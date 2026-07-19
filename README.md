@@ -52,7 +52,10 @@ The checked-in `roam/` tree is the knowledge source. Emacs builds an Org-roam da
 ```bash
 bash scripts/publish-pages
 python3 scripts/check-pages-links.py _site
+python3 scripts/serve-pages
 ```
+
+Open <http://127.0.0.1:8042/>. Do not open `_site/index.html` directly with a `file://` URL: browsers block the JSON requests used by search and the graph.
 
 Interactive commands are provided by `lisp/starintel/second-brain.el`:
 
@@ -60,7 +63,11 @@ Interactive commands are provided by `lisp/starintel/second-brain.el`:
 - `M-x star/roam-capture`
 - `M-x star/roam-sync`
 - `M-x star/pages-build`
+- `M-x star/pages-serve`
 - `M-x star/pages-open`
+- `M-x star/pages-stop`
+
+The Pages workflow tests the generated site through local HTTP. After deployment from `main`, it also requests the public Pages URL and fails if the live site cannot be reached.
 
 ## Agent Zero
 

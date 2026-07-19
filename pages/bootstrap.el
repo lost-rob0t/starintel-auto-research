@@ -3,7 +3,8 @@
 (let* ((pages-directory
         (file-name-directory (or load-file-name buffer-file-name)))
        (root (file-name-directory (directory-file-name pages-directory)))
-       (cache (expand-file-name ".cache/emacs" root)))
+       (cache (expand-file-name ".cache/emacs" root))
+       (lisp-directory (expand-file-name "lisp/starintel" root)))
   (setq package-user-dir (expand-file-name "elpa" cache))
   (require 'package)
   (setq package-archives
@@ -18,8 +19,9 @@
       (package-install 'org-roam))
     (unless (package-installed-p 'htmlize)
       (package-install 'htmlize)))
-  (add-to-list 'load-path (expand-file-name "lisp/starintel" root))
-  (require 'starintel-second-brain)
+  (add-to-list 'load-path lisp-directory)
+  (load (expand-file-name "pages.el" lisp-directory) nil nil t)
+  (load (expand-file-name "second-brain.el" lisp-directory) nil nil t)
   (starintel-second-brain-configure root nil)
   (starintel-pages-build root))
 

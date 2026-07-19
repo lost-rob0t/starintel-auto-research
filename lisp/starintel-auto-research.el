@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2026 lost-rob0t
 ;; SPDX-License-Identifier: GPL-3.0-or-later
-;; Package-Requires: ((emacs "29.1") (org "9.6") (org-roam "2.3.1") (org-ql "0.8.8"))
+;; Package-Requires: ((emacs "29.1") (org "9.6"))
 ;; Keywords: outlines, tools
 ;; Version: 0.1.0
 
@@ -239,21 +239,21 @@ When nil, resolve from STARINTEL_RESEARCH_ROOT, the current file, or
             :target
             (file+head
              "research/inbox/${slug}.org"
-             "#+title: ${title}\n#+filetags: :starintel:research:\n")
+             "#+title: ${title}\n#+description: Inbox research capture requiring triage.\n#+filetags: :starintel:research:\n")
             :unnarrowed t)
            ("d" "Starintel design note" plain
             "%?"
             :target
             (file+head
              "design/inbox/${slug}.org"
-             "#+title: ${title}\n#+filetags: :starintel:design:\n")
+             "#+title: ${title}\n#+description: Inbox design note requiring conversion into a numbered design file.\n#+filetags: :starintel:design-inbox:\n")
             :unnarrowed t)
            ("i" "Starintel implementation note" plain
             "%?"
             :target
             (file+head
              "implement/inbox/${slug}.org"
-             "#+title: ${title}\n#+filetags: :starintel:implement:\n")
+             "#+title: ${title}\n#+description: Inbox implementation note requiring triage.\n#+filetags: :starintel:implement:\n")
             :unnarrowed t)))
       (unless (assoc (car template) org-roam-capture-templates)
         (setq org-roam-capture-templates
@@ -370,6 +370,7 @@ Return the new remaining byte budget."
   "Build a bounded context bundle for FILE.
 Only the active file, its direct local links, and its project index are added."
   (interactive)
+  (star/research-setup)
   (let* ((source (file-truename
                   (or file buffer-file-name
                       (user-error "No active file"))))
@@ -452,9 +453,9 @@ Only the active file, its direct local links, and its project index are added."
   (let ((buffer (get-buffer-create "*Starintel Validation*"))
         failures)
     (with-current-buffer buffer
-      (erase-buffer)
-      (special-mode)
       (let ((inhibit-read-only t))
+        (erase-buffer)
+        (special-mode)
         (insert (format "Starintel validation: %s\n\n"
                         (star/research--timestamp)))
         (dolist (file (star/research--org-files))
@@ -650,14 +651,15 @@ Only the active file, its direct local links, and its project index are added."
 (defun star/research-desktop-graph-start ()
   "Export graph data and launch the desktop graph IDE."
   (interactive)
-  (star/research-export-graph-json)
-  (unless star/research-desktop-command
-    (user-error "`star/research-desktop-command' is empty"))
-  (apply #'start-process
-         "starintel-desktop-graph"
-         "*Starintel Desktop Graph*"
-         (car star/research-desktop-command)
-         (cdr star/research-desktop-command)))
+  (let ((graph (star/research-export-graph-json)))
+    (unless star/research-desktop-command
+      (user-error "`star/research-desktop-command' is empty"))
+    (apply #'start-process
+           "starintel-desktop-graph"
+           "*Starintel Desktop Graph*"
+           (car star/research-desktop-command)
+           (append (cdr star/research-desktop-command)
+                   (list graph)))))
 
 (defun star/research-dashboard ()
   "Open the roadmap and active-work view."
@@ -682,7 +684,7 @@ Only the active file, its direct local links, and its project index are added."
   "Global Starintel research workflow mode."
   :global t
   :lighter " STAR"
-  :keymap star/research-prefix-map
+  :keymap star/research-mode-map
   (when star/research-mode
     (star/research-setup)))
 

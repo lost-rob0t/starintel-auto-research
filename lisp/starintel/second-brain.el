@@ -1,7 +1,12 @@
 ;;; second-brain.el --- Starintel Org-roam workspace -*- lexical-binding: t; -*-
 
 (require 'org-roam)
-(require 'starintel-pages)
+
+(unless (featurep 'starintel-pages)
+  (load (expand-file-name
+         "pages.el"
+         (file-name-directory (or load-file-name buffer-file-name)))
+        nil nil t))
 
 (defun starintel-second-brain-root (&optional start)
   (let ((root (locate-dominating-file
@@ -74,4 +79,5 @@ When AUTOSYNC is non-nil, enable `org-roam-db-autosync-mode'."
                      (starintel-second-brain-root))))
 
 (provide 'starintel-second-brain)
+(provide 'second-brain)
 ;;; second-brain.el ends here

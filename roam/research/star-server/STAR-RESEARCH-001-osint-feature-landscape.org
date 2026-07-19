@@ -1,0 +1,423 @@
+:PROPERTIES:
+:ID:       starintel-research-osint-feature-landscape-001
+:END:
+#+title: STAR-RESEARCH-001 OSINT Feature Landscape
+#+description: Comparative research on reusable feature patterns from mature OSINT and intelligence platforms, mapped onto the current StarIntel architecture.
+#+status: REVIEW
+#+filetags: :starintel:research:star-server:osint:features:comparison:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-19 | Complete comparative feature study and next-design proposal | Pending               |
+
+* Related Nodes
+
+- [[file:../../design/STAR-00-Starintel-4th-generation-Ideas.org][STAR-00 StarIntel Fourth Generation Ideas]]
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+- [[file:../../design/cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]]
+- [[file:../../design/cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]]
+
+* Research Question
+
+Which product and architecture features from mature open-source intelligence[fn:osint] and intelligence-analysis platforms should StarIntel[fn:starintel] adopt next, without replacing its document model[fn:document-model], actor runtime[fn:actor-runtime], domain gservers[fn:domain-gserver], or local-first[fn:local-first] operating model?
+
+* Scope and Method
+
+This loop compares official documentation and source repositories for:
+
+- SpiderFoot[fn:spiderfoot]
+- IntelOwl[fn:intelowl]
+- OpenCTI[fn:opencti]
+- MISP[fn:misp]
+- Maltego[fn:maltego]
+- Aleph and FollowTheMoney[fn:aleph]
+
+The comparison focuses on reusable product patterns rather than copying any platform wholesale. Features are evaluated against the current StarIntel boundaries: typed documents, actor manifests[fn:actor-manifest], dataset manifests[fn:dataset-manifest], per-domain dispatchers[fn:dispatcher], Sento supervision[fn:supervision], ZeroMQ transport[fn:zeromq], Star Router[fn:star-router], provenance[fn:provenance], and replay[fn:replay].
+
+* Platform Findings
+
+** SpiderFoot: event-fed modules and correlation rules
+
+SpiderFoot exposes more than two hundred collection and analysis modules through a publisher/subscriber model[fn:pubsub]. Modules consume discovered event types and emit additional events, allowing one result to activate several downstream modules. It also provides YAML-configurable[fn:yaml] correlation rules, multiple exports, custom querying, visualizations, command-line and web interfaces, and the ability to invoke external tools.[fn:source-spiderfoot]
+
+*** Reusable pattern
+
+- Declare the input and output document types for every actor capability.
+- Allow newly emitted documents to trigger compatible capabilities automatically.
+- Keep correlation rules separate from collectors.
+- Make tool invocation a normal capability type rather than a special subsystem.
+- Let an operator inspect why a capability ran and which prior document activated it.
+
+*** StarIntel mapping
+
+Actor manifests already provide the correct home for typed input/output declarations. Dataset manifests provide the correct home for dataflow bindings. The missing layer is a searchable capability catalog[fn:capability-catalog] that compiles those declarations into an executable plan.
+
+** IntelOwl: artifacts, playbooks, pivots, and visualizers
+
+IntelOwl models files and observables as reusable artifacts[fn:artifact]. Its plugin framework separates analyzers, connectors, pivots, visualizers, ingestors, playbooks, data models, and user events. Playbooks make analysis repeatable; pivots chain new analysis from prior results; visualizers provide result-specific presentation; user events let analysts attach evaluation and context.[fn:source-intelowl]
+
+*** Reusable pattern
+
+- Treat each target artifact as a stable object that may be analyzed many times.
+- Record every analysis request as a job with explicit selected capabilities.
+- Support repeatable playbooks[fn:playbook] and result-driven pivots[fn:pivot].
+- Separate result production from result visualization.
+- Preserve analyst annotations[fn:annotation] as first-class documents.
+
+*** StarIntel mapping
+
+StarIntel documents already cover reusable artifacts. The missing product layer is an analysis job and playbook model that records the selected capabilities, versions, parameters, execution order, results, failures, and analyst annotations.
+
+** OpenCTI: connector classes, stateful ingestion, graph views, and managed integrations
+
+OpenCTI distinguishes connector classes for import, enrichment, streaming, file import, and file export. Connectors can maintain ingestion state, backfill from a configured date, expose queue statistics, and use dedicated identities and permissions. The platform combines knowledge-graph navigation[fn:knowledge-graph], external references, history, notes, dashboards, cases, and application programming interfaces.[fn:source-opencti-connectors][fn:source-opencti-overview]
+
+OpenCTI also exposes an integration catalog and managed connector lifecycle with start, stop, configuration, logs, status, and protected credentials.[fn:source-opencti-manager]
+
+*** Reusable pattern
+
+- Give every connector a declared class and lifecycle.
+- Make connector checkpoints[fn:checkpoint], backlog, health, identity, permissions, and configuration visible.
+- Distinguish scheduled import, requested enrichment, continuous stream, file import, and export.
+- Use dedicated service identities instead of one shared credential.
+- Present source references, change history, and analyst notes beside graph relationships.
+
+*** StarIntel mapping
+
+The Sento managed-component design supplies lifecycle and health primitives. StarIntel still needs a connector instance document[fn:connector-instance] and operator surface that bind one manifest to credentials, checkpoints, limits, dispatcher placement, and runtime state.
+
+** MISP: correlation, warning lists, taxonomies, sharing, and workflow control
+
+MISP combines automatic correlation, structured objects, analyst opinions, sightings, reports, taxonomies[fn:taxonomy], intelligence vocabularies, warning lists[fn:warning-list], workflow automation, real-time synchronization, granular sharing groups, and machine-readable imports and exports.[fn:source-misp-features][fn:source-misp-taxonomies]
+
+Its correlation model goes beyond exact equality by supporting patterns such as fuzzy-hash overlap and network-range matching. Its warning lists help analysts identify common or misleading values before treating them as meaningful indicators.
+
+*** Reusable pattern
+
+- Separate exact identity resolution from configurable correlation rules.
+- Maintain warning lists and known-benign lists as versioned datasets.
+- Make analyst opinions, sightings, and counter-analysis first-class records.
+- Attach policy markings and export rules to individual documents, not only whole cases.
+- Use shared controlled vocabularies instead of free-form tags where consistency matters.
+
+*** StarIntel mapping
+
+StarIntel should add a rule-driven correlation service above its raw relation documents. Warning lists should be ordinary versioned datasets consumed by the correlation and analysis domains. Policy markings should remain document fields enforced by export and routing capabilities.
+
+** Maltego: transforms, machines, graph-centered investigation, and case collaboration
+
+Maltego separates transforms[fn:transform] from machines[fn:machine]. A transform performs one typed expansion. A machine is a reusable workflow that runs transforms sequentially or in parallel. Current tooling also supports transform sets, graph-oriented investigation, cases, collaboration roles, and local transforms for machine-specific tools or private network access.[fn:source-maltego-machines][fn:source-maltego-cases][fn:source-maltego-local]
+
+*** Reusable pattern
+
+- Give each capability a small, stable identifier and typed contract.
+- Build workflows by composing capability identifiers rather than embedding implementation code.
+- Support sequential, parallel, filtering, and fan-out steps.
+- Allow local capabilities that execute beside the analyst workstation.
+- Store investigations as durable cases with explicit membership and roles.
+
+*** StarIntel mapping
+
+The StarIntel playbook format should be declarative[fn:declarative]. Playbooks should reference capability identifiers, input selectors, output bindings, policies, and dispatcher placement. Execution belongs to workflow-coordinator actors inside the relevant domain gserver.
+
+** Aleph and FollowTheMoney: document search plus normalized investigative entities
+
+Aleph combines document and dataset search with structured people, companies, assets, relationships, and bulk ingestion. FollowTheMoney provides a shared entity schema and processing tools so records from many sources can be normalized into comparable investigative entities.[fn:source-aleph]
+
+*** Reusable pattern
+
+- Preserve source documents while extracting structured entities and relationships.
+- Maintain one shared schema across importers and analysis tools.
+- Keep bulk upload, document text extraction, entity extraction, and search as distinct stages.
+- Allow analysts to move between a structured entity and the source documents supporting it.
+
+*** StarIntel mapping
+
+This confirms the current StarIntel decision to preserve full documents and derived entities together. The missing feature is a universal source-support view that lists which source documents, extraction runs, and relation documents support each displayed entity or claim.
+
+* Cross-Project Feature Matrix
+
+| Feature pattern                         | SpiderFoot | IntelOwl | OpenCTI | MISP | Maltego | Aleph | StarIntel status |
+|-----------------------------------------+------------+----------+---------+------+---------+-------+------------------|
+| Typed capability input/output           | Strong     | Strong   | Strong  | Medium | Strong | Medium | Partial          |
+| Repeatable workflow/playbook            | Partial    | Strong   | Medium  | Strong | Strong | Weak  | Missing          |
+| Result-driven pivot                     | Strong     | Strong   | Medium  | Medium | Strong | Medium | Partial          |
+| Connector lifecycle and checkpoints     | Partial    | Strong   | Strong  | Strong | Medium | Strong | Partial          |
+| Correlation rules                       | Strong     | Medium   | Strong  | Strong | Medium | Medium | Partial          |
+| Warning or known-benign lists           | Weak       | Weak     | Medium  | Strong | Weak   | Weak  | Missing          |
+| Analyst annotations and opinions        | Weak       | Strong   | Strong  | Strong | Strong | Strong | Partial          |
+| Case or investigation workspace         | Weak       | Strong   | Strong  | Medium | Strong | Strong | Missing          |
+| Capability or integration catalog       | Module list | Plugin list | Strong | Module list | Data Hub | Importers | Missing          |
+| Policy-aware sharing and export         | Weak       | Medium   | Strong  | Strong | Strong | Strong | Partial          |
+| Source-document support navigation      | Medium     | Medium   | Strong  | Strong | Medium | Strong | Partial          |
+| Local private execution                 | Strong     | Strong   | Self-hosted | Self-hosted | Strong | Self-hosted | Strong design    |
+
+* Decisions for StarIntel
+
+** P0: Capability catalog and typed execution contract
+
+Create one catalog record for every callable actor, collector, analyzer, exporter, tool wrapper, correlation rule set, and visualizer. The catalog must be generated from actor manifests rather than maintained as a second manual registry.
+
+Each capability record must declare:
+
+- stable capability identifier
+- version
+- domain and optional subdomain
+- accepted input document types
+- emitted output document types
+- execution class: import, enrichment, stream, file import, export, analysis, correlation, or visualization
+- side effects[fn:side-effect]
+- required credentials and permissions
+- expected cost and quota unit
+- timeout, retry, cache, and concurrency defaults
+- dispatcher placement
+- whether execution is local, in-process, cross-process, or remote
+- configuration schema
+- health and readiness requirements
+
+** P0: Declarative playbooks and resumable analysis jobs
+
+A playbook is a versioned document that composes capability identifiers. A run produces an analysis-job document[fn:analysis-job] recording inputs, resolved capability versions, parameters, start and finish times, intermediate outputs, failures, retries, costs, and the final result set.
+
+The first playbook operators should be:
+
+- sequential steps
+- parallel steps
+- fan-out over a document collection
+- filter by document type or predicate
+- bind output from one step into another
+- stop, continue, or branch on failure
+- explicit human-review checkpoint
+- bounded retry
+- deadline
+- cache reuse
+
+** P0: Connector instance and checkpoint documents
+
+Separate the reusable connector capability from each configured connector instance. An instance binds credentials, source scope, schedule, checkpoint, rate limit, dispatcher, enabled state, and retention configuration.
+
+** P0: Correlation rules and warning-list datasets
+
+Implement correlation as versioned rule sets that consume documents and emit relation documents with an explanation. Warning lists and known-benign datasets must be versioned inputs to those rules, not hard-coded conditions.
+
+** P1: Investigation workspace documents
+
+Add a case document[fn:case-document] that groups targets, source documents, jobs, findings, notes, relations, saved views, and exports. Membership and roles should be explicit. A case does not own or duplicate every document; it references shared documents and may attach case-specific annotations.
+
+** P1: Analyst annotation and assessment documents
+
+Analyst notes, opinions, confirmations, rejections, confidence changes, and competing interpretations should be append-only documents linked to the subject and case.
+
+** P1: Source-support navigation
+
+Every entity, claim, relation, and conclusion view should expose the source documents and processing runs that support it. This is a navigation requirement over existing provenance records, not a replacement evidence system.
+
+** P1: Capability-specific visualizers
+
+A capability may declare one or more visualizers for its output type. Visualizers receive validated documents and cannot alter source data. Initial visualizers should include relation graph, timeline, geographic map, tabular comparison, document viewer, and execution trace.
+
+** P2: Saved queries, change detection, and alerts
+
+Allow a query to be saved as a versioned document. A scheduled evaluator compares the latest result set to the prior result set and emits added, removed, or changed document references.
+
+** P2: Policy-aware export bundles
+
+Export capabilities should resolve document-level markings, case policy, destination policy, and requested format before producing an output bundle. A denied document must be reported explicitly rather than silently omitted.
+
+* Proposed Next Design
+
+Extract the first implementation design as:
+
+- =STAR-SERVER-001 Capability Catalog and Playbook Runtime=
+
+The design should define the capability manifest projection, catalog query model, playbook document schema, analysis-job state machine[fn:state-machine], workflow-coordinator actors, dispatcher selection, failure semantics, checkpointing, cost accounting, and result bindings.
+
+Connector instances, cases, correlation rules, and visualizers should be referenced as dependent future designs rather than packed into the first implementation.
+
+* Common Lisp Example
+
+The following Common Lisp[fn:common-lisp] example demonstrates the intended shape. It is not a final application programming interface[fn:api]. The catalog is derived from manifests; a playbook references capabilities by stable identifier.
+
+#+begin_src lisp
+(defparameter *capability-catalog*
+  '((:id :dns-enrichment
+     :version "1.0.0"
+     :domain :cyber
+     :subdomain :enrichment
+     :class :enrichment
+     :inputs (:domain-name)
+     :outputs (:dns-record :ip-address)
+     :side-effects (:network-read)
+     :credentials (:dns-provider-token)
+     :quota (:unit :request :estimated-cost-usd 0.002)
+     :dispatcher (:domain :cyber :subdomain :enrichment)
+     :policy (:timeout-ms 15000
+              :retries 2
+              :cache-ttl-seconds 3600))
+    (:id :passive-dns-history
+     :version "1.0.0"
+     :domain :cyber
+     :subdomain :enrichment
+     :class :enrichment
+     :inputs (:domain-name :ip-address)
+     :outputs (:dns-observation :relation)
+     :side-effects (:network-read)
+     :credentials (:passive-dns-token)
+     :quota (:unit :request :estimated-cost-usd 0.01)
+     :dispatcher (:domain :cyber :subdomain :enrichment)
+     :policy (:timeout-ms 30000
+              :retries 1
+              :cache-ttl-seconds 86400))))
+
+(defparameter *domain-infrastructure-playbook*
+  '(:id :domain-infrastructure-deep-dive
+    :version "1.0.0"
+    :input-type :domain-name
+    :steps
+    ((:run :dns-enrichment
+      :input :target
+      :bind :dns)
+     (:parallel
+      ((:run :passive-dns-history
+        :input :target
+        :bind :history)
+       (:fan-out
+        :over (:binding :dns :type :ip-address)
+        :run :passive-dns-history
+        :bind :ip-history)))
+     (:human-review
+      :bindings (:dns :history :ip-history)))))
+#+end_src
+
+A workflow coordinator resolves the requested capability versions, validates the target document, estimates cost, selects the domain dispatcher, starts child jobs, records every state transition, and emits the resulting documents. The playbook never embeds collector implementation code.
+
+* Acceptance Criteria for STAR-SERVER-001
+
+- Catalog entries are generated deterministically from actor manifests.
+- Invalid input and output type combinations fail before execution.
+- Every playbook run creates one durable analysis-job document.
+- Resuming a stopped run does not repeat completed non-repeatable steps.
+- Parallel and fan-out steps have explicit concurrency bounds.
+- Capability versions are frozen for the duration of one run.
+- Dispatcher selection follows the per-domain and subdomain design.
+- Cost and quota estimates are visible before execution.
+- Actual cost, retries, failures, and cache hits are recorded afterward.
+- Human-review checkpoints can pause and resume without holding a worker thread.
+- Every emitted document links to the job and capability version that produced it.
+- A playbook can be validated without starting any actor or network request.
+
+* Research Conclusion
+
+The largest missing StarIntel product primitive is not another collector. It is the layer that makes existing and future collectors discoverable, composable, repeatable, inspectable, and bounded.
+
+The next design should therefore implement a capability catalog and playbook runtime before expanding the collection-actor inventory. This creates the control surface required to add large numbers of actors without turning the system into an unsearchable collection of one-off integrations.
+
+* Footnotes and Glossary
+
+[fn:osint] Open-source intelligence, or OSINT: Information collected and analyzed from sources that are openly available to the public or otherwise lawfully accessible to the operator.
+
+[fn:starintel] StarIntel: The local-first intelligence platform being designed in this repository to collect, normalize, connect, search, analyze, and export structured documents through actor-based components.
+
+[fn:document-model] Document model: The rules defining the fields, types, relationships, lifecycle, and interpretation of records stored by a system.
+
+[fn:actor-runtime] Actor runtime: Software that runs many independent actors, delivers messages to them, schedules their work, and manages their lifecycle.
+
+[fn:domain-gserver] Domain gserver: A managed tree of actors responsible for one intelligence area, such as cyber, social-media intelligence, or human intelligence.
+
+[fn:local-first] Local-first: Designed to work primarily on equipment controlled by the operator, while still permitting optional remote or hosted components.
+
+[fn:spiderfoot] SpiderFoot: An open-source OSINT automation tool whose modules exchange discovered event types and perform collection, enrichment, analysis, and correlation.
+
+[fn:intelowl] IntelOwl: An open-source threat-intelligence analysis platform built from modular analyzers, connectors, pivots, visualizers, ingestors, and playbooks.
+
+[fn:opencti] OpenCTI: An open-source cyber-threat-intelligence platform centered on a knowledge graph, connectors, cases, analysis, and integrations.
+
+[fn:misp] MISP: An open-source platform for storing, correlating, analyzing, and sharing threat intelligence and structured indicators.
+
+[fn:maltego] Maltego: An investigation platform that represents information as graph entities and expands them through transforms and reusable machines.
+
+[fn:aleph] Aleph and FollowTheMoney: Open-source investigative data tools developed around document search, bulk ingestion, and a shared schema for people, organizations, assets, and relationships.
+
+[fn:actor-manifest] Actor manifest: A declarative document describing an actor's identity, capabilities, dependencies, configuration, and lifecycle requirements.
+
+[fn:dataset-manifest] Dataset manifest: A declarative document describing a dataset, its storage, processing flow, indexing, actor bindings, and lifecycle.
+
+[fn:dispatcher] Dispatcher: A pool of worker threads that runs actor mailbox work. StarIntel partitions dispatchers primarily by domain and may create subdomain dispatchers inside the same process.
+
+[fn:supervision] Supervision: A runtime mechanism in which a parent component watches child components and applies declared restart, stop, or escalation rules when they fail.
+
+[fn:zeromq] ZeroMQ: A messaging library that provides socket patterns for transferring messages between threads, processes, or machines without requiring a central broker.
+
+[fn:star-router] Star Router: The StarIntel component responsible for client-facing and cross-process routing rather than ordinary in-process actor mailbox delivery.
+
+[fn:provenance] Provenance: Structured information recording where data came from, how it was collected or produced, and which processing steps changed it.
+
+[fn:replay] Replay: Re-running recorded inputs and processing decisions to reproduce or rebuild prior results.
+
+[fn:pubsub] Publisher/subscriber model: A message pattern where producers publish events by type and interested consumers subscribe to those types without the producer naming every consumer.
+
+[fn:yaml] YAML: A human-readable text format commonly used for configuration files and declarative rules.
+
+[fn:capability-catalog] Capability catalog: A searchable inventory of operations the system can perform, including their accepted inputs, produced outputs, requirements, costs, policies, and runtime placement.
+
+[fn:artifact] Artifact: A stable file or observable, such as a domain name, address, document, or hash, that may be processed by several analysis operations.
+
+[fn:playbook] Playbook: A versioned, repeatable description of analysis steps and how data moves between them.
+
+[fn:pivot] Pivot: Starting a new analysis from a result discovered during an earlier analysis, such as looking up an address found inside a document.
+
+[fn:annotation] Annotation: A note, assessment, opinion, or decision attached by an analyst to another document without overwriting the original document.
+
+[fn:knowledge-graph] Knowledge graph: A collection of typed entities and explicit relationships that can be navigated and queried as a connected graph.
+
+[fn:checkpoint] Checkpoint: Saved progress showing how far an importer or workflow has processed, allowing it to continue later without starting over.
+
+[fn:connector-instance] Connector instance: One configured running copy of a reusable connector capability, bound to particular credentials, source scope, limits, checkpoint, and schedule.
+
+[fn:taxonomy] Taxonomy: A controlled classification vocabulary used to label information consistently.
+
+[fn:warning-list] Warning list: A maintained set of common, misleading, benign, or otherwise special values that should trigger caution during analysis.
+
+[fn:transform] Transform: One typed operation that accepts an entity or document and returns related or enriched entities or documents.
+
+[fn:machine] Machine: A reusable workflow that composes multiple transforms in a declared sequence or parallel arrangement.
+
+[fn:declarative] Declarative: Describing the desired structure, rules, or result without embedding the step-by-step implementation code that performs it.
+
+[fn:side-effect] Side effect: An externally observable action beyond returning a value, such as making a network request, writing a file, changing a database, or launching a tool.
+
+[fn:analysis-job] Analysis job: A durable record of one requested execution, including its inputs, chosen capabilities, state, intermediate results, failures, costs, and final outputs.
+
+[fn:case-document] Case document: A record representing one investigation workspace and linking its targets, jobs, sources, findings, notes, views, and exports.
+
+[fn:state-machine] State machine: A model that defines the allowed states of a process and which events may move it from one state to another.
+
+[fn:common-lisp] Common Lisp: A standardized programmable language in the Lisp family and the primary implementation language planned for the StarIntel server.
+
+[fn:api] Application programming interface, or API: A defined set of operations and data formats that software components use to communicate.
+
+* Citations
+
+[fn:source-spiderfoot] SpiderFoot official repository and feature documentation: https://github.com/smicallef/spiderfoot
+
+[fn:source-intelowl] IntelOwl official repository and feature documentation: https://github.com/intelowlproject/IntelOwl
+
+[fn:source-opencti-connectors] OpenCTI official connector documentation: https://docs.opencti.io/latest/deployment/connectors/
+
+[fn:source-opencti-overview] OpenCTI official platform overview: https://docs.opencti.io/latest/usage/overview/
+
+[fn:source-opencti-manager] OpenCTI official Integration Manager documentation: https://docs.opencti.io/latest/deployment/integration-manager/
+
+[fn:source-misp-features] MISP official features documentation: https://www.misp-project.org/features/
+
+[fn:source-misp-taxonomies] MISP official taxonomy repository: https://github.com/MISP/misp-taxonomies
+
+[fn:source-maltego-machines] Maltego official Machines documentation: https://docs.maltego.com/en/support/solutions/articles/15000047415-introduction-to-maltego-machines
+
+[fn:source-maltego-cases] Maltego official Cases documentation: https://docs.maltego.com/en/support/solutions/articles/15000060312-what-is-maltego-cases-
+
+[fn:source-maltego-local] Maltego official Local Transforms documentation: https://docs.maltego.com/en/support/solutions/articles/15000034021-local-transforms
+
+[fn:source-aleph] Aleph project organization and official repositories: https://github.com/alephdata

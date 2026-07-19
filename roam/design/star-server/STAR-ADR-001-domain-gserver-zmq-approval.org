@@ -1,0 +1,134 @@
+:PROPERTIES:
+:ID:       starintel-adr-domain-gserver-zmq-001
+:END:
+#+title: STAR-ADR-001 Domain GServer and ZeroMQ Approval
+#+description: Record nsaspy approval of the scoped StarIntel domain-gserver architecture, explicit ZeroMQ transport boundaries, and the audit-first Common Lisp binding strategy.
+#+status: APPROVED
+#+filetags: :starintel:design:decision:star-server:cl-gserver:sento:zeromq:
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-19 | Approve scoped domain gservers and ZeroMQ transport design | Yes                   |
+
+* Approved Designs
+
+- [[file:STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+- [[file:../cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]]
+- [[file:../cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]] as the required generic runtime dependency, without approving unrelated future scope not required by the two linked designs
+
+* Decision
+
+nsaspy approves the scoped domain-gserver[fn:domain-gserver] model and the explicit ZeroMQ[fn:zeromq] transport model on 2026-07-19.
+
+Approval means the architecture is accepted for focused implementation planning. It does not claim that the runtime or transport has already been implemented, benchmarked, secured, or validated.
+
+* Domain GServer Decision
+
+Use one extended Sento actor system[fn:actor-system] per StarIntel server process by default.
+
+Inside that process:
+
+- one root domain supervisor owns the domain tree
+- HUMINT, SOCMINT, SIGINT, cyber, BBP, and threat intelligence each receive a scoped child domain supervisor
+- dispatchers are owned per domain by default
+- subdomains may receive their own supervisor, dispatcher, router pools, limits, and transport gateway inside the same process
+- a logical domain is not automatically a separate process
+- a separate process is introduced only for deployment, scaling, privilege, memory, crash-containment, or language-runtime reasons
+- shared workload dispatchers remain optional infrastructure rather than the primary ownership boundary
+
+This is the approved boundary. Do not flatten all intelligence work into one undifferentiated worker pool, and do not create one operating-system process per label merely because the label is a domain.
+
+* ZeroMQ Decision
+
+Use ZeroMQ only at explicit component boundaries requiring one or more of:
+
+- process separation
+- language independence
+- routing identity
+- independent queue and overload policy
+- process or host mobility
+- failure containment
+- ZeroMQ socket semantics
+- Star Router transport
+
+Ordinary actors inside one tightly coupled Sento subtree continue to use direct actor mailboxes.
+
+Approved transport invariants:
+
+- one ZeroMQ context per operating-system process
+- one exclusive owner per ZeroMQ socket
+- no socket sharing across unrelated dispatcher threads
+- dedicated poller or input/output ownership for blocking work
+- ROUTER and DEALER for addressed asynchronous command traffic
+- PUB and SUB only for intentionally lossy event traffic
+- PUSH and PULL only for equivalent one-way workers without keyed state
+- explicit high-water marks, deadlines, message limits, monitoring, shutdown, and security
+- no unrestricted Common Lisp reader input for untrusted messages
+- no binding-specific object exposed through the StarIntel transport interface
+
+* Binding Strategy
+
+The Common Lisp[fn:common-lisp] implementation first audits =orivej/pzmq=[fn:pzmq] against the selected current =libzmq=[fn:libzmq] version.
+
+PyZMQ[fn:pyzmq] is a reference implementation and cross-language test peer. It is not the Common Lisp production dependency. Its mature stable-API coverage and test structure may be used to identify expected behavior, construct compatibility fixtures, and compare transport results.
+
+The binding audit has exactly three possible outcomes:
+
+1. adopt the existing =pzmq= revision when it passes the required matrix
+2. fork and extend =pzmq= when its architecture and foreign-memory ownership are sound but modern coverage or tests are incomplete
+3. create a new narrow maintained binding when the existing implementation is unsafe, structurally obsolete, or more expensive to repair than replace
+
+Do not commit to a fork or rewrite before the audit produces evidence.
+
+* Rotteness Gate
+
+Treat the existing binding as unsuitable for direct adoption when one or more critical failures are confirmed:
+
+- unsafe foreign-memory ownership
+- use-after-free, leak, or finalization hazards
+- missing stable libzmq functions required by the transport design
+- missing or broken multipart messaging
+- broken non-blocking send or receive behavior
+- inadequate polling support
+- missing socket-monitor support
+- missing CURVE security support
+- incorrect context termination or socket close behavior
+- inability to configure required production socket options
+- failure on supported SBCL and operating-system versions
+- tests too weak to detect transport regressions
+- API structure that cannot be wrapped behind a stable transport protocol without leaking raw foreign objects
+- inactive or unreviewable code whose repair cost exceeds a small replacement binding
+
+The phrase “start new” means a deliberately narrow C foreign-function interface[fn:ffi] around only the stable libzmq operations required by the approved transport design. It does not mean binding every experimental ZeroMQ function.
+
+* Required Technology Spike
+
+- [[file:../../research/cl-gserver/SENTO-ZMQ-RESEARCH-001-pzmq-binding-audit.org][SENTO-ZMQ-RESEARCH-001 PZMQ Binding Audit]]
+
+The spike must pin exact commits and versions before reporting a decision.
+
+* Consequences
+
+- the domain model may proceed as a set of scoped actor trees rather than separate monoliths
+- ZeroMQ remains an adapter beneath domain boundaries and Star Router rather than replacing local Sento mailboxes
+- the binding layer is replaceable behind a stable Common Lisp protocol
+- Python services may interoperate over the message envelope without forcing the Common Lisp server to embed Python
+- implementation planning must begin with the binding audit and shutdown, ownership, and overload tests
+
+* Footnotes and Glossary
+
+[fn:domain-gserver] Domain gserver: A supervised actor subtree responsible for one bounded intelligence area, with its own ingress, dispatchers, workers, health state, and optional transport gateways.
+
+[fn:zeromq] ZeroMQ: A brokerless messaging library that provides asynchronous message-oriented sockets over in-process, inter-process, and network transports.
+
+[fn:actor-system] Actor system: A runtime that creates actors, delivers mailbox messages, schedules work, and manages actor identity and lifecycle.
+
+[fn:common-lisp] Common Lisp: A standardized programmable language in the Lisp family and the primary implementation language for the StarIntel server runtime.
+
+[fn:pzmq] PZMQ: The =orivej/pzmq= Common Lisp foreign-function binding for ZeroMQ 4.0 and later.
+
+[fn:libzmq] libzmq: The core native ZeroMQ library that implements sockets, transports, queues, polling, monitoring, and security mechanisms.
+
+[fn:pyzmq] PyZMQ: The maintained Python binding for ZeroMQ, used here as a behavior and compatibility reference rather than the production Common Lisp binding.
+
+[fn:ffi] Foreign-function interface, or FFI: A language boundary that allows Common Lisp code to call functions and manage memory provided by a native C library.

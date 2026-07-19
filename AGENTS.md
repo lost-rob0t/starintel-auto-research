@@ -140,6 +140,39 @@ scripts/save-research \
 
 Incomplete work is `DRAFT` and tagged `:draft:`.
 
+## Reader Accessibility and Footnote Glossary
+
+Every design and research Org file must be readable by a person with no assumed background in intelligence work, actor systems, Common Lisp, infrastructure, security, or the specific project.
+
+Agents must:
+
+- define every acronym and initialism at first use
+- define every technical, domain-specific, legal, intelligence, security, programming, networking, database, and project-specific term at first use
+- define every non-obvious code word, package name, protocol name, component name, architectural pattern, and abbreviation
+- attach an Org footnote reference to the first use of each defined term
+- maintain a `* Footnotes and Glossary` section containing the plain-language definitions
+- use one stable footnote label per term and reuse that label when the same term appears again
+- explain terms in ordinary language before using more specialized terminology inside the definition
+- define specialized words used inside a definition unless the meaning is obvious from ordinary English
+- include a concrete example when a definition alone may still be unclear
+- expand shortened names such as `BBP`, `SOCMINT`, `SIGINT`, `API`, `ACL`, `TLS`, `mTLS`, `URI`, `FSM`, `OTP`, `PII`, `LEO`, `ASDF`, and `CLOS`
+- define project names such as Starintel, Sento, CL-GServer, Star Router, actor manifest, and dataset manifest
+- never assume that a familiar term is familiar to the reader
+
+“Every word” means every word or phrase whose meaning is not obvious to a general reader from normal English. Ordinary connective words such as “and,” “the,” and “inside” do not need glossary entries.
+
+A design is incomplete when a reader must search outside the file merely to understand its vocabulary. External citations may support claims, but they do not replace local definitions.
+
+Required Org structure:
+
+```org
+* Footnotes and Glossary
+
+[fn:actor] Actor: A small independent software unit that owns its state and processes messages one at a time.
+
+[fn:dispatcher] Dispatcher: A pool of worker threads that runs actor mailbox work.
+```
+
 ## Architecture Boundaries
 
 - `starintel-doc`, `star-cl`, `starintel-doc.nim`, `starintel_doc.js`: document specification implementations.

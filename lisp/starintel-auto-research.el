@@ -245,7 +245,7 @@ When nil, resolve from STARINTEL_RESEARCH_ROOT, the current file, or
             "%?"
             :target
             (file+head
-             "design/inbox/${slug}.org"
+             "research/inbox/design-${slug}.org"
              "#+title: ${title}\n#+description: Inbox design note requiring conversion into a numbered design file.\n#+filetags: :starintel:design-inbox:\n")
             :unnarrowed t)
            ("i" "Starintel implementation note" plain
@@ -317,12 +317,12 @@ When nil, resolve from STARINTEL_RESEARCH_ROOT, the current file, or
     (make-directory directory t)
     (dired directory)))
 
-(defun star/research--linked-local-files (file)
-  "Return local files directly linked by Org FILE."
+(defun star/research--linked-local-targets (file)
+  "Return local files and directories directly linked by Org FILE."
   (with-temp-buffer
     (insert-file-contents file)
     (org-mode)
-    (let (files)
+    (let (targets)
       (org-element-map (org-element-parse-buffer) 'link
         (lambda (link)
           (when (string= "file" (org-element-property :type link))
@@ -331,9 +331,9 @@ When nil, resolve from STARINTEL_RESEARCH_ROOT, the current file, or
                     (org-link-unescape
                      (org-element-property :path link))
                     (file-name-directory file))))
-              (when (file-regular-p target)
-                (push (file-truename target) files))))))
-      (delete-dups (nreverse files)))))
+              (when (file-exists-p target)
+                (push (file-truename target) targets))))))
+      (delete-dups (nreverse targets)))))
 
 (defun star/research--project-index-for-file (file)
   "Return the nearest project index associated with FILE."
@@ -346,25 +346,63 @@ When nil, resolve from STARINTEL_RESEARCH_ROOT, the current file, or
            t
            (format "%s.*\\.org\\'" (regexp-quote project))
            t)))
-    (car candidates)))
+    (or (car candidates)
+        (car (directory-files
+              (star/research--path "roam" "indexes")
+              t
+              "\\.org\\'"
+              t)))))
 
-(defun star/research--append-context-file (source destination remaining)
+(defun star/research--truncate-to-bytes (text limit)
+  "Return the longest prefix of TEXT whose encoded size is at most LIMIT."
+  (let ((low 0)
+        (high (length text)))
+    (while (< low high)
+      (let ((middle (/ (+ low high 1) 2)))
+        (if (<= (string-bytes (substring text 0 middle)) limit)
+            (setq low middle)
+          (setq high (1- middle)))))
+    (substring text 0 low)))
+
+(defun star/research--context-content (source)
+  "Return bounded-context source text for SOURCE."
+  (if (file-directory-p source)
+      (concat
+       "Directory manifest only; contents were not loaded recursively.\n\n"
+       (mapconcat
+        (lambda (entry)
+          (file-relative-name entry source))
+        (directory-files source t "\\`[^.]" t)
+        "\n")
+       "\n")
+    (with-temp-buffer
+      (insert-file-contents source)
+      (buffer-string))))
+
+(defun star/research--append-context-target (source destination remaining)
   "Append SOURCE to DESTINATION without exceeding REMAINING bytes.
-Return the new remaining byte budget."
-  (let* ((content (with-temp-buffer
-                    (insert-file-contents source)
-                    (buffer-string)))
-         (header (format "\n* Context File: %s\n\n"
+Directories are represented by a non-recursive manifest. Return remaining bytes."
+  (let* ((content (star/research--context-content source))
+         (header (format "\n* Context Target: %s\n\n"
                          (file-relative-name source
                                              (star/research--root))))
          (payload (concat header content "\n"))
-         (bytes (string-bytes payload)))
-    (if (> bytes remaining)
-        remaining
+         (complete-bytes (string-bytes payload))
+         (written
+          (if (<= complete-bytes remaining)
+              payload
+            (let* ((marker "\n\n[TRUNCATED BY CONTEXT BUDGET]\n")
+                   (available (max 0 (- remaining (string-bytes marker)))))
+              (concat
+               (star/research--truncate-to-bytes payload available)
+               (star/research--truncate-to-bytes
+                marker
+                (max 0 (- remaining available))))))))
+    (when (> remaining 0)
       (with-temp-buffer
-        (insert payload)
-        (append-to-file (point-min) (point-max) destination))
-      (- remaining bytes))))
+        (insert written)
+        (append-to-file (point-min) (point-max) destination)))
+    (max 0 (- remaining (string-bytes written)))))
 
 (defun star/research-build-context-bundle (&optional file)
   "Build a bounded context bundle for FILE.
@@ -374,7 +412,7 @@ Only the active file, its direct local links, and its project index are added."
   (let* ((source (file-truename
                   (or file buffer-file-name
                       (user-error "No active file"))))
-         (linked (star/research--linked-local-files source))
+         (linked (star/research--linked-local-targets source))
          (index (star/research--project-index-for-file source))
          (files (delete-dups
                  (delq nil (append (list source index) linked))))
@@ -385,15 +423,18 @@ Only the active file, its direct local links, and its project index are added."
                    (format-time-string "%Y%m%dT%H%M%S")
                    (star/research--slug
                     (file-name-base source)))))
-         (remaining star/research-context-max-bytes))
-    (star/research--write-file
-     destination
-     (format "#+title: Bounded Context for %s\n#+created: %s\n"
-             (file-name-base source)
-             (star/research--timestamp)))
+         (intro
+          (format "#+title: Bounded Context for %s\n#+created: %s\n"
+                  (file-name-base source)
+                  (star/research--timestamp)))
+         (remaining
+          (max 0
+               (- star/research-context-max-bytes
+                  (string-bytes intro)))))
+    (star/research--write-file destination intro)
     (dolist (candidate files)
       (setq remaining
-            (star/research--append-context-file
+            (star/research--append-context-target
              candidate destination remaining)))
     (find-file destination)
     (message "Context bundle: %s (%d bytes free)"

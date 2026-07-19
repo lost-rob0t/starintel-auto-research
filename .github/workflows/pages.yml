@@ -8,6 +8,7 @@ on:
       - "lisp/starintel/**"
       - "pages/**"
       - "scripts/publish-pages"
+      - "scripts/serve-pages"
       - "scripts/check-pages-links.py"
       - ".github/workflows/pages.yml"
       - "AGENTS.md"
@@ -20,6 +21,7 @@ on:
       - "lisp/starintel/**"
       - "pages/**"
       - "scripts/publish-pages"
+      - "scripts/serve-pages"
       - "scripts/check-pages-links.py"
       - ".github/workflows/pages.yml"
       - "AGENTS.md"
@@ -71,6 +73,25 @@ jobs:
       - name: Check internal links
         run: python3 scripts/check-pages-links.py _site
 
+      - name: Check site through HTTP
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/serve-pages --host 127.0.0.1 --port 8042 --directory _site >pages-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error http://127.0.0.1:8042/ >/dev/null; then
+              break
+            fi
+            sleep 0.25
+          done
+          curl --fail --silent --show-error http://127.0.0.1:8042/ >/dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8042/search.html >/dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8042/graph.html >/dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8042/search-index.json >/dev/null
+          curl --fail --silent --show-error http://127.0.0.1:8042/graph.json >/dev/null
+
       - name: Configure GitHub Pages
         if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v5
@@ -88,9 +109,33 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
     steps:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  verify-deployment:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    needs: deploy
+    steps:
+      - name: Verify deployed Pages URL
+        shell: bash
+        env:
+          PAGE_URL: ${{ needs.deploy.outputs.page_url }}
+        run: |
+          set -euo pipefail
+          test -n "$PAGE_URL"
+          curl \
+            --fail \
+            --location \
+            --retry 12 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --show-error \
+            --silent \
+            "$PAGE_URL" >/dev/null

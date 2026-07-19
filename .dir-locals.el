@@ -1,0 +1,5 @@
+((nil . ((indent-tabs-mode . nil)
+         (fill-column . 88)))
+ (emacs-lisp-mode . ((checkdoc-minor-mode . t)))
+ (org-mode . ((org-use-property-inheritance . t)
+              (org-confirm-babel-evaluate . t))))

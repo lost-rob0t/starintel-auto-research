@@ -8,6 +8,12 @@
          (file-name-directory (or load-file-name buffer-file-name)))
         nil nil t))
 
+(defvar starintel-pages-server-process nil)
+(defcustom starintel-pages-server-port 8042
+  "Local HTTP port used by `star/pages-serve'."
+  :type 'integer
+  :group 'starintel-pages)
+
 (defun starintel-second-brain-root (&optional start)
   (let ((root (locate-dominating-file
                (or start default-directory)
@@ -71,12 +77,43 @@ When AUTOSYNC is non-nil, enable `org-roam-db-autosync-mode'."
     (org-roam-db-sync)
     (message "Starintel Org-roam database synchronized")))
 
-(defun star/pages-open ()
-  "Open the generated site index."
+(defun star/pages-serve ()
+  "Build and serve the generated site over local HTTP.
+Using HTTP is required because browsers block the search and graph JSON requests
+when the site is opened directly through a file URL."
   (interactive)
-  (browse-url-of-file
-   (expand-file-name "_site/index.html"
-                     (starintel-second-brain-root))))
+  (let* ((root (starintel-second-brain-root))
+         (index (expand-file-name "_site/index.html" root))
+         (script (expand-file-name "scripts/serve-pages" root))
+         (buffer (get-buffer-create "*starintel-pages-server*")))
+    (unless (file-exists-p index)
+      (starintel-pages-build root))
+    (unless (process-live-p starintel-pages-server-process)
+      (setq starintel-pages-server-process
+            (start-process
+             "starintel-pages-server"
+             buffer
+             "python3"
+             script
+             "--host" "127.0.0.1"
+             "--port" (number-to-string starintel-pages-server-port)
+             "--directory" (expand-file-name "_site" root)))
+      (set-process-query-on-exit-flag starintel-pages-server-process nil)
+      (accept-process-output starintel-pages-server-process 0.2))
+    (format "http://127.0.0.1:%d/" starintel-pages-server-port)))
+
+(defun star/pages-stop ()
+  "Stop the local Starintel Pages server."
+  (interactive)
+  (when (process-live-p starintel-pages-server-process)
+    (delete-process starintel-pages-server-process))
+  (setq starintel-pages-server-process nil)
+  (message "Starintel Pages server stopped"))
+
+(defun star/pages-open ()
+  "Build, serve, and open the generated site over local HTTP."
+  (interactive)
+  (browse-url (star/pages-serve)))
 
 (provide 'starintel-second-brain)
 (provide 'second-brain)

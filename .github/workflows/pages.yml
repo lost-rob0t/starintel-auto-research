@@ -41,11 +41,23 @@ jobs:
 
       - name: Install Emacs
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes emacs-nox sqlite3
+          sudo apt-get update -qq >/tmp/apt-update.log
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --quiet emacs-nox sqlite3 >/tmp/apt-install.log
+          emacs --version | head -1
 
       - name: Build Org-roam site
-        run: bash scripts/publish-pages
+        shell: bash
+        run: |
+          set +e
+          bash scripts/publish-pages >pages-build.log 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Emacs build failure"
+            tail -n 180 pages-build.log
+            echo "::endgroup::"
+            exit "$status"
+          fi
+          tail -n 30 pages-build.log
 
       - name: Check internal links
         run: python3 scripts/check-pages-links.py _site

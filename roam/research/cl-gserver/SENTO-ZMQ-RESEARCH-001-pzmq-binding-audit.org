@@ -1,0 +1,210 @@
+:PROPERTIES:
+:ID:       sento-zmq-pzmq-binding-audit-001
+:END:
+#+title: SENTO-ZMQ-RESEARCH-001 PZMQ Binding Audit
+#+description: Audit the existing Common Lisp PZMQ binding against current stable libzmq requirements and decide whether to adopt, fork, or replace it with a narrow maintained binding.
+#+status: RESEARCHING
+#+filetags: :starintel:research:cl-gserver:sento:zeromq:pzmq:ffi:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-19 | Start audit with explicit adopt, fork, or replace decision | Yes                   |
+
+* Related Nodes
+
+- [[file:../../design/cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]]
+- [[file:../../design/star-server/STAR-ADR-001-domain-gserver-zmq-approval.org][STAR-ADR-001 Domain GServer and ZeroMQ Approval]]
+- [[file:SENTO-000-zeromq-transport-analysis.org][SENTO-000 ZeroMQ Transport Analysis]]
+
+* Research Question
+
+Can =orivej/pzmq=[fn:pzmq] safely and maintainably support the approved Sento ZeroMQ transport runtime against the selected stable =libzmq=[fn:libzmq] version, or should StarIntel fork it or create a new narrow Common Lisp binding?
+
+* Initial Source Read
+
+The PZMQ repository describes itself as a ZeroMQ 4.0 and later Common Lisp binding. Its own README lists important deficiencies: surfaces outside its examples and tests have not been tested, conveniences are limited to those examples and tests, performance is not fully optimized, and the automatic tests are described as barebone.[fn:source-pzmq]
+
+That is a real warning. It does not prove the binding is unusable. It proves direct adoption without a source and runtime audit would be reckless.
+
+PyZMQ[fn:pyzmq] is maintained by the ZeroMQ organization and states that it fully supports the stable libzmq 3.x and 4.x APIs. Its repository includes extensive tests, performance tooling, packaging support, and documentation. It will be used as a reference oracle[fn:reference-oracle] and cross-language peer for expected stable behavior, not as a substitute for the Common Lisp binding.[fn:source-pyzmq]
+
+* Required Baseline
+
+Record before testing:
+
+- PZMQ repository commit
+- PZMQ ASDF system version when present
+- libzmq release and build configuration
+- SBCL version
+- CFFI version
+- operating system and architecture
+- Nix package revisions
+- whether draft libzmq APIs are disabled
+- compiler and linker versions
+
+No final recommendation is valid without this version matrix.
+
+* Source Audit Matrix
+
+| Area | Required evidence | Failure consequence |
+|------+-------------------+---------------------|
+| FFI declarations | Signatures match current stable C headers | Replace declaration or binding |
+| Foreign memory | Message and buffer ownership is explicit and safe | Critical; fork or replace |
+| Conditions | Native errors map to structured Lisp conditions | Extend or wrap |
+| Interrupts | Blocking calls handle SBCL interrupts correctly | Extend before adoption |
+| Context | Context creation, shutdown, and termination are complete | Critical; fork or replace |
+| Sockets | Create, configure, bind, connect, disconnect, close | Critical |
+| Multipart | Frame boundaries and more-parts state remain correct | Critical |
+| Polling | Poller behavior is bounded and interruptible | Critical |
+| Monitoring | Stable socket-monitor events are exposed | Extend or replace |
+| Security | CURVE and ZAP-related stable options are exposed | Extend or replace |
+| Options | All required stable production options are covered | Extend or replace |
+| Non-blocking I/O | EAGAIN and timeout behavior is correct | Critical |
+| Thread ownership | API does not encourage cross-thread socket sharing | Wrap or redesign |
+| Tests | Regressions are detectable across supported systems | Fork or replace |
+| Packaging | Reproducible Nix build and pinned source | Required before adoption |
+
+* Runtime Test Matrix
+
+** Context and shutdown
+
+- create and terminate an empty context
+- close all sockets before termination
+- force a blocked receive to stop by declared shutdown path
+- detect leaked sockets
+- repeat context startup and shutdown one thousand times
+- verify no lingering native or Lisp threads
+
+** Socket patterns
+
+Test over =inproc://=, =ipc://= where supported, and loopback =tcp://=:
+
+- PAIR
+- PUB and SUB
+- PUSH and PULL
+- ROUTER and DEALER
+
+REQ and REP are tested only for compatibility and are not the primary StarIntel runtime protocol.
+
+** Messaging
+
+- zero-length frame
+- one frame
+- multipart frame sequence
+- large bounded payload
+- non-blocking send at high-water mark
+- non-blocking receive without data
+- send and receive timeout
+- disconnect and reconnect
+- ROUTER identity preservation
+- concurrent outstanding DEALER requests
+
+** Polling and monitoring
+
+- poll multiple sockets
+- wake and stop a poller
+- connect and disconnect monitor events
+- handshake success and failure
+- retry events
+- monitor shutdown
+
+** Security
+
+- CURVE client and server handshake
+- approved key succeeds
+- unknown key fails
+- malformed key fails
+- message is not delivered before authentication and authorization
+
+** Differential tests with PyZMQ
+
+Use the same message envelope and fixtures across Common Lisp and Python:
+
+- Common Lisp ROUTER with Python DEALER
+- Python ROUTER with Common Lisp DEALER
+- Common Lisp PUB with Python SUB
+- Python PUB with Common Lisp SUB
+- Common Lisp PUSH with Python PULL
+- Python PUSH with Common Lisp PULL
+- multipart and binary payload round trips
+- high-water-mark and timeout behavior
+- clean shutdown from either side
+
+Differences are classified as:
+
+- libzmq behavior
+- PZMQ binding defect
+- PyZMQ binding behavior
+- test assumption defect
+- platform difference
+
+* Decision Gate
+
+** Adopt upstream PZMQ
+
+Choose adoption only when:
+
+- no critical memory or lifecycle defect is found
+- required stable APIs and options are present
+- missing conveniences can be hidden by the StarIntel adapter
+- tests can be added without restructuring the binding
+- exact source and libzmq versions can be pinned reproducibly
+
+** Fork and extend PZMQ
+
+Choose a fork when:
+
+- its CFFI[fn:cffi] foundation and memory ownership are sound
+- most required declarations are correct
+- the missing work is bounded to modern options, monitoring, tests, conditions, and packaging
+- preserving its existing API costs less than a new binding
+
+The fork must be narrow, versioned, and suitable for eventual upstream contribution where practical.
+
+** Create a new narrow binding
+
+Choose replacement when:
+
+- memory ownership is unsafe or unclear
+- the generated or handwritten declarations substantially diverge from current stable libzmq
+- context and socket lifecycle cannot be repaired locally
+- the public API prevents safe ownership and structured conditions
+- testability is poor enough that repair cannot be trusted
+- the amount of dead or obsolete code exceeds the stable API surface StarIntel actually needs
+
+A replacement binds only the approved stable operations. It must not attempt to expose every draft or experimental libzmq feature.
+
+* Deliverables
+
+- pinned source and toolchain manifest
+- source-level audit report with file and line references
+- stable API feature matrix
+- failing and passing runtime tests
+- PyZMQ interoperability fixtures
+- memory and shutdown findings
+- adopt, fork, or replace recommendation
+- estimated implementation and maintenance cost
+- affected design updates
+
+* Current Preliminary Conclusion
+
+Do not adopt PZMQ blindly. Its own documented test limitations are enough to require the full audit. The likely outcomes are either a maintained fork with a serious test suite or a smaller replacement binding. The audit must decide based on memory safety, lifecycle correctness, stable API coverage, and repair cost rather than repository age or aesthetics.
+
+* Footnotes and Glossary
+
+[fn:pzmq] PZMQ: The =orivej/pzmq= Common Lisp foreign-function binding for ZeroMQ 4.0 and later.
+
+[fn:libzmq] libzmq: The native ZeroMQ core library that implements message sockets, transports, queues, polling, monitoring, and security.
+
+[fn:pyzmq] PyZMQ: The maintained Python binding for ZeroMQ.
+
+[fn:reference-oracle] Reference oracle: A trusted comparison implementation used to determine expected behavior when testing another implementation.
+
+[fn:cffi] CFFI: The Common Foreign Function Interface, a Common Lisp library used to declare and call functions from native C libraries.
+
+* Citations
+
+[fn:source-pzmq] =orivej/pzmq= official repository and README, retrieved 2026-07-19: https://github.com/orivej/pzmq
+
+[fn:source-pyzmq] =zeromq/pyzmq= official repository and README, retrieved 2026-07-19: https://github.com/zeromq/pyzmq

@@ -1,23 +1,132 @@
 #+title: Starintel Auto Research
+#+description: Emacs-first control plane for Starintel research, design files, SRFCs, implementation promotion, and graph IDEs.
 
 * Purpose
 
 This repository is the Emacs-first control plane for Starintel research, design files, SRFCs, implementation promotion, and graph-oriented IDE surfaces.
 
-The Org tree under =roam/= is the source of truth.  Elisp under =lisp/= owns capture, indexing, validation, context bundling, Git workflow helpers, and graph export.
+The Org tree under =roam/= is the source of truth. Elisp under =lisp/= owns capture, indexing, validation, bounded context construction, design promotion, Git workflow helpers, and graph export.
 
 * Repository Shape
 
 #+begin_example
 lisp/                         Emacs workflow implementation
-roam/design/                  Numbered design files
-roam/research/                Research trackers and findings
+roam/design/                  Numbered design files and SRFCs
+roam/research/                Research trackers, inbox captures, and findings
 roam/implement/               Designs promoted for implementation
 roam/indexes/                 Roadmaps and project indexes
+test/                         ERT tests
 ui/web/                       Web graph IDE
 ui/desktop/                   Desktop graph IDE
 #+end_example
 
-* Rule
+* Dependencies
 
-Do not load the entire research tree into an agent context.  Build a bounded context bundle from the active node, its direct links, and its project index.
+- Emacs 29 or newer.
+- Org mode.
+- Org-roam for graph indexing and capture.
+- Org-ql for dashboard queries.
+- =simple-httpd= only when serving the web UI directly from Emacs.
+
+* Doom Emacs Setup
+
+#+begin_src emacs-lisp
+(add-to-list
+ 'load-path
+ (expand-file-name
+  "~/Documents/Projects/starintelV4/starintel-auto-research/lisp"))
+
+(require 'starintel-auto-research)
+
+(setq star/research-root
+      (expand-file-name
+       "~/Documents/Projects/starintelV4/starintel-auto-research"))
+
+(star/research-mode 1)
+#+end_src
+
+The mode installs =C-c s= as the Starintel command prefix.
+
+* Command Surface
+
+| Key     | Command                              | Purpose |
+|---------+--------------------------------------+---------|
+| C-c s o | =star/research-dashboard=            | Open roadmap and active work |
+| C-c s d | =star/research-new-design=           | Create a numbered design file |
+| C-c s r | =star/research-new-research=         | Create a numbered research tracker |
+| C-c s R | =star/research-new-srfc=             | Create a numbered SRFC |
+| C-c s c | =star/roam-capture=                  | Run Starintel Org-roam capture |
+| C-c s f | =star/roam-find=                     | Find a Starintel node |
+| C-c s i | =star/roam-insert=                   | Insert a node link |
+| C-c s s | =star/roam-sync=                     | Synchronize Org-roam |
+| C-c s l f | =star/research-link-file=          | Link a file into the active node |
+| C-c s l d | =star/research-link-directory=     | Link a directory into the active node |
+| C-c s a | =star/research-open-asset-directory= | Open or create the node asset directory |
+| C-c s x | =star/research-build-context-bundle= | Build bounded agent context |
+| C-c s q t | =star/research-open-todo-view=     | Query active work with Org-ql |
+| C-c s q b | =star/research-open-blocked-view=  | Query blocked work |
+| C-c s q p | =star/research-open-project-view=  | Query one project |
+| C-c s v | =star/research-validate=             | Validate the Org tree |
+| C-c s p | =star/research-promote-design=       | Promote exactly one design |
+| C-c s g s | =star/research-git-status=         | Show scoped repository status |
+| C-c s g d | =star/research-git-diff=           | Show diff statistics |
+| C-c s g a | =star/research-git-stage=          | Validate and stage owned paths |
+| C-c s g c | =star/research-git-commit=         | Validate, stage, and commit |
+| C-c s e | =star/research-export-graph-json=    | Export Org-roam graph data |
+| C-c s w | =star/research-web-ui-start=         | Export and serve the web IDE |
+| C-c s D | =star/research-desktop-graph-start=  | Export and launch desktop graph IDE |
+
+* Workflow
+
+** TODO Capture
+
+Use Org-roam inbox capture for raw material. Convert accepted design notes into numbered files with =star/research-new-design=.
+
+** TODO Research
+
+Track status, sources, repositories, decisions, rejected approaches, implementation issues, and next action in Org properties and TODO states.
+
+** TODO Context
+
+Do not load the entire tree into an agent context. =star/research-build-context-bundle= includes only:
+
+- The active Org file.
+- Its directly linked local files.
+- One-level manifests for directly linked directories.
+- The nearest project index, with the roadmap as fallback.
+
+The result is truncated to =star/research-context-max-bytes= and written under =.starintel/context/=.
+
+** TODO Design
+
+Create design files under =roam/design/<project>/=. Numbering, headers, version table, required headings, and citations are validated before Git staging.
+
+** TODO Implementation
+
+Use =star/research-promote-design= to copy exactly one approved design into the matching path below =roam/implement/=.
+
+** TODO Git
+
+Use the =C-c s g= commands. Staging is limited to =lisp/=, =roam/=, =ui/=, =README.org=, and =.dir-locals.el=. Generated databases, context bundles, and graph exports remain untracked.
+
+** TODO IDEs
+
+Emacs is the reference workflow engine. The web UI and desktop graph app consume the same JSON graph export and must route writes through validated workflow operations.
+
+* Batch Validation
+
+#+begin_src sh
+emacs --batch \
+  -L lisp \
+  -l lisp/starintel-auto-research.el \
+  -f star/research-batch-validate
+#+end_src
+
+* Tests
+
+#+begin_src sh
+emacs --batch \
+  -L lisp \
+  -l test/starintel-auto-research-test.el \
+  -f ert-run-tests-batch-and-exit
+#+end_src

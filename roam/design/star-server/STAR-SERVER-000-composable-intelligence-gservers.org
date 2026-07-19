@@ -1,0 +1,573 @@
+#+title: STAR-SERVER-000 Composable Intelligence GServer Domains
+#+description: Compose StarIntel domain gservers for HUMINT, SOCMINT, SIGINT, cyber, BBP, and threat intelligence on CL-GServer.
+#+status: DRAFT
+#+filetags: :starintel:design:star-server:actors:gserver:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-19 | Seed domain-gserver composition and isolation architecture | Pending               |
+
+* TODO Design File System
+
+** Objective
+
+Define how StarIntel composes specialized gservers for:
+
+- HUMINT
+- SOCMINT
+- SIGINT
+- cyber
+- BBP
+- threat intelligence
+
+The domain gservers are tools inside StarIntel. They consume and emit typed StarIntel documents and participate in actor-manifest and dataset-manifest flows.
+
+** Decision
+
+Use one CL-GServer/Sento actor system per StarIntel server process by default.
+
+Inside that actor system, create one root domain guardian and six child domain guardians:
+
+#+begin_example
+/user/domains
+/user/domains/humint
+/user/domains/socmint
+/user/domains/sigint
+/user/domains/cyber
+/user/domains/bbp
+/user/domains/threat-intel
+#+end_example
+
+Each domain guardian owns a complete child actor tree and exposes a domain-gserver interface.
+
+A domain gserver is a StarIntel composition unit containing:
+
+- one guardian actor
+- one typed ingress actor
+- zero or more workflow coordinators
+- zero or more router-backed worker pools
+- domain-local state actors
+- actor-manifest registrations
+- dataset-manifest bindings
+- health and readiness state
+- lifecycle and restart policy
+- metrics and mailbox telemetry
+
+Do not model a logical domain as a separate Sento actor system unless a hard isolation requirement justifies it.
+
+** Why one actor system is the default
+
+Sento already supports actor hierarchies by creating actors inside actors. Every actor contains an actor context tied to the same actor system.
+
+A Sento actor system owns:
+
+- dispatcher worker pools
+- the system event stream
+- the timeout timer
+- the scheduler
+- internal and user actor contexts
+
+Creating one actor system per intelligence domain would duplicate these resources and create separate lifecycle roots. The default Sento configuration creates four shared dispatcher workers for every actor system, so six default actor systems would begin with twenty-four shared dispatcher workers before domain actors and additional dispatchers are counted.
+
+The logical domain boundary should therefore be an actor hierarchy and manifest boundary. A separate actor system is a deployment and isolation boundary.
+
+** Composition modes
+
+*** Mode A: one actor system with domain guardians
+
+Default mode.
+
+Use one actor system and place every domain beneath the =domains= guardian.
+
+Advantages:
+
+- one lifecycle root
+- direct actor references inside the process
+- one actor registry and path hierarchy
+- shared document and service actors
+- lower duplicated runtime overhead
+- simple startup and shutdown
+- straightforward cross-domain orchestration
+
+*** Mode B: one actor system with domain bulkheads
+
+Use the same guardian hierarchy but assign custom dispatchers to domains or workload classes.
+
+Examples:
+
+- =:humint=
+- =:socmint=
+- =:sigint=
+- =:cyber=
+- =:bbp=
+- =:threat-intel=
+- =:blocking-io=
+- =:cpu-analysis=
+
+Domain-specific dispatchers are optional. A deployment may instead share workload-class dispatchers when six independent pools would waste threads.
+
+Use custom dispatchers to prevent blocking collectors, parsers, or database operations from starving normal actor message handling.
+
+*** Mode C: multiple actor systems in one Lisp image
+
+Use only when a domain requires:
+
+- independent startup and shutdown
+- a separate event stream
+- a separate scheduler or timeout configuration
+- hard dispatcher ownership
+- plugin lifecycle containment
+- benchmark or test isolation
+
+Cross-system communication must go through an explicit bridge abstraction. Do not scatter direct cross-system actor references through domain code.
+
+*** Mode D: multiple processes or nodes
+
+Use for real process isolation, independent scaling, crash containment, or remote deployment.
+
+Use =starRouter= for client-facing and cross-process routing. CL-GServer remains the in-process actor runtime.
+
+** Runtime tree
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+component "StarIntel Runtime" as Runtime
+component "Sento Actor System" as Sento
+component "Domain Supervisor" as Supervisor
+component "HUMINT GServer" as HUMINT
+component "SOCMINT GServer" as SOCMINT
+component "SIGINT GServer" as SIGINT
+component "Cyber GServer" as Cyber
+component "BBP GServer" as BBP
+component "Threat Intel GServer" as ThreatIntel
+component "Shared Services" as Shared
+component "Star Router Bridge" as StarRouter
+
+Runtime --> Sento
+Sento --> Supervisor
+Supervisor --> HUMINT
+Supervisor --> SOCMINT
+Supervisor --> SIGINT
+Supervisor --> Cyber
+Supervisor --> BBP
+Supervisor --> ThreatIntel
+Supervisor --> Shared
+Supervisor --> StarRouter
+
+HUMINT --> Shared
+SOCMINT --> Shared
+SIGINT --> Shared
+Cyber --> Shared
+BBP --> Shared
+ThreatIntel --> Shared
+
+HUMINT --> StarRouter
+SOCMINT --> StarRouter
+SIGINT --> StarRouter
+Cyber --> StarRouter
+BBP --> StarRouter
+ThreatIntel --> StarRouter
+@enduml
+#+end_src
+
+** Domain-gserver protocol
+
+Every domain gserver must implement equivalent operations:
+
+- =start-domain=
+- =stop-domain=
+- =restart-domain=
+- =domain-ready-p=
+- =domain-health=
+- =domain-ingress=
+- =domain-capabilities=
+- =domain-routes=
+- =domain-workers=
+- =domain-mailbox-metrics=
+- =domain-manifest=
+
+The public object should be a StarIntel domain-gserver handle. Callers should not need to know whether the domain is hosted in the local actor system, another actor system, or another process.
+
+A handle should contain stable logical identity and opaque routing information rather than raw implementation internals.
+
+** Domain layout
+
+*** HUMINT gserver
+
+Owns HUMINT-specific workflows such as:
+
+- source and contact records
+- tasking and collection plans
+- interview and debrief ingestion
+- report normalization
+- relationship extraction
+- timeline construction
+- review queues
+- source-facing and analyst-facing workflow actors
+
+*** SOCMINT gserver
+
+Owns social-media intelligence workflows such as:
+
+- platform collectors
+- profile and account normalization
+- post, message, thread, and reaction ingestion
+- media and attachment processing
+- identity and account correlation
+- interaction graph generation
+- platform checkpoint actors
+- platform-specific rate and session actors
+
+*** SIGINT gserver
+
+Owns signal-oriented workflows such as:
+
+- stream and session ingestion
+- sensor and receiver metadata
+- protocol and format decoders
+- signal-event normalization
+- channel and session correlation
+- temporal correlation
+- decoder worker pools
+- high-volume bounded mailboxes
+
+*** Cyber gserver
+
+Owns general cyber operations and analysis such as:
+
+- asset discovery
+- network and service documents
+- web and protocol observations
+- vulnerability and exposure analysis
+- incident documents
+- malware and artifact analysis
+- infrastructure correlation
+- cyber graph updates
+
+*** BBP gserver
+
+Owns bug-bounty-program workflows such as:
+
+- program and scope ingestion
+- scope validation
+- target locks
+- enumeration workflows
+- tool execution coordination
+- finding normalization
+- duplicate-finding analysis
+- evidence and reproduction packaging
+- submission-state tracking
+
+BBP remains a separate domain because program scope, target locks, deduplication, and submission workflows differ from general cyber analysis.
+
+*** Threat-intelligence gserver
+
+Owns threat-intelligence workflows such as:
+
+- feed ingestion
+- IOC normalization
+- TTP and ATT&CK mapping
+- campaign and actor documents
+- enrichment
+- scoring and prioritization
+- watchlists
+- cross-source correlation
+- alert generation
+
+** Shared service gservers
+
+Do not duplicate generic services inside every domain.
+
+Provide shared actors or router pools for:
+
+- document validation
+- normalization
+- persistence
+- CouchDB operations
+- search
+- attachment processing
+- OCR
+- entity resolution
+- graph updates
+- embedding generation
+- LLM requests
+- audit and telemetry emission
+
+Domains call shared services with typed documents. Shared services must not contain hidden domain policy.
+
+** Actor hierarchy and naming
+
+Use the domain guardian as the actor context for all domain-owned children.
+
+Actor names must be unique only inside their immediate actor context. This permits repeated leaf names such as =collector=, =normalizer=, or =reviewer= beneath different domains while preserving stable full paths.
+
+Example:
+
+#+begin_example
+/user/domains/socmint/collector
+/user/domains/cyber/collector
+/user/domains/threat-intel/collector
+#+end_example
+
+** Router use
+
+Use Sento routers for homogeneous, stateless, independently processable work.
+
+Good router-pool candidates:
+
+- document validation
+- text normalization
+- parsing
+- OCR
+- attachment metadata extraction
+- entity extraction
+- independent enrichment calls
+- independent database operations
+
+Do not route stateful target or case state randomly.
+
+Sento's current router has important limits:
+
+- the router is not an actor
+- the router cannot be watched
+- it exposes routee addition but no routee removal operation
+- its strategy function receives only the routee count, not the message
+- built-in strategies are random and round-robin
+
+Therefore:
+
+1. Every router must be owned by a guardian or pool-manager actor.
+2. The owner tracks routee lifecycle and health.
+3. Do not expose an unmanaged router as the domain root.
+4. Use a dedicated keyed-routing actor when routing requires target, case, account, sensor, or dataset affinity.
+5. Add a managed-router abstraction before depending on dynamic resizing.
+
+** Dispatcher policy
+
+Default actor message handling should remain short and non-blocking.
+
+Use:
+
+- shared dispatchers for ordinary message handling
+- custom shared dispatchers for bounded blocking or high-volume work
+- pinned dispatchers only for actors that require a dedicated mailbox thread
+- router pools when parallelism is safe
+
+Each actor still processes one message at a time. Increasing dispatcher workers increases concurrency across actors, not inside one actor.
+
+Dispatcher assignment must be declared in the actor manifest and observable through runtime telemetry.
+
+** Event policy
+
+A Sento actor system has one event stream. All local domains can publish and subscribe to it.
+
+All StarIntel events must therefore use typed, namespaced envelopes.
+
+Minimum event envelope:
+
+#+begin_src lisp
+(defstruct domain-event
+  domain
+  event-type
+  trace-id
+  dataset
+  document-id
+  payload)
+#+end_src
+
+A domain must not subscribe to unqualified generic messages when a typed domain event is available.
+
+Cross-process events use StarIntel documents and =starRouter= rather than the local Sento event stream.
+
+** Supervision and lifecycle
+
+Sento supports child actors and lifecycle watching. A watcher can observe that an actor stopped.
+
+Sento does not currently provide a complete Erlang/OTP-style declarative supervision strategy with restart intensity, one-for-one, one-for-all, or rest-for-one semantics.
+
+StarIntel must provide the missing policy layer.
+
+The domain supervisor and every domain guardian must define:
+
+- child specifications
+- startup order
+- reverse shutdown order
+- restart mode
+- restart limits and windows
+- permanent, transient, or temporary child class
+- readiness rules
+- failure escalation
+- mailbox-drain policy
+- checkpoint recovery
+
+The planned Prolog Supervisor Actor may evaluate policy and dependency rules. The Common Lisp guardian remains responsible for direct actor lifecycle operations.
+
+** Cross-domain routing
+
+Cross-domain work must be explicit.
+
+Use:
+
+- actor manifests to declare capabilities
+- dataset manifests to declare document flows
+- typed StarIntel documents as messages
+- a domain registry to resolve domain ingress handles
+- trace identifiers across every hop
+- Star Router for cross-process hops
+
+Do not allow arbitrary domain actors to discover and call arbitrary actors in another domain by path.
+
+A cross-domain flow should enter through the destination domain ingress actor or a declared shared service.
+
+** Domain registry
+
+The runtime must maintain a registry keyed by domain identifier.
+
+Example identifiers:
+
+- =:humint=
+- =:socmint=
+- =:sigint=
+- =:cyber=
+- =:bbp=
+- =:threat-intel=
+
+Registry entries include:
+
+- domain handle
+- guardian reference
+- ingress reference
+- lifecycle state
+- health state
+- capability set
+- actor-manifest identifier
+- dataset-manifest identifiers
+- dispatcher identifiers
+- process or node identity
+
+** Common Lisp composition sketch
+
+#+begin_src lisp
+(defpackage #:starintel.domain-runtime
+  (:use #:cl)
+  (:local-nicknames (#:ac #:sento.actor-context)
+                    (#:act #:sento.actor)
+                    (#:asys #:sento.actor-system)))
+
+(in-package #:starintel.domain-runtime)
+
+(defstruct domain-gserver
+  name
+  guardian
+  ingress
+  capabilities
+  dispatcher-id)
+
+(defun make-domain-guardian (system name dispatcher-id initializer)
+  (ac:actor-of
+   system
+   :name (string-downcase (symbol-name name))
+   :dispatcher dispatcher-id
+   :state (list :status :starting :children nil)
+   :init (lambda (self)
+           (funcall initializer self)
+           (setf act:*state*
+                 (list :status :ready
+                       :children (ac:all-actors self))))
+   :receive (lambda (message)
+              (case (car message)
+                (:health
+                 (act:reply act:*state*))
+                (:stop-domain
+                 (dolist (child (ac:all-actors act:*self*))
+                   (ac:stop act:*self* child :wait t))
+                 (act:reply :stopped))
+                (otherwise
+                 (error "Unsupported domain command: ~s" message))))))
+
+(defun compose-domain-gservers (system definitions)
+  (loop for (name dispatcher-id initializer capabilities) in definitions
+        for guardian = (make-domain-guardian
+                        system name dispatcher-id initializer)
+        collect (make-domain-gserver
+                 :name name
+                 :guardian guardian
+                 :ingress guardian
+                 :capabilities capabilities
+                 :dispatcher-id dispatcher-id)))
+#+end_src
+
+The production implementation should place the six guardians beneath a =domains= root actor rather than directly beneath the actor system. The sketch only demonstrates the composition boundary.
+
+** Isolation decision table
+
+| Requirement                                  | Domain guardian | Custom dispatcher | Separate actor system | Separate process |
+|----------------------------------------------+-----------------+-------------------+-----------------------+------------------|
+| Logical ownership                            | Yes             | No                | No                    | No               |
+| Actor-path namespace                         | Yes             | No                | Yes                   | Yes              |
+| Dedicated worker pool                        | No              | Yes               | Yes                   | Yes              |
+| Separate event stream                        | No              | No                | Yes                   | Yes              |
+| Independent lifecycle root                   | Partial         | No                | Yes                   | Yes              |
+| Memory-space isolation                       | No              | No                | No                    | Yes              |
+| Crash isolation from the Lisp image          | No              | No                | No                    | Yes              |
+| Independent horizontal scaling               | No              | No                | Limited               | Yes              |
+| Lowest runtime overhead                      | Yes             | Usually           | No                    | No               |
+
+** Implementation sequence
+
+1. Implement the domain-gserver handle and registry.
+2. Implement the =domains= root guardian.
+3. Implement one domain guardian with health and lifecycle handling.
+4. Add a managed router-pool actor.
+5. Add typed domain-event envelopes.
+6. Add actor-manifest and dataset-manifest bindings.
+7. Add all six domain guardians with empty capability-specific child trees.
+8. Benchmark one actor system against six actor systems.
+9. Add failure-injection and restart-policy tests.
+10. Add Star Router bridge support for process-separated domains.
+
+** Validation requirements
+
+The implementation must demonstrate:
+
+- all six domain gservers can start in one actor system
+- actor paths remain stable and domain-scoped
+- one domain can restart without stopping unrelated domains
+- shared services remain reachable through declared interfaces
+- a saturated domain dispatcher does not starve unrelated domains
+- bounded mailboxes produce structured overload results
+- routee failure is detected by the pool manager
+- keyed work preserves affinity
+- cross-domain messages carry trace and dataset metadata
+- complete shutdown leaves no actor or timer resources running
+
+** Open questions
+
+- Should dispatchers initially be per-domain or per-workload-class?
+- Should managed router pools extend Sento's router or wrap it behind an actor?
+- Which restart strategies belong in Common Lisp and which belong in the Prolog supervisor policy layer?
+- Should every domain have a separate local event namespace implemented as typed envelopes, a broker actor, or both?
+- Which domains need process separation in the first hosted deployment?
+- Should domain handles be serializable so the same interface resolves local and remote domains?
+
+* TODO Foot Notes
+
+[fn:1] In this document, “gserver” means a StarIntel actor-service composition built on CL-GServer/Sento. It does not require one Sento actor system per service.
+
+[fn:2] A separate actor system provides runtime-resource and lifecycle separation inside one Lisp image, but it does not provide memory or process crash isolation.
+
+* TODO Citations
+
+- Sento documentation: https://mdbergmann.github.io/cl-gserver/index.html
+- Sento actor-system implementation: https://github.com/mdbergmann/cl-gserver/blob/master/src/actor-system.lisp
+- Sento actor-context implementation: https://github.com/mdbergmann/cl-gserver/blob/master/src/actor-context.lisp
+- Sento default actor-system configuration: https://github.com/mdbergmann/cl-gserver/blob/master/src/actor-system-api.lisp
+- Sento router implementation: https://github.com/mdbergmann/cl-gserver/blob/master/src/router.lisp
+- Sento ASDF system, version 3.4.3: https://github.com/mdbergmann/cl-gserver/blob/master/sento.asd
+- Akka actor-system hierarchy guidance: https://doc.akka.io/libraries/akka-core/current/general/actor-systems.html
+- Akka dispatcher and bulkhead guidance: https://doc.akka.io/libraries/akka-core/current/typed/dispatchers.html
+- Akka router pool and lifecycle model: https://doc.akka.io/libraries/akka-core/current/routing.html
+- Erlang/OTP supervision principles: https://www.erlang.org/doc/system/sup_princ.html

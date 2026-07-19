@@ -197,7 +197,7 @@
 
       function draw() {
         context.clearRect(0, 0, width, height);
-        context.strokeStyle = "rgba(139, 152, 167, 0.32)";
+        context.strokeStyle = "rgba(146, 64, 110, 0.52)";
         context.lineWidth = 1;
         for (const link of links) {
           context.beginPath();
@@ -208,9 +208,18 @@
 
         for (const node of nodes) {
           context.beginPath();
-          context.fillStyle = node.kind === "research" ? "#9be28f" : "#67d4ff";
+          const colors = {
+            design: "#2de2e6",
+            research: "#62ff00",
+            implement: "#fba922",
+            indexes: "#f6019d",
+          };
+          context.fillStyle = colors[node.kind] || "#9700cc";
+          context.shadowColor = context.fillStyle;
+          context.shadowBlur = 8;
           context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
           context.fill();
+          context.shadowBlur = 0;
         }
 
         frame += 1;

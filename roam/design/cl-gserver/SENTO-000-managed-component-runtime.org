@@ -1,12 +1,13 @@
 #+title: SENTO-000 Managed Component Runtime
-#+description: Extend Sento with explicit failure semantics, supervision trees, managed routers, per-domain dispatcher trees, overload control, scoped event buses, observability, secure remoting, and component handles.
+#+description: Extend Sento with explicit failure semantics, supervision trees, managed routers, per-domain dispatcher trees, overload control, scoped event buses, observability, secure remoting, ZeroMQ process bridges, and component handles.
 #+status: DRAFT
-#+filetags: :starintel:design:cl-gserver:sento:actors:supervision:routing:remoting:
+#+filetags: :starintel:design:cl-gserver:sento:actors:supervision:routing:remoting:zeromq:
 #+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
 
-| Version | Date       | Description of change                                        | Did nsaspy approve it |
-|---------+------------+--------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-19 | Full managed-component runtime after source-level Sento audit | Pending               |
+| Version | Date       | Description of change                                                  | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-19 | Full managed-component runtime after source-level Sento audit           | Pending               |
+| 0.2.0   | 2026-07-19 | Add the complete ZeroMQ transport, reactor, security, and routing model | Pending               |
 
 * TODO Design File System
 
@@ -23,6 +24,7 @@ Primary consumer:
 Research basis:
 
 - [[file:../../research/cl-gserver/SENTO-000-sento-runtime-analysis.org][SENTO-000 Sento Runtime Analysis]]
+- [[file:../../research/cl-gserver/SENTO-000-zeromq-transport-analysis.org][SENTO-000 ZeroMQ Transport Analysis]]
 
 ** Source baseline
 
@@ -33,9 +35,10 @@ The design is based on source review of:
 - commit: =a889b8375709ca9396bba5d06b6e460689a23716=
 - Sento version: =3.4.3=
 - Sento remoting[fn:remoting] version: =0.1.0=
+- ZeroMQ[fn:zeromq] engine: =libzmq=[fn:libzmq]
 - review date: =2026-07-19=
 
-Every implementation record must identify the exact upstream commit being extended.
+Every implementation record must identify the exact Sento, libzmq, Common Lisp binding, and operating-system package versions being used.
 
 ** Current Sento capabilities
 
@@ -72,28 +75,19 @@ The extension must use these facilities rather than replace them.
 
 Sento currently catches a =serious-condition=[fn:serious-condition] raised by an actor handler, logs it, and returns =(:handler-error . condition)=. The actor normally remains alive.
 
-This means a supervisor cannot infer that a child failed merely because user code raised an error. Watching currently reports only that an actor stopped.
+A supervisor cannot infer that a child failed merely because user code raised an error. Watching currently reports only that an actor stopped.
 
 A correct supervision system therefore requires a core Sento failure-policy hook. A companion library alone cannot reliably implement restart semantics while the core converts every handler failure into a normal result.
 
 *** Stop notifications have no reason
 
-A watcher receives:
+A watcher currently receives:
 
 #+begin_src lisp
 (cons :stopped actor)
 #+end_src
 
-The notification does not distinguish:
-
-- normal shutdown
-- explicit stop
-- handler failure
-- initialization failure
-- forced thread termination
-- mailbox failure
-- parent shutdown
-- remote disconnection
+The notification does not distinguish normal shutdown, explicit stop, handler failure, initialization failure, forced thread termination, mailbox failure, parent shutdown, or remote disconnection.
 
 Supervision requires a structured termination record[fn:termination-record].
 
@@ -149,13 +143,7 @@ The current event stream keeps subscribers in a list and does not automatically 
 
 *** Actor systems are runtime roots
 
-A Sento actor system owns:
-
-- user and internal actor contexts
-- dispatchers
-- a system event stream
-- a timeout timer
-- an optional scheduler
+A Sento actor system owns user and internal actor contexts, dispatchers, a system event stream, a timeout timer, and an optional scheduler.
 
 The default actor system creates four shared dispatcher workers. Six default actor systems would create twenty-four shared workers before custom dispatchers or pinned actors.
 
@@ -169,16 +157,7 @@ Managed components must not assume timers remain available during actor destroy 
 
 *** Remoting already exists
 
-Sento remoting already provides:
-
-- TCP framing
-- optional TLS
-- connection pooling
-- a two-megabyte default frame limit
-- local and remote references
-- =tell=, =ask-s=, and =ask= across actor systems
-- correlation identifiers[fn:correlation-id]
-- nested actor-path routing
+Sento remoting already provides TCP framing, optional TLS, connection pooling, a two-megabyte default frame limit, local and remote references, =tell=, =ask-s=, and =ask= across actor systems, correlation identifiers[fn:correlation-id], and nested actor-path routing.
 
 The design must integrate and harden this existing subsystem rather than invent another Sento-to-Sento transport.
 
@@ -187,7 +166,7 @@ The design must integrate and harden this existing subsystem rather than invent 
 The source audit found these issues:
 
 1. The default S-expression serializer[fn:s-expression] calls =read-from-string= without binding =*read-eval*= to =nil=.
-2. TLS configuration is optional even though the design document describes TLS as a principle.
+2. TLS configuration is optional.
 3. Incoming messages may target arbitrary local actor paths.
 4. There is no exported-actor registry[fn:export-registry] or per-peer access policy.
 5. Remote inbound asks use a fixed five-second local timeout.
@@ -219,6 +198,7 @@ Every application domain receives:
 - one component registry entry
 - one or more ingress actors[fn:ingress]
 - zero or more managed router pools
+- zero or more optional ZeroMQ reactor components[fn:zmq-reactor]
 - lifecycle, readiness, health, overload, and metrics state
 
 Use another process when the requirement is actual process isolation[fn:process-isolation], independent scaling, independent deployment, privilege separation, or crash containment.
@@ -249,24 +229,13 @@ Proposed creation options:
   :failure-classifier classifier)
 #+end_src
 
-A failure classifier receives:
-
-- actor reference
-- message
-- sender
-- condition
-- actor state
-- mailbox metadata
-
-It returns a failure directive[fn:failure-directive].
+A failure classifier receives the actor reference, message, sender, condition, actor state, and mailbox metadata. It returns a failure directive[fn:failure-directive].
 
 The default remains =:resume= for backward compatibility[fn:backward-compatibility].
 
 ** Structured termination records
 
 Replace reason-free stop notifications with a structured value while retaining a compatibility notification.
-
-Proposed record:
 
 #+begin_src lisp
 (defstruct termination-record
@@ -292,6 +261,7 @@ Proposed reasons:
 - =:initialization-failure=
 - =:mailbox-failure=
 - =:dispatcher-failure=
+- =:transport-failure=
 - =:forced-stop=
 - =:shutdown-timeout=
 
@@ -307,7 +277,7 @@ The old =(:stopped . actor)= notification may remain behind a compatibility opti
 
 Add an actor generation number[fn:generation] or restart incarnation identifier[fn:incarnation].
 
-A restarted actor may reuse the same logical name and path, but monitoring and remote references must distinguish the old instance from the new instance.
+A restarted actor may reuse the same logical name and path, but monitoring, component handles, and remote replies must distinguish the old instance from the new instance.
 
 ** Mailbox status API
 
@@ -321,8 +291,6 @@ Expose public read-only operations:
 (mailbox-rejected-count actor)
 (mailbox-running-p actor)
 #+end_src
-
-Do not require application code to access message-box slots or internal queue slots.
 
 ** Mailbox overload policies
 
@@ -349,8 +317,6 @@ Add stop modes:
 - =:deadline=: drain until a deadline, then discard remaining messages
 - =:handoff=: return or transfer queued messages to a replacement actor
 
-The supervisor selects the mode from the child specification.
-
 ** Router protocol extension
 
 Extend routing with a message-aware strategy protocol:
@@ -367,8 +333,6 @@ Add public routee operations:
 (replace-routees router routees)
 (routees router)
 #+end_src
-
-Add a router generation that changes whenever membership changes.
 
 Built-in strategies:
 
@@ -399,16 +363,7 @@ Dynamic dispatcher resizing is a later capability. Initial implementations may r
 
 ** Actor-system identity
 
-Add a stable actor-system identifier[fn:actor-system-id].
-
-It is required for:
-
-- component handles
-- remoting
-- metrics
-- termination records
-- stale-reference detection
-- multi-system tests
+Add a stable actor-system identifier[fn:actor-system-id] for component handles, remoting, ZeroMQ envelopes, metrics, termination records, stale-reference detection, and multi-system tests.
 
 ** Public timeout scheduling access
 
@@ -426,6 +381,7 @@ sento-managed-router
 sento-components
 sento-observability
 sento-remoting-policy
+sento-zmq
 #+end_example
 
 They may live in the Sento fork and be proposed upstream independently.
@@ -462,6 +418,7 @@ Child types:
 - =:worker=
 - =:supervisor=
 - =:router-pool=
+- =:transport-reactor=
 - =:component=
 
 ** Supervisor actor
@@ -502,7 +459,7 @@ Supervisor states:
 - =:stopped=
 - =:failed=
 
-The supervisor may use Sento FSM facilities, but restart policy state must remain explicit and testable.
+The supervisor may use Sento FSM facilities, but the child table, restart window, and lifecycle events must remain explicit and testable.
 
 ** Dependency startup
 
@@ -528,19 +485,7 @@ Probes must have deadlines and must not block the supervisor dispatcher indefini
 
 ** Managed component
 
-A managed component is a supervisor-owned actor subtree with:
-
-- stable logical identity
-- root supervisor
-- declared children
-- domain dispatcher tree
-- optional scoped event stream
-- ingress references
-- capability metadata
-- lifecycle state
-- health and readiness state
-- metrics namespace
-- local or remote location
+A managed component is a supervisor-owned actor subtree with stable logical identity, root supervisor, declared children, domain dispatcher tree, optional scoped event stream, ingress references, capability metadata, lifecycle state, health and readiness state, metrics namespace, and local or remote location.
 
 Public operations:
 
@@ -557,11 +502,7 @@ Public operations:
 
 ** Component handle
 
-A component handle[fn:component-handle] hides whether a component is:
-
-- local in the current actor system
-- local in another actor system
-- remote through Sento remoting
+A component handle[fn:component-handle] hides whether a component is local in the current actor system, local in another actor system, remote through Sento remoting, or remote through a ZeroMQ transport adapter.
 
 Minimum fields:
 
@@ -569,7 +510,7 @@ Minimum fields:
 - actor-system identifier
 - node identifier
 - process identifier
-- ingress reference
+- ingress reference or transport route
 - component generation
 - capability set
 - transport kind
@@ -579,40 +520,15 @@ Application code routes through handles rather than arbitrary actor-path discove
 
 ** Component registry
 
-The component registry indexes:
+The component registry indexes component identifier, capability, accepted message type, actor-system identifier, node identifier, lifecycle state, readiness state, generation, and transport kind.
 
-- component identifier
-- capability
-- accepted message type
-- actor-system identifier
-- node identifier
-- lifecycle state
-- readiness state
-- generation
-
-The registry supports:
-
-- register
-- replace
-- unregister
-- lookup by identifier
-- lookup by capability
-- subscribe to changes
-- resolve local or remote handle
+The registry supports register, replace, unregister, lookup by identifier, lookup by capability, subscribe to changes, and resolve local or remote handle.
 
 ** Scoped event bus
 
 A component may create a private event stream beneath its supervisor actor context.
 
-The managed event bus must:
-
-- watch subscribers
-- remove terminated subscribers
-- use typed event envelopes
-- report subscriber count
-- report delivery failures
-- support explicit close
-- stop with the component
+The managed event bus must watch subscribers, remove terminated subscribers, use typed event envelopes, report subscriber count, report delivery failures, support explicit close, and stop with the component.
 
 The system event stream remains available for runtime-wide events.
 
@@ -647,23 +563,9 @@ Required behavior:
 
 A keyed router[fn:keyed-routing] maps messages with the same key to the same routee while membership is stable.
 
-Supported key examples:
+Supported key examples include target, account, case, sensor, program, dataset, and tenant.
 
-- target
-- account
-- case
-- sensor
-- program
-- dataset
-- tenant
-
-When membership changes, the pool must define:
-
-- which keys move
-- how in-flight work finishes
-- whether state is transferred
-- whether a key is temporarily paused
-- how stale-route messages are handled
+When membership changes, the pool must define which keys move, how in-flight work finishes, whether state is transferred, whether a key is temporarily paused, and how stale-route messages are handled.
 
 Stateful keyed actors must not be scaled with random routing.
 
@@ -732,53 +634,32 @@ These are examples. A domain manifest defines the actual subdomains.
 
 Every domain receives at least:
 
-- a small control dispatcher for supervisors, registries, health, and routing control
+- a small control dispatcher for supervisors, registries, health, routing control, and transport control
 - a default dispatcher for normal domain actors
 
-A domain may add subdomain dispatchers when:
-
-- one area can saturate the domain
-- one area blocks on external I/O[fn:io]
-- one area is CPU-heavy[fn:cpu]
-- one area requires different queue limits
-- one area requires independent scaling
-- one area requires dedicated latency targets
+A domain may add subdomain dispatchers when one area can saturate the domain, blocks on external I/O[fn:io], is CPU-heavy[fn:cpu], requires different queue limits, requires independent scaling, or requires dedicated latency targets.
 
 ** Control-dispatcher rule
 
 Application work must never run on the domain control dispatcher.
 
-The control dispatcher is reserved for:
-
-- supervisor messages
-- routee lifecycle
-- readiness and health
-- registry changes
-- overload decisions
-- shutdown coordination
-- metrics snapshots
+The control dispatcher is reserved for supervisor messages, routee lifecycle, transport lifecycle, readiness and health, registry changes, overload decisions, shutdown coordination, and metrics snapshots.
 
 ** Subdomain ownership
 
 A subdomain is a named workload or organizational area inside a domain process.
 
-A subdomain may contain:
-
-- its own dispatcher
-- its own supervisor
-- its own routee pools
-- its own queue policies
-- its own event bus
-- its own metrics prefix
+A subdomain may contain its own dispatcher, supervisor, routee pools, queue policies, event bus, ZeroMQ reactor, and metrics prefix.
 
 A subdomain is not automatically a separate process or actor system.
 
 ** Platform dispatchers
 
-The runtime may also define platform-owned dispatchers:
+The runtime may define platform-owned dispatchers:
 
 - =:platform/control=
 - =:platform/remoting=
+- =:platform/zeromq=
 - =:platform/registry=
 - =:platform/storage=
 
@@ -786,37 +667,34 @@ Domain actors use platform services through declared handles. Platform dispatche
 
 ** Thread-budget validation
 
-Before startup, the runtime computes:
+Before startup, the runtime computes total shared dispatcher workers, total pinned actors, ZeroMQ reactor threads, libzmq I/O threads[fn:zmq-io-thread], timer threads, remoting transport threads, and configured maximum process thread count.
 
-- total shared dispatcher workers
-- total pinned actors
-- expected timer threads
-- remoting transport threads
-- configured maximum process thread count
-
-Startup fails or warns when the declared dispatcher tree exceeds the configured thread budget[fn:thread-budget].
+Startup fails or warns when the declared dispatcher and transport tree exceeds the configured thread budget[fn:thread-budget].
 
 * TODO Overload and Backpressure
 
 Backpressure[fn:backpressure] must be explicit at every asynchronous boundary.
 
-** Required boundaries
+Required boundaries:
 
 - actor mailbox
 - router pool
 - dispatcher
 - component ingress
+- ZeroMQ command queue
+- ZeroMQ socket high-water mark[fn:high-water-mark]
 - remote sender actor
 - remoting connection
 - task pool
 
-** Structured overload result
+Structured overload result:
 
 #+begin_src lisp
 (defstruct overload-result
   boundary
   component-id
   actor-path
+  endpoint
   queue-depth
   queue-capacity
   policy
@@ -825,48 +703,15 @@ Backpressure[fn:backpressure] must be explicit at every asynchronous boundary.
   timestamp)
 #+end_src
 
-** Admission control
-
-A component ingress may reject work before creating deeper messages when:
-
-- the component is not ready
-- the component is stopping
-- its default dispatcher is saturated
-- a required subdomain is unavailable
-- a tenant quota is exhausted
-- a message deadline is already expired
+A component ingress may reject work before creating deeper messages when the component is not ready, is stopping, its default dispatcher is saturated, a required subdomain is unavailable, a transport is unavailable, a tenant quota is exhausted, or a message deadline is already expired.
 
 Admission control[fn:admission-control] prevents overload from spreading through the actor tree.
 
 * TODO Observability
 
-** Runtime metrics
+Expose metrics for actor count, actor generations, mailbox depth and capacity, processed, rejected, and dropped messages, handler duration, dispatcher worker count, dispatcher queue depth, router membership, router key movement, supervisor restart count, component lifecycle state, readiness and health, event subscribers, remoting connections, pending remote asks, ZeroMQ socket state, ZeroMQ peer state, ZeroMQ high-water events, ZeroMQ pending requests, serializer failures, and frame-size rejections.
 
-Expose metrics for:
-
-- actor count
-- actor generations
-- mailbox depth and capacity
-- processed, rejected, and dropped messages
-- handler duration
-- dispatcher worker count
-- dispatcher queue depth
-- router membership
-- router key movement
-- supervisor restart count
-- restart intensity
-- component lifecycle state
-- readiness and health
-- event subscribers
-- remoting connections
-- pending remote asks
-- remote send failures
-- serializer failures
-- frame-size rejections
-
-** Runtime events
-
-Define typed events:
+Define typed runtime events:
 
 - actor started
 - actor terminated
@@ -886,27 +731,28 @@ Define typed events:
 - remote peer connected
 - remote peer rejected
 - remote target denied
+- ZeroMQ socket bound
+- ZeroMQ socket connected
+- ZeroMQ socket disconnected
+- ZeroMQ handshake succeeded
+- ZeroMQ handshake failed
+- ZeroMQ route unavailable
+- ZeroMQ send rejected
+- ZeroMQ reactor restarted
 
-** Trace context
-
-Every application envelope may carry:
-
-- trace identifier[fn:trace-id]
-- parent span identifier[fn:span]
-- deadline
-- sender component
-- target component
-- message type
-
-The runtime must not require application payloads to expose private data merely to produce metrics.
+Every application envelope may carry a trace identifier[fn:trace-id], parent span identifier[fn:span], deadline, sender component, target component, and message type.
 
 * TODO Secure Sento Remoting
 
 ** Boundary decision
 
-Use Sento remoting for Sento-to-Sento actor communication.
+Use Sento remoting for direct Sento-to-Sento actor communication when location-transparent actor references are required.
+
+Use ZeroMQ for explicit component, service, work, and event transport patterns where brokerless asynchronous messaging or non-Sento peers are useful.
 
 Use Star Router[fn:star-router] for client-facing routing, heterogeneous services[fn:heterogeneous-service], and application-level cross-process routing where the destination is not a raw Sento actor reference.
+
+The three paths are adapters behind the same component-handle protocol. Application actors do not select raw sockets directly.
 
 ** Safe serializer
 
@@ -925,79 +771,25 @@ Add a production serializer using an explicit schema[fn:schema], bounded nesting
 
 Remote peers must not address every local actor path.
 
-Add an export registry containing:
+Add an export registry containing exported logical name, local actor reference, allowed message types, allowed peers or peer capabilities, maximum payload size, maximum concurrent asks, queue policy, and audit hook.
 
-- exported logical name
-- local actor reference
-- allowed message types
-- allowed peers or peer capabilities
-- maximum payload size
-- maximum concurrent asks
-- queue policy
-- audit hook
-
-Remote URIs resolve exported names, not arbitrary internal paths, unless an explicit development-only option enables path routing.
+Remote references resolve exported names rather than arbitrary internal paths unless an explicit development-only option enables path routing.
 
 ** Peer identity and policy
 
 When TLS is enabled, map the authenticated certificate identity[fn:certificate-identity] to a peer principal[fn:principal].
 
-A policy decision receives:
-
-- principal
-- exported target
-- message type
-- payload metadata
-- current quota
-- connection metadata
-
-It returns allow or deny plus a structured reason.
-
-** TLS policy
-
-Production mode requires TLS and peer verification.
-
-Plain TCP remains available only for loopback tests or explicitly marked development environments.
+A policy decision receives the principal, exported target, message type, payload metadata, current quota, and connection metadata. It returns allow or deny plus a structured reason.
 
 ** Network envelope additions
 
-Extend the envelope with:
+Extend the envelope with protocol version, source actor-system identifier, source component identifier, destination export name, message identifier, correlation identifier, trace identifier, deadline, attempt number, content type, and principal metadata supplied by the transport.
 
-- protocol version
-- source actor-system identifier
-- source component identifier
-- destination export name
-- message identifier
-- correlation identifier
-- trace identifier
-- deadline
-- attempt number
-- content type
-- principal metadata supplied by the transport, not trusted from the payload
+** Deadlines and errors
 
-** Deadlines
+Carry the caller deadline over the network. Reject expired requests before dispatching them.
 
-Carry the caller deadline over the network.
-
-The receiver rejects expired requests before dispatching them.
-
-The local actor timeout must be derived from the remaining deadline rather than a fixed five-second constant.
-
-** Error responses
-
-Use structured error envelopes for:
-
-- target not found
-- target not exported
-- access denied
-- unsupported message type
-- serializer failure
-- message too large
-- receiver overloaded
-- actor stopped
-- handler failure
-- timeout
-- protocol mismatch
+Use structured error envelopes for target not found, target not exported, access denied, unsupported message type, serializer failure, message too large, receiver overloaded, actor stopped, handler failure, timeout, and protocol mismatch.
 
 ** Delivery semantics
 
@@ -1011,18 +803,474 @@ Automatic retries are disabled by default.
 
 A caller that enables retries must provide an idempotency key[fn:idempotency-key] or explicitly accept duplicate processing.
 
-** Remote-reference lifecycle
+* TODO ZeroMQ Integration
 
-Replace one sender actor per remote reference with configurable shared sender components keyed by peer and policy class where benchmarks show it is beneficial.
+** Architectural role
 
-Add:
+ZeroMQ is an optional transport backend and process bridge.
 
-- remote-reference close
-- pending-ask cancellation
-- maximum pending asks
-- peer connection status
-- stale-reference detection
-- component-generation checks
+ZeroMQ does not replace:
+
+- local Sento actor mailboxes
+- per-domain dispatchers
+- Sento supervision
+- the component registry
+- local managed routers
+- the Star Router client boundary
+
+ZeroMQ transports messages between processes, languages, or runtime components after a component handle selects the ZeroMQ adapter.
+
+** Why an adapter is required
+
+A ZeroMQ context[fn:zmq-context] may be shared between threads, but most classic ZeroMQ sockets are not thread-safe[fn:thread-safe]. A socket must be created, used, and closed by its owning thread.
+
+Sento actors on shared dispatchers may execute on different worker threads. They must never call a classic ZeroMQ socket directly.
+
+The runtime therefore introduces a ZeroMQ reactor component that owns all socket calls on one dedicated thread.
+
+** Process topology
+
+Each process contains:
+
+#+begin_example
+Sento actor system
+└── /internal/transports/zeromq
+    ├── context-supervisor
+    ├── zap-handler
+    ├── monitor-collector
+    └── domain reactors
+        ├── humint
+        ├── socmint
+        ├── sigint
+        ├── cyber
+        ├── bbp
+        └── threat-intel
+#+end_example
+
+One process-wide ZeroMQ context is the default.
+
+A domain may create one reactor for the whole domain or separate reactors for subdomains when isolation, socket count, endpoint ownership, or measured load justifies it.
+
+Multiple contexts require an explicit reason because every context owns its own internal ZeroMQ I/O threads and socket set.
+
+** Reactor component
+
+A ZeroMQ reactor component contains:
+
+- one supervisor actor on the domain control dispatcher
+- one bounded outbound command queue[fn:mpsc-queue]
+- one dedicated reactor thread
+- one or more sockets owned only by that reactor thread
+- one poll loop[fn:poll-loop]
+- one pending-request table
+- one endpoint registry
+- one connection-monitor collector
+- one serializer
+- one policy adapter
+- metrics and lifecycle state
+
+The supervisor actor owns the reactor lifecycle. The reactor thread owns the sockets.
+
+The supervisor and ordinary domain actors never call =zmq_send=, =zmq_recv=, =zmq_close=, =zmq_bind=, or =zmq_connect= directly.
+
+** Actor-to-reactor path
+
+1. A domain actor sends a normal Sento message to the ZeroMQ bridge actor.
+2. The bridge validates the component handle, schema, deadline, payload limit, and policy.
+3. The bridge places a transport command into the bounded outbound command queue.
+4. The reactor thread drains commands and performs socket operations.
+5. A send result or overload result is returned through the original Sento sender or correlation map.
+
+** Reactor-to-actor path
+
+1. The reactor poll loop receives a ZeroMQ message.
+2. The reactor validates frame count and hard size limits before allocation or decoding.
+3. The reactor decodes only the fixed transport header.
+4. The reactor submits the envelope to a domain ingress actor.
+5. The ingress actor performs schema validation, authorization, deadline checks, and target resolution.
+6. The ingress actor sends the payload to the destination component.
+7. Replies travel through the same reactor using the stored routing envelope and correlation identifier.
+
+** Polling model
+
+The first implementation uses a dedicated reactor thread with a bounded command queue and a finite ZeroMQ poll timeout.
+
+The loop alternates between:
+
+- polling owned ZeroMQ sockets
+- draining a bounded number of outbound commands
+- expiring timed-out pending requests
+- publishing metrics snapshots
+- checking the stop flag
+
+A later implementation may add a platform wakeup descriptor[fn:wakeup-descriptor] to interrupt the poll immediately when a new outbound command arrives.
+
+A normal Sento pinned actor receive function must not block forever in =zmq_poll= because that would prevent its Sento mailbox from processing lifecycle commands.
+
+** Socket pattern map
+
+*** ROUTER and DEALER
+
+Use ROUTER[fn:zmq-router] and DEALER[fn:zmq-dealer] for asynchronous request, reply, command, and component messaging.
+
+Default cross-process component topology:
+
+#+begin_example
+Process A DEALER ───────► Process B ROUTER ingress
+Process A ROUTER ingress ◄─────── Process B DEALER
+#+end_example
+
+A process may maintain one DEALER per remote node or per policy class. One ROUTER ingress may serve many peers.
+
+Do not use REQ and REP[fn:req-rep] for the main runtime because their strict send-then-receive state machine makes concurrent requests, cancellation, and out-of-order replies harder.
+
+REQ and REP remain permitted where an external protocol requires them, including the ZeroMQ Authentication Protocol handler.
+
+*** XPUB and XSUB
+
+Use XPUB[fn:xpub] and XSUB[fn:xsub] with a steerable proxy[fn:steerable-proxy] for selected cross-process event streams.
+
+Suitable data:
+
+- telemetry
+- cache invalidation hints
+- discovery announcements
+- non-authoritative status events
+- high-volume observation notifications whose loss is acceptable
+
+Do not use PUB/SUB[fn:pub-sub] as the only channel for commands, authoritative lifecycle transitions, required replies, or any message that must be recovered after subscriber downtime.
+
+The proxy control socket uses an internal =inproc://= endpoint and supports pause, resume, and terminate.
+
+*** PUSH and PULL
+
+Use PUSH and PULL[fn:push-pull] only for stateless, idempotent, one-way work distribution where no direct reply or keyed affinity is required.
+
+Use ROUTER and DEALER when work needs a result, cancellation, deadlines, target selection, or key affinity.
+
+*** PAIR
+
+Use PAIR[fn:pair-socket] only for fixed one-to-one internal control channels, socket monitors, or proxy control. Do not use PAIR as a general service topology.
+
+*** CLIENT and SERVER
+
+Do not depend on CLIENT and SERVER[fn:client-server-sockets] in the initial implementation. Their availability and multipart limitations vary with libzmq build features and API maturity.
+
+The stable initial implementation uses classic ROUTER and DEALER sockets with strict single-thread ownership.
+
+** Transport selection
+
+- =inproc://=: internal ZeroMQ control, ZAP, proxy control, and socket-monitor channels inside one process
+- =ipc://=: same-host cross-process communication when the operating system supports Unix-domain-style endpoints[fn:ipc-endpoint]
+- =tcp://=: communication across hosts or containers
+
+Normal same-process Sento actors use Sento messages, not =inproc://= ZeroMQ, unless the message must cross into a ZeroMQ-owned reactor or external library.
+
+** Message framing
+
+The ROUTER routing identity stays outside the application envelope.
+
+Application multipart frame layout:
+
+#+begin_example
+Frame 0: protocol magic and version
+Frame 1: message kind
+Frame 2: message identifier
+Frame 3: correlation identifier or empty
+Frame 4: trace identifier or empty
+Frame 5: source node and component
+Frame 6: target component export
+Frame 7: operation or event topic
+Frame 8: deadline
+Frame 9: content type and schema identifier
+Frame 10: flags
+Frame 11: payload
+#+end_example
+
+The transport layer rejects unexpected frame counts, oversized frames, unsupported versions, and malformed fixed-width fields before payload deserialization.
+
+Supported message kinds:
+
+- =tell=
+- =ask=
+- =reply=
+- =error=
+- =event=
+- =work=
+- =cancel=
+- =heartbeat=
+
+** Serialization
+
+ZeroMQ is a transport, not a serializer.
+
+The ZeroMQ adapter uses the same safe schema serializer defined for Sento remoting.
+
+Never pass an untrusted network frame directly to Common Lisp =read= or =read-from-string= with reader evaluation enabled.
+
+** Binding decision
+
+Create =sento-zmq= as a small ASDF system using CFFI[fn:cffi] against a pinned stable libzmq package.
+
+The binding exposes only the reviewed functions and options used by this design.
+
+The existing =orivej/pzmq= project may be used as a bootstrap reference or fork, but it must not be accepted without a compatibility layer and complete tests for the used surface. Its latest reviewed commit is from 2021, and its README states that functions outside examples and tests may be untested.
+
+Required binding surface:
+
+- context create, configure, shutdown, and terminate
+- socket create and close
+- bind, unbind, connect, and disconnect
+- multipart message send and receive
+- poll
+- socket options
+- socket monitor
+- CURVE key and authentication options
+- error-number and error-string access
+- version query
+
+The binding must represent byte vectors without converting binary payloads through strings.
+
+** Socket configuration defaults
+
+Every socket specification declares:
+
+- socket type
+- bind or connect endpoints
+- routing identifier
+- send high-water mark
+- receive high-water mark
+- send timeout
+- receive timeout
+- immediate-connect behavior
+- router-mandatory behavior
+- linger deadline
+- heartbeat settings
+- reconnect settings
+- maximum frame size
+- security mechanism
+- monitor events
+
+Recommended runtime defaults:
+
+- finite =ZMQ_LINGER= rather than infinite linger
+- non-zero =ZMQ_SNDHWM= and =ZMQ_RCVHWM=
+- =ZMQ_IMMEDIATE= enabled for outbound sockets where queuing before a connection would hide unavailability
+- =ZMQ_ROUTER_MANDATORY= enabled on ROUTER sockets so unroutable messages return an error rather than disappearing silently
+- non-blocking sends or finite =ZMQ_SNDTIMEO=
+- finite receive polling intervals
+- explicit heartbeat and reconnect policy
+
+An =EAGAIN=[fn:eagain] result maps to a structured overload result. An =EHOSTUNREACH=[fn:ehostunreach] result maps to a route-unavailable result.
+
+** Security
+
+For =tcp://= production endpoints, use CurveZMQ[fn:curvezmq] and ZAP[fn:zap].
+
+Each process runs one ZAP handler bound to:
+
+#+begin_example
+inproc://zeromq.zap.01
+#+end_example
+
+The ZAP handler maps a client public key to:
+
+- principal
+- node identifier
+- allowed component exports
+- allowed operations
+- tenant or organization
+- quota class
+- audit metadata
+
+The ZAP handler starts before any accepting ZeroMQ socket.
+
+For =ipc://= endpoints, also apply file ownership and permission controls. IPC permissions do not replace application-level target and operation policy.
+
+Do not use the PLAIN mechanism[fn:plain-mechanism] on an untrusted network because it does not provide confidentiality.
+
+** Backpressure
+
+ZeroMQ backpressure is coordinated with Sento backpressure.
+
+The path contains at least:
+
+1. Sento sender mailbox
+2. component ingress mailbox
+3. bridge command queue
+4. ZeroMQ per-peer send queue
+5. remote receive queue
+6. remote ingress mailbox
+
+Every layer is bounded and has a declared policy.
+
+High-water marks limit queued ZeroMQ messages per peer. Reaching a high-water mark may block, return =EAGAIN=, or drop messages depending on socket type and options.
+
+The adapter must never assume that a successful local enqueue means the remote component processed the message.
+
+** Delivery semantics
+
+ZeroMQ queues are memory-based and are not a durable message log[fn:durable-log].
+
+Default semantics:
+
+- ROUTER/DEALER tell: at-most-once transport attempt
+- ROUTER/DEALER ask: at-most-once transport attempt with application correlation
+- PUSH/PULL work: at-most-once transport attempt
+- PUB/SUB event: best-effort[fn:best-effort] and may be missed by disconnected or late subscribers
+
+Automatic retries are disabled by default.
+
+A retry requires an idempotency key and a declared duplicate-handling policy.
+
+A component that needs durable replay uses a database, event log, RabbitMQ[fn:rabbitmq], or another declared durable broker rather than pretending ZeroMQ is durable.
+
+** Monitoring
+
+Enable =zmq_socket_monitor= for connection-oriented sockets.
+
+A dedicated monitor collector receives monitor events over an internal PAIR socket and converts them into typed Sento runtime events.
+
+Monitor at least:
+
+- connected
+- connect delayed
+- connect retried
+- listening
+- bind failed
+- accepted
+- accept failed
+- closed
+- close failed
+- disconnected
+- handshake succeeded
+- handshake protocol failure
+- handshake authentication failure
+
+Do not expose native file descriptors from monitor events as stable actor state.
+
+** Proxy components
+
+A steerable proxy may be used for:
+
+- XPUB/XSUB event distribution
+- ROUTER/DEALER broker topologies
+- traffic capture for metrics or testing
+
+Every proxy runs in a dedicated thread or process and has:
+
+- frontend socket
+- backend socket
+- optional capture socket
+- control socket
+- supervisor child specification
+- finite shutdown deadline
+
+The control channel supports pause, resume, and terminate.
+
+** Supervision and restart
+
+The ZeroMQ reactor supervisor treats these as failures:
+
+- reactor thread exit
+- context termination outside shutdown
+- socket bind failure
+- repeated authentication failure above policy threshold
+- repeated poll failure
+- unrecoverable serializer failure
+- command queue corruption
+- monitor channel failure
+
+Restart rules:
+
+1. Stop component admission.
+2. Mark transport not ready.
+3. Fail or cancel pending requests with structured transport errors.
+4. Close sockets on the owning reactor thread.
+5. Join the reactor thread.
+6. Increase transport generation.
+7. Recreate sockets and endpoints.
+8. Wait for bind, connect, and authentication readiness.
+9. Reopen admission.
+
+Replies carrying an old transport or component generation are rejected as stale.
+
+** Shutdown order
+
+1. Reject new transport work.
+2. Stop subscriptions and external admission.
+3. Drain the bridge command queue until the deadline.
+4. Resolve or cancel pending asks.
+5. Pause and terminate proxies.
+6. Close sockets on their owner threads using finite linger.
+7. Join reactor and monitor threads.
+8. Stop the ZAP handler after accepting sockets are closed.
+9. Shut down and terminate the process-wide ZeroMQ context.
+10. Continue normal Sento component and actor-system shutdown.
+
+The context must never terminate while live sockets remain.
+
+** ZeroMQ public API sketch
+
+#+begin_src lisp
+(defpackage #:sento.zmq
+  (:use #:cl)
+  (:export
+   #:define-zmq-transport
+   #:define-zmq-endpoint
+   #:start-zmq-runtime
+   #:stop-zmq-runtime
+   #:start-zmq-reactor
+   #:stop-zmq-reactor
+   #:bind-zmq-endpoint
+   #:connect-zmq-endpoint
+   #:disconnect-zmq-endpoint
+   #:send-zmq
+   #:ask-zmq
+   #:cancel-zmq-request
+   #:subscribe-zmq-topic
+   #:unsubscribe-zmq-topic
+   #:zmq-runtime-status
+   #:zmq-reactor-status
+   #:zmq-endpoint-status
+   #:zmq-metrics))
+#+end_src
+
+** Component-handle integration
+
+A ZeroMQ component handle contains:
+
+- transport kind =:zeromq=
+- local reactor identifier
+- remote node identifier
+- remote component export
+- endpoint identifier
+- security policy identifier
+- serializer identifier
+- current component generation
+- current transport generation
+
+Sending through the handle resolves to the local domain reactor. The application actor never receives a raw socket pointer.
+
+** ZeroMQ validation requirements
+
+- no classic ZeroMQ socket is called from more than one thread
+- all socket creation and closure occur on the owner reactor thread
+- one domain reactor failure does not stop sibling domains
+- one subdomain reactor may restart without restarting the whole domain
+- ROUTER mandatory mode returns structured route-unavailable errors
+- high-water saturation returns structured overload results
+- finite linger prevents shutdown from blocking forever
+- malformed multipart messages are rejected before payload decoding
+- old-generation replies are rejected
+- expired deadlines are rejected before actor dispatch
+- unauthorized CURVE keys are denied by ZAP
+- allowed CURVE keys map to the correct principal and capabilities
+- socket monitor events become typed runtime events
+- proxy pause, resume, and terminate work under load
+- disconnected PUB/SUB subscribers are documented as missing events
+- process restart leaves no socket, context, or reactor thread leak
+- component handles behave consistently across local, Sento-remoting, ZeroMQ, and Star Router adapters
 
 * TODO Public API Sketch
 
@@ -1066,11 +1314,13 @@ Add:
 
 ** Phase 0: pin and reproduce
 
-- pin reviewed Sento commit
+- pin the reviewed Sento commit
+- pin a stable libzmq package
 - run Sento core tests
 - run Sento remoting tests
+- build a minimal CFFI ZeroMQ probe
 - record thread counts and benchmark baseline
-- add regression fixtures for all discovered behavior
+- add regression fixtures for discovered behavior
 
 ** Phase 1: failure and termination core
 
@@ -1142,13 +1392,35 @@ Add:
 - document delivery semantics
 - add quotas and cancellation
 
-** Phase 9: StarIntel integration
+** Phase 9: ZeroMQ binding and reactor
+
+- create =sento-zmq=
+- bind the required libzmq API through CFFI
+- implement process context supervisor
+- implement domain reactor and bounded command queue
+- implement poll loop and socket ownership assertions
+- implement ROUTER/DEALER component transport
+- implement socket monitoring
+- implement structured overload and route errors
+
+** Phase 10: ZeroMQ security and patterns
+
+- implement CURVE key loading
+- implement ZAP handler and principal mapping
+- implement explicit component export policy
+- implement XPUB/XSUB event bridge
+- implement steerable proxy supervision
+- implement optional PUSH/PULL work bridge
+- implement IPC endpoint permissions
+
+** Phase 11: StarIntel integration
 
 - consume component definitions from actor manifests
 - create per-domain dispatcher trees
 - start six domain components
+- start selected domain or subdomain ZeroMQ reactors
 - expose domain ingress handles
-- connect process-separated domains through Sento remoting or Star Router according to boundary
+- select local, Sento remoting, ZeroMQ, or Star Router through component handles
 
 * TODO Validation Matrix
 
@@ -1170,9 +1442,14 @@ Add:
 | Remoting serializer | Reader evaluation input cannot execute code |
 | Remoting export | Unexported actor paths cannot be reached remotely |
 | Remoting policy | Unauthorized peers receive a structured denial |
+| ZeroMQ ownership | Every socket is used by exactly one owner thread |
+| ZeroMQ routing | Unroutable peers return errors rather than silent loss |
+| ZeroMQ overload | High-water saturation maps to structured overload results |
+| ZeroMQ security | CURVE and ZAP map authenticated keys to declared principals |
+| ZeroMQ lifecycle | Reactor and proxy restart preserve generation and reject stale replies |
 | Deadlines | Expired requests never enter actor mailboxes |
 | Delivery | Retry behavior matches documented semantics |
-| Shutdown | Complete runtime shutdown leaves no actor, dispatcher, timer, or transport thread |
+| Shutdown | Complete runtime shutdown leaves no actor, dispatcher, timer, transport, proxy, socket, or reactor thread |
 
 * TODO Benchmark Plan
 
@@ -1191,16 +1468,23 @@ Measure:
 - keyed-router movement
 - domain saturation impact on other domains
 - subdomain saturation impact on sibling subdomains
-- local versus remote handle overhead
+- local versus Sento-remoting versus ZeroMQ handle overhead
+- ZeroMQ command-queue latency
+- ZeroMQ ROUTER/DEALER throughput
+- ZeroMQ multipart serialization cost
+- ZeroMQ connection and authentication time
+- proxy throughput
 - serializer throughput
-- remoting connection reuse
+- connection reuse
 
 Compare:
 
 1. one actor system with six domain dispatcher trees
 2. one actor system with six flat domain dispatchers
 3. six actor systems in one process
-4. six processes connected through remoting
+4. six processes connected through Sento remoting
+5. six processes connected through ZeroMQ ROUTER/DEALER
+6. mixed Sento-remoting and ZeroMQ adapters selected by component handle
 
 The default remains one actor system with per-domain dispatcher trees unless measurements show a concrete reason to change it.
 
@@ -1211,9 +1495,13 @@ The default remains one actor system with per-domain dispatcher trees unless mea
 - Whether managed router wraps the current router or becomes a new actor type
 - Whether dispatcher resizing belongs in the first release
 - Which production serializer becomes the default
-- Whether the export registry uses logical names only or supports controlled path aliases
 - Whether component handles implement the actor protocol directly
-- Whether remote-reference sender actors are pooled per peer
+- Whether the ZeroMQ reactor uses one thread per domain or one thread per subdomain by default
+- Whether the first reactor wakeup uses finite polling or a platform wakeup descriptor
+- Whether =orivej/pzmq= is forked or only used as a reference for a new narrow binding
+- Whether XPUB/XSUB proxies run inside each domain process or as separate broker processes
+- Which messages are allowed on lossy PUB/SUB event bridges
+- Whether Sento remoting and ZeroMQ share one schema envelope or use transport-specific outer envelopes with the same inner message
 
 * Footnotes and Glossary
 
@@ -1225,11 +1513,15 @@ The default remains one actor system with per-domain dispatcher trees unless mea
 
 [fn:actor-system] Actor system: The top-level Sento container that owns actor contexts, dispatchers, timers, the default event stream, and system-wide runtime resources.
 
-[fn:node] Node: One running Sento endpoint with its own actor system identity and optional network address.
+[fn:node] Node: One running Sento endpoint with its own actor-system identity and optional network address.
 
 [fn:starintel] StarIntel: The larger document-driven intelligence search and analysis platform that consumes Sento as its in-process actor runtime.
 
 [fn:remoting] Remoting: Sending actor messages between separate actor systems over a network connection.
+
+[fn:zeromq] ZeroMQ: A brokerless messaging library that provides asynchronous message sockets, message queues, routing patterns, and several transport types.
+
+[fn:libzmq] libzmq: The C and C++ core engine that implements ZeroMQ sockets and the ZeroMQ Message Transport Protocol.
 
 [fn:actor] Actor: A small independent software unit that owns private state and processes messages one at a time.
 
@@ -1281,11 +1573,11 @@ The default remains one actor system with per-domain dispatcher trees unless mea
 
 [fn:observability] Observability: Runtime information such as metrics, events, traces, and status that lets operators understand what the system is doing.
 
+[fn:correlation-id] Correlation identifier: A unique value attached to a request and its response so the caller can match them.
+
 [fn:s-expression] S-expression: The parenthesized data notation used by Lisp, such as =(task :id 1)=.
 
 [fn:export-registry] Export registry: A list of explicitly approved local actors or logical services that remote peers are allowed to address.
-
-[fn:correlation-id] Correlation identifier: A unique value attached to a request and its response so the caller can match them.
 
 [fn:delivery-guarantee] Delivery guarantee: The documented promise about whether a message may be lost, duplicated, reordered, or retried.
 
@@ -1301,13 +1593,15 @@ The default remains one actor system with per-domain dispatcher trees unless mea
 
 [fn:ingress] Ingress actor: The declared entry actor through which outside components submit work to a component.
 
+[fn:zmq-reactor] ZeroMQ reactor: A supervised component with a dedicated thread that owns ZeroMQ sockets, polls them, sends outbound messages, and forwards inbound messages to Sento actors.
+
 [fn:failure-policy] Failure policy: The configured action taken when an actor handler raises a condition.
 
 [fn:failure-directive] Failure directive: The specific decision returned by a failure policy, such as resume, stop, or escalate.
 
 [fn:backward-compatibility] Backward compatibility: Preserving existing behavior so older code continues to work after the runtime changes.
 
-[fn:generation] Generation: A number increased each time a logical actor or component is recreated.
+[fn:generation] Generation: A number increased each time a logical actor, component, or transport is recreated.
 
 [fn:incarnation] Incarnation: One specific running instance of a logical actor name across possible restarts.
 
@@ -1353,9 +1647,13 @@ The default remains one actor system with per-domain dispatcher trees unless mea
 
 [fn:cpu] CPU: Central Processing Unit. The hardware that executes program instructions; CPU-heavy work spends most of its time computing rather than waiting on external systems.
 
+[fn:zmq-io-thread] ZeroMQ I/O thread: An internal thread created by libzmq to move network data between application sockets and operating-system transports.
+
 [fn:thread-budget] Thread budget: The maximum number of operating-system threads the process is allowed or expected to create.
 
 [fn:backpressure] Backpressure: A method for slowing or rejecting new work when downstream workers cannot keep up.
+
+[fn:high-water-mark] High-water mark: A configured maximum number of queued messages for a ZeroMQ peer connection.
 
 [fn:admission-control] Admission control: A decision at the system entrance that accepts or rejects work before it consumes deeper resources.
 
@@ -1379,6 +1677,56 @@ The default remains one actor system with per-domain dispatcher trees unless mea
 
 [fn:idempotency-key] Idempotency key: A unique request value that lets a receiver recognize and safely ignore a duplicate operation.
 
+[fn:zmq-context] ZeroMQ context: The process-level libzmq object that owns ZeroMQ sockets and internal I/O threads.
+
+[fn:thread-safe] Thread-safe: Safe for multiple threads to use at the same time without corrupting state or causing races.
+
+[fn:mpsc-queue] MPSC queue: Multiple-Producer, Single-Consumer queue. Many actor threads may add commands while one reactor thread removes and processes them.
+
+[fn:poll-loop] Poll loop: A repeated loop that waits for activity on one or more sockets and then processes the ready sockets.
+
+[fn:wakeup-descriptor] Wakeup descriptor: An operating-system pipe, event descriptor, or socket used to interrupt a blocked poll loop when control work arrives.
+
+[fn:zmq-router] ROUTER socket: A ZeroMQ socket that receives a routing identity with each incoming message and can send a reply to a selected peer identity.
+
+[fn:zmq-dealer] DEALER socket: An asynchronous ZeroMQ request socket that can send multiple requests without waiting for each reply in strict order.
+
+[fn:req-rep] REQ and REP: ZeroMQ request and reply sockets with a strict alternating send and receive state machine.
+
+[fn:xpub] XPUB: Extended publish socket. It sends published messages and also reports subscription and unsubscription activity from peers.
+
+[fn:xsub] XSUB: Extended subscribe socket. It receives published messages and forwards subscription commands, commonly as the backend of a proxy.
+
+[fn:steerable-proxy] Steerable proxy: A built-in ZeroMQ message proxy that can be paused, resumed, or terminated through a control socket.
+
+[fn:pub-sub] PUB/SUB: Publish and Subscribe. A one-to-many messaging pattern where subscribers receive topics they selected while connected.
+
+[fn:push-pull] PUSH/PULL: A ZeroMQ pipeline pattern where PUSH distributes one-way work and PULL receives it.
+
+[fn:pair-socket] PAIR socket: A ZeroMQ socket intended for one fixed peer, commonly used for internal control or monitoring channels.
+
+[fn:client-server-sockets] CLIENT and SERVER sockets: A newer thread-safe ZeroMQ request and service pattern with different framing rules from classic ROUTER and DEALER sockets.
+
+[fn:ipc-endpoint] IPC endpoint: An Inter-Process Communication endpoint used by processes on the same host, commonly represented by a filesystem path.
+
+[fn:cffi] CFFI: Common Foreign Function Interface. A Common Lisp library for calling functions and using data types from C libraries.
+
+[fn:eagain] EAGAIN: An operating-system-style error meaning the operation cannot complete immediately and may succeed later.
+
+[fn:ehostunreach] EHOSTUNREACH: An operating-system-style error meaning the selected destination cannot currently be routed to.
+
+[fn:curvezmq] CurveZMQ: ZeroMQ's public-key encryption and authentication protocol based on Curve25519 cryptography.
+
+[fn:zap] ZAP: ZeroMQ Authentication Protocol. An in-process request and reply protocol used by ZeroMQ servers to ask an authentication handler whether a peer is allowed.
+
+[fn:plain-mechanism] PLAIN mechanism: A ZeroMQ username-and-password authentication method that does not itself encrypt the credentials or message traffic.
+
+[fn:durable-log] Durable message log: Storage that persists messages so they survive process failure and can be replayed later.
+
+[fn:best-effort] Best-effort: A delivery model that attempts to send data but does not guarantee that every receiver obtains it.
+
+[fn:rabbitmq] RabbitMQ: A message broker that stores and routes messages through queues and exchanges and can provide durable delivery features.
+
 [fn:resident-memory] Resident memory: The portion of a process's memory currently held in physical memory.
 
 [fn:percentile-latency] Percentile latency: A response-time measurement such as p95, meaning ninety-five percent of measured operations finished at or below that time.
@@ -1398,4 +1746,13 @@ The default remains one actor system with per-domain dispatcher trees unless mea
 - Sento remoting integration: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/remoting/remoting.lisp
 - Sento remote references: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/remoting/remote-ref.lisp
 - Sento serializer: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/remoting/serialization.lisp
+- ZeroMQ core engine: https://github.com/zeromq/libzmq
+- ZeroMQ socket API and thread-safety rules: https://libzmq.readthedocs.io/en/latest/zmq_socket.html
+- ZeroMQ socket options: https://libzmq.readthedocs.io/en/latest/zmq_setsockopt.html
+- ZeroMQ socket monitoring: https://libzmq.readthedocs.io/en/latest/zmq_socket_monitor.html
+- ZeroMQ steerable proxy: https://libzmq.readthedocs.io/en/latest/zmq_proxy_steerable.html
+- ZeroMQ Authentication Protocol: https://rfc.zeromq.org/spec/27/
+- CurveZMQ: https://rfc.zeromq.org/spec/26/
+- ZMTP CURVE mechanism: https://rfc.zeromq.org/spec/25/
+- PZMQ Common Lisp binding: https://github.com/orivej/pzmq
 - Erlang supervision principles: https://www.erlang.org/doc/system/sup_princ.html

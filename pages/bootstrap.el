@@ -20,7 +20,6 @@
     (unless (package-installed-p 'htmlize)
       (package-install 'htmlize)))
   (add-to-list 'load-path lisp-directory)
-  (load (expand-file-name "pages.el" lisp-directory) nil nil t)
   (load (expand-file-name "second-brain.el" lisp-directory) nil nil t)
   (starintel-second-brain-configure root nil)
   (starintel-pages-build root))

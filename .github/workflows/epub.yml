@@ -1,0 +1,58 @@
+name: Kindle EPUB
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "roam/**"
+      - "epub/**"
+      - "scripts/build-epub"
+      - "scripts/build_epub.py"
+      - ".github/workflows/epub.yml"
+      - "README.md"
+      - "README.org"
+  pull_request:
+    branches: [main]
+    paths:
+      - "roam/**"
+      - "epub/**"
+      - "scripts/build-epub"
+      - "scripts/build_epub.py"
+      - ".github/workflows/epub.yml"
+      - "README.md"
+      - "README.org"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install EPUB tools
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --quiet pandoc epubcheck
+          pandoc --version | head -1
+          epubcheck --version
+
+      - name: Check EPUB builder syntax
+        run: python3 -m py_compile scripts/build_epub.py
+
+      - name: Build Kindle EPUB
+        run: bash scripts/build-epub
+
+      - name: Validate EPUB
+        run: epubcheck _exports/starintel-second-brain.epub
+
+      - name: Upload Kindle EPUB
+        uses: actions/upload-artifact@v4
+        with:
+          name: starintel-kindle-epub
+          path: _exports/starintel-second-brain.epub
+          if-no-files-found: error
+          retention-days: 30

@@ -5,7 +5,7 @@
 (add-to-list
  'load-path
  (expand-file-name
-  "../lisp"
+  "../lisp/starintel"
   (file-name-directory (or load-file-name buffer-file-name))))
 
 (require 'starintel-auto-research)

@@ -26,6 +26,9 @@ on:
 permissions:
   contents: read
 
+env:
+  EPUBCHECK_VERSION: "5.3.0"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -34,11 +37,19 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Install EPUB tools
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --quiet pandoc epubcheck
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --quiet pandoc default-jre-headless unzip
+          curl --fail --silent --show-error --location \
+            "https://github.com/w3c/epubcheck/releases/download/v${EPUBCHECK_VERSION}/epubcheck-${EPUBCHECK_VERSION}.zip" \
+            --output /tmp/epubcheck.zip
+          unzip -q /tmp/epubcheck.zip -d /tmp
+          sudo mv "/tmp/epubcheck-${EPUBCHECK_VERSION}" /opt/epubcheck
+          printf 'EPUBCHECK_JAR=/opt/epubcheck/epubcheck.jar\n' >> "$GITHUB_ENV"
           pandoc --version | head -1
-          epubcheck --version
+          java -jar /opt/epubcheck/epubcheck.jar --version
 
       - name: Check EPUB builder syntax
         run: python3 -m py_compile scripts/build_epub.py
@@ -47,7 +58,7 @@ jobs:
         run: bash scripts/build-epub
 
       - name: Validate EPUB
-        run: epubcheck _exports/starintel-second-brain.epub
+        run: java -jar "$EPUBCHECK_JAR" _exports/starintel-second-brain.epub
 
       - name: Upload Kindle EPUB
         uses: actions/upload-artifact@v4

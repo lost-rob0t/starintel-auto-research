@@ -72,6 +72,16 @@ Interactive commands are provided by `lisp/starintel/second-brain.el`:
 - `M-x star/pages-build`
 - `M-x star/pages-open`
 
+## Kindle EPUB
+
+The EPUB is an additional read-only edition for reviewing the complete Org-roam corpus on a Kindle. It does not replace or modify the website, Org files, or Org-roam database.
+
+```bash
+bash scripts/build-epub
+```
+
+The local output is `_exports/starintel-second-brain.epub`. The independent **Kindle EPUB** GitHub Actions workflow builds the same file, validates it with EPUBCheck, and uploads it as the `starintel-kindle-epub` workflow artifact.
+
 ## Agent Zero
 
 ```bash

@@ -15,8 +15,9 @@ Read only what is needed:
 1. `AGENTS.md`
 2. The one active design under `roam/implement/`
 3. Directly linked design and research nodes
-4. Relevant source and tests
-5. Git history when needed
+4. The relevant project index under `roam/indexes/`
+5. Relevant source and tests
+6. Git history when needed
 
 Never recursively load all of `roam/`.
 
@@ -139,6 +140,50 @@ scripts/save-research \
 ```
 
 Incomplete work is `DRAFT` and tagged `:draft:`.
+
+## Org-roam Second Brain and GitHub Pages
+
+The `roam/` tree is a long-lived second brain, not a pile of disconnected documents.
+
+Agents must:
+
+- treat every persistent Org file as an Org-roam file node
+- include a stable file-level `ID` property, `#+title`, and `#+description` in every new Org file
+- prefer durable `id:` links between Org-roam nodes
+- link new designs to their research basis, project index, dependencies, replacements, and related designs
+- update or create the relevant project index when adding a project or major subsystem
+- use Org-roam backlinks and direct graph neighbors before broader repository search
+- use `M-x star/roam`, `M-x star/roam-capture`, and `M-x star/roam-sync` for interactive work
+- run `bash scripts/publish-pages` for the same isolated Emacs export used by continuous integration
+- run `python3 scripts/check-pages-links.py _site` after changing the exporter, links, attachments, or site assets
+- keep all generated Org-roam database state under `.cache/`
+- keep all generated website output under `_site/`
+- never hand-edit `.cache/` or `_site/`
+- keep site links relative so the build works on GitHub Pages, custom domains, local files, and local web servers
+- never hard-code a branch preview URL into exported pages
+- preserve source directory structure in published note URLs
+- keep the publication pipeline reproducible from `emacs --batch -Q`
+- keep the GitHub Pages workflow green before reporting publishing work complete
+
+The Pages exporter must:
+
+- build an Org-roam database from the staged `roam/` tree
+- resolve `id:` and local Org-file links into generated HTML pages
+- add backlinks to every exported file node
+- generate the main index, search index, and graph index
+- copy referenced non-Org assets into the published note tree
+- fail on unresolved Org-roam identifiers
+- fail on broken internal pages, assets, or HTML anchors
+- deploy only from `main` or a manually dispatched workflow
+- build and validate pull requests without deploying them
+
+The public site is generated from repository content. Never commit secrets, private datasets, credentials, private evidence, or personal data that is not intended to exist in the repository.
+
+The canonical publishing index is:
+
+```text
+roam/indexes/second-brain/SECOND-BRAIN-000-org-roam-pages.org
+```
 
 ## Reader Accessibility and Footnote Glossary
 
@@ -266,6 +311,8 @@ Before completion:
 git diff --check
 git diff --stat
 python scripts/sync.py --check
+bash scripts/publish-pages
+python3 scripts/check-pages-links.py _site
 ```
 
 Report:
@@ -275,4 +322,5 @@ Report:
 - behavior changed
 - tests and exact results
 - research/design records updated
+- Pages build and link-check result when Org or site content changed
 - unresolved risks

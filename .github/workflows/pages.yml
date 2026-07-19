@@ -1,0 +1,75 @@
+name: Org-roam Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "roam/**"
+      - "lisp/starintel/**"
+      - "pages/**"
+      - "scripts/publish-pages"
+      - "scripts/check-pages-links.py"
+      - ".github/workflows/pages.yml"
+      - "README.org"
+  pull_request:
+    branches: [main]
+    paths:
+      - "roam/**"
+      - "lisp/starintel/**"
+      - "pages/**"
+      - "scripts/publish-pages"
+      - "scripts/check-pages-links.py"
+      - ".github/workflows/pages.yml"
+      - "README.org"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Emacs
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes emacs-nox sqlite3
+
+      - name: Build Org-roam site
+        run: bash scripts/publish-pages
+
+      - name: Check internal links
+        run: python3 scripts/check-pages-links.py _site
+
+      - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

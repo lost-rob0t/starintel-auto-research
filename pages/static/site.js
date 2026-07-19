@@ -2,6 +2,8 @@
   "use strict";
 
   const byId = (id) => document.getElementById(id);
+  const currentScript = document.currentScript;
+  const staticAssetBase = currentScript?.src ? new URL(".", currentScript.src) : null;
 
   async function loadJson(path) {
     const response = await fetch(path, { cache: "no-store" });
@@ -72,6 +74,80 @@
     return Math.min(maximum, Math.max(minimum, value));
   }
 
+  function loadGraphStyles() {
+    if (!staticAssetBase || document.querySelector('link[data-starintel-graph-styles]')) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = new URL("graph.css", staticAssetBase).href;
+    link.dataset.starintelGraphStyles = "true";
+    document.head.append(link);
+  }
+
+  function createGraphShell(canvas, status) {
+    loadGraphStyles();
+
+    const layout = document.createElement("div");
+    layout.className = "graph-layout";
+
+    const stage = document.createElement("div");
+    stage.className = "graph-stage";
+
+    const sidebar = document.createElement("aside");
+    sidebar.className = "graph-sidebar";
+    sidebar.setAttribute("aria-hidden", "true");
+    sidebar.innerHTML = `
+      <div class="graph-sidebar-header">
+        <p class="eyebrow">Document inspector</p>
+        <button class="graph-sidebar-close" type="button" aria-label="Close document sidebar">×</button>
+      </div>
+      <h2 class="graph-sidebar-title">Select a document</h2>
+      <p class="graph-sidebar-meta"></p>
+      <p class="graph-sidebar-description"></p>
+      <a class="graph-sidebar-open" href="#">Open document</a>
+      <section class="graph-sidebar-section">
+        <h3>Linked documents</h3>
+        <ul class="graph-related-documents"></ul>
+      </section>
+      <section class="graph-sidebar-section">
+        <h3>Other documents</h3>
+        <label class="graph-document-filter-label" for="graph-document-filter">Filter documents</label>
+        <input id="graph-document-filter" class="graph-document-filter" type="search" autocomplete="off">
+        <ul class="graph-other-documents"></ul>
+      </section>
+    `;
+
+    canvas.parentNode.insertBefore(layout, canvas);
+    stage.append(canvas, status);
+    layout.append(stage, sidebar);
+
+    return {
+      layout,
+      sidebar,
+      close: sidebar.querySelector(".graph-sidebar-close"),
+      title: sidebar.querySelector(".graph-sidebar-title"),
+      meta: sidebar.querySelector(".graph-sidebar-meta"),
+      description: sidebar.querySelector(".graph-sidebar-description"),
+      open: sidebar.querySelector(".graph-sidebar-open"),
+      related: sidebar.querySelector(".graph-related-documents"),
+      filter: sidebar.querySelector(".graph-document-filter"),
+      others: sidebar.querySelector(".graph-other-documents"),
+    };
+  }
+
+  function appendDocumentLink(list, node, suffix = "") {
+    const item = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = node.url;
+    link.textContent = node.title;
+    item.append(link);
+    if (suffix) {
+      const detail = document.createElement("span");
+      detail.textContent = suffix;
+      item.append(detail);
+    }
+    list.append(item);
+  }
+
   async function startGraph() {
     const canvas = byId("graph-canvas");
     const status = byId("graph-status");
@@ -82,12 +158,14 @@
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Canvas rendering is unavailable");
 
+      const shell = createGraphShell(canvas, status);
       let width = 1;
       let height = 1;
       let pixelRatio = 1;
       let alpha = 1;
       let dragged = null;
       let hovered = null;
+      let selectedNode = null;
       let pointerDownAt = null;
       let dragOffset = { x: 0, y: 0 };
 
@@ -110,13 +188,76 @@
         .filter((link) => link.source && link.target && link.source !== link.target);
 
       const degree = new Map(nodes.map((node) => [node.id, 0]));
+      const relatedById = new Map(nodes.map((node) => [node.id, []]));
       for (const link of links) {
         degree.set(link.source.id, degree.get(link.source.id) + 1);
         degree.set(link.target.id, degree.get(link.target.id) + 1);
+        relatedById.get(link.source.id).push({ node: link.target, direction: "links to" });
+        relatedById.get(link.target.id).push({ node: link.source, direction: "linked from" });
       }
       for (const node of nodes) {
         node.radius = clamp(6 + Math.sqrt(degree.get(node.id)) * 1.4, 6, 13);
       }
+
+      function closeSidebar() {
+        selectedNode = null;
+        shell.layout.classList.remove("has-sidebar");
+        shell.sidebar.setAttribute("aria-hidden", "true");
+        shell.filter.value = "";
+        status.textContent = `${nodes.length} nodes · ${links.length} links · drag to arrange · select for details · double-click to open`;
+      }
+
+      function renderOtherDocuments(query = "") {
+        shell.others.replaceChildren();
+        const normalizedQuery = query.trim().toLowerCase();
+        const relatedIds = new Set((relatedById.get(selectedNode?.id) || []).map((entry) => entry.node.id));
+        const candidates = nodes
+          .filter((node) => node !== selectedNode)
+          .filter((node) => !normalizedQuery || [node.title, node.description, node.kind, ...(node.tags || [])]
+            .join(" ").toLowerCase().includes(normalizedQuery))
+          .sort((left, right) => {
+            const leftRelated = relatedIds.has(left.id) ? 0 : 1;
+            const rightRelated = relatedIds.has(right.id) ? 0 : 1;
+            return leftRelated - rightRelated || left.title.localeCompare(right.title);
+          });
+
+        for (const node of candidates) {
+          appendDocumentLink(shell.others, node, relatedIds.has(node.id) ? "related" : node.kind || "document");
+        }
+      }
+
+      function openSidebar(node) {
+        selectedNode = node;
+        shell.title.textContent = node.title;
+        shell.meta.textContent = [node.kind, node.modified, ...(node.tags || [])].filter(Boolean).join(" · ");
+        shell.description.textContent = node.description || "No description is available for this document.";
+        shell.open.href = node.url;
+        shell.related.replaceChildren();
+
+        const related = [...(relatedById.get(node.id) || [])]
+          .sort((left, right) => left.node.title.localeCompare(right.node.title));
+        if (related.length === 0) {
+          const empty = document.createElement("li");
+          empty.textContent = "No direct graph links.";
+          shell.related.append(empty);
+        } else {
+          for (const entry of related) {
+            appendDocumentLink(shell.related, entry.node, entry.direction);
+          }
+        }
+
+        shell.filter.value = "";
+        renderOtherDocuments();
+        shell.layout.classList.add("has-sidebar");
+        shell.sidebar.setAttribute("aria-hidden", "false");
+        status.textContent = node.title;
+      }
+
+      shell.close.addEventListener("click", closeSidebar);
+      shell.filter.addEventListener("input", () => renderOtherDocuments(shell.filter.value));
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && selectedNode) closeSidebar();
+      });
 
       function seedLayout() {
         const centerX = width / 2;
@@ -157,7 +298,7 @@
           }
         }
         seedLayout();
-        alpha = Math.max(alpha, 0.35);
+        alpha = Math.max(alpha, 0.25);
       }
 
       function pointerPosition(event) {
@@ -232,8 +373,8 @@
         const springStrength = 0.012;
         const anchorStrength = 0.0018;
         const centerStrength = 0.0006;
-        const damping = 0.82;
-        const maxSpeed = 7;
+        const velocityRetention = 0.68;
+        const maxSpeed = 4.5;
 
         for (const node of nodes) {
           node.ax = (node.anchorX - node.x) * anchorStrength * alpha;
@@ -260,23 +401,27 @@
 
         for (const node of nodes) {
           if (node === dragged) continue;
-          node.vx = clamp((node.vx + node.ax) * damping, -maxSpeed, maxSpeed);
-          node.vy = clamp((node.vy + node.ay) * damping, -maxSpeed, maxSpeed);
+          node.vx = clamp((node.vx + node.ax) * velocityRetention, -maxSpeed, maxSpeed);
+          node.vy = clamp((node.vy + node.ay) * velocityRetention, -maxSpeed, maxSpeed);
           node.x = clamp(node.x + node.vx, node.radius + 3, width - node.radius - 3);
           node.y = clamp(node.y + node.vy, node.radius + 3, height - node.radius - 3);
         }
 
-        alpha *= 0.986;
-        if (alpha < 0.008) alpha = 0;
+        alpha *= 0.975;
+        if (alpha < 0.006) alpha = 0;
+      }
+
+      function isSelectedLink(link) {
+        return selectedNode && (link.source === selectedNode || link.target === selectedNode);
       }
 
       function draw() {
         context.clearRect(0, 0, width, height);
-        context.strokeStyle = "rgba(146, 64, 110, 0.52)";
-        context.lineWidth = 1;
 
         for (const link of links) {
           context.beginPath();
+          context.strokeStyle = isSelectedLink(link) ? "rgba(45, 226, 230, 0.8)" : "rgba(146, 64, 110, 0.42)";
+          context.lineWidth = isSelectedLink(link) ? 1.6 : 1;
           context.moveTo(link.source.x, link.source.y);
           context.lineTo(link.target.x, link.target.y);
           context.stroke();
@@ -285,8 +430,19 @@
         for (const node of nodes) {
           context.beginPath();
           context.fillStyle = node === hovered || node === dragged ? "#f3f4f5" : "#2de2e6";
+          context.shadowColor = "rgba(45, 226, 230, 0.65)";
+          context.shadowBlur = node === selectedNode ? 16 : 8;
           context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
           context.fill();
+          context.shadowBlur = 0;
+
+          if (node === selectedNode) {
+            context.beginPath();
+            context.strokeStyle = "#f3f4f5";
+            context.lineWidth = 2;
+            context.arc(node.x, node.y, node.radius + 5, 0, Math.PI * 2);
+            context.stroke();
+          }
         }
 
         if (hovered) {
@@ -314,7 +470,7 @@
         dragOffset = { x: selected.x - position.x, y: selected.y - position.y };
         selected.vx = 0;
         selected.vy = 0;
-        alpha = Math.max(alpha, 0.35);
+        alpha = Math.max(alpha, 0.25);
         canvas.setPointerCapture(event.pointerId);
       });
 
@@ -329,7 +485,7 @@
         dragged.anchorY = dragged.y;
         dragged.vx = 0;
         dragged.vy = 0;
-        alpha = Math.max(alpha, 0.25);
+        alpha = Math.max(alpha, 0.18);
       });
 
       canvas.addEventListener("pointerleave", () => {
@@ -345,14 +501,17 @@
         }
         dragged = null;
         pointerDownAt = null;
-        alpha = Math.max(alpha, 0.18);
-        if (selected && !moved) status.textContent = selected.title;
+        alpha = Math.max(alpha, 0.12);
+        if (!moved) {
+          if (selected) openSidebar(selected);
+          else closeSidebar();
+        }
       });
 
       canvas.addEventListener("pointercancel", () => {
         dragged = null;
         pointerDownAt = null;
-        alpha = Math.max(alpha, 0.18);
+        alpha = Math.max(alpha, 0.12);
       });
 
       canvas.addEventListener("dblclick", (event) => {
@@ -367,7 +526,7 @@
         window.addEventListener("resize", resizeCanvas);
       }
 
-      status.textContent = `${nodes.length} nodes · ${links.length} links · drag to arrange · double-click to open`;
+      closeSidebar();
       animate();
     } catch (error) {
       status.textContent = `Graph failed: ${error.message}`;

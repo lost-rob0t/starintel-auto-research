@@ -49,6 +49,16 @@ python scripts/sync.py
 
 The checked-in `roam/` tree is the knowledge source. Emacs builds an Org-roam database from it, exports linked HTML pages with backlinks, emits search and graph indexes, and deploys `_site/` through GitHub Pages.
 
+Enable workflow publishing once with an administrator-authenticated GitHub CLI session:
+
+```bash
+bash scripts/configure-pages
+```
+
+That command creates or updates the Pages site with `build_type=workflow` and triggers the deployment workflow on `main`. The ordinary workflow token cannot perform this initial repository-setting change.
+
+Build and validate locally:
+
 ```bash
 bash scripts/publish-pages
 python3 scripts/check-pages-links.py _site

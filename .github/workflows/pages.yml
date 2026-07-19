@@ -8,6 +8,7 @@ on:
       - "lisp/starintel/**"
       - "pages/**"
       - "scripts/publish-pages"
+      - "scripts/configure-pages"
       - "scripts/check-pages-links.py"
       - ".github/workflows/pages.yml"
       - "AGENTS.md"
@@ -20,6 +21,7 @@ on:
       - "lisp/starintel/**"
       - "pages/**"
       - "scripts/publish-pages"
+      - "scripts/configure-pages"
       - "scripts/check-pages-links.py"
       - ".github/workflows/pages.yml"
       - "AGENTS.md"
@@ -40,13 +42,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Quiet repository checkout
-        shell: bash
-        run: |
-          git init -q .
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git fetch -q --depth=1 origin "$GITHUB_SHA"
-          git checkout -q FETCH_HEAD
+      - name: Check out repository
+        uses: actions/checkout@v6
 
       - name: Install Emacs
         run: |
@@ -71,15 +68,37 @@ jobs:
       - name: Check internal links
         run: python3 scripts/check-pages-links.py _site
 
-      - name: Configure GitHub Pages
+      - name: Verify GitHub Pages is enabled
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh api "repos/${GITHUB_REPOSITORY}/pages" >/tmp/pages.json 2>/tmp/pages-error.log; then
+            cat /tmp/pages-error.log
+            echo "::error::GitHub Pages is not enabled for workflow publishing. Run 'bash scripts/configure-pages' once with an administrator-authenticated gh CLI, then rerun this workflow."
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          pages = json.loads(Path('/tmp/pages.json').read_text())
+          build_type = pages.get('build_type')
+          if build_type != 'workflow':
+              raise SystemExit(
+                  "GitHub Pages exists but build_type is not 'workflow'. "
+                  "Run 'bash scripts/configure-pages' once."
+              )
+          print(f"GitHub Pages enabled: {pages.get('html_url', 'URL pending')}")
+          PY
+
+      - name: Configure GitHub Pages metadata
         if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       - name: Upload GitHub Pages artifact
         if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: _site
 
@@ -90,6 +109,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      pages: write
+      id-token: write
     steps:
       - name: Deploy GitHub Pages
         id: deployment

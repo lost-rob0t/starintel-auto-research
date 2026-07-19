@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import os
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from pathlib import Path
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Serve the generated Starintel Pages site")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8042)
+    parser.add_argument("--directory", default="_site")
+    args = parser.parse_args()
+
+    site = Path(args.directory).resolve()
+    index = site / "index.html"
+    if not index.is_file():
+        parser.error(f"generated site is missing: {index}; run scripts/publish-pages first")
+
+    os.chdir(site)
+    server = ThreadingHTTPServer((args.host, args.port), SimpleHTTPRequestHandler)
+    print(f"Serving {site} at http://{args.host}:{args.port}/", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,665 @@
+#+title: SENTO-000 Sento Runtime Analysis
+#+description: Source-level analysis of Sento 3.4.3 and sento-remoting 0.1.0 for supervised domain gservers.
+#+filetags: :starintel:research:cl-gserver:sento:actors:supervision:routing:remoting:
+#+todo: DRAFT RESEARCH REVIEW | DONE REJECTED
+
+* DONE Objective
+
+Analyze Sento[fn:sento] deeply enough to determine what can be composed with existing public APIs[fn:api], what requires a companion library[fn:companion-library], and what requires changes to Sento core[fn:core].
+
+The analysis focuses on supervised gservers[fn:gserver], per-domain dispatchers[fn:dispatcher], subdomains, managed routers[fn:managed-router], overload handling[fn:overload], event isolation, observability[fn:observability], and secure remoting[fn:remoting].
+
+Affected designs:
+
+- [[file:../../design/cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]]
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+
+* DONE Review Baseline
+
+- Repository: =mdbergmann/cl-gserver=
+- Reviewed branch: =master=
+- Reviewed commit: =a889b8375709ca9396bba5d06b6e460689a23716=
+- Sento version: =3.4.3=
+- Sento remoting version: =0.1.0=
+- Review date: =2026-07-19=
+
+The latest reviewed commit fixes shutdown of actors whose bounded mailbox[fn:mailbox] is already full. The fix catches =queue-full-error= while submitting the internal stop trigger.
+
+* DONE Repository Areas Reviewed
+
+** Core runtime
+
+- =src/actor-system-api.lisp=
+- =src/actor-system.lisp=
+- =src/actor-context-api.lisp=
+- =src/actor-context.lisp=
+- =src/actor-api.lisp=
+- =src/actor.lisp=
+- =src/actor-cell.lisp=
+- =src/mbox/message-box.lisp=
+- =src/queue/queue.lisp=
+- =src/dispatcher-api.lisp=
+- =src/dispatcher.lisp=
+- =src/router.lisp=
+- =src/eventstream-api.lisp=
+- =src/eventstream.lisp=
+- =src/wheel-timer.lisp=
+- =src/tasks.lisp=
+- =src/fsm.lisp=
+- =src/stash.lisp=
+
+** Remoting runtime
+
+- =sento-remoting.asd=
+- =src/remoting/remoting-api.lisp=
+- =src/remoting/remoting.lisp=
+- =src/remoting/remote-ref.lisp=
+- =src/remoting/envelope.lisp=
+- =src/remoting/serialization.lisp=
+- =src/remoting/transport.lisp=
+- =src/remoting/transport-tcp.lisp=
+- =src/remoting/tls.lisp=
+- =src/remoting/tls-pure.lisp=
+- =specs/remoting.md=
+- =specs/remoting-state.md=
+
+** Tests and automation
+
+- =tests/actor-tree-test.lisp=
+- =tests/actor-test.lisp=
+- =tests/message-box-test.lisp=
+- =tests/router-test.lisp=
+- =tests/dispatcher-test.lisp=
+- =tests/eventstream-test.lisp=
+- =tests/remoting/=
+- =bench.lisp=
+- =.github/workflows/CI.yml=
+
+* DONE Actor-System Model
+
+A Sento actor system[fn:actor-system] creates:
+
+- =/user= actor context[fn:actor-context]
+- =/internal= actor context
+- configured dispatchers
+- one system event stream[fn:event-stream]
+- one timeout wheel timer[fn:wheel-timer]
+- one optional scheduler
+
+The default shared dispatcher creates four workers.
+
+Each shared dispatcher worker is a pinned actor[fn:pinned-actor] with its own operating-system thread[fn:thread]. The dispatcher routes execution functions to those workers.
+
+Creating six default actor systems in one process would therefore create twenty-four shared dispatcher worker threads before counting:
+
+- additional domain dispatchers
+- pinned application actors
+- timeout timer threads
+- scheduler threads
+- remoting threads
+
+** Conclusion**
+
+The actor system is a runtime root. Logical domains should normally be actor subtrees inside one actor system. Multiple actor systems remain valid for tests, migration, or a measured isolation need, but they are not the default composition primitive.
+
+* DONE Actor Trees and Contexts
+
+Every actor created through =ac:actor-of= receives an actor context connected to the same actor system.
+
+An actor can create children through its own context. Sento builds paths such as:
+
+#+begin_example
+/user/domains
+/user/domains/cyber
+/user/domains/cyber/ingress
+#+end_example
+
+Actor names need to be unique only within the immediate context. Different domains can therefore use the same leaf name, such as =ingress= or =collector=, while retaining unique full paths.
+
+Stopping an actor recursively stops its children first.
+
+The actor context automatically watches actors it creates. When a child stops, the context removes that child from its actor list.
+
+** Conclusion**
+
+Sento already supplies the tree required for domain and subdomain gservers. No separate hierarchy system is needed.
+
+* DONE Actor Failure Semantics
+
+The actor-cell message handler catches =serious-condition=[fn:serious-condition]. It logs the condition and returns:
+
+#+begin_src lisp
+(cons :handler-error condition)
+#+end_src
+
+The actor normally remains running.
+
+The behavior applies to both synchronous and asynchronous actor handling because both eventually call the same handler path.
+
+A watcher is not notified because the actor did not stop.
+
+A pinned mailbox thread can die if a debugger abort restart unwinds past the handler. The mailbox implementation attempts to restart the pinned thread on the next submission.
+
+** Consequences**
+
+- A supervisor cannot treat a handler error as a child crash.
+- Watching is insufficient for failure supervision.
+- A companion library cannot reliably add Erlang-style restart behavior[fn:erlang-style] without a core failure-policy hook.
+- Current behavior should remain available for compatibility because existing code may expect handler errors as values.
+
+** Required core change**
+
+Add actor failure policies:
+
+- resume
+- stop
+- escalate
+- custom classifier
+
+Add a structured termination record with reason, condition, actor generation, failed-message summary, and timestamps.
+
+* DONE Lifecycle and Watching
+
+Sento exposes:
+
+- =pre-start=
+- =after-stop=
+- constructor =:init= hook
+- constructor =:destroy= hook
+- =watch=
+- =unwatch=
+- =stop=
+- context shutdown
+- actor-system shutdown
+
+A watcher currently receives:
+
+#+begin_src lisp
+(cons :stopped actor)
+#+end_src
+
+The notification contains no termination reason.
+
+Stopping an actor:
+
+1. stops all children
+2. stops its mailbox
+3. runs the after-stop hook
+4. notifies watchers
+
+Actor-system shutdown:
+
+1. stops the timeout timer
+2. stops the scheduler
+3. shuts down user actors
+4. shuts down internal actors
+
+**Consequences**
+
+- Destroy hooks cannot assume the scheduler remains available during actor-system shutdown.
+- Declarative child startup order is absent.
+- Restart intensity[fn:restart-intensity], restart windows, restart backoff, and escalation are absent.
+- Supervisor behavior must be added.
+
+* DONE Mailboxes and Queues
+
+Sento has two mailbox types:
+
+- pinned-thread mailbox
+- dispatcher mailbox
+
+Both use either a bounded or unbounded queue.
+
+A bounded queue signals =queue-full-error= when capacity is reached.
+
+The actor creation API accepts =:queue-size=. Zero or =nil= means unbounded.
+
+** Dispatcher mailbox behavior
+
+A dispatcher mailbox stores messages in its own queue and submits one execution function to the dispatcher per message.
+
+A mailbox lock prevents two dispatcher workers from changing one actor's state at the same time.
+
+The source documentation states that processing order cannot be guaranteed when submissions arrive from multiple threads, although state access remains serialized.
+
+** Stop behavior
+
+Stopping finishes the currently running message and discards queued messages. There is no queue-drain option.
+
+** Metrics
+
+The queue protocol exports =queued-count=. The actor-to-mailbox-to-queue path and processed-message counts require internal slot access in existing benchmark code.
+
+** Consequences**
+
+Required runtime additions:
+
+- public mailbox depth and capacity
+- processed, rejected, and dropped counts
+- explicit overload policies
+- structured overload result
+- drain, discard, deadline, and handoff shutdown modes
+- admission control[fn:admission-control] at component ingress
+
+* DONE Dispatchers
+
+A shared dispatcher contains:
+
+- a router
+- pinned worker actors
+- one worker thread per routee
+
+The actor system can register additional named dispatchers at startup or dynamically through =register-new-dispatcher=.
+
+Actors select a dispatcher by identifier when created.
+
+Tasks can also run on a selected custom dispatcher.
+
+** User decision recorded**
+
+Dispatchers are per domain by default.
+
+A domain may define subdomain dispatchers inside the same process.
+
+Examples:
+
+#+begin_example
+:domain/cyber/control
+:domain/cyber/default
+:domain/cyber/discovery
+:domain/cyber/scanning
+:domain/cyber/analysis
+#+end_example
+
+The domain control dispatcher must remain separate from saturated application work.
+
+** Consequences**
+
+The Sento extension needs:
+
+- domain dispatcher declarations
+- subdomain dispatcher declarations
+- thread-budget checks[fn:thread-budget]
+- dispatcher status and metrics
+- application-work prohibition on control dispatchers
+
+* DONE Router Model
+
+The current Sento router supports:
+
+- =tell=
+- =ask-s=
+- =ask=
+- random selection
+- round-robin selection
+- custom count-to-index selection
+- routee addition
+- listing routees
+- stopping all routees
+
+It does not support:
+
+- routee removal
+- routee replacement
+- watching the router
+- watching routees through the router
+- message-aware strategy selection
+- keyed affinity[fn:keyed-affinity]
+- dynamic pool sizing
+- routee readiness
+- routee health
+- routee metrics
+- lifecycle generation
+
+** Conclusion**
+
+A raw Sento router is appropriate for simple static pools. A managed gserver needs a pool-manager actor plus router protocol extensions.
+
+Required strategies:
+
+- random
+- round robin
+- least mailbox depth
+- consistent hash[fn:consistent-hash]
+- rendezvous hash[fn:rendezvous-hash]
+- key function
+- broadcast
+
+The pool manager belongs on the domain control dispatcher. Routees belong on a domain or subdomain dispatcher.
+
+* DONE Event Streams
+
+Sento creates a system-wide event stream by default.
+
+The event-stream constructor can also create an event stream in any actor context. The source explicitly notes that a context-local event stream could address one actor hierarchy.
+
+Subscriptions can match:
+
+- all events
+- type
+- class
+- symbol
+- string
+- list structure
+
+The event stream stores subscriber references in a list. It does not watch subscribers or automatically remove a stopped subscriber.
+
+** Conclusion**
+
+Each domain or subdomain may have its own scoped event stream without a separate actor system.
+
+The managed event bus must:
+
+- watch subscribers
+- remove terminated subscribers
+- expose subscriber metrics
+- use typed events
+- stop with the owning component
+
+* DONE Tasks, FSM, Stash, and Timers
+
+** Tasks
+
+Sento tasks create temporary actor-backed operations on a selected dispatcher.
+
+Task errors are converted into handler-error values.
+
+Tasks are suitable for bounded short-lived work but do not replace managed routee pools for long-lived domain capacity.
+
+** FSM**
+
+Sento FSM actors support named states, transitions, unhandled events, and state timeouts.
+
+A supervisor may use FSM helpers, but the supervisor's child table, restart window, and lifecycle events must remain explicit data.
+
+** Stash**
+
+The stash mixin stores deferred messages in an unbounded list. It supports =tell= and asynchronous =ask= patterns but not synchronous =ask-s=.
+
+A supervisor should not use an unbounded stash as its primary overload strategy.
+
+** Timers**
+
+Wheel-timer callbacks execute in the timer thread. Long-running callback work must be sent to actors or tasks.
+
+The timeout timer is private actor-system infrastructure. Extensions currently access it through private symbols in remoting. A public scheduling interface is needed.
+
+* DONE Remoting Architecture
+
+Sento remoting is a separate ASDF system[fn:asdf] depending on Sento, Bordeaux Threads, flexi-streams, pure-tls, usocket, and log4cl.
+
+It includes:
+
+- serializer protocol
+- S-expression serializer
+- network envelope
+- TLS provider protocol
+- pure-tls provider
+- abstract transport protocol
+- TCP transport
+- connection pooling
+- remote actor reference
+- remoting context
+- actor-path routing
+
+The remoting state file reports sixty-two tests and one hundred sixty-two checks passing at the reviewed commit.
+
+** Transport
+
+The TCP transport uses a four-byte length prefix and a default maximum message length of two megabytes.
+
+It uses reader threads per connection and tracks accepted sockets for shutdown.
+
+** Remote references
+
+A remote reference implements the actor =tell=, =ask-s=, and =ask= methods.
+
+Each remote reference creates one local sender actor for queued tell messages.
+
+Remote asks use correlation identifiers and a pending-ask table.
+
+** Inbound routing
+
+Incoming target paths are resolved through =find-actors=. The first matching actor receives the deserialized message.
+
+A missing tell target is logged and dropped.
+
+A missing ask target is logged, but no structured not-found response is sent.
+
+Inbound asks call the local actor with a fixed five-second timeout.
+
+* DONE Remoting Security Findings
+
+** Unsafe default reader setting
+
+The default deserializer performs:
+
+#+begin_src lisp
+(read-from-string string)
+#+end_src
+
+It does not locally bind =*read-eval*= to =nil=.
+
+Common Lisp reader evaluation[fn:reader-evaluation] can execute forms introduced through reader syntax when =*read-eval*= is true.
+
+Immediate fix:
+
+#+begin_src lisp
+(let ((*read-eval* nil))
+  (read-from-string string))
+#+end_src
+
+This is necessary but not sufficient for a production untrusted-data serializer.
+
+** Arbitrary actor paths
+
+Remoting exposes actor-system path lookup. There is no explicit exported-actor registry or capability check.
+
+A production remote boundary must resolve only approved logical exports.
+
+** Optional TLS
+
+The remoting API accepts a =nil= TLS configuration. Plain TCP is therefore possible.
+
+Production mode must require TLS and verified peer identity[fn:peer-identity].
+
+** No actor authorization layer
+
+The transport does not map an authenticated peer to allowed target actors or message types.
+
+** No deadline propagation
+
+The envelope contains target, sender, payload, message type, and correlation identifier. It does not contain the caller deadline.
+
+** Error envelope not integrated
+
+An error-envelope structure exists, but the inbound routing path does not use it for not-found, access-denied, overload, timeout, or handler failures.
+
+** Delivery semantics not explicit
+
+Remote tell send failures are logged. The API does not claim durable delivery[fn:durable-delivery] or automatic retry.
+
+The safe default interpretation is at-most-once[fn:at-most-once].
+
+** Required remoting changes**
+
+- disable reader evaluation
+- add a schema serializer[fn:schema]
+- require TLS in production mode
+- add explicit actor exports
+- map certificate identity to a principal[fn:principal]
+- add authorization policy
+- add per-peer quotas
+- carry deadlines
+- return structured errors
+- document at-most-once behavior
+- require idempotency keys[fn:idempotency-key] for caller-enabled retries
+- add remote-reference lifecycle and pending-ask limits
+
+* DONE CI and Test-Coverage Findings
+
+The GitHub Actions workflow runs:
+
+- Sento core tests
+- Sento remoting tests
+
+The active matrix currently lists only =sbcl-bin= on Ubuntu. Other Lisps and operating systems are commented out.
+
+The workflow downloads Roswell with =curl= and clones remoting dependencies not present in Quicklisp.
+
+** Consequences**
+
+The Sento extension should add:
+
+- supervisor tests on shared and pinned dispatchers
+- overload tests
+- crash-loop tests
+- routee replacement tests
+- domain saturation tests
+- subdomain saturation tests
+- safe-deserializer tests
+- actor-export denial tests
+- deadline tests
+- structured remote-error tests
+- thread-leak tests
+
+Portability claims must remain limited to the implementations actually tested.
+
+* DONE Architecture Revisit
+
+The initial idea proposed six domain gservers and considered separate actor systems.
+
+After source review, the corrected architecture is:
+
+1. One Sento actor system per process by default.
+2. One managed root component for domain composition.
+3. One supervisor per domain.
+4. Per-domain control and default dispatchers.
+5. Optional nested subdomain dispatchers inside each domain.
+6. Optional scoped event stream per domain or subdomain.
+7. Managed router pools for equivalent workers.
+8. Keyed routers for stateful affinity.
+9. Core Sento changes for failure policies and termination reasons.
+10. Companion Sento systems for supervision, components, managed routers, and observability.
+11. Harden existing Sento remoting for Sento-to-Sento links.
+12. Use a separate process when actual isolation or independent scaling is required.
+
+* DONE Core Versus Companion Boundary
+
+| Capability | Existing Sento | Core change | Companion module |
+|------------+----------------+-------------+------------------|
+| Actor tree | Yes | No | Component conventions |
+| Named dispatchers | Yes | Metrics hooks | Domain dispatcher declaration |
+| Handler error result | Yes | Failure policy | Supervisor consumes termination |
+| Stop notification | Minimal | Structured termination | Restart strategy |
+| Bounded queue | Yes | Overload and shutdown policy | Admission control |
+| Static router | Yes | Routee removal and message-aware strategy | Managed pool actor |
+| System event stream | Yes | Optional subscriber lifecycle hook | Scoped managed event bus |
+| Metrics | Partial/internal | Public mailbox and dispatcher API | Aggregation and export |
+| Remoting | Yes | Safe defaults and exported target protocol | Peer policy and component resolution |
+| Component registry | No | No | Yes |
+| Supervisor | No | Failure hooks required | Yes |
+
+* DONE Next Action
+
+Implement Phase 0 and Phase 1 from =SENTO-000 Managed Component Runtime=:
+
+1. Pin the reviewed Sento commit.
+2. Reproduce core and remoting tests.
+3. Add failure-policy regression tests.
+4. Add structured termination records.
+5. Preserve =:resume= as compatibility behavior.
+6. Prototype one-for-one supervision after termination events are reliable.
+
+* Footnotes and Glossary
+
+[fn:sento] Sento: The Common Lisp actor framework in the =mdbergmann/cl-gserver= repository.
+
+[fn:api] API: Application Programming Interface. The documented functions, classes, and data that one software component allows another component to use.
+
+[fn:companion-library] Companion library: A separate software package built on top of another library without placing all of its code inside the original core package.
+
+[fn:core] Core: The central Sento runtime code that owns actor message handling, mailboxes, dispatchers, and lifecycle behavior.
+
+[fn:gserver] Gserver: A managed service composed from one or more actors, dispatchers, routing, lifecycle state, and a stable entry point.
+
+[fn:dispatcher] Dispatcher: A named pool of worker actors and threads that executes work taken from actor mailboxes.
+
+[fn:managed-router] Managed router: A router whose worker membership, failure handling, resizing, health, and metrics are controlled by a supervisor or pool manager.
+
+[fn:overload] Overload: A state where incoming work arrives faster than the system can process or store it safely.
+
+[fn:observability] Observability: Metrics, events, status, and traces that show what the runtime is doing.
+
+[fn:remoting] Remoting: Sending actor messages between actor systems over a network.
+
+[fn:mailbox] Mailbox: The queue owned by one actor that stores messages waiting to be processed.
+
+[fn:actor-system] Actor system: The top-level Sento runtime container that owns actor contexts, dispatchers, timers, and the default event stream.
+
+[fn:actor-context] Actor context: A container that owns the immediate child actors beneath an actor or actor system.
+
+[fn:event-stream] Event stream: A publish-and-subscribe message bus used to distribute events to interested actors.
+
+[fn:wheel-timer] Wheel timer: A timer that stores future deadlines in rotating time slots.
+
+[fn:pinned-actor] Pinned actor: An actor whose mailbox owns one dedicated operating-system thread.
+
+[fn:thread] Thread: One independently scheduled execution path inside a process.
+
+[fn:serious-condition] Serious condition: A Common Lisp condition representing an error or other event that interrupts normal processing.
+
+[fn:erlang-style] Erlang-style restart behavior: Supervision behavior modeled after Erlang/OTP, where supervisors restart failed children according to declared strategies and limits.
+
+[fn:restart-intensity] Restart intensity: The maximum number of restarts permitted during a configured time window before a supervisor gives up or escalates.
+
+[fn:admission-control] Admission control: Accepting or rejecting work at a component entrance before it consumes deeper queues and workers.
+
+[fn:thread-budget] Thread budget: The maximum number of operating-system threads a process is expected or allowed to create.
+
+[fn:keyed-affinity] Keyed affinity: Routing related messages with the same key to the same worker so that worker can keep sequential state for that key.
+
+[fn:consistent-hash] Consistent hash: A routing method that minimizes how many keys move when workers are added or removed.
+
+[fn:rendezvous-hash] Rendezvous hash: A routing method that scores all workers for a key and chooses the highest score.
+
+[fn:asdf] ASDF: Another System Definition Facility. The standard Common Lisp system and dependency definition tool.
+
+[fn:reader-evaluation] Reader evaluation: Common Lisp reader behavior that can execute code while reading data when special syntax is present and =*read-eval*= is true.
+
+[fn:peer-identity] Peer identity: The verified identity of the remote system connected to the local remoting endpoint.
+
+[fn:durable-delivery] Durable delivery: A message-delivery model that stores messages so they can survive temporary failure and be retried later.
+
+[fn:at-most-once] At-most-once: A delivery model where a message is attempted no more than once, so it may be lost but is not automatically duplicated by retry.
+
+[fn:schema] Schema: A formal definition of allowed message fields, types, sizes, and structure.
+
+[fn:principal] Principal: The verified user, service, or node identity used in an authorization decision.
+
+[fn:idempotency-key] Idempotency key: A unique request value that allows a receiver to recognize a retried operation and avoid processing it twice.
+
+* DONE Sources
+
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/sento.asd
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/actor-system.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/actor-context.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/actor.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/actor-cell.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/mbox/message-box.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/queue/queue.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/dispatcher.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/router.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/eventstream.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/tasks.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/fsm.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/stash.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/remoting/remoting.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/remoting/remote-ref.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/remoting/serialization.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/specs/remoting-state.md
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/pull/112
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/pull/113
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/pull/114
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/pull/115
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/pull/116

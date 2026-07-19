@@ -1,0 +1,96 @@
+name: Org-roam Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "roam/**"
+      - "lisp/starintel/**"
+      - "pages/**"
+      - "scripts/publish-pages"
+      - "scripts/check-pages-links.py"
+      - ".github/workflows/pages.yml"
+      - "AGENTS.md"
+      - "README.org"
+      - "README.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - "roam/**"
+      - "lisp/starintel/**"
+      - "pages/**"
+      - "scripts/publish-pages"
+      - "scripts/check-pages-links.py"
+      - ".github/workflows/pages.yml"
+      - "AGENTS.md"
+      - "README.org"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quiet repository checkout
+        shell: bash
+        run: |
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth=1 origin "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
+
+      - name: Install Emacs
+        run: |
+          sudo apt-get update -qq >/tmp/apt-update.log
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --quiet emacs-nox sqlite3 >/tmp/apt-install.log
+          emacs --version | head -1
+
+      - name: Build Org-roam site
+        shell: bash
+        run: |
+          set +e
+          bash scripts/publish-pages >pages-build.log 2>&1
+          status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Emacs build failure"
+            tail -n 20 pages-build.log
+            echo "::endgroup::"
+            exit "$status"
+          fi
+          tail -n 20 pages-build.log
+
+      - name: Check internal links
+        run: python3 scripts/check-pages-links.py _site
+
+      - name: Configure GitHub Pages
+        if: github.event_name != 'pull_request'
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Upload GitHub Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

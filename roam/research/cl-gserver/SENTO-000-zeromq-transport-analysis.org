@@ -1,0 +1,487 @@
+#+title: SENTO-000 ZeroMQ Transport Analysis
+#+description: Deep research on wiring libzmq into the managed Sento component runtime without violating actor or socket ownership rules.
+#+filetags: :starintel:research:cl-gserver:sento:zeromq:transport:routing:security:
+#+todo: DRAFT RESEARCH REVIEW | DONE REJECTED
+
+* DONE Objective
+
+Determine how ZeroMQ[fn:zeromq] should connect Sento[fn:sento] components across processes while preserving Sento actor semantics, per-domain dispatchers[fn:dispatcher], supervision[fn:supervision], bounded overload handling[fn:overload], and explicit security policy.
+
+Affected design:
+
+- [[file:../../design/cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]]
+
+* DONE Research Baseline
+
+Reviewed on 2026-07-19:
+
+- libzmq[fn:libzmq] official repository and API documentation
+- ZeroMQ Message Transport Protocol[fn:zmtp] specifications
+- ZeroMQ Authentication Protocol[fn:zap]
+- CurveZMQ[fn:curvezmq]
+- ROUTER and DEALER socket behavior
+- PUB, SUB, XPUB, and XSUB behavior
+- PUSH and PULL behavior
+- socket high-water marks[fn:high-water-mark]
+- socket monitor API
+- steerable proxy API
+- Common Lisp PZMQ binding repository
+- current Sento actor, dispatcher, router, event-stream, and remoting implementation
+
+* DONE Main Decision
+
+ZeroMQ is an optional transport adapter and process bridge.
+
+ZeroMQ does not replace local Sento mailboxes[fn:mailbox], domain dispatchers, actor supervision, managed local routers, the component registry, or Star Router[fn:star-router].
+
+The component-handle layer selects ZeroMQ only when a message must cross a process boundary, reach a non-Sento service, use a ZeroMQ message pattern, or join a ZeroMQ-compatible topology.
+
+* DONE Thread-Ownership Finding
+
+A ZeroMQ context[fn:zmq-context] is thread-safe and may be shared by application threads.
+
+Most classic ZeroMQ sockets are not thread-safe. A socket must be created, used, and closed by one owning thread.
+
+A Sento actor on a shared dispatcher may run mailbox handlers on different dispatcher worker threads over time. Such an actor must not directly hold or call a classic ZeroMQ socket.
+
+A pinned Sento actor does have a dedicated mailbox thread, but blocking that receive handler forever in =zmq_poll= would prevent the actor mailbox from processing lifecycle and control messages.
+
+** Resulting design
+
+Use a supervised ZeroMQ reactor component:
+
+- supervisor actor owns lifecycle
+- bounded multiple-producer, single-consumer command queue carries outbound work
+- one dedicated reactor thread owns sockets
+- reactor thread polls sockets, drains commands, expires deadlines, and emits metrics
+- inbound frames are sent into Sento through normal actor messages
+- no ordinary actor receives a raw socket pointer
+
+* DONE Context Model
+
+Use one process-wide libzmq context by default.
+
+The context owns libzmq internal input and output threads and every ZeroMQ socket created by the process.
+
+Each domain may own one reactor, and may split into subdomain reactors when measured load, endpoint ownership, security policy, or independent restart justifies it.
+
+Multiple contexts are possible but duplicate internal resources and complicate shutdown. They require an explicit design reason.
+
+* DONE Reactor Topology
+
+#+begin_example
+Sento actor system
+└── /internal/transports/zeromq
+    ├── context-supervisor
+    ├── zap-handler
+    ├── monitor-collector
+    └── reactors
+        ├── humint
+        ├── socmint
+        ├── sigint
+        ├── cyber
+        ├── bbp
+        └── threat-intel
+#+end_example
+
+Each reactor contains:
+
+- supervisor child specification
+- domain or subdomain identifier
+- dedicated reactor thread
+- bounded outbound command queue
+- socket specifications
+- endpoint registry
+- pending request table
+- serializer
+- connection monitor
+- transport generation
+- metrics
+
+* DONE Actor-to-ZeroMQ Flow
+
+1. A Sento actor sends a transport command to a bridge actor.
+2. The bridge resolves the component handle.
+3. The bridge checks deadline, payload size, schema, and policy.
+4. The bridge enqueues a bounded command for the reactor thread.
+5. The reactor thread owns the socket call.
+6. The reactor reports success, overload, route failure, or transport failure through Sento messaging.
+
+A successful local enqueue is not proof that the remote component received or processed the message.
+
+* DONE ZeroMQ-to-Actor Flow
+
+1. The reactor poll loop receives multipart frames.
+2. It checks frame count and hard byte limits.
+3. It decodes only the fixed transport header.
+4. It sends a typed transport envelope to the domain ingress actor.
+5. The ingress actor checks authorization, deadline, schema, component generation, and destination export.
+6. The ingress actor sends the application message to the destination component.
+7. Replies use the stored routing identity and correlation identifier.
+
+* DONE Socket Pattern Selection
+
+** ROUTER and DEALER
+
+Use ROUTER[fn:router-socket] and DEALER[fn:dealer-socket] for asynchronous requests, replies, commands, and component messaging.
+
+ROUTER receives a routing identity frame for each peer and can select the destination identity when sending.
+
+DEALER can send multiple requests without the strict send-then-receive lockstep imposed by REQ[fn:req] sockets.
+
+Enable =ZMQ_ROUTER_MANDATORY= so an unroutable send returns an error rather than disappearing silently.
+
+** XPUB and XSUB
+
+Use XPUB[fn:xpub] and XSUB[fn:xsub] behind a steerable proxy[fn:steerable-proxy] for selected cross-process event distribution.
+
+Suitable messages:
+
+- telemetry
+- cache invalidation hints
+- discovery announcements
+- non-authoritative status notifications
+- high-volume observations whose loss is acceptable
+
+PUB/SUB[fn:pub-sub] is not a durable message log. Late or disconnected subscribers can miss messages.
+
+** PUSH and PULL
+
+Use PUSH and PULL[fn:push-pull] for stateless, idempotent, one-way work distribution where no direct reply, cancellation, or key affinity is required.
+
+Use ROUTER and DEALER for work requiring replies, deadlines, cancellation, target selection, or stable routing keys.
+
+** PAIR
+
+Use PAIR[fn:pair] only for one-to-one internal control, socket monitoring, and proxy control.
+
+** REQ and REP
+
+Do not use REQ and REP[fn:rep] for the main component transport because their strict alternating state machine complicates concurrent requests and out-of-order replies.
+
+REQ and REP remain valid when an external protocol requires them. ZAP itself defines a request and reply dialog.
+
+** CLIENT and SERVER
+
+Do not require ZeroMQ CLIENT and SERVER sockets in the first implementation. They belong to the newer thread-safe socket family and have single-part message restrictions. Classic ROUTER and DEALER provide the required stable multipart model with explicit thread ownership.
+
+* DONE Transport Selection
+
+- =inproc://=: ZAP, proxy control, socket monitor channels, and internal ZeroMQ-only control inside one process
+- =ipc://=: same-host process communication when supported
+- =tcp://=: communication across hosts and containers
+
+Normal actors inside one Sento process continue to use Sento messages. =inproc://= is not a replacement local actor bus.
+
+* DONE Message Envelope
+
+The ZeroMQ routing identity remains outside the application envelope.
+
+Application frames contain:
+
+1. protocol magic and version
+2. message kind
+3. message identifier
+4. correlation identifier
+5. trace identifier
+6. source node and component
+7. target component export
+8. operation or event topic
+9. deadline
+10. content type and schema identifier
+11. flags
+12. payload
+
+Supported kinds:
+
+- tell
+- ask
+- reply
+- error
+- event
+- work
+- cancel
+- heartbeat
+
+The reactor rejects unsupported versions, wrong frame counts, oversized frames, and malformed fixed fields before payload decoding.
+
+* DONE Binding Review
+
+The reviewed Common Lisp PZMQ repository is =orivej/pzmq=.
+
+Its README describes ZeroMQ 4.0 bindings, warns that functions outside examples and tests may be untested, and states that raw performance was not fully optimized.
+
+The latest reviewed commit is:
+
+#+begin_example
+6f7b2ca02c23ea53510a9b0e0f181d5364ce9d32
+Grovel zmq_pollitem_t (#35)
+2021-05-16
+#+end_example
+
+** Decision
+
+Create =sento-zmq= as a narrow Common Lisp Foreign Function Interface[fn:cffi] system against a pinned stable libzmq package.
+
+PZMQ may be forked or used as a reference, but every used function, structure, constant, socket option, binary path, error condition, interrupt behavior, and shutdown behavior must have direct tests.
+
+Required binding surface:
+
+- context create, configure, shutdown, and terminate
+- socket create and close
+- bind, unbind, connect, and disconnect
+- multipart send and receive
+- poll
+- socket monitor
+- socket options
+- CURVE options
+- error access
+- version access
+
+Binary payloads remain unsigned-byte vectors rather than being converted through text strings.
+
+* DONE Backpressure Findings
+
+ZeroMQ high-water marks bound queued messages per peer.
+
+Depending on socket type and options, a full queue may block, return =EAGAIN=[fn:eagain], or drop a message.
+
+Recommended settings:
+
+- finite send and receive high-water marks
+- finite send timeout or non-blocking send
+- finite receive polling interval
+- =ZMQ_IMMEDIATE= on outbound sockets where pre-connection queuing would hide unavailability
+- =ZMQ_ROUTER_MANDATORY= on ROUTER sockets
+- finite =ZMQ_LINGER= so shutdown cannot wait forever
+- explicit heartbeat and reconnect policy
+
+Map =EAGAIN= to a structured overload result.
+
+Map =EHOSTUNREACH=[fn:ehostunreach] to a structured route-unavailable result.
+
+The full path must bound:
+
+- Sento sender mailbox
+- component ingress mailbox
+- reactor command queue
+- ZeroMQ peer queue
+- remote receive queue
+- remote ingress mailbox
+
+* DONE Security Findings
+
+Use CurveZMQ for encrypted and authenticated =tcp://= endpoints.
+
+Run one ZAP handler per process at:
+
+#+begin_example
+inproc://zeromq.zap.01
+#+end_example
+
+ZAP maps a remote public key to a principal[fn:principal], node, allowed component exports, allowed operations, quota class, and audit metadata.
+
+The ZAP handler starts before server sockets begin accepting peers.
+
+Use filesystem ownership and permissions for =ipc://= endpoints, while retaining application-level target and operation policy.
+
+Do not use ZeroMQ PLAIN authentication over an untrusted network because it does not provide confidentiality.
+
+* DONE Delivery Semantics
+
+ZeroMQ queues are memory-based. They are not durable storage[fn:durable-storage].
+
+Default semantics:
+
+- ROUTER/DEALER tell: at-most-once transport attempt
+- ROUTER/DEALER ask: at-most-once transport attempt with application correlation
+- PUSH/PULL work: at-most-once transport attempt
+- PUB/SUB event: best-effort delivery
+
+Automatic retries are disabled by default.
+
+A retry requires an idempotency key[fn:idempotency-key] and duplicate-handling policy.
+
+Durable replay belongs in a database, event log, RabbitMQ[fn:rabbitmq], or another declared durable broker.
+
+* DONE Monitoring Findings
+
+=zmq_socket_monitor= emits socket lifecycle events over an internal PAIR channel.
+
+Relevant events include:
+
+- connected
+- connect delayed
+- connect retried
+- listening
+- bind failed
+- accepted
+- accept failed
+- closed
+- close failed
+- disconnected
+- handshake succeeded
+- handshake protocol failure
+- handshake authentication failure
+
+A monitor collector converts these events into typed Sento runtime events.
+
+Native file descriptors reported by monitor events are transient observations and must not become stable actor identifiers.
+
+* DONE Supervision Model
+
+The reactor supervisor treats these as failures:
+
+- reactor thread exit
+- unexpected context termination
+- socket bind failure
+- repeated poll failure
+- unrecoverable serializer failure
+- command queue corruption
+- monitor channel failure
+
+Restart sequence:
+
+1. close admission
+2. mark transport not ready
+3. fail or cancel pending requests
+4. close sockets on the owning reactor thread
+5. join the reactor thread
+6. increase transport generation
+7. recreate sockets
+8. wait for endpoint and authentication readiness
+9. reopen admission
+
+Old-generation replies are rejected as stale.
+
+* DONE Shutdown Model
+
+1. Reject new transport work.
+2. Stop subscriptions and external admission.
+3. Drain the command queue until the deadline.
+4. Resolve or cancel pending requests.
+5. Pause and terminate proxies.
+6. Close sockets on owner threads with finite linger.
+7. Join reactor and monitor threads.
+8. Stop ZAP after accepting sockets are closed.
+9. Shut down and terminate the ZeroMQ context.
+10. Continue normal Sento shutdown.
+
+The context must not terminate while live sockets remain.
+
+* DONE Validation Requirements
+
+- classic sockets are never used from multiple threads
+- socket creation and closure occur on owner threads
+- malformed multipart input is rejected before decoding
+- high-water saturation returns overload results
+- mandatory routing returns route errors
+- finite linger prevents permanent shutdown blocking
+- unauthorized CURVE keys are denied
+- authorized keys map to declared principals
+- old-generation replies are rejected
+- pending asks expire and are removed
+- proxy control works under load
+- socket monitor events become Sento events
+- domain reactor failure does not stop sibling domains
+- subdomain reactor restart does not restart the whole process
+- no socket, context, monitor, proxy, or reactor thread leaks after shutdown
+
+* DONE Recommendation
+
+Implement the ZeroMQ path in this order:
+
+1. narrow CFFI binding
+2. context supervisor
+3. single domain reactor with command queue
+4. ROUTER/DEALER component messaging
+5. fixed schema envelope
+6. high-water and route errors
+7. socket monitoring
+8. CURVE and ZAP
+9. XPUB/XSUB event proxy
+10. optional PUSH/PULL work pipeline
+11. component-handle adapter
+12. benchmarks against Sento remoting and Star Router
+
+* Footnotes and Glossary
+
+[fn:zeromq] ZeroMQ: A brokerless messaging library that provides asynchronous message sockets, routing patterns, and multiple transports.
+
+[fn:sento] Sento: The Common Lisp actor framework implemented in the =mdbergmann/cl-gserver= repository.
+
+[fn:dispatcher] Dispatcher: A named pool of worker actors and threads used to execute actor mailbox work.
+
+[fn:supervision] Supervision: Starting, watching, restarting, and stopping child components according to declared policy.
+
+[fn:overload] Overload: A state where work arrives faster than the system can safely process or queue it.
+
+[fn:libzmq] libzmq: The C and C++ core engine implementing ZeroMQ sockets and protocol behavior.
+
+[fn:zmtp] ZMTP: ZeroMQ Message Transport Protocol. The wire protocol used between ZeroMQ peers.
+
+[fn:zap] ZAP: ZeroMQ Authentication Protocol. The in-process protocol used by a server socket to ask an authentication handler whether a peer is permitted.
+
+[fn:curvezmq] CurveZMQ: ZeroMQ's public-key encryption and authentication protocol based on Curve25519 cryptography.
+
+[fn:high-water-mark] High-water mark: The configured maximum number of queued messages for one ZeroMQ peer connection.
+
+[fn:mailbox] Mailbox: The queue owned by one actor for messages waiting to be processed.
+
+[fn:star-router] Star Router: StarIntel's client-facing and application-level cross-process routing layer.
+
+[fn:zmq-context] ZeroMQ context: The process-level object that owns ZeroMQ sockets and internal input and output threads.
+
+[fn:router-socket] ROUTER socket: A ZeroMQ socket that receives peer routing identities and can select a peer when sending.
+
+[fn:dealer-socket] DEALER socket: An asynchronous ZeroMQ request socket that permits multiple outstanding requests and out-of-order replies.
+
+[fn:req] REQ socket: A ZeroMQ request socket that normally alternates strictly between one send and one receive.
+
+[fn:xpub] XPUB socket: An extended publisher socket that also reports subscription activity.
+
+[fn:xsub] XSUB socket: An extended subscriber socket used to receive publications and forward subscription commands.
+
+[fn:steerable-proxy] Steerable proxy: A ZeroMQ proxy that can be paused, resumed, or terminated through a control socket.
+
+[fn:pub-sub] PUB/SUB: Publish and Subscribe. A pattern where publishers send topics and connected subscribers receive topics they selected.
+
+[fn:push-pull] PUSH/PULL: A one-way pipeline pattern that distributes work from PUSH sockets to PULL sockets.
+
+[fn:pair] PAIR socket: A socket intended for one fixed peer, commonly used for internal control or monitoring.
+
+[fn:rep] REP socket: A ZeroMQ reply socket that normally alternates strictly between receiving one request and sending one reply.
+
+[fn:cffi] CFFI: Common Foreign Function Interface. A Common Lisp library used to call C functions and represent C data.
+
+[fn:eagain] EAGAIN: An error meaning an operation cannot complete immediately and may succeed later.
+
+[fn:ehostunreach] EHOSTUNREACH: An error meaning the selected routing destination is not currently reachable.
+
+[fn:principal] Principal: The verified user, service, or node identity used for authorization.
+
+[fn:durable-storage] Durable storage: Storage designed to retain data across process restarts or machine failures.
+
+[fn:idempotency-key] Idempotency key: A unique request value that lets a receiver identify and safely handle a retried operation.
+
+[fn:rabbitmq] RabbitMQ: A message broker that routes messages through queues and exchanges and can persist messages for durable delivery.
+
+* DONE Sources
+
+- Retrieved 2026-07-19: https://github.com/zeromq/libzmq
+- Retrieved 2026-07-19: https://api.zeromq.org/4-2:zmq-socket
+- Retrieved 2026-07-19: https://libzmq.readthedocs.io/en/latest/zmq_socket.html
+- Retrieved 2026-07-19: https://libzmq.readthedocs.io/en/latest/zmq_setsockopt.html
+- Retrieved 2026-07-19: https://libzmq.readthedocs.io/en/latest/zmq_getsockopt.html
+- Retrieved 2026-07-19: https://libzmq.readthedocs.io/en/latest/zmq_socket_monitor.html
+- Retrieved 2026-07-19: https://libzmq.readthedocs.io/en/latest/zmq_proxy_steerable.html
+- Retrieved 2026-07-19: https://rfc.zeromq.org/spec/23/
+- Retrieved 2026-07-19: https://rfc.zeromq.org/spec/25/
+- Retrieved 2026-07-19: https://rfc.zeromq.org/spec/26/
+- Retrieved 2026-07-19: https://rfc.zeromq.org/spec/27/
+- Retrieved 2026-07-19: https://github.com/orivej/pzmq
+- Retrieved 2026-07-19: https://github.com/orivej/pzmq/commit/6f7b2ca02c23ea53510a9b0e0f181d5364ce9d32
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/actor-system.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/dispatcher.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/router.lisp
+- Retrieved 2026-07-19: https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/remoting/remoting.lisp

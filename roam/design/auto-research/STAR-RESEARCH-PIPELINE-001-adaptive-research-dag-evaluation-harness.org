@@ -1,0 +1,526 @@
+:PROPERTIES:
+:ID:       starintel-auto-research-pipeline-001
+:END:
+#+title: STAR-RESEARCH-PIPELINE-001 Adaptive Research DAG and Evaluation Harness
+#+description: Add bounded parallel research candidates, append-only run state, independent evaluation, and a single promotion gate while preserving one-design implementation ownership.
+#+status: APPROVED
+#+filetags: :starintel:design:auto-research:agents:dag:evaluation:actors:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                            | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-19 | Define the scoped adaptive research graph and evaluation harness | Yes                   |
+
+* Related Nodes
+
+- [[file:../../research/auto-research/STAR-RESEARCH-000-rd-agent-pipeline-analysis.org][STAR-RESEARCH-000 R&D-Agent Pipeline Analysis]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+
+* APPROVED Objective
+
+Replace the current single-chain research control flow with a bounded directed acyclic graph[fn:dag] of competing research candidates while preserving:
+
+- the canonical Org-roam[fn:org-roam] knowledge base
+- append-only status history
+- one writable owner per file
+- read-only parallel research
+- exactly zero or one active design under =roam/implement/=
+- human approval for architecture promotion
+
+The first implementation provides control and evaluation infrastructure. It does not implement semantic retrieval, automated coding, or unrestricted recursive agents.
+
+* APPROVED Scope
+
+** Included
+
+- research-run document and ledger contract
+- research-candidate document and ledger contract
+- append-only state transitions
+- parent and branch relationships
+- fixed run budgets
+- branch supervisor actor
+- bounded memory packet contract
+- deterministic candidate validation
+- independent reviewer roles
+- evaluation aggregation
+- promotion vetoes
+- single promotion gate
+- replay and ablation support
+
+** Deferred
+
+- semantic vector retrieval[fn:semantic-retrieval]
+- automated prototype execution
+- model routing across providers
+- distributed branch execution across machines
+- automatic implementation-slot activation
+- automatic merging of source code
+- generalized workflow language
+- full production dashboard
+
+Dependent designs may add those features only after this design produces measurable run records.
+
+* APPROVED Invariants
+
+1. Research branches may not directly edit canonical design, research, or index files.
+2. Each candidate owns an isolated transient workspace.
+3. Reviewer actors are read-only.
+4. Only the promotion gate may write a promoted design proposal.
+5. Promotion never places a second file in =roam/implement/=.
+6. Every state change is append-only and idempotent[fn:idempotent].
+7. Every material claim must link to evidence or be labeled inference.
+8. Every candidate records contrary evidence and a falsifier.
+9. Rejected candidates remain retrievable.
+10. A run may finish without promoting any candidate.
+
+* APPROVED Runtime Actors
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+component "Research Run Supervisor" as Run
+component "Planner Actor" as Planner
+component "Branch Supervisor" as Branches
+component "Research Branch Actors" as Researchers
+component "Memory Packet Builder" as Memory
+component "Deterministic Validator" as Validator
+component "Reviewer Pool" as Reviewers
+component "Evaluation Aggregator" as Aggregator
+component "Promotion Gate" as Promotion
+component "Append-Only Ledgers" as Ledgers
+component "Org-roam Canonical Files" as Roam
+
+Run --> Planner
+Run --> Branches
+Branches --> Researchers
+Researchers --> Memory
+Researchers --> Validator
+Validator --> Reviewers
+Reviewers --> Aggregator
+Aggregator --> Promotion
+Run --> Ledgers
+Branches --> Ledgers
+Aggregator --> Ledgers
+Promotion --> Ledgers
+Promotion --> Roam
+@enduml
+#+end_src
+
+** Research Run Supervisor
+
+The research run supervisor[fn:supervisor] owns one research run. It:
+
+- validates the run request
+- records the total budget
+- starts the planner and branch supervisor
+- limits branch count, depth, time, and token use
+- observes candidate state without editing candidate workspaces
+- stops the run when its budget or stop condition is reached
+- requests final promotion review
+- emits the run summary
+
+** Planner Actor
+
+The first planner is deterministic[fn:deterministic]. It receives fixed configuration rather than inventing its own unlimited strategy.
+
+Initial configuration:
+
+- maximum candidates: 5
+- maximum active branches: 3
+- maximum parent depth: 4
+- maximum reviewer retries: 1
+- maximum promotion count: 1
+- explicit wall-clock or token budget
+- explicit source and repository scope
+
+Later designs may make allocation adaptive. This design records enough state to test whether adaptive planning is actually better.
+
+** Branch Supervisor
+
+The branch supervisor:
+
+- creates isolated candidate identifiers and workspaces
+- assigns exact questions, inputs, output schemas, and stop conditions
+- permits parallel read-only repository inspection
+- enforces one writable owner per candidate workspace
+- records parent-child relationships
+- kills branches that exceed budget or violate scope
+- never writes canonical Org files
+
+** Memory Packet Builder
+
+The memory packet builder creates one bounded context packet containing:
+
+1. exact source section that triggered the run
+2. direct Org-roam neighbors
+3. active architecture decisions
+4. relevant rejected approaches
+5. top lexical matches
+6. selected results from sibling branches
+7. run budget and evaluation contract
+
+The packet records every included source. It has a configurable maximum byte and token size.
+
+** Deterministic Validator
+
+The validator rejects malformed candidates before model-based review. It checks:
+
+- required fields
+- valid state transition
+- valid parent identifiers
+- resolvable citations and Org links
+- evidence for material claims
+- explicit inference labels
+- measurable acceptance criteria
+- explicit contrary evidence
+- explicit falsifier
+- duplicate or near-identical candidate identifiers
+- forbidden canonical-file writes
+- scope and budget compliance
+
+** Reviewer Pool
+
+The reviewer pool contains independent actors with fixed responsibilities:
+
+- evidence reviewer: source quality and claim support
+- architecture reviewer: compatibility with current boundaries and decisions
+- novelty reviewer: duplication of existing or sibling work
+- feasibility reviewer: implementation cost, dependencies, and testability
+- adversarial reviewer: strongest failure modes and falsifying evidence
+
+Reviewers do not see each other's scores before submitting their own results.
+
+** Evaluation Aggregator
+
+The aggregator stores every raw review and produces:
+
+- median numeric score per category
+- trimmed mean overall score[fn:trimmed-mean]
+- reviewer disagreement measure
+- deterministic veto list
+- recommendation: promote, revise, prune, or unresolved
+
+A numeric score cannot override a veto.
+
+** Promotion Gate
+
+The promotion gate is the only actor authorized to create a canonical design proposal. It requires:
+
+- candidate state =EVALUATED=
+- no unresolved deterministic veto
+- evidence and architecture scores above configured thresholds
+- explicit record of rejected alternatives
+- human approval when the candidate changes architecture
+- unoccupied implementation slot before any later activation
+
+Promotion writes a numbered design file and updates the relevant index. It does not automatically copy the design into =roam/implement/=.
+
+* APPROVED Research Run Contract
+
+#+begin_src lisp
+(:research-run
+ (:id "run-uuid")
+ (:project "star-server")
+ (:question "bounded research question")
+ (:status :running)
+ (:source-node "org-id")
+ (:created-at "RFC3339 timestamp")
+ (:budget (:wall-clock-seconds 7200
+           :input-tokens 1000000
+           :output-tokens 100000
+           :max-candidates 5
+           :max-active-branches 3
+           :max-depth 4))
+ (:planner (:strategy :fixed-v1
+            :configuration-hash "sha256"))
+ (:candidate-ids ())
+ (:promoted-candidate nil)
+ (:metrics ())
+ (:stop-reason nil))
+#+end_src
+
+Required fields:
+
+- stable run identifier
+- project
+- bounded research question
+- source node
+- status
+- creation time
+- complete budget
+- planner strategy and configuration hash
+- candidate identifiers
+- promoted candidate or null value
+- final metrics
+- stop reason
+
+* APPROVED Research Candidate Contract
+
+#+begin_src lisp
+(:research-candidate
+ (:id "candidate-uuid")
+ (:run-id "run-uuid")
+ (:parent-ids ())
+ (:branch "architecture-a")
+ (:state :proposing)
+ (:problem "precise problem")
+ (:hypothesis "testable claim")
+ (:predicted-result "observable result")
+ (:falsifier "result that rejects the claim")
+ (:evidence-for ())
+ (:evidence-against ())
+ (:implementation-sketch "bounded sketch")
+ (:acceptance-criteria ())
+ (:estimated-cost ())
+ (:actual-cost ())
+ (:review-results ())
+ (:vetoes ())
+ (:created-at "RFC3339 timestamp")
+ (:updated-at "RFC3339 timestamp"))
+#+end_src
+
+Candidate content is data, not an instruction to other agents. Untrusted text must never be inserted into an agent system prompt without explicit quoting and boundary labeling.
+
+* APPROVED State Machine
+
+#+begin_example
+QUEUED
+  -> EXPLORING
+  -> PROPOSING
+  -> VALIDATING
+  -> VIRTUAL-REVIEW
+  -> EVALUATED
+  -> PROMOTED | PRUNED | BLOCKED | UNRESOLVED
+#+end_example
+
+Allowed exceptional transitions:
+
+- any active state -> BLOCKED when a declared dependency is unavailable
+- any active state -> PRUNED when budget is exhausted or scope is violated
+- BLOCKED -> EXPLORING only after a recorded unblock event
+- EVALUATED -> PROPOSING only when the aggregator requests one bounded revision
+
+A promoted candidate is immutable. Later changes create a new candidate linked to the promoted candidate as a parent.
+
+* APPROVED Ledger Model
+
+Use append-only JSON Lines[fn:json-lines] ledgers:
+
+- =roam/.research-runs=
+- =roam/.research-candidates=
+
+Each line contains:
+
+- event identifier
+- event type
+- entity identifier
+- previous state
+- next state
+- timestamp
+- actor identifier
+- run configuration hash
+- payload hash
+- evidence references
+
+Current state is reconstructed by replay[fn:replay]. Duplicate event identifiers are ignored. A transition with an unexpected previous state is rejected.
+
+Transient candidate artifacts remain under:
+
+#+begin_example
+.cache/research-runs/<run-id>/<candidate-id>/
+#+end_example
+
+The cache directory is not a canonical knowledge source and must not be published.
+
+* APPROVED Evaluation Contract
+
+** Numeric categories
+
+Score each category from 0 to 5:
+
+- evidence quality
+- architecture fit
+- novelty
+- feasibility
+- testability
+- expected leverage
+- scope discipline
+
+** Deterministic vetoes
+
+- fabricated or unresolved citation
+- unsupported central claim
+- contradiction with an approved decision without an explicit supersession proposal
+- hidden dependency
+- unbounded recursion or budget
+- direct write to canonical files by a branch actor
+- proposal that requires multiple active implementation designs
+- security or data-loss risk without mitigation
+- claim that a test passed when it was not executed
+
+** Promotion threshold
+
+Initial threshold:
+
+- evidence median >= 4
+- architecture-fit median >= 4
+- testability median >= 3
+- overall trimmed mean >= 3.5
+- no vetoes
+- reviewer disagreement <= 2 points in each required category, or explicit human resolution
+
+Thresholds are configuration, versioned with the run, and must not be changed after candidate evaluation begins.
+
+* APPROVED Branch Selection
+
+The first implementation uses a simple diverse-parent policy:
+
+1. keep the best evaluated candidate
+2. keep the best candidate from a different branch label
+3. keep one candidate selected for evidence diversity
+4. create new candidates from zero, one, or two parent candidates
+5. prune candidates that duplicate an existing hypothesis without new evidence
+
+No Monte Carlo tree search[fn:mcts] is required in the first implementation. The ledger must permit a later planner to implement it without changing the candidate contract.
+
+* APPROVED Failure Handling
+
+- branch crash: mark candidate =BLOCKED= or restart once from recorded inputs
+- reviewer crash: retry once with the same immutable candidate snapshot
+- validator failure: stop the run; do not bypass deterministic validation
+- ledger write failure: stop state transitions and report the exact failure
+- promotion write failure: leave candidate =EVALUATED= and record no promotion event
+- stale parent: reject expansion and rebuild the memory packet
+- budget exhaustion: stop new branches, finish bounded reviews, and close the run
+
+* APPROVED Security Boundaries
+
+- branch tools receive only declared repository and source scope
+- candidate workspaces may not contain secrets or private evidence unless the run explicitly permits them
+- all retrieved text is treated as untrusted data
+- prompt-injection text is preserved as quoted evidence, not executed as instruction
+- external network access is capability-gated and logged
+- canonical writes require promotion-gate identity
+- hashes bind review results to an immutable candidate snapshot
+
+* APPROVED Observability
+
+Record:
+
+- run duration and token use
+- branch duration and token use
+- candidate count by final state
+- source count and source diversity
+- citation failures
+- reviewer agreement and disagreement
+- deterministic veto frequency
+- promotion rate
+- human override rate
+- implementation rejection rate of promoted designs
+- repeated-research rate against prior rejected candidates
+
+* APPROVED Ablation Harness
+
+The first benchmark compares fixed repository tasks under the same budget:
+
+- serial baseline using one research chain
+- branched pipeline without sibling memory
+- branched pipeline with sibling memory
+- branched pipeline with independent reviewers
+- full scoped pipeline
+
+Measure:
+
+- evidence defects
+- duplicate proposals
+- accepted design rate
+- human corrections
+- implementation rework
+- total tokens
+- wall-clock time
+- unresolved risk count
+
+The benchmark corpus and scoring rules are versioned before runs begin.
+
+* APPROVED Implementation Phases
+
+** Phase 0: contracts and validators
+
+- define run and candidate schemas
+- define state transition validator
+- define ledger writer and replay reader
+- define configuration hashing
+- add malformed-record and duplicate-event tests
+
+** Phase 1: branch supervisor
+
+- create bounded candidate workspaces
+- enforce branch budgets
+- record parent-child edges
+- build bounded memory packets
+- prevent canonical writes
+
+** Phase 2: evaluation harness
+
+- add deterministic validation
+- add reviewer result schema
+- add independent reviewer execution
+- add score aggregation and vetoes
+- add disagreement reporting
+
+** Phase 3: promotion gate
+
+- select one eligible candidate
+- create a numbered design proposal
+- update the project index
+- record alternatives and rejection reasons
+- require human approval for architecture changes
+
+** Phase 4: ablation
+
+- define fixed repository research tasks
+- run serial and branched configurations
+- compare quality, cost, and rework
+- retain raw run ledgers and summaries
+
+* APPROVED Acceptance Criteria
+
+- one run can create at least three isolated candidates
+- candidates record zero, one, or two parents
+- candidate state can be reconstructed entirely from append-only events
+- an invalid transition is rejected
+- duplicate events are idempotent
+- branch actors cannot write beneath =roam/design/=, =roam/research/=, or =roam/indexes/=
+- unsupported central claims trigger a veto
+- five independent reviewer roles produce immutable results
+- the aggregator reports disagreement and does not hide raw reviews
+- only one candidate may be promoted per run
+- promotion does not activate the implementation slot
+- a run may end unresolved without fabricating a winner
+- rejected candidates remain searchable by identifier, hypothesis, and evidence
+- serial and branched modes can run against the same fixed benchmark and budget
+- exact token, time, source, and outcome metrics are reported
+
+* Footnotes and Glossary
+
+[fn:dag] Directed acyclic graph, or DAG: A graph whose connections point from earlier nodes to later nodes and never form a cycle back to an ancestor.
+
+[fn:org-roam] Org-roam: An Emacs package that stores linked Org files as a knowledge graph with stable identifiers and backlinks.
+
+[fn:semantic-retrieval] Semantic retrieval: Finding text by similarity of meaning rather than only exact words.
+
+[fn:idempotent] Idempotent: Safe to repeat because applying the same event more than once has the same result as applying it once.
+
+[fn:supervisor] Supervisor: An actor that starts, watches, limits, restarts, and stops child actors according to declared rules.
+
+[fn:deterministic] Deterministic: Producing the same result from the same inputs and configuration.
+
+[fn:trimmed-mean] Trimmed mean: An average calculated after removing the highest and lowest scores to reduce the effect of an outlier.
+
+[fn:json-lines] JSON Lines: A text format containing one complete JSON object on each line so events can be appended and processed independently.
+
+[fn:replay] Replay: Reconstructing current state by processing recorded events in their original order.
+
+[fn:mcts] Monte Carlo tree search, or MCTS: A search method that repeatedly selects, expands, evaluates, and revisits branches to concentrate work on promising paths while preserving some exploration.

@@ -1,0 +1,812 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-000
+:END:
+#+title: STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations
+#+description: Define the minimum language, execution, persistence, actor, Prolog, error, debugging, and testing architecture needed to implement Star-Lang.
+#+status: DONE
+#+filetags: :starintel:research:star-lang:dsl:common-lisp:actors:prolog:execution:replay:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                               | Did nsaspy approve it |
+|---------+------------+---------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-20 | Complete the bounded Star-Lang language-design foundation research | Yes                   |
+
+* Related Nodes
+
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-001-adaptive-research-dag-evaluation-harness.org][STAR-RESEARCH-PIPELINE-001 Adaptive Research DAG and Evaluation Harness]]
+- [[file:../auto-research/STAR-RESEARCH-001-logic-engine-selection-for-adard.org][STAR-RESEARCH-001 Logic Engine Selection for ADARD]]
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+
+* Research Question
+
+What is the smallest language architecture that lets StarIntel authors declare resumable analysis runs[fn:analysis-run], coordinate supervised actors[fn:actor-model], invoke Prolog[fn:prolog] through explicit reasoning capabilities, preserve complete provenance, and recover through declared Common Lisp conditions and restarts without becoming a new general-purpose programming language?
+
+* Decision Summary
+
+Star-Lang should be a declarative domain-specific language[fn:dsl] embedded in Common Lisp[fn:common-lisp]. Its source syntax should use S-expressions[fn:s-expression], but source forms must be treated as data and compiled through a private reader, syntax objects, a checked core intermediate representation[fn:ir], and an immutable execution plan. Star-Lang source must never be passed directly to Common Lisp =EVAL=.
+
+The first version should provide:
+
+- a small closed set of declarative forms
+- source locations on every syntax and plan node
+- schema and contract checking
+- explicit effect and capability declarations
+- deterministic orchestration separated from effectful actor work
+- append-only run history and compatible checkpoints
+- named, typed, auditable conditions and restarts
+- actor message envelopes with idempotency keys
+- an isolated Prolog capability boundary
+- expansion, checking, planning, tracing, and replay tools
+
+The first version should not provide:
+
+- arbitrary Common Lisp escapes
+- user-defined reader macros
+- unrestricted compile-time execution
+- raw continuation persistence
+- a general distributed workflow engine
+- unrestricted plugin loading
+- native-code generation
+- automatic architecture promotion
+- full polymorphic type or effect inference
+
+* Language Boundary
+
+Star-Lang is a language for declaring an analysis and its recovery policy. It is not the actor implementation language, rule language, storage query language, or user-interface language.
+
+A Star-Lang program declares:
+
+1. typed inputs and expected outputs
+2. allowed effects and capabilities
+3. bounded resource policy
+4. deterministic control relationships
+5. actor commands and awaited results
+6. reasoning requests
+7. checkpoint boundaries
+8. conditions and permitted restarts
+9. emitted artifacts and provenance
+
+Common Lisp implements the compiler, interpreter, runtime adapters, actors, and tooling. Prolog implements selected logic capabilities. Actor libraries implement collection, normalization, model invocation, and storage effects.
+
+* Proposed Surface Syntax
+
+#+begin_src lisp
+(star:analysis investigate-target
+  (:version 1)
+  (:inputs ((target star:target-document)))
+  (:outputs ((report star:analysis-report)))
+  (:effects (:read-dataset
+             :network
+             :llm
+             :prolog
+             :write-artifact
+             :human-approval))
+  (:policy ((:max-wall-time "PT30M")
+            (:max-cost-usd 5.00)
+            (:max-parallelism 4)))
+
+  (star:checkpoint :accepted-input)
+
+  (star:parallel
+    (star:collect
+      :actor star.actors.news:collector
+      :request (star:news-request :target target)
+      :as news)
+    (star:collect
+      :actor star.actors.registry:collector
+      :request (star:registry-request :target target)
+      :as registry))
+
+  (star:let ((documents
+              (star:normalize :inputs (news registry))))
+    (star:reason
+      :capability :deterministic-rule-evaluation
+      :facts documents
+      :query (star:query (risk target ?reason))
+      :as proofs))
+
+  (star:on-condition star:source-unavailable
+    (star:restart :retry :max-attempts 2)
+    (star:restart :use-value :value ())
+    (star:restart :request-human))
+
+  (star:checkpoint :reasoning-complete)
+  (star:emit :type star:analysis-report
+             :from (documents proofs)
+             :as report))
+#+end_src
+
+This syntax is illustrative. Form names and argument schemas become stable only after parser and core-model fixtures pass review.
+
+* Required Core Forms
+
+The surface language may add convenience forms, but every form must expand into this small core:
+
+| Core form | Purpose | Required property |
+|-----------+---------+-------------------|
+| =analysis= | Declare one versioned analysis definition | Closed metadata schema |
+| =bind= | Bind a checked value to a name | No hidden mutation |
+| =sequence= | Order dependent plan nodes | Deterministic order |
+| =parallel= | Declare independent plan nodes | Effect-conflict validation |
+| =command= | Request one external effect | Stable command identifier |
+| =await= | Suspend until a matching result event exists | Durable correlation |
+| =reason= | Request a declared reasoning capability | Isolated facts and query |
+| =checkpoint= | Declare a resumable state boundary | Compatibility metadata |
+| =branch= | Select among checked alternatives | Recorded decision input |
+| =condition= | Signal a typed runtime problem | Structured payload |
+| =restart= | Declare a legal recovery action | Named and auditable |
+| =emit= | Produce a typed artifact or result | Provenance attachment |
+
+Convenience forms such as =collect=, =normalize=, =choose=, and =on-condition= must be syntax transformations[fn:macro] over the core rather than independent runtime mechanisms.
+
+* Compiler Architecture
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+artifact "Star-Lang Source\nS-expressions" as Source
+component "Safe Reader" as Reader
+component "Syntax Objects\nwith Source Spans" as Syntax
+component "DSL Expander" as Expander
+component "Schema, Type, and\nEffect Checker" as Checker
+component "Core IR" as IR
+component "Plan Compiler" as Compiler
+artifact "Immutable Run Plan" as Plan
+component "Interpreter / Replay Engine" as Runtime
+
+Source --> Reader
+Reader --> Syntax
+Syntax --> Expander
+Expander --> Checker
+Checker --> IR
+IR --> Compiler
+Compiler --> Plan
+Plan --> Runtime
+
+note bottom of Reader
+*READ-EVAL* = NIL
+private readtable
+closed literal grammar
+end note
+
+note bottom of Expander
+No file, network, model,
+actor, or Prolog effects
+end note
+@enduml
+#+end_src
+
+The compiler must use the following phases:
+
+1. The safe reader[fn:reader] converts text into syntax objects[fn:syntax-object] carrying source spans[fn:source-span].
+2. The expander resolves only registered Star-Lang forms and rewrites convenience syntax into the core.
+3. The checker validates names, schemas, contracts[fn:contract], types, effect declarations, capability requirements, restart legality, and bounded policies.
+4. The core intermediate representation contains no reader or macro objects and no executable host-language forms.
+5. The plan compiler assigns stable node identifiers, dependencies, effect sets, checkpoints, and command templates.
+6. The interpreter executes or replays the immutable plan against an append-only history.
+
+* Safe Reader and Symbol Resolution
+
+Common Lisp reading is programmable and can execute read-time evaluation through sharpsign-dot when =*READ-EVAL*= is true.[fn:source-cl-read-eval] Star-Lang must therefore use all of these controls:
+
+- bind =*READ-EVAL*= to =NIL=
+- use a private readtable[fn:readtable]
+- permit only parentheses, symbols, keywords, strings, integers, bounded ratios, booleans, and explicitly registered literals
+- reject circular notation, pathname literals, structure literals, arbitrary dispatch macros, and implementation-specific objects
+- intern language symbols in a private package or resolve them without interning untrusted names globally
+- preserve the original file, line, column, and byte range
+- impose maximum source size, nesting depth, token length, collection length, and numeric magnitude
+- return structured parse conditions rather than entering an interactive debugger
+
+The reader produces data. It never invokes =COMPILE=, =LOAD=, =EVAL=, actor code, Prolog, the network, or storage.
+
+* Expansion and Macro Policy
+
+Racket demonstrates that a language can define its own module boundary, reader, and hygienic macro system while preserving source-aware tooling.[fn:source-racket-languages][fn:source-racket-macros] Star-Lang should adopt the separation of reader, expander, and runtime, but it does not need to reproduce Racket's complete macro system.
+
+Version 0.1 should use registered expander functions with these rules:
+
+- one expander owns one surface form
+- input and output are syntax objects
+- output must contain only registered core forms and checked literals
+- expansion is deterministic and side-effect free
+- expansion has a bounded step count and output size
+- every generated node retains an origin chain to the source form
+- bindings are represented by compiler-issued identifiers, not text substitution
+- an expansion cannot inspect the repository, environment variables, clock, random generator, network, model, or Prolog database
+
+This provides the binding safety normally associated with hygienic macros[fn:hygiene] without committing the first implementation to a general macro language.
+
+* Type, Schema, and Contract Model
+
+Version 0.1 should use explicit schemas and algebraic data types[fn:algebraic-data-type], not a full Hindley-Milner-style inference engine.
+
+Required classes of type:
+
+- scalar values: string, integer, boolean, timestamp, duration, identifier, hash, URI
+- document references: dataset, schema, document, artifact, evidence, actor, capability
+- collections: list, set, map, optional, result
+- domain records: target document, collection request, proof trace, review, report
+- runtime records: run, plan node, command, event, checkpoint, condition, restart
+
+Each actor command and result must name a versioned input and output schema. The compiler checks declared relationships; the runtime revalidates data crossing an actor or process boundary.
+
+A contract failure before plan creation is a compile error. A contract failure in an external result is a runtime condition and cannot be silently coerced.
+
+* Effects and Capabilities
+
+An effect system[fn:effect-system] records which externally observable operations an expression may perform. A capability[fn:capability] is an explicit authority to perform a particular operation. Star-Lang needs a bounded version of both concepts rather than a research-grade general effect calculus.
+
+Initial effect set:
+
+- =:read-repository=
+- =:read-dataset=
+- =:network=
+- =:llm=
+- =:prolog=
+- =:write-transient=
+- =:write-artifact=
+- =:write-canonical-proposal=
+- =:human-approval=
+- =:clock=
+- =:random=
+
+Rules:
+
+1. Every effectful core node declares its required effect.
+2. The analysis header declares the maximum effect set.
+3. The compiler rejects a node whose effect is not declared.
+4. Runtime policy narrows, but never widens, the compiled effect set.
+5. Actor routing requires a matching capability token or policy grant.
+6. Effects that can change external state require an idempotency key[fn:idempotency].
+7. Clock and random values are effects whose results are written to history.
+8. Replay reuses recorded effect results instead of repeating the operation.
+
+Koka's effect typing demonstrates that effect information can be attached to function types and used to reason about control effects.[fn:source-koka-book][fn:source-effect-systems] Star-Lang only needs explicit declared sets in version 0.1. Inference can be added after real programs expose repeated annotation problems.
+
+* Operational Semantics
+
+The runtime state is:
+
+#+begin_example
+<plan, cursor, bindings, history, pending-commands, status>
+#+end_example
+
+The formal semantics[fn:formal-semantics] should define a small-step transition relation[fn:small-step]:
+
+#+begin_example
+<plan, state, history> -> <plan, state', history'>
+#+end_example
+
+Required rules:
+
+- Pure nodes compute deterministically from immutable bindings.
+- A command node appends one command event and moves to =AWAITING=.
+- A matching result event binds the checked result and advances the cursor.
+- A previously completed command is not dispatched again during replay.
+- A parallel block may advance any ready node whose declared effects do not conflict.
+- A condition node records the condition and the set of legal restarts.
+- A restart event selects one legal transition and records its parameters.
+- An emit node records the artifact identifier, schema, content hash, and provenance.
+- The same plan hash and event history must reconstruct the same logical state.
+
+The reference interpreter is authoritative in version 0.1. Any later optimizer or compiled executor must produce the same observable event history for the same plan and effect results.
+
+* Resumable Analysis Runs
+
+An analysis run is a durable logical execution of one immutable plan. It is not a queue job whose only meaningful states are pending, running, and finished.
+
+Temporal's workflow model shows the useful separation: deterministic orchestration is reconstructed from event history, while external operations execute separately and return recorded results.[fn:source-temporal-workflows][fn:source-temporal-execution] Star-Lang should implement that semantic boundary without importing Temporal as a required runtime.
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+component "Plan Interpreter" as Interpreter
+database "Append-Only Event Journal" as Journal
+database "Checkpoint Store" as Checkpoints
+queue "Command Outbox" as Outbox
+component "Effect Actor" as Actor
+
+Interpreter --> Journal : append command event
+Interpreter --> Outbox : publish idempotent command
+Outbox --> Actor : deliver
+Actor --> Journal : append result or condition
+Journal --> Interpreter : wake matching run
+Interpreter --> Checkpoints : write compatible snapshot
+
+component "Restarted Interpreter" as Restarted
+Journal --> Restarted : replay authoritative history
+Checkpoints --> Restarted : optional acceleration
+Restarted --> Journal : continue from reconstructed state
+
+note bottom of Journal
+Source of truth for logical state
+end note
+
+note bottom of Checkpoints
+Optimization, never authority
+end note
+@enduml
+#+end_src
+
+The event journal[fn:event-sourcing] is authoritative. A checkpoint[fn:checkpoint] accelerates recovery but may be discarded and rebuilt by replay[fn:replay].
+
+Each event must contain:
+
+- event identifier
+- run identifier
+- analysis definition identifier and version
+- plan hash[fn:plan-hash]
+- plan-node identifier
+- event type and schema version
+- causation and correlation identifiers
+- attempt number
+- actor or runtime identity
+- timestamp supplied as a recorded clock effect
+- input and output hashes
+- effect and capability identifiers
+- structured payload or artifact reference
+
+* Checkpoint Compatibility
+
+A checkpoint must store declarative runtime state, not an implementation continuation[fn:continuation]. It contains:
+
+- plan hash and analysis version
+- interpreter and checkpoint schema versions
+- current cursor or ready-node set
+- immutable bindings or references to hashed values
+- completed command identifiers and result references
+- pending awaits and correlation identifiers
+- active condition and legal restart descriptors
+- resource counters
+- last included journal event identifier
+
+Resume is allowed when:
+
+- the plan hash matches; or
+- a reviewed migration explicitly maps the old plan and checkpoint schema to the new version.
+
+A changed plan must never silently resume from an old cursor. The runtime must either replay a compatible version, apply a recorded migration, or begin a new run linked to the prior run.
+
+* Conditions and Restarts
+
+The Common Lisp condition system[fn:condition-system] separates detecting a condition from selecting a recovery action. A restart[fn:restart] exposes a recovery transfer that handlers may choose without forcing the signaling code to own policy.[fn:source-cl-conditions][fn:source-cl-handler-bind][fn:source-cl-restart-case]
+
+Star-Lang should preserve that separation while making it durable and non-interactive.
+
+Initial conditions:
+
+- =source-unavailable=
+- =rate-limited=
+- =schema-mismatch=
+- =capability-unavailable=
+- =reasoner-timeout=
+- =budget-exhausted=
+- =policy-denied=
+- =artifact-write-failed=
+- =human-decision-required=
+- =incompatible-checkpoint=
+
+Initial restarts:
+
+- =retry=
+- =retry-after=
+- =use-value=
+- =skip-branch=
+- =select-fallback-capability=
+- =request-human=
+- =abort-analysis=
+
+#+begin_src plantuml
+@startuml
+[*] --> RUNNING
+RUNNING --> AWAITING : command emitted
+AWAITING --> RUNNING : valid result recorded
+RUNNING --> CONDITION : condition recorded
+AWAITING --> CONDITION : failure recorded
+
+CONDITION --> RUNNING : retry / use-value / fallback
+CONDITION --> WAITING_HUMAN : request-human
+WAITING_HUMAN --> RUNNING : approved restart event
+CONDITION --> FAILED : abort-analysis
+RUNNING --> COMPLETED : outputs emitted
+
+COMPLETED --> [*]
+FAILED --> [*]
+@enduml
+#+end_src
+
+Rules:
+
+1. Conditions and restart arguments have versioned schemas.
+2. The compiler verifies that each declared restart is legal for the condition and surrounding form.
+3. The runtime records the available restart set when signaling the condition.
+4. An unattended policy may select only a restart explicitly allowed by the analysis and runtime policy.
+5. Human selection is recorded as an event with identity and supplied parameters.
+6. A retry preserves the original command identifier and increments the attempt number according to the actor protocol.
+7. Restarts are declarative descriptors; raw Common Lisp restart closures are not persisted.
+
+* Actor and Prolog Integration
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+component "Analysis Run Supervisor" as Supervisor
+component "Plan Interpreter" as Interpreter
+component "Capability Router" as Router
+queue "Durable Command Outbox" as Outbox
+component "Collection / Model / Storage Actors" as Actors
+component "Prolog Adapter Actor" as Adapter
+component "Logic Capability Router" as LogicRouter
+component "Isolated Logic Engine Worker" as Logic
+component "Event Journal" as Journal
+
+Supervisor --> Interpreter
+Interpreter --> Router : checked command
+Router --> Outbox
+Outbox --> Actors
+Outbox --> Adapter : reasoning command
+Adapter --> LogicRouter : capability + immutable facts/query
+LogicRouter --> Logic : selected engine request
+Actors --> Journal : result / condition
+Logic --> Adapter : answers + proof + engine metadata
+Adapter --> Journal : checked reasoning result
+Journal --> Interpreter : correlated event
+Supervisor --> Journal : lifecycle events
+@enduml
+#+end_src
+
+The analysis run supervisor[fn:supervisor] owns lifecycle, budget, cancellation, and child actors. It does not perform collection or reasoning itself.
+
+Every actor command envelope must include:
+
+#+begin_src lisp
+(:star-command
+ (:schema-version 1)
+ (:run-id "run-uuid")
+ (:plan-hash "sha256")
+ (:plan-node-id "node-id")
+ (:command-id "stable-command-id")
+ (:attempt 1)
+ (:causation-id "event-id")
+ (:correlation-id "correlation-id")
+ (:idempotency-key "stable-key")
+ (:capability :news-collection)
+ (:effects (:network :write-transient))
+ (:input-schema "star.news-request/1")
+ (:input-hash "sha256")
+ (:payload-ref "artifact-or-inline-reference"))
+#+end_src
+
+The Prolog foreign-function interface[fn:ffi] or process adapter must expose a capability request rather than a shared mutable Prolog database. SWI-Prolog provides explicit foreign frames and predicate-call interfaces, which are suitable implementation primitives when embedding is selected.[fn:source-swi-frame][fn:source-swi-call]
+
+A reasoning request contains:
+
+- capability identifier such as deterministic rule evaluation, probabilistic query, tabled recursion, explanation, or bulk Datalog closure
+- isolated fact set or immutable fact artifact
+- rule-set identifier and version
+- query and output schema
+- time, inference, and memory limits
+- required proof-trace[fn:proof-trace] level
+- engine selection policy
+
+A reasoning result contains:
+
+- selected engine and version
+- adapter version
+- answer bindings
+- proof, explanation, or derivation artifact
+- input, rule-set, and output hashes
+- completeness or approximation status
+- resource use
+- structured warnings and conditions
+
+The engine is selected through the capability-routing study in [[file:../auto-research/STAR-RESEARCH-001-logic-engine-selection-for-adard.org][STAR-RESEARCH-001 Logic Engine Selection for ADARD]]. Star-Lang must not encode engine-specific syntax in the core language.
+
+* Supervision and Failure Isolation
+
+Erlang/OTP supervision trees separate worker behavior from restart policy and organize processes into bounded fault domains.[fn:source-erlang-design][fn:source-erlang-supervisor] Star-Lang should declare the logical recovery policy, while the actor runtime implements process supervision.
+
+Required separation:
+
+- actor crash: actor supervisor restarts or replaces the worker
+- command failure: actor emits a structured result condition
+- analysis recovery: Star-Lang policy selects a declared restart
+- journal failure: stop state advancement; never acknowledge unrecorded progress
+- checkpoint failure: continue from journal when safe and record degraded operation
+- Prolog worker crash: discard isolated engine state and retry only through a legal restart
+- cancellation: record cancellation request and completion; do not infer cancellation from process death alone
+
+* Debugging and Tracing
+
+Every syntax, core, plan, command, event, condition, restart, and output node must retain a source map from generated representation to the original source span. LLVM's debug metadata demonstrates the value of preserving source-level locations through transformed representations.[fn:source-llvm-debug]
+
+Required commands or Emacs entry points:
+
+- =star-lang expand=: show surface syntax expanded to core forms
+- =star-lang check=: report parse, name, schema, type, effect, capability, and restart errors
+- =star-lang plan=: show the immutable execution directed acyclic graph[fn:dag]
+- =star-lang trace=: show events grouped by source form, actor, command, and causation
+- =star-lang replay=: reconstruct state at an event or checkpoint
+- =star-lang explain=: show why a node is ready, blocked, skipped, retried, or failed
+
+Trace output must distinguish:
+
+- source expansion
+- pure evaluation
+- command creation
+- delivery attempts
+- actor execution
+- result validation
+- condition signaling
+- restart selection
+- checkpoint creation
+- replayed versus newly executed effects
+
+* Incremental Compilation and Caching
+
+Incremental compilation[fn:incremental-compilation] should begin with content-addressed phase caches rather than a complex dependency engine.
+
+Version 0.1 cache keys:
+
+- parsed syntax: source content hash + reader version
+- expanded core: syntax hash + expander registry hash
+- checked core: core hash + schema registry hash + checker version
+- run plan: checked-core hash + plan compiler version + policy schema version
+
+Salsa's red-green algorithm and the Rust compiler's dependency graph show how a later query-directed incremental system can validate only dependencies that may have changed.[fn:source-salsa][fn:source-rust-incremental] Star-Lang should add that complexity only after profiling shows phase-cache invalidation is too broad.
+
+* Optimization Rules
+
+Optimization is permitted only after type, effect, and dependency checking. Initial semantics-preserving passes:
+
+- constant folding of pure literal expressions
+- dead-step elimination[fn:dead-step] for unreachable pure nodes
+- common-subexpression reuse[fn:common-subexpression] for identical pure queries
+- parallel scheduling of dependency-independent nodes with non-conflicting effects
+- immutable artifact reuse by content hash
+- checkpoint coalescing when recovery guarantees are unchanged
+
+Forbidden without a proof or explicit semantic rule:
+
+- reordering network, storage, model, clock, random, approval, or canonical-write effects
+- combining commands with different idempotency or provenance requirements
+- removing an effect because its result appears unused when the effect itself is externally observable
+- changing retry counts or restart selection
+- dropping proof or negative-result artifacts
+
+* Testing Methodology
+
+Required test layers:
+
+1. Reader rejection fixtures for every forbidden reader form and size limit.
+2. Golden tests[fn:golden-test] for source-to-core expansion and source maps.
+3. Positive and negative schema, type, effect, capability, and restart checks.
+4. Property tests[fn:property-test] for parser round trips, identifier stability, event replay, and idempotency.
+5. State-machine tests for every legal and illegal run transition.
+6. Differential tests comparing the reference interpreter with any optimized executor.
+7. Replay tests that crash after every event boundary and reconstruct identical logical state.
+8. Fault injection for actor crashes, duplicate delivery, delayed results, journal failure, corrupt checkpoints, Prolog timeout, and human-decision waits.
+9. Actor adapter contract tests using mock and replay transports.
+10. Prolog adapter tests covering isolation, proof metadata, timeout, cancellation, and engine fallback.
+11. Concurrency tests for parallel branches, effect conflicts, and deterministic final bindings.
+12. Migration tests for every accepted analysis, event, plan, and checkpoint schema change.
+
+A test that performs an external effect must record whether it used a mock, replay fixture, sandbox, or live service. Tests must never claim replay safety from a run that did not inject failures.
+
+* Direct Comparisons and Adopted Lessons
+
+| Source system or technique | Needed lesson for Star-Lang | Do not copy blindly |
+|----------------------------+-----------------------------+---------------------|
+| Racket languages and macros | Separate reader, expander, binding, and runtime; retain source-aware syntax | A general user-extensible macro ecosystem |
+| Common Lisp conditions and restarts | Separate problem detection from recovery selection | Persisting dynamic restart closures |
+| Temporal workflows | Reconstruct deterministic orchestration from recorded effect results | Requiring Temporal or adopting its complete product model |
+| Erlang/OTP supervision | Separate worker crashes, process restart policy, and logical analysis recovery | Treating process restart as successful logical recovery |
+| SWI-Prolog foreign interface | Use explicit query scopes and checked predicate calls | Shared mutable case knowledge across runs |
+| Koka effect system | Make effects visible and checkable | Full inferred effect polymorphism in version 0.1 |
+| Salsa and Rust incremental compilation | Cache by dependencies and validate changed queries | Building a complex query engine before profiling |
+| LLVM source debugging | Preserve source locations across transformations | Exposing generated implementation details as the user model |
+
+* Implementation Order
+
+** Phase 0: Core representation
+
+- safe reader
+- source spans and origin chains
+- syntax-object representation
+- closed core forms
+- stable identifiers
+- parser and expansion fixtures
+
+** Phase 1: Checker and reference interpreter
+
+- schema and contract registry
+- explicit type checker
+- effect and capability checker
+- restart legality checker
+- core interpreter
+- immutable plan compiler
+- expand, check, and plan commands
+
+** Phase 2: Durable execution
+
+- append-only event schema
+- event journal adapter
+- deterministic replay
+- checkpoint schema and store
+- outbox and result correlation
+- crash-at-every-boundary test harness
+
+** Phase 3: Actor and reasoning adapters
+
+- supervised run actor
+- command router
+- actor envelope and idempotency contract
+- mock and replay actor transports
+- Prolog capability adapter
+- proof and engine metadata validation
+
+** Phase 4: Recovery and tooling
+
+- durable condition and restart events
+- unattended restart policies
+- human-decision flow
+- trace, replay, and explain commands
+- source-mapped diagnostics
+
+** Phase 5: Measured optimization
+
+- phase caches
+- pure-plan optimization passes
+- scheduling by dependency and effect conflict
+- incremental query graph only when justified by measurements
+
+* Acceptance Criteria
+
+- Star-Lang source cannot execute Common Lisp reader or evaluator code.
+- Every accepted form expands into the closed core.
+- Every core and plan node maps back to a source span.
+- Undeclared effects, unavailable capabilities, invalid schemas, and illegal restarts fail before execution.
+- A fixed plan and event history reconstruct identical logical state after a crash.
+- Replayed runs do not repeat completed external effects.
+- Duplicate actor delivery does not create duplicate logical results or external writes.
+- Checkpoints can be deleted without destroying recoverability.
+- An incompatible checkpoint is rejected or migrated explicitly.
+- Conditions expose only declared, typed restarts.
+- Actor crashes and logical recovery remain separate recorded events.
+- Prolog reasoning runs in an isolated scope and returns engine, rule, proof, and hash metadata.
+- The reference interpreter and optimized executor pass differential event-history tests.
+- Tooling can expand, check, plan, trace, replay, and explain one fixture analysis.
+- No Star-Lang construct may write a canonical design or implementation file without the existing promotion and human-approval controls.
+
+* Design Handoff
+
+A later numbered design should freeze only these interfaces:
+
+1. source grammar and closed core forms
+2. syntax object and source-span schema
+3. checked core intermediate representation
+4. effect and capability vocabulary
+5. immutable run-plan schema
+6. command, result, condition, restart, event, and checkpoint schemas
+7. actor routing and idempotency protocol
+8. Prolog capability request and result protocol
+9. replay compatibility and migration rules
+10. reference interpreter observable semantics
+
+The design should begin with executable fixtures for one serial analysis, one parallel analysis, one Prolog query, one retry, one human restart, and one crash-and-replay run. It should not add more syntax until those fixtures are deterministic and inspectable.
+
+* Footnotes and Glossary
+
+[fn:analysis-run] Analysis run: One durable execution of a versioned Star-Lang analysis plan, identified independently from any worker process or queue delivery.
+
+[fn:actor-model] Actor model: A concurrency model in which isolated actors own state and communicate by asynchronous messages instead of sharing mutable memory.
+
+[fn:prolog] Prolog: A logic-programming language family in which facts and rules are queried through unification and proof search.
+
+[fn:dsl] Domain-specific language, or DSL: A language intentionally limited to the concepts and operations of one problem domain.
+
+[fn:common-lisp] Common Lisp: A standardized Lisp language with programmable syntax, macros, a condition system, and implementations suitable for long-running applications.
+
+[fn:s-expression] Symbolic expression, or S-expression: A parenthesized tree representation used by Lisp languages in which lists and atoms directly encode program structure.
+
+[fn:ir] Intermediate representation, or IR: A compiler-owned data model between source syntax and executable plans.
+
+[fn:macro] Syntax transformation: A compile-time operation that rewrites one language form into another representation before runtime execution.
+
+[fn:reader] Reader: The component that converts source characters into language data structures before expansion or evaluation.
+
+[fn:syntax-object] Syntax object: A parsed form paired with source location, lexical identity, and transformation-origin metadata.
+
+[fn:source-span] Source span: The file and exact character, byte, line, and column range that produced a syntax or plan node.
+
+[fn:contract] Contract: A machine-checkable declaration of the shape and allowed values crossing an interface.
+
+[fn:readtable] Readtable: The Common Lisp table that determines how characters and dispatch sequences are interpreted by the reader.
+
+[fn:hygiene] Hygienic macro behavior: Binding-aware syntax transformation that prevents generated identifiers from accidentally capturing or being captured by surrounding names.
+
+[fn:algebraic-data-type] Algebraic data type: A type assembled from named alternatives and product fields, such as a result that is either success with a value or failure with a condition.
+
+[fn:effect-system] Effect system: A static description of operations that can interact with state or the outside world in addition to returning a value.
+
+[fn:capability] Capability: An explicit, unforgeable or policy-checked authority to request a bounded operation.
+
+[fn:formal-semantics] Formal semantics: A precise mathematical or rule-based definition of how programs evaluate.
+
+[fn:small-step] Small-step transition relation: A semantics that defines execution as individual state transitions rather than one opaque whole-program result.
+
+[fn:plan-hash] Plan hash: A cryptographic digest of the normalized immutable execution plan and relevant compiler configuration.
+
+[fn:event-sourcing] Event journal or event sourcing: Persisting ordered facts about state changes so current state can be reconstructed by replaying them.
+
+[fn:checkpoint] Checkpoint: A versioned snapshot of derived runtime state used to accelerate recovery.
+
+[fn:replay] Replay: Reconstructing logical state by reapplying recorded events to the same compatible plan semantics.
+
+[fn:continuation] Continuation: A representation of the remaining computation at a point in program execution.
+
+[fn:condition-system] Condition system: The Common Lisp protocol for signaling structured situations, locating handlers, and offering recovery options.
+
+[fn:restart] Restart: A named recovery operation made available by code that knows how execution can safely continue.
+
+[fn:supervisor] Supervisor: An actor or process component that owns child lifecycle and applies bounded restart and shutdown policy.
+
+[fn:idempotency] Idempotency: The property that repeating an operation with the same identity does not create additional logical effects after the first successful application.
+
+[fn:ffi] Foreign-function interface, or FFI: A boundary that lets one language runtime call functions or predicates implemented by another runtime.
+
+[fn:proof-trace] Proof trace: A structured record of facts, rules, substitutions, and derivation steps supporting a logic result.
+
+[fn:dag] Directed acyclic graph, or DAG: A graph with directed edges and no path that returns to its starting node.
+
+[fn:incremental-compilation] Incremental compilation: Reusing valid prior compiler results and recomputing only outputs affected by changed inputs or dependencies.
+
+[fn:dead-step] Dead-step elimination: Removing a plan node that cannot execute or affect any observable result.
+
+[fn:common-subexpression] Common-subexpression reuse: Computing one identical pure expression once and sharing its result at multiple use sites.
+
+[fn:golden-test] Golden test: A test that compares generated output with a reviewed expected artifact stored as the reference result.
+
+[fn:property-test] Property test: A test that generates many inputs and checks general invariants rather than only fixed examples.
+
+* Citations
+
+[fn:source-racket-languages] Racket documentation, “Creating Languages,” retrieved 2026-07-20: https://docs.racket-lang.org/guide/languages.html
+
+[fn:source-racket-macros] Racket documentation, “Macros,” retrieved 2026-07-20: https://docs.racket-lang.org/guide/macros.html
+
+[fn:source-cl-conditions] Common Lisp HyperSpec, “Condition System Concepts,” retrieved 2026-07-20: https://www.lispworks.com/documentation/HyperSpec/Body/09_a.htm
+
+[fn:source-cl-handler-bind] Common Lisp HyperSpec, =HANDLER-BIND=, retrieved 2026-07-20: https://www.lispworks.com/documentation/HyperSpec/Body/m_handle.htm
+
+[fn:source-cl-restart-case] Common Lisp HyperSpec, =RESTART-CASE=, retrieved 2026-07-20: https://www.lispworks.com/documentation/HyperSpec/Body/m_rst_ca.htm
+
+[fn:source-cl-read-eval] Common Lisp HyperSpec, =*READ-EVAL*= and sharpsign-dot reader behavior, retrieved 2026-07-20: https://clhs.lisp.se/Body/v_rd_eva.htm and https://www.lispworks.com/documentation/HyperSpec/Body/02_dhf.htm
+
+[fn:source-temporal-workflows] Temporal documentation, “Workflow,” retrieved 2026-07-20: https://docs.temporal.io/workflows
+
+[fn:source-temporal-execution] Temporal documentation, “Workflow Execution,” retrieved 2026-07-20: https://docs.temporal.io/workflow-execution
+
+[fn:source-erlang-design] Erlang/OTP documentation, “OTP Design Principles,” retrieved 2026-07-20: https://www.erlang.org/doc/system/design_principles.html
+
+[fn:source-erlang-supervisor] Erlang/OTP documentation, “Supervisor Behaviour,” retrieved 2026-07-20: https://www.erlang.org/docs/17/design_principles/sup_princ.html
+
+[fn:source-swi-frame] SWI-Prolog documentation, =PL_open_foreign_frame()=, retrieved 2026-07-20: https://www.swi-prolog.org/pldoc/doc_for?object=c%28%27PL_open_foreign_frame%27%29
+
+[fn:source-swi-call] SWI-Prolog documentation, =PL_call_predicate()=, retrieved 2026-07-20: https://www.swi-prolog.org/pldoc/man?CAPI=PL_call_predicate
+
+[fn:source-koka-book] Koka documentation, “Programming with Row-polymorphic Effect Types,” retrieved 2026-07-20: https://koka-lang.github.io/koka/doc/book.html
+
+[fn:source-effect-systems] Daan Leijen, “Koka: Programming with Row-polymorphic Effect Types,” arXiv:1306.6316, retrieved 2026-07-20: https://arxiv.org/abs/1306.6316
+
+[fn:source-salsa] Salsa documentation, “The Salsa Algorithm,” retrieved 2026-07-20: https://salsa-rs.github.io/salsa/reference/algorithm.html
+
+[fn:source-rust-incremental] Rust Compiler Development Guide, “Incremental Compilation,” retrieved 2026-07-20: https://rustc-dev-guide.rust-lang.org/queries/incremental-compilation.html
+
+[fn:source-llvm-debug] LLVM documentation, “Source Level Debugging with LLVM,” retrieved 2026-07-20: https://llvm.org/docs/SourceLevelDebugging.html

@@ -1,0 +1,766 @@
+:PROPERTIES:
+:ID:       starintel-collection-actor-runtime-001
+:END:
+#+title: STAR-COLLECT-001 Collection Actor Contract and Source Runtime
+#+description: Define reusable collector definitions, configured source instances, durable collection runs, source-specific checkpoints, atomic batches, policy enforcement, and in-process or external actor execution.
+#+status: DRAFT
+#+filetags: :starintel:design:star-server:collection:actors:connectors:runtime:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-19 | Define common collection actor and source runtime contract | Pending               |
+
+* Related Nodes
+
+- [[file:../../research/star-server/STAR-RESEARCH-002-collection-actor-architecture.org][STAR-RESEARCH-002 Collection Actor Architecture]]
+- [[file:STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+- [[file:../cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]]
+- [[file:../cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]]
+- [[file:../../research/star-server/STAR-RESEARCH-001-osint-feature-landscape.org][STAR-RESEARCH-001 OSINT Feature Landscape]]
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+
+* TODO Objective
+
+Provide one runtime contract for source collection, enrichment, artifact import, browser sessions, repository synchronization, and bounded tool execution.
+
+The runtime must let source-specific packages implement their actual platform behavior without reimplementing:
+
+- lifecycle
+- source registration
+- credentials and scopes
+- source policy
+- checkpoints
+- pagination and stream resumption
+- rate limiting
+- budgets
+- bounded concurrency
+- scope enforcement
+- raw-response preservation
+- normalization handoff
+- artifact handling
+- error classification
+- retry and dead-letter behavior
+- health
+- audit
+- shutdown
+- replay
+
+The design does not implement individual FEC, Discord, Telegram, Signal, news, Scrapy, Playwright, Mastodon, Bluesky, Reddit, LinkedIn, telephone, or people-data adapters.
+
+* TODO Dependency Boundary
+
+The capability catalog and playbook runtime proposed by =STAR-SERVER-001= owns:
+
+- capability discovery
+- version selection
+- playbook composition
+- analysis-job coordination
+- result bindings
+- user-facing execution planning
+
+This collection runtime owns:
+
+- source-specific execution semantics
+- source-instance lifecycle
+- collection-run lifecycle
+- checkpoints
+- batch durability
+- source policy
+- rate and cost budgets
+- raw observations and artifacts
+- collector conformance
+
+The collection runtime projects every collector definition into the capability catalog. It must not maintain an unrelated second capability registry.
+
+* TODO Invariants
+
+1. Collector code never receives raw secret material unless its declared credential capability requires it.
+2. Every run freezes collector, source-instance, policy, and schema versions.
+3. Every source interaction belongs to one collection run.
+4. Every output links to its run, collector version, source instance, and raw observation or artifact.
+5. Checkpoint advancement occurs only after the corresponding durable batch commit.
+6. A checkpoint payload is source-specific and schema-versioned.
+7. Repeated source observations are not erased by normalized-record deduplication.
+8. Rate limits and access revocation can pause or terminate a run without killing unrelated domain actors.
+9. External workers cannot write directly to canonical StarIntel storage.
+10. A source actor cannot expand beyond the immutable scope snapshot of its run.
+11. A run may complete partially and must record exactly what committed.
+12. Local mailbox traffic remains local; ZeroMQ[fn:zeromq] is used only at an approved process or language boundary.
+
+* TODO Execution Classes
+
+Every collector definition declares exactly one primary execution class.
+
+** =:snapshot-import=
+
+Consumes a supplied or scheduled immutable snapshot, archive, export, mounted image, database copy, or bulk file.
+
+Required behavior:
+
+- content hashing
+- immutable source-artifact reference
+- format detection
+- archive and container traversal limits
+- extraction manifest
+- partial-processing state
+- replay from the original artifact
+
+** =:paged-pull=
+
+Requests finite pages from an application programming interface[fn:api] or source endpoint.
+
+Required behavior:
+
+- explicit pagination strategy
+- repeated-token and repeated-page detection
+- maximum pages and records
+- dynamic rate-limit handling
+- stable ordering or deduplication strategy
+- restart from the last committed page boundary
+
+** =:incremental-pull=
+
+Requests records newer or changed after a source-defined replication key.
+
+Required behavior:
+
+- replication-key schema
+- overlap window when timestamps or ordering are weak
+- late-arriving and updated-record handling
+- high-water mark only after batch commit
+- clock and timezone normalization
+
+** =:event-stream=
+
+Consumes a long-lived stream of source events.
+
+Required behavior:
+
+- stream sequence or resume token
+- heartbeat and liveness
+- reconnect policy
+- gap detection
+- bounded receive and normalization queues
+- explicit behavior for events received before checkpoint commit
+
+** =:repository-sync=
+
+Synchronizes a versioned or signed repository with full-state recovery.
+
+Required behavior:
+
+- repository identity
+- revision and commit verification
+- operation application
+- gap and fork detection
+- full resynchronization
+- blob and record separation
+- identity and hosting verification where applicable
+
+** =:interactive-session=
+
+Runs a bounded browser, client, or account session involving navigation or source-side state.
+
+Required behavior:
+
+- isolated session context
+- approved action policy
+- session ownership and expiration
+- complete interaction log
+- download and attachment persistence before session close
+- deterministic fixture replay where possible
+
+** =:enrichment=
+
+Looks up additional source data for one or more typed StarIntel documents.
+
+Required behavior:
+
+- explicit input and output types
+- per-record cost estimate
+- quota and monetary budget
+- provider request and result identifiers
+- field-level provenance
+- conflict and confidence output
+- cache policy
+
+** =:tool-execution=
+
+Executes a bounded tool, spider, rule engine, or operational workflow against an approved target.
+
+Required behavior:
+
+- exact command or tool capability version
+- target and scope validation
+- resource and request budget
+- structured standard output, standard error, and artifact capture
+- cancellation and deadline
+- result normalization stage
+
+* TODO Core Documents
+
+** Collector definition
+
+#+begin_src lisp
+(:collector-definition
+ (:id :fec-open-api)
+ (:version "1.0.0")
+ (:execution-class :paged-pull)
+ (:domain :humint)
+ (:subdomain :government-fec)
+ (:inputs (:fec-source-instance :collection-request))
+ (:outputs (:raw-observation :fec-filing :fec-committee :fec-transaction))
+ (:checkpoint-schema "fec/open-api-page/1")
+ (:credential-types (:data-gov-api-key))
+ (:source-configuration-schema "fec/open-api-config/1")
+ (:side-effects (:network-read :persistent-write))
+ (:cost-unit :api-call)
+ (:runtime (:language :common-lisp
+            :placement :in-process))
+ (:defaults (:timeout-ms 30000
+             :max-concurrency 4
+             :retry-policy :bounded-source-aware)))
+#+end_src
+
+Required fields:
+
+- stable identifier
+- semantic version
+- execution class
+- domain and subdomain
+- accepted inputs
+- emitted outputs
+- checkpoint schema
+- credential requirements
+- source-configuration schema
+- side effects
+- cost and quota units
+- runtime language and placement
+- default timeout, concurrency, retry, and cache policies
+- health and readiness contract
+- mock and replay fixture identifiers
+
+** Source instance
+
+#+begin_src lisp
+(:source-instance
+ (:id "source-uuid")
+ (:collector :fec-open-api)
+ (:collector-version "1.0.0")
+ (:source-identity "Federal Election Commission OpenFEC")
+ (:source-mode :api)
+ (:account nil)
+ (:organization nil)
+ (:credential-ref "secret-ref")
+ (:granted-scopes ())
+ (:approved-scope (:datasets (:candidates :committees :filings)))
+ (:policy-snapshot "sha256")
+ (:retention-policy "policy-id")
+ (:rate-budget (:requests-per-hour 1000))
+ (:cost-budget (:currency :usd :maximum 0))
+ (:checkpoint-ref "checkpoint-uuid")
+ (:status :enabled)
+ (:domain :humint)
+ (:subdomain :government-fec))
+#+end_src
+
+Required fields:
+
+- stable identifier
+- frozen collector version
+- source identity and mode
+- account, application, organization, instance, repository, archive, or device identity when applicable
+- credential reference and granted scopes
+- approved collection scope
+- source-policy snapshot
+- retention and deletion policy
+- rate, cost, and concurrency budgets
+- checkpoint reference
+- enabled, paused, expired, or revoked state
+- runtime placement
+
+** Source-policy snapshot
+
+The policy snapshot records machine-readable runtime controls derived from the source access, agreement, operator decision, and project configuration.
+
+It contains:
+
+- source terms or policy reference and retrieval date
+- permitted acquisition modes
+- approved accounts, organizations, domains, chats, communities, boards, repositories, datasets, or paths
+- allowed actions
+- rate and concurrency limits
+- retention and deletion duties
+- expiration and revocation conditions
+- attribution requirements
+- redistribution limits
+- model-training restrictions where applicable
+- human approval reference
+
+A policy snapshot is immutable. A changed policy produces a new snapshot and may pause existing source instances pending review.
+
+** Collection request
+
+A collection request specifies desired work without directly invoking source code:
+
+- source instance
+- target documents
+- requested capability
+- requested time or identifier range
+- maximum records, bytes, pages, events, time, and cost
+- priority
+- deadline
+- requested raw and normalized outputs
+- caller and policy context
+
+** Collection run
+
+Run states:
+
+#+begin_example
+QUEUED
+  -> VALIDATING
+  -> STARTING
+  -> RUNNING
+  -> PAUSING -> PAUSED -> RUNNING
+  -> DRAINING
+  -> COMPLETED | PARTIAL | FAILED | CANCELLED | REVOKED
+#+end_example
+
+A collection run records:
+
+- immutable request
+- collector, source-instance, policy, schema, model, prompt, and tool versions
+- assigned actor, process, dispatcher, and transport
+- initial and final checkpoint
+- batch identifiers
+- records, events, pages, bytes, attachments, and artifacts
+- rate-limit and throttle events
+- gaps and resynchronizations
+- errors and retries
+- cost and quota use
+- start, pause, resume, and finish times
+- final state and stop reason
+
+** Raw observation
+
+A raw observation records one source response, event, page, file member, database record, browser capture, or tool output before source-specific normalization.
+
+Required fields:
+
+- source instance
+- collection run
+- collector version
+- observation time
+- source timestamp when supplied
+- source locator
+- request or event metadata
+- content type and encoding
+- content hash
+- raw bytes or artifact reference
+- checkpoint position
+- policy snapshot
+- parser status
+
+** Collection batch
+
+A collection batch is the durable commit boundary.
+
+It contains:
+
+- run identifier
+- batch sequence
+- checkpoint before
+- checkpoint after
+- raw observation identifiers
+- artifact identifiers
+- normalized document identifiers
+- error identifiers
+- metric summary
+- commit hash and time
+
+The runtime commits in this order:
+
+1. validate the batch
+2. store raw observations
+3. store artifacts
+4. store normalized documents and relations
+5. store batch errors and metrics
+6. store checkpoint
+7. append batch-commit event
+
+A failed step before checkpoint storage leaves the prior checkpoint active. Retrying the batch uses idempotency keys[fn:idempotency] derived from the run, batch sequence, and source record identity.
+
+** Checkpoint envelope
+
+#+begin_src lisp
+(:checkpoint
+ (:id "checkpoint-uuid")
+ (:schema "starintel/checkpoint/1")
+ (:collector-id :discord-gateway)
+ (:collector-version "1.0.0")
+ (:source-instance "discord-source-uuid")
+ (:execution-class :event-stream)
+ (:payload-schema "discord/gateway-session/1")
+ (:payload (:session-id "..."
+            :sequence 123456
+            :resume-url "..."))
+ (:created-at "RFC3339 timestamp")
+ (:batch-id "batch-uuid"))
+#+end_src
+
+The runtime validates the envelope. The collector package validates and migrates the payload.
+
+* TODO Runtime Actors
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+component "Domain Supervisor" as Domain
+component "Collection Supervisor" as Collection
+component "Source Instance Manager" as Source
+component "Run Coordinator" as Run
+component "Rate and Budget Actor" as Rate
+component "Policy Evaluator" as Policy
+component "Collector Adapter" as Adapter
+component "Raw Observation Writer" as Raw
+component "Normalizer Router" as Normalize
+component "Artifact Writer" as Artifact
+component "Checkpoint Writer" as Checkpoint
+component "Dead Letter Actor" as Dead
+component "External Worker Gateway" as Gateway
+
+Domain --> Collection
+Collection --> Source
+Collection --> Run
+Run --> Rate
+Run --> Policy
+Run --> Adapter
+Run --> Raw
+Run --> Normalize
+Run --> Artifact
+Run --> Checkpoint
+Run --> Dead
+Adapter --> Gateway
+@enduml
+#+end_src
+
+** Collection supervisor
+
+One collection supervisor exists beneath each domain or source subdomain. It starts source-instance managers and run coordinators, applies restart policies, and reports aggregate health.
+
+** Source-instance manager
+
+One manager owns mutable runtime state for one configured source instance:
+
+- current status
+- current policy version
+- credential readiness
+- active run set
+- rate-limit state
+- latest durable checkpoint
+- health
+- scheduled work
+
+The manager does not hold raw secret values in ordinary actor state.
+
+** Run coordinator
+
+One coordinator owns one collection run. It validates immutable inputs, requests rate and policy decisions, invokes the collector adapter, coordinates batch commits, handles pause and shutdown, and records every state transition.
+
+** Rate and budget actor
+
+The rate actor tracks source-supplied and configured limits:
+
+- route or endpoint bucket
+- retry-after time
+- request count
+- byte count
+- record count
+- concurrent requests
+- monetary cost
+- daily or period quota
+
+It supports reservation before work and reconciliation after work. Source response headers and error payloads may update the limiter dynamically.
+
+** Policy evaluator
+
+The policy actor answers whether one proposed source operation is allowed under the frozen source-policy snapshot and run scope. It returns a structured allow or deny decision with the exact rule and evidence.
+
+** Raw observation writer
+
+This actor stores source material before normalization and returns immutable references. Large content and attachments use the artifact subsystem.
+
+** Normalizer router
+
+This router selects source-specific normalizers by collector version and raw observation type. Normalization failure does not erase the raw observation.
+
+** Checkpoint writer
+
+Only the checkpoint writer may advance a source checkpoint. It verifies that the referenced batch committed and that the new checkpoint is a valid successor under the collector's checkpoint schema.
+
+* TODO In-Process and External Workers
+
+** In-process collector
+
+Use an in-process Sento actor when:
+
+- the implementation is Common Lisp
+- the dependency can safely coexist in the server process
+- blocking work can be isolated on an appropriate dispatcher
+- failure does not require a process boundary
+
+** External worker
+
+Use an external process when:
+
+- the best supported runtime is Python, JavaScript, or another language
+- browser or client libraries require their own event loop
+- native dependencies or memory risks justify containment
+- resource limits require process isolation
+- independent deployment or scaling is required
+
+External workers register a collector capability through Star Router. The approved ZeroMQ transport carries control, batch, observation, and health envelopes. External workers never receive direct database credentials unless a later design explicitly authorizes a narrow persistence capability.
+
+** Worker protocol
+
+Required operations:
+
+- =collector.hello=
+- =collector.check=
+- =collector.discover=
+- =collector.start=
+- =collector.read=
+- =collector.pause=
+- =collector.resume=
+- =collector.stop=
+- =collector.health=
+- =collector.metrics=
+
+Every message includes protocol version, collector identifier and version, source-instance identifier, run identifier, trace identifier, deadline, idempotency key where applicable, and content type.
+
+* TODO Scope Enforcement
+
+Scope is evaluated before and during collection.
+
+Supported scope dimensions:
+
+- dataset
+- account
+- application
+- organization
+- instance
+- repository
+- domain
+- network range
+- Uniform Resource Locator path
+- guild
+- channel
+- chat
+- community
+- board
+- file or archive member
+- device image
+- date or identifier range
+- allowed browser action
+- tool target
+
+A collector reports every discovered scope expansion candidate. It may not follow that expansion until the run scope or policy explicitly permits it.
+
+* TODO Credentials
+
+Credentials are references to a secret service record. Collector definitions declare credential types and required scopes.
+
+Requirements:
+
+- one source instance may use several credential references
+- credentials are delivered only to the owning worker
+- logs, events, checkpoints, and raw observations must redact credentials
+- expiration and revocation immediately affect source-instance readiness
+- refreshing a credential produces an audit event
+- account sessions and browser storage state are encrypted artifacts with explicit owners and expiration
+- no credential is copied into an Org design or research file
+
+* TODO Rate Limiting and Backoff
+
+Rate policy hierarchy:
+
+1. source response and documented retry time
+2. source-instance configured limit
+3. project limit
+4. domain limit
+5. global safety limit
+
+The most restrictive active limit wins.
+
+Backoff must be:
+
+- bounded
+- interruptible
+- deadline-aware
+- jittered where appropriate
+- recorded
+- separated by source-instance and rate bucket
+
+A source actor must not sleep while occupying a domain control dispatcher. Long waits are scheduled through timers and run state.
+
+* TODO Error Contract
+
+Error classes:
+
+- =:authentication=
+- =:authorization=
+- =:access-revoked=
+- =:rate-limited=
+- =:quota-exhausted=
+- =:cost-budget=
+- =:scope-denied=
+- =:source-unavailable=
+- =:schema-drift=
+- =:checkpoint-invalid=
+- =:stream-gap=
+- =:artifact-corrupt=
+- =:normalization=
+- =:transport=
+- =:worker-crash=
+- =:cancelled=
+- =:deadline=
+- =:internal=
+
+Every error declares:
+
+- retryability
+- safe retry point
+- source operation
+- affected batch
+- checkpoint impact
+- policy impact
+- public and internal message
+- cause chain
+- evidence references
+
+* TODO Conformance Suite
+
+Every collector package must provide:
+
+- definition fixture
+- source-instance fixture with fake credentials
+- mock source transport
+- replay source transport
+- normal response fixture
+- pagination or stream fixture
+- rate-limit fixture
+- credential expiration fixture
+- scope-denial fixture
+- schema-drift fixture
+- partial-batch failure fixture
+- restart and checkpoint-resume fixture
+- cancellation fixture
+- raw observation and normalized document fixtures
+
+Shared tests verify:
+
+- no checkpoint advances before batch commit
+- retries do not duplicate durable outputs
+- scope denial stops expansion
+- secret values never appear in logs or documents
+- raw observations survive normalization failure
+- dynamic rate limits are honored
+- revoked access disables new runs
+- process restart resumes from the durable checkpoint
+- external and in-process implementations produce equivalent protocol results
+
+* TODO Implementation Phases
+
+** Phase 0: document contracts
+
+- define collector definition
+- define source instance
+- define source-policy snapshot
+- define collection request
+- define collection run
+- define raw observation
+- define collection batch
+- define checkpoint envelope
+- add schema fixtures
+
+** Phase 1: event ledger and state machines
+
+- append run events
+- replay run state
+- validate transitions
+- implement idempotent batch events
+- implement checkpoint successor validation
+
+** Phase 2: in-process runtime
+
+- collection supervisor
+- source-instance manager
+- run coordinator
+- policy evaluator
+- rate and budget actor
+- raw observation writer
+- checkpoint writer
+
+** Phase 3: batch and normalization handoff
+
+- atomic batch coordinator
+- artifact handoff
+- normalizer routing
+- partial-failure handling
+- dead letters
+
+** Phase 4: external worker protocol
+
+- collector registration
+- ZeroMQ and Star Router envelopes
+- health and metrics
+- cancellation and shutdown
+- process containment
+
+** Phase 5: conformance harness
+
+- mock source
+- replay source
+- shared lifecycle cases
+- in-process and external parity tests
+- failure injection
+
+** Phase 6: first source adapters
+
+Implement small representatives of distinct execution classes:
+
+- FEC API for =:paged-pull=
+- FEC bulk file for =:snapshot-import=
+- Mastodon stream or equivalent fixture for =:event-stream=
+- one provider fixture for =:enrichment=
+
+Do not begin with every platform simultaneously.
+
+* TODO Acceptance Criteria
+
+- collector definitions project deterministically into the capability catalog
+- source instances freeze collector, credential-scope, policy, and runtime configuration
+- a run cannot start with an expired or revoked source instance
+- every source request is linked to one run
+- raw observations are durable before checkpoint advancement
+- normalized documents link to raw observations and collector version
+- a partial batch never advances beyond its last committed checkpoint
+- source-specific checkpoint payloads are schema validated
+- dynamic rate-limit responses update the correct source bucket
+- policy denial stops source expansion before the request is sent
+- credentials and session secrets do not enter logs, Org files, or ordinary documents
+- external workers cannot bypass the worker protocol to write storage
+- in-process and external collectors pass the same conformance contract
+- a crashed worker resumes from the last durable checkpoint
+- a replay transport can reproduce one completed run without network access
+- the implementation slot remains limited to one active design
+
+* Footnotes and Glossary
+
+[fn:zeromq] ZeroMQ: A brokerless messaging library used at declared StarIntel process and language boundaries.
+
+[fn:api] Application programming interface, or API: A defined set of operations and data formats used by software components to communicate.
+
+[fn:idempotency] Idempotency: The property that repeating the same operation with the same identifier does not create additional effects after the first successful execution.

@@ -1,0 +1,194 @@
+:PROPERTIES:
+:ID:       starintel-auto-research-logic-engine-selection-001
+:END:
+#+title: STAR-RESEARCH-001 Logic Engine Selection for ADARD
+#+description: Compare ProbLog, N-Prolog, and other logic engines and define which engine ADARD should use for each reasoning situation.
+#+status: DRAFT
+#+filetags: :starintel:research:auto-research:adard:prolog:logic:probabilistic:draft:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-19 | Add the bounded ADARD logic-engine selection investigation | Yes                   |
+
+* Related Nodes
+
+- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-001-adaptive-research-dag-evaluation-harness.org][STAR-RESEARCH-PIPELINE-001 Adaptive Research DAG and Evaluation Harness]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:STAR-RESEARCH-000-rd-agent-pipeline-analysis.org][STAR-RESEARCH-000 R&D-Agent Pipeline Analysis]]
+
+* TODO Research Question
+
+Which logic-programming engine[fn:logic-engine], or combination of engines, should the Adaptive Design, Analysis, Research, and Development loop[fn:adard] use for each reasoning situation?
+
+The study must not force one engine to cover every workload. It must produce a selection policy that maps a declared situation to an engine, execution boundary, and fallback.
+
+* TODO Required Candidates
+
+The comparison must include:
+
+1. ProbLog[fn:problog]: probabilistic facts, evidence-conditioned queries, most-probable explanations, decision-theoretic inference, and probability learning.
+2. N-Prolog[fn:n-prolog]: a compact general Prolog implementation evaluated as a lightweight runtime and compatibility option.
+3. SWI-Prolog[fn:swi-prolog]: the current general-purpose integration baseline.
+4. XSB with PITA[fn:pita]: tabled and answer-subsumption-based reasoning, including recursive probabilistic programs.
+5. cplint[fn:cplint]: probabilistic logic programming and learning over Logic Programs with Annotated Disjunctions.
+6. DeepProbLog[fn:deepproblog]: neural-symbolic reasoning when probabilities originate from trained neural predicates.
+7. s(CASP)[fn:scasp]: goal-directed answer-set reasoning, defaults, exceptions, and human-readable justification paths.
+8. Soufflé[fn:souffle]: compiled Datalog for high-volume relation analysis and fixed-point computation.
+
+Additional engines may be added only when they provide a distinct capability, deployment model, or performance profile not represented above.
+
+* TODO Initial Situation Hypotheses
+
+These are starting hypotheses, not architecture decisions:
+
+| Situation | Engines to evaluate first | Required reason |
+|-----------+---------------------------+-----------------|
+| General symbolic rules and orchestration | SWI-Prolog, N-Prolog | Compare integration depth, compatibility, startup cost, and runtime footprint |
+| Compact embedded or isolated rule worker | N-Prolog, SWI-Prolog | Determine whether the smaller implementation provides a useful deployment boundary |
+| Probabilistic facts and evidence-conditioned inference | ProbLog, cplint, PITA | Compare semantics, exact and approximate inference, explanations, and performance |
+| Recursive probabilistic programs | PITA/XSB, cplint, ProbLog | Test tabling behavior, termination, answer subsumption, and memory use |
+| Neural predictions combined with symbolic rules | DeepProbLog, ProbLog adapters | Use only when neural predicates are required and measurable |
+| Defaults, exceptions, and non-monotonic explanations | s(CASP), SWI-Prolog alternatives | Compare explanation quality and rule semantics |
+| Bulk graph closure and static relation analysis | Soufflé, XSB | Compare compiled fixed-point throughput with interactive logic execution |
+| Auditable ADARD promotion decisions | SWI-Prolog, s(CASP), ProbLog | Compare deterministic proof traces, uncertainty handling, and reproducibility |
+
+* TODO Comparison Contract
+
+Each candidate must be evaluated against the same versioned fixtures where its semantics apply.
+
+** Semantics and correctness
+
+- supported logic and probability semantics
+- treatment of negation, recursion, cycles, and undefined results
+- exact, bounded, approximate, or sampled inference modes
+- deterministic replay from fixed inputs and configuration
+- quality and completeness of proof, explanation, or derivation traces
+
+** Runtime and integration
+
+- startup latency
+- query latency and throughput
+- peak memory use
+- behavior under concurrent isolated workers
+- foreign-function interface[fn:ffi], command-line, service, and file-based integration options
+- process isolation and cancellation
+- Common Lisp, Python, and Prolog interoperability
+- Nix packaging and reproducible builds
+
+** Operations and maintenance
+
+- license compatibility
+- release and maintenance activity
+- test coverage and documentation
+- stable machine-readable output
+- failure reporting and timeout behavior
+- sandboxing and untrusted-input boundaries
+
+** ADARD suitability
+
+- ability to emit attributable evidence for a candidate score
+- ability to preserve negative and uncertain results
+- suitability for deterministic validators, reviewers, planners, and promotion gates
+- cost of switching engines through a common adapter
+- risk of making one engine a hidden global dependency
+
+* TODO Required Experiments
+
+1. Implement one deterministic rule fixture across all general logic engines.
+2. Implement one evidence-conditioned probabilistic fixture across ProbLog, cplint, and PITA where supported.
+3. Implement one recursive or cyclic fixture that requires tabling or a declared termination strategy.
+4. Implement one explanation fixture and compare machine-readable and human-readable proof output.
+5. Measure cold start, warm query latency, memory, timeout behavior, and repeated-run determinism.
+6. Exercise each engine through the intended process or foreign-function boundary rather than only its interactive shell.
+7. Record unsupported semantics as explicit non-applicability, not a failed benchmark.
+
+* TODO Selection Deliverable
+
+Produce a versioned engine-selection matrix containing:
+
+- situation identifier
+- required semantics
+- preferred engine
+- permitted fallback
+- adapter and process boundary
+- required evidence or proof output
+- timeout and resource budget
+- known unsupported cases
+- benchmark artifact identifiers
+- reason for the selection
+
+The final result may select several engines. A single default is allowed only for situations whose requirements are genuinely equivalent.
+
+* TODO ADARD Integration Boundary
+
+Engine choice must be exposed as a declared capability route rather than embedded throughout the loop.
+
+The ADARD planner may request a reasoning capability such as:
+
+- deterministic rule evaluation
+- probabilistic query
+- recursive tabled query
+- answer-set explanation
+- neural-symbolic inference
+- bulk Datalog closure
+
+A routing layer resolves that capability to the selected engine and records:
+
+- engine name and version
+- adapter version
+- input and output hashes
+- configuration
+- resource limits
+- result and proof artifacts
+- fallback use
+
+The current ADARD loop remains active. This investigation adds an engine-selection research track; it does not create a separate recursive loop or authorize automatic architecture promotion.
+
+* TODO Acceptance Criteria
+
+- ProbLog and N-Prolog are both installed or reproducibly packaged for evaluation.
+- At least six distinct implementations are compared.
+- Every benchmark declares which semantics are applicable.
+- Results separate correctness, explanation quality, integration cost, and performance.
+- The decision selects engines by situation instead of declaring an unsupported universal winner.
+- The selected engines are reachable through a common capability-routing contract.
+- Every selection cites a reproducible benchmark or a documented semantic requirement.
+- Unselected engines and failed approaches remain recorded as negative evidence.
+- No engine is added as a production dependency before the selection study is reviewed.
+
+* Sources to Investigate
+
+- ProbLog: https://github.com/ML-KULeuven/problog
+- ProbLog documentation: https://problog.readthedocs.io/
+- N-Prolog: https://github.com/sasagawa888/nprolog
+- SWI-Prolog: https://github.com/SWI-Prolog/swipl-devel
+- XSB: https://xsb.sourceforge.net/
+- cplint: https://github.com/friguzzi/cplint
+- DeepProbLog: https://github.com/ML-KULeuven/deepproblog
+- s(CASP): https://github.com/JanWielemaker/sCASP
+- Soufflé: https://github.com/souffle-lang/souffle
+
+* Footnotes and Glossary
+
+[fn:logic-engine] Logic-programming engine: Software that evaluates facts and rules to derive answers, proofs, probabilities, or fixed-point relations.
+
+[fn:adard] Adaptive Design, Analysis, Research, and Development loop, or ADARD: The bounded StarIntel control loop that generates competing research candidates, evaluates them, and promotes at most one measured design proposal.
+
+[fn:problog] ProbLog: A probabilistic logic-programming language and implementation that extends Prolog-style rules with probabilities and evidence-conditioned inference.
+
+[fn:n-prolog] N-Prolog: A compact Prolog implementation maintained in the =sasagawa888/nprolog= repository and evaluated here as a lightweight general logic runtime rather than as a probabilistic language.
+
+[fn:swi-prolog] SWI-Prolog: A widely used general-purpose Prolog implementation with libraries and interfaces for embedding, networking, constraints, and application development.
+
+[fn:pita] Probabilistic Inference with Tabling and Answer Subsumption, or PITA: A method implemented with the XSB Prolog system that transforms probabilistic rules into tabled logic evaluation while combining answers probabilistically.
+
+[fn:cplint] cplint: A collection of tools for probabilistic logic programming, inference, and learning using Logic Programs with Annotated Disjunctions.
+
+[fn:deepproblog] DeepProbLog: An extension of ProbLog that lets neural-network outputs appear as probabilistic predicates inside logic programs.
+
+[fn:scasp] s(CASP): A goal-directed implementation of answer-set programming that can reason with defaults and exceptions and produce justification trees.
+
+[fn:souffle] Soufflé: A compiled Datalog engine designed for high-performance fixed-point analysis over large sets of relations.
+
+[fn:ffi] Foreign-function interface, or FFI: A boundary that lets code written in one programming language call code or libraries written in another language.

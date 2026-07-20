@@ -1,0 +1,499 @@
+:PROPERTIES:
+:ID:       starintel-research-collection-actor-architecture-002
+:END:
+#+title: STAR-RESEARCH-002 Collection Actor Architecture
+#+description: Classify the fourth-generation collection-actor inventory into reusable runtime contracts, source-specific adapters, durable checkpoints, policy snapshots, and domain-gserver placement.
+#+status: REVIEW
+#+filetags: :starintel:research:star-server:collection:actors:connectors:sources:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                              | Did nsaspy approve it |
+|---------+------------+--------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-19 | Complete collection-actor architecture study and design proposal   | Pending               |
+
+* Related Nodes
+
+- [[file:../../design/STAR-00-Starintel-4th-generation-Ideas.org][STAR-00 StarIntel Fourth Generation Ideas]]
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:STAR-RESEARCH-001-osint-feature-landscape.org][STAR-RESEARCH-001 OSINT Feature Landscape]]
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+- [[file:../../design/cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]]
+- [[file:../../design/star-server/STAR-COLLECT-001-collection-actor-contract-source-runtime.org][STAR-COLLECT-001 Collection Actor Contract and Source Runtime]]
+
+* Research Question
+
+How should StarIntel[fn:starintel] implement the collection-actor inventory in section 2 of the canonical fourth-generation backlog without creating a separate one-off lifecycle, checkpoint, credential, rate-limit, provenance, and error model for every source?
+
+* Scope
+
+The canonical inventory includes:
+
+- Federal Election Commission data
+- commercial identity and people-data providers
+- telephone enrichment
+- bug-bounty tools
+- Discord
+- Telegram
+- Signal artifacts
+- news
+- Scrapy spiders
+- Playwright browsers
+- proxy rotation
+- expert systems
+- Mastodon
+- Bluesky and the Authenticated Transfer Protocol
+- 4chan and 8kun.top
+- Reddit
+- LinkedIn
+
+The inventory mixes collection sources, enrichment services, browser runtimes, supplied evidence packages, operational tools, support infrastructure, and expert systems. They should share runtime primitives where their behavior is equivalent, but they must not be forced into one false abstraction that erases source-specific semantics.
+
+This loop reviews current official documentation for representative sources and connector frameworks. It extracts architectural requirements, not a claim that every listed source is immediately available to every deployment.
+
+* Source Findings
+
+** Federal Election Commission: paged API, bulk snapshots, filings, and amendments
+
+The OpenFEC application programming interface[fn:api] provides candidate, committee, filing, report, receipt, disbursement, loan, debt, independent-expenditure, e-filing, audit, and legal endpoints. The official documentation states that processed data are updated nightly, API calls return at most one hundred records per page, ordinary registered keys receive one thousand calls per hour, and higher limits may be requested.[fn:source-fec-api]
+
+FEC bulk files contain transaction-level data and update on schedules ranging from daily to weekly. Real-time e-filing endpoints cover recent electronic filings, while processed endpoints and bulk files provide longer-lived normalized data.[fn:source-fec-bulk]
+
+Architectural consequences:
+
+- one logical FEC source needs several collection modes
+- a bulk snapshot cannot use the same checkpoint shape as paged API retrieval
+- filing identity, file identifiers, image identifiers, amendment chains, and processing status must survive normalization
+- a source actor must reconcile real-time e-filing records with later processed data instead of treating them as unrelated duplicates
+- API rate limits and bulk schedules belong to a source-instance policy, not hard-coded actor constants
+
+** Telegram: bot updates and full client state are different capabilities
+
+Telegram officially exposes the Bot API, the full Telegram API, and the Telegram Database Library[fn:tdlib]. The Bot API is a simplified Hypertext Transfer Protocol interface for bot accounts. The full API and TDLib support customized clients and broader account functionality.[fn:source-telegram-apis]
+
+A Telegram application receives an application identifier and hash, authorizes an account, and operates under Telegram's application terms. Telegram states that unofficial clients are monitored and may be banned for abusive behavior.[fn:source-telegram-app]
+
+Architectural consequences:
+
+- =telegram-bot= and =telegram-client= are separate capability classes
+- bot checkpoints follow update identifiers or webhook delivery state
+- client checkpoints include session state, dialog identifiers, per-chat message cursors, and synchronization state
+- session ownership and revocation are first-class source-instance fields
+- the actor must expose the exact account, chat scope, and client type used for each observation
+- Telegram identifiers require full-width integer handling and source-type preservation
+
+** Mastodon: every instance is a source boundary
+
+Mastodon exposes instance-specific Representational State Transfer endpoints and streaming endpoints. Public timelines may be disabled by an instance administrator. Streaming can be served from a different hostname, which clients discover through instance configuration or redirection.[fn:source-mastodon-public][fn:source-mastodon-stream]
+
+Current streaming documentation distinguishes public, local, remote, hashtag, user, list, and direct streams. Several streams require a user token and specific scopes. Events include creation, deletion, update, and other instance-defined state changes.[fn:source-mastodon-stream]
+
+Architectural consequences:
+
+- a Mastodon instance, not the global Mastodon network, is the immediate source instance
+- instance capabilities and rules must be discovered and versioned
+- collection must record local, remote, federated, account, and stream scope
+- deletion and edit events need durable tombstone or revision handling inside StarIntel even when the source no longer serves old content
+- stream host, token scopes, software version, and rate behavior must be source-instance metadata
+
+** Bluesky and the Authenticated Transfer Protocol: repository synchronization
+
+The Authenticated Transfer Protocol[fn:atproto] supports full repository export as Content Addressable aRchive files[fn:car] and real-time repository event streams over WebSocket. Event streams use sequence numbers for resumption and include repository commits, synchronization events, identity changes, and account-hosting changes.[fn:source-atproto-sync]
+
+Repository content is content-addressed and commits are cryptographically signed. Identity and hosting information require separate verification through decentralized identifier[fn:did] resolution. When a commit chain is broken, a consumer must mark the repository desynchronized, fetch a full repository, reconcile records, and resume queued events.[fn:source-atproto-sync][fn:source-atproto-repo]
+
+Architectural consequences:
+
+- repository synchronization is not an ordinary timestamp poller
+- checkpoints include stream sequence, repository revision, commit identifier, and synchronization status
+- signatures, record content identifiers, decentralized identifiers, source Personal Data Server, and relay source must be retained
+- a detected gap triggers a declared resynchronization workflow
+- repository records and blobs require separate retrieval and integrity handling
+- identity resolution and repository verification are separate actors or stages
+
+** Discord: gateway sequence, intents, and dynamic rate limits
+
+Discord's Gateway delivers stateful events with sequence numbers used for heartbeats and session resumption. Applications declare intents that control which event classes are delivered, and privileged intents require configuration or approval.[fn:source-discord-gateway]
+
+Discord currently limits applications to one hundred twenty outbound Gateway events per connection per sixty seconds. Hypertext Transfer Protocol rate limits vary by route and must be learned from response headers rather than hard-coded. A rate-limited request returns retry information.[fn:source-discord-gateway][fn:source-discord-rate]
+
+Architectural consequences:
+
+- Gateway sequence and resume state are checkpoint data
+- approved intents, guilds, channels, and accounts are immutable inputs to a collection run
+- privileged access is a capability and source-instance constraint
+- rate-limit buckets belong to runtime state and may change without a code release
+- historical traversal through the Hypertext Transfer Protocol API and live Gateway ingestion are distinct collection modes
+- supplied Discord data packages and audit logs use artifact-import actors rather than live-session actors
+
+** Reddit: access contract and source-policy lifecycle
+
+Reddit's developer platform can expose posts, comments, votes, and community-scoped operations, while private user data remain unavailable through the platform. The application installation determines scope.[fn:source-reddit-api]
+
+Reddit's Data API terms reserve the ability to apply call limits, require registered access information, restrict some commercial or high-volume uses to separate agreements, and require cessation and deletion duties when access terminates.[fn:source-reddit-terms]
+
+Architectural consequences:
+
+- the source instance must record the application, account, community, agreement, and permitted use
+- source policy is versioned input to the actor
+- collection capability must stop on credential or agreement revocation
+- retention and deletion obligations cannot be inferred only from document type
+- API, moderator export, account export, and licensed archive are separate acquisition modes
+
+** LinkedIn: product-scoped access rather than a general profile API
+
+LinkedIn uses OAuth 2.0 and divides access among open permissions and approved partner programs. General open access is limited; marketing, sales, talent, and other integrations require product-specific approval.[fn:source-linkedin-access]
+
+LinkedIn's Profile API documentation states that profile access is restricted, returned identifiers are application-specific, and storage of profile data is constrained by permission and member context.[fn:source-linkedin-profile]
+
+Architectural consequences:
+
+- one generic =linkedin-token= field is inadequate
+- source instances require product, partner program, application, account, organization, scopes, version, and agreement metadata
+- application-scoped identifiers must not be treated as globally stable person identifiers
+- account-owner exports and supplied recruiting-system records are different source modes from platform APIs
+- actor availability is discovered from granted product capabilities rather than assumed from the platform name
+
+** Scrapy: reusable engine with source-specific spiders
+
+Scrapy separates its engine, scheduler, downloader, downloader middleware, spiders, spider middleware, and sequential item pipelines. Item pipelines commonly validate, deduplicate, transform, and persist extracted items.[fn:source-scrapy-middleware][fn:source-scrapy-pipeline]
+
+Architectural consequences:
+
+- StarIntel should wrap Scrapy as a managed execution runtime, not rewrite the crawl engine
+- each generated or maintained spider is a versioned capability with declared domains, paths, budgets, and output types
+- raw responses and extracted items must be emitted separately
+- middleware and pipeline configuration belong to the actor definition and run record
+- fixture validation must occur before a generated spider can execute against its declared source
+
+** Playwright: isolated interactive browser collection
+
+Playwright browser contexts isolate cookies, sessions, pages, downloads, network events, and tracing. Browser contexts expose page, frame, request, response, download, and failure events. Tracing can preserve browser operations, network activity, screenshots, and snapshots.[fn:source-playwright-context][fn:source-playwright-trace]
+
+Downloaded files live in temporary context storage unless explicitly persisted, and context shutdown deletes them.[fn:source-playwright-download]
+
+Architectural consequences:
+
+- every collection run owns one or more isolated browser contexts
+- a run must explicitly persist approved downloads before closing the context
+- browser state, trace, screenshot, network log, and downloaded artifact are separate outputs
+- browser actions require an approved action policy, not only a domain allowlist
+- the browser actor is heavier and more privileged than a normal Hypertext Transfer Protocol actor and needs separate dispatcher and process controls
+
+** OpenCTI and Singer: reusable connector lifecycle patterns
+
+OpenCTI classifies connectors as import, enrichment, stream, file import, and file export. It recommends one dedicated service identity per connector and exposes connector configuration, queue state, start, stop, status, and logs.[fn:source-opencti-connectors][fn:source-opencti-manager]
+
+OpenCTI distinguishes self-triggered connectors from platform-triggered connectors. Connectors may run as independent processes and submit normalized bundles through a worker queue.[fn:source-opencti-development]
+
+Singer-style incremental replication records a replication key or other source state and passes that state into later runs so only newer or changed records are emitted.[fn:source-singer-state]
+
+Architectural consequences:
+
+- reusable actor definition and configured source instance must be separate records
+- import, enrichment, stream, artifact import, and tool execution require distinct execution classes
+- each instance needs dedicated credentials, lifecycle, checkpoint, health, and logs
+- checkpoint shape is source-defined but wrapped in a common versioned envelope
+- source actors may run in-process or externally while preserving the same application-facing contract
+
+* Collection Actor Taxonomy
+
+The canonical inventory maps to eight execution classes.
+
+| Execution class | Trigger and state | Examples |
+|-----------------+-------------------+----------|
+| =:snapshot-import= | Operator, schedule, or supplied immutable package; content hash and snapshot version | FEC bulk data, account exports, Signal image, licensed archive |
+| =:paged-pull= | Scheduled or requested pagination; page, token, or high-water key | FEC API, provider APIs, telephone lookup batches, Mastodon history |
+| =:incremental-pull= | Scheduled delta query; source-specific replication key | news APIs, committee updates, Reddit history, LinkedIn approved feeds |
+| =:event-stream= | Long-running connection; sequence, resume token, or offset | Discord Gateway, Mastodon streaming, Telegram updates |
+| =:repository-sync= | Signed repository commits plus gap recovery | Bluesky and Authenticated Transfer Protocol repositories |
+| =:interactive-session= | Bounded browser or client session; session and action state | Playwright, Telegram client, approved account workflows |
+| =:enrichment= | Requested lookup of one or more typed documents; cost and quota state | Melissa, telephone providers, people-data providers |
+| =:tool-execution= | Explicit bounded target job; tool checkpoint and artifact set | bug-bounty tools, generated Scrapy spiders, expert-system requests |
+
+An actor may implement more than one class only when each class is declared separately. A single Telegram package may expose bot-stream, client-history, and export-import capabilities, but those are different catalog entries and source-instance modes.
+
+* Inventory Mapping
+
+| Canonical area | Primary class | Secondary class or runtime |
+|----------------+---------------+----------------------------|
+| FEC | =:paged-pull= | =:snapshot-import=, =:incremental-pull= |
+| Melissa and people providers | =:enrichment= | =:paged-pull= |
+| Telephone actors | =:enrichment= | =:paged-pull= |
+| Bug-bounty tools | =:tool-execution= | =:event-stream= for live output |
+| Discord | =:event-stream= | =:paged-pull=, =:snapshot-import= |
+| Telegram | =:event-stream= | =:interactive-session=, =:snapshot-import= |
+| Signal | =:snapshot-import= | device and attachment parsing stages |
+| News | =:incremental-pull= | =:event-stream=, =:snapshot-import= |
+| Scrapy | =:tool-execution= | managed crawl runtime |
+| Playwright | =:interactive-session= | artifact import and network capture |
+| Proxy rotation | support service | not a collector; allocated transport capability |
+| Expert systems | =:tool-execution= | analysis actor, not a source collector |
+| Mastodon | =:paged-pull= | =:event-stream= |
+| Bluesky | =:repository-sync= | =:event-stream=, blob retrieval |
+| 4chan and 8kun.top | =:incremental-pull= | =:snapshot-import= for archives |
+| Reddit | =:paged-pull= | =:incremental-pull=, =:snapshot-import= |
+| LinkedIn | =:paged-pull= | =:snapshot-import=, provider-specific feeds |
+
+* Shared Runtime Records
+
+** Collector definition
+
+A collector definition describes reusable code and capability:
+
+- stable capability identifier and version
+- execution class
+- accepted target and source-instance types
+- emitted document types
+- checkpoint schema
+- required credential types and scopes
+- supported transports
+- pagination or streaming semantics
+- expected side effects
+- cost and quota units
+- default timeout, retry, concurrency, and cache policy
+- source-specific configuration schema
+- health and readiness checks
+- runtime placement
+
+This record should be projected into the capability catalog proposed by =STAR-SERVER-001= rather than maintained as a second unrelated catalog.
+
+** Source instance
+
+A source instance binds a collector definition to one configured source:
+
+- source identity and source mode
+- account, application, organization, device, archive, or instance identity
+- credential reference and scopes
+- approved targets, domains, chats, communities, boards, repositories, or datasets
+- source policy and agreement snapshot
+- schedule
+- rate and monetary budget
+- retention, expiration, deletion, and revocation policy
+- proxy and network policy
+- current checkpoint reference
+- enabled, paused, revoked, or expired state
+- domain and subdomain placement
+
+** Collection run
+
+A collection run is one durable execution record:
+
+- immutable collector and source-instance versions
+- request and target identifiers
+- start and finish times
+- initial and final checkpoint
+- pages, events, records, bytes, and artifacts observed
+- raw and normalized output references
+- retries, throttling, gaps, resynchronization, and errors
+- actual cost and quota use
+- actor, process, dispatcher, and transport identity
+- policy decision and approval references
+- final state and stop reason
+
+** Checkpoint envelope
+
+Every checkpoint uses a shared envelope with source-defined payload:
+
+#+begin_src lisp
+(:checkpoint
+ (:schema "starintel/checkpoint/1")
+ (:collector "bluesky-repository-sync")
+ (:collector-version "1.0.0")
+ (:source-instance "relay.example")
+ (:kind :repository-sync)
+ (:observed-at "RFC3339 timestamp")
+ (:payload-schema "atproto/repo-cursor/1")
+ (:payload (:stream-sequence 123456
+            :repository "did:plc:example"
+            :revision "3k..."
+            :commit-cid "bafy..."
+            :sync-state :synchronized)))
+#+end_src
+
+The runtime validates the envelope. The source adapter validates the payload.
+
+* Domain-GServer Placement
+
+Collection actors run inside the approved scoped domain-gserver model.
+
+- FEC, people-data, telephone, news, and general web sources normally run under a source-specific subdomain of the appropriate intelligence domain.
+- Discord, Telegram, Mastodon, Bluesky, Reddit, LinkedIn, and imageboards normally run under the social-media intelligence domain with per-platform subdomains.
+- bug-bounty tools run under the bug-bounty or cyber domain.
+- Signal artifact parsers run as evidence-import workers under the domain assigned to the investigation.
+- proxy rotation is a shared supervised service that allocates approved proxies to source instances.
+- expert systems run in analysis subdomains and request collection through capability identifiers rather than opening undeclared network sessions.
+
+Direct local actors use Sento[fn:sento] mailboxes. External Python, browser, scraper, or tool workers use Star Router and the approved ZeroMQ transport boundary when process or language separation is required.
+
+* Failure and Recovery Model
+
+| Failure | Required behavior |
+|---------+-------------------|
+| Authentication failure | Pause source instance; never retry credentials indefinitely |
+| Access revoked or expired | Disable new runs and mark active run for bounded shutdown |
+| Rate limit | Parse source response, update dynamic limiter, and resume at declared time |
+| Invalid checkpoint | Stop before collection; require migration or reset event |
+| Pagination loop | Detect repeated token or page fingerprint and stop |
+| Stream gap | Mark desynchronized and run source-specific recovery |
+| Schema drift | Preserve raw response, reject normalization, and alert |
+| Scope violation | Stop actor immediately and emit policy event |
+| Partial batch failure | Commit only outputs linked to a durable batch boundary |
+| Duplicate observation | Preserve observation provenance; deduplicate derived canonical records separately |
+| Process crash | Resume from the last durable checkpoint and immutable run configuration |
+| Poison artifact | Quarantine artifact and continue only when policy permits |
+
+* Common Lisp Contract Example
+
+#+begin_src lisp
+(defgeneric collector-check (collector source-instance))
+(defgeneric collector-discover (collector source-instance))
+(defgeneric collector-start-run (collector source-instance request))
+(defgeneric collector-read (collector run checkpoint))
+(defgeneric collector-acknowledge (collector run batch))
+(defgeneric collector-pause (collector run reason))
+(defgeneric collector-resume (collector run checkpoint))
+(defgeneric collector-stop (collector run &key mode deadline))
+(defgeneric collector-health (collector source-instance))
+
+(defclass collection-batch ()
+  ((run-id :initarg :run-id :reader batch-run-id)
+   (checkpoint-before :initarg :checkpoint-before)
+   (checkpoint-after :initarg :checkpoint-after)
+   (raw-observations :initarg :raw-observations)
+   (documents :initarg :documents)
+   (artifacts :initarg :artifacts)
+   (metrics :initarg :metrics)
+   (source-errors :initarg :source-errors)))
+
+(defun commit-collection-batch (runtime batch)
+  (validate-batch runtime batch)
+  (persist-raw-observations runtime batch)
+  (persist-artifacts runtime batch)
+  (persist-normalized-documents runtime batch)
+  (persist-checkpoint runtime batch)
+  (record-batch-commit runtime batch))
+#+end_src
+
+The checkpoint is persisted only after the corresponding raw observations, artifacts, and normalized documents reach the declared durable batch boundary. Source adapters do not write directly to arbitrary databases.
+
+* Decisions
+
+** P0: Build the common collection contract before individual collectors
+
+The next implementation design should establish collector definitions, source instances, collection runs, checkpoint envelopes, batch commits, dynamic rate limits, scope enforcement, and external-worker transport.
+
+** P0: Preserve source-specific checkpoint schemas
+
+A universal checkpoint payload would be false. The runtime owns the versioned envelope and transition rules; each adapter owns and validates its payload.
+
+** P0: Separate raw observation from normalized document
+
+A collection actor first emits a raw observation or artifact with source provenance. Normalization produces typed StarIntel documents linked to the raw source. Deduplication of normalized records must not erase repeated source observations.
+
+** P0: Treat access and source policy as runtime data
+
+Credentials, granted scopes, source agreement, retention, expiration, revocation, and collection boundaries belong to the source instance and immutable run snapshot.
+
+** P0: Reuse proven external runtimes
+
+Scrapy, Playwright, TDLib, platform software-development kits, and source-specific libraries remain external workers where appropriate. StarIntel supplies supervision, contracts, manifests, transport, provenance, policy, and durable state rather than rewriting each runtime.
+
+** P1: Add source conformance suites
+
+Every collector package must pass shared lifecycle tests plus source-specific fixtures. Mock and replay transports must permit validation without contacting the live source.
+
+** P1: Add source-change detection
+
+Capability discovery, schema, platform version, permissions, API version, and rate behavior are versioned. A change may degrade or disable a source instance before malformed data enter the normalizer.
+
+* Proposed Next Design
+
+Create:
+
+- =STAR-COLLECT-001 Collection Actor Contract and Source Runtime=
+
+The design should define:
+
+- collector definition projection into the capability catalog
+- source-instance schema
+- collection-run state machine
+- checkpoint envelope and adapter-owned payload
+- atomic collection-batch boundary
+- rate-limit and budget service
+- scope-policy evaluator
+- raw-observation and artifact handoff
+- in-process and external-worker adapters
+- domain-gserver placement
+- mock and replay conformance suite
+
+Individual FEC, Telegram, Discord, Mastodon, Bluesky, Reddit, LinkedIn, Signal, Scrapy, Playwright, news, and enrichment designs should depend on this runtime rather than duplicate it.
+
+* Research Conclusion
+
+The next missing primitive is not a particular platform collector. It is a collection runtime that makes source access explicit, checkpoints durable, raw observations preservable, retries bounded, policy versioned, and external workers interchangeable.
+
+Once that contract exists, individual collection packages become smaller source adapters plus normalizers. Without it, every platform actor will independently reinvent credentials, pagination, checkpoints, shutdown, rate limiting, scope enforcement, replay, and provenance.
+
+* Footnotes and Glossary
+
+[fn:starintel] StarIntel: The local-first intelligence platform being designed to collect, preserve, normalize, connect, search, analyze, and export typed documents through actor-based components.
+
+[fn:api] Application programming interface, or API: A defined set of operations and data formats that programs use to communicate.
+
+[fn:tdlib] Telegram Database Library, or TDLib: Telegram's official client library that implements network, encryption, synchronization, and local-storage behavior for custom Telegram clients.
+
+[fn:atproto] Authenticated Transfer Protocol, or atproto: A decentralized protocol used by Bluesky for signed account repositories, identity, hosting, and data synchronization.
+
+[fn:car] Content Addressable aRchive, or CAR: A file format containing content-addressed blocks and roots, used to transfer complete atproto repositories and other linked data.
+
+[fn:did] Decentralized identifier, or DID: A globally unique identifier resolved through a decentralized identifier method to obtain keys, services, and identity metadata.
+
+[fn:sento] Sento: The actor framework implemented in the =mdbergmann/cl-gserver= repository and planned as StarIntel's in-process actor runtime.
+
+* Citations
+
+[fn:source-fec-api] Federal Election Commission, OpenFEC API Documentation, retrieved 2026-07-19: https://api.open.fec.gov/developers/
+
+[fn:source-fec-bulk] Federal Election Commission, campaign-finance data and bulk downloads, retrieved 2026-07-19: https://www.fec.gov/data/browse-data/
+
+[fn:source-telegram-apis] Telegram, Telegram APIs, retrieved 2026-07-19: https://core.telegram.org/api
+
+[fn:source-telegram-app] Telegram, Creating your Telegram Application, retrieved 2026-07-19: https://core.telegram.org/api/obtaining_api_id
+
+[fn:source-mastodon-public] Mastodon, Playing with public data, retrieved 2026-07-19: https://docs.joinmastodon.org/client/public/
+
+[fn:source-mastodon-stream] Mastodon, Streaming API methods, retrieved 2026-07-19: https://docs.joinmastodon.org/methods/streaming/
+
+[fn:source-atproto-sync] Authenticated Transfer Protocol, Data Synchronization, retrieved 2026-07-19: https://atproto.com/specs/sync
+
+[fn:source-atproto-repo] Authenticated Transfer Protocol, Repository, retrieved 2026-07-19: https://atproto.com/specs/repository
+
+[fn:source-discord-gateway] Discord, Gateway documentation, retrieved 2026-07-19: https://docs.discord.com/developers/events/gateway
+
+[fn:source-discord-rate] Discord, Rate Limits, retrieved 2026-07-19: https://docs.discord.com/developers/topics/rate-limits
+
+[fn:source-reddit-api] Reddit for Developers, Reddit API Overview, retrieved 2026-07-19: https://developers.reddit.com/docs/capabilities/server/reddit-api
+
+[fn:source-reddit-terms] Reddit, Data API Terms, retrieved 2026-07-19: https://redditinc.com/policies/data-api-terms
+
+[fn:source-linkedin-access] LinkedIn, Getting Access to LinkedIn APIs, retrieved 2026-07-19: https://learn.microsoft.com/en-us/linkedin/shared/authentication/getting-access
+
+[fn:source-linkedin-profile] LinkedIn, Profile API, retrieved 2026-07-19: https://learn.microsoft.com/en-us/linkedin/shared/integrations/people/profile-api
+
+[fn:source-scrapy-middleware] Scrapy, Spider Middleware, retrieved 2026-07-19: https://docs.scrapy.org/en/latest/topics/spider-middleware.html
+
+[fn:source-scrapy-pipeline] Scrapy, Item Pipeline, retrieved 2026-07-19: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
+
+[fn:source-playwright-context] Playwright, BrowserContext, retrieved 2026-07-19: https://playwright.dev/docs/api/class-browsercontext
+
+[fn:source-playwright-trace] Playwright, Tracing, retrieved 2026-07-19: https://playwright.dev/docs/api/class-tracing
+
+[fn:source-playwright-download] Playwright, Downloads, retrieved 2026-07-19: https://playwright.dev/docs/downloads
+
+[fn:source-opencti-connectors] OpenCTI, Connectors, retrieved 2026-07-19: https://docs.opencti.io/latest/deployment/connectors/
+
+[fn:source-opencti-development] OpenCTI, Connector Development, retrieved 2026-07-19: https://docs.opencti.io/latest/development/connectors/
+
+[fn:source-opencti-manager] OpenCTI, Integration Manager, retrieved 2026-07-19: https://docs.opencti.io/latest/deployment/integration-manager/
+
+[fn:source-singer-state] Meltano Singer Software Development Kit, Incremental Replication, retrieved 2026-07-19: https://sdk.meltano.com/en/latest/incremental_replication.html

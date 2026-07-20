@@ -28,6 +28,8 @@ When AUTOSYNC is non-nil, enable `org-roam-db-autosync-mode'."
           org-roam-db-location (expand-file-name "org-roam.db" cache)
           org-id-locations-file (expand-file-name "org-id-locations" cache)
           org-roam-completion-everywhere t
+          starintel-pages-site-title
+          "Starintel Second Brain — Entirely built and managed by AI agents"
           org-roam-capture-templates
           '(("n" "Inbox note" plain "%?"
              :target

@@ -426,7 +426,7 @@
        (compile-surface-expression syntax))
       (t
        (fail 'compile-error :unknown-program-form span
-             "Unknown program form ~A." name))))
+             "Unknown program form ~A." name)))))
 
 (defun surface-node-effects (node)
   (case (surface-node-operation node)

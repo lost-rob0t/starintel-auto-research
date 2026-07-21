@@ -39,3 +39,24 @@
                  (canonical-surface-value (cdr value)))))
     (t
      (canonical-value value))))
+
+(defun surface-node-effects (node)
+  (case (surface-node-operation node)
+    (:send (list :actor))
+    (:start-actor (list :actor-start))
+    (:stop-actor (list :actor-stop))
+    (:load-documents (list :source-read))
+    (:attach-dataset (list :dataset-attach))
+    (:loop
+     (remove-duplicates
+      (mapcan
+       (lambda (child)
+         (copy-list (surface-node-effects child)))
+       (append
+        (getf (surface-node-arguments node) :actions)
+        (remove nil
+                (list
+                 (getf (surface-node-arguments node) :collect)
+                 (getf (surface-node-arguments node) :append)))))
+      :test #'eq))
+    (otherwise nil)))

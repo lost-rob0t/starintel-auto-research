@@ -25,6 +25,17 @@
         :test #'equal
         :key (lambda (field) (normalize-name (first field)))))
 
+(defun document-field (document field-name)
+  (let ((entry (assoc (normalize-name field-name)
+                      (core-document-fields document)
+                      :test #'equal)))
+    (unless entry
+      (fail 'schema-error :missing-field nil
+            "Document ~A has no field ~A."
+            (core-document-id document)
+            field-name))
+    (second entry)))
+
 (defun make-core-document (registry schema-name fields &key (provenance '()))
   (let* ((schema (require-schema registry schema-name nil))
          (normalized-fields

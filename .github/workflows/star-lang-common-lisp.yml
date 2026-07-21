@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "prototypes/star-lang/common-lisp/**"
+      - "prototypes/star-lang/examples/**"
       - "prototypes/star-lang/fixtures/**"
       - ".github/workflows/star-lang-common-lisp.yml"
   push:
@@ -11,6 +12,7 @@ on:
       - main
     paths:
       - "prototypes/star-lang/common-lisp/**"
+      - "prototypes/star-lang/examples/**"
       - "prototypes/star-lang/fixtures/**"
       - ".github/workflows/star-lang-common-lisp.yml"
   workflow_dispatch:
@@ -39,4 +41,47 @@ jobs:
         with:
           name: star-lang-test-log
           path: star-lang-test.log
+          if-no-files-found: error
+
+  sento-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install SBCL and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sbcl curl git
+      - name: Install Quicklisp
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --output quicklisp.lisp \
+            https://beta.quicklisp.org/quicklisp.lisp
+          sbcl --non-interactive \
+            --load quicklisp.lisp \
+            --eval '(quicklisp-quickstart:install :path (merge-pathnames "quicklisp/" (user-homedir-pathname)))' \
+            --quit
+      - name: Pin Sento upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/quicklisp/local-projects"
+          git clone https://github.com/mdbergmann/cl-gserver.git \
+            "$HOME/quicklisp/local-projects/cl-gserver"
+          git -C "$HOME/quicklisp/local-projects/cl-gserver" \
+            checkout a889b8375709ca9396bba5d06b6e460689a23716
+      - name: Run real Sento integration
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/run-sento-integration.lisp \
+            2>&1 | tee star-lang-sento-integration.log
+      - name: Upload Sento integration log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-sento-integration-log
+          path: star-lang-sento-integration.log
           if-no-files-found: error

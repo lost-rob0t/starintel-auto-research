@@ -1,0 +1,359 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-002
+:END:
+#+title: STAR-LANG-002 Common Lisp Surface, Actors, and Document Sources
+#+description: Freeze the Common Lisp-shaped Star-Lang surface for datasets, iteration, nested document access, actor definition and startup through Sento, and bounded CouchDB and RabbitMQ document sources.
+#+status: DRAFT
+#+filetags: :starintel:design:star-lang:common-lisp:actors:sento:couchdb:rabbitmq:datasets:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                                     | Did nsaspy approve it |
+|---------+------------+---------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-21 | Define the Common Lisp surface, actor lifecycle, and document-source layer | Pending               |
+
+* TODO Design File System
+
+** Purpose
+
+Define the user-facing Common Lisp-shaped surface for Star-Lang[fn:star-lang] programs that attach datasets, iterate through typed documents, inspect nested document fields, define and start actors, send messages, and load bounded document batches from CouchDB[fn:couchdb] and RabbitMQ[fn:rabbitmq].
+
+This page extends:
+
+- [[file:STAR-LANG-001-common-lisp-language-runtime.org][STAR-LANG-001 Common Lisp Language and Durable Runtime]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-001-common-lisp-comparative-baseline.org][STAR-LANG-RESEARCH-001 Common Lisp Comparative Baseline]]
+
+It does not approve implementation or enter =roam/implement/=.
+
+** Binding syntax decision
+
+The following source is valid Star-Lang:
+
+#+begin_src lisp
+(attach-dataset "flock" *documents*)
+
+(loop for relation in *documents*
+      when (and (document-type-p relation 'relation)
+                (equal (document-ref relation 'predicate)
+                       "employed")
+                (equal (document-ref relation 'dest 'org)
+                       employer))
+        do (send (actor-ref 'name-to-email)
+                 (document-ref relation 'source)))
+#+end_src
+
+The surface deliberately resembles ordinary Common Lisp. It is still parsed by the bounded Star-Lang tokenizer and parser. It is never passed to the Common Lisp reader, =EVAL=, or =COMPILE=.
+
+A leading quote is supported only as shorthand for one symbol literal:
+
+#+begin_src lisp
+'relation
+'predicate
+'name-to-email
+#+end_src
+
+Quoted lists, dotted forms, reader dispatch, backquote, comma, package prefixes, and arbitrary Common Lisp reader syntax remain forbidden.
+
+** Dataset forms
+
+Attach an existing collection:
+
+#+begin_src lisp
+(attach-dataset "flock" *documents*)
+#+end_src
+
+Retrieve a named collection:
+
+#+begin_src lisp
+(set relations (dataset "flock"))
+#+end_src
+
+A dataset name is a runtime string. A dataset value is an immutable logical collection for one run. Adapters may materialize the collection as a list during the reference implementation.
+
+Attaching a dataset records a =dataset-attached= event containing the dataset name and document count.
+
+** Loop forms
+
+Version 0.1 supports:
+
+#+begin_src lisp
+(loop for item in collection
+      when predicate
+      unless other-predicate
+      do action
+      collect value)
+#+end_src
+
+and:
+
+#+begin_src lisp
+(loop for item in collection
+      append values)
+#+end_src
+
+Rules:
+
+1. =for=, =in=, and at least one result or action clause are required.
+2. =when= and =unless= may appear repeatedly.
+3. =do= may appear repeatedly.
+4. at most one =collect= clause is allowed.
+5. at most one =append= clause is allowed.
+6. =collect= preserves selected input order.
+7. =append= preserves selected input order and each produced list's order.
+8. unknown clauses fail compilation with a source-mapped diagnostic.
+
+** Document access
+
+Supported operations:
+
+#+begin_src lisp
+(document-type-p document 'relation)
+(document-ref document 'predicate)
+(document-ref document 'dest 'org)
+#+end_src
+
+=document-ref= traverses:
+
+- Star-Lang typed documents
+- association lists
+- hash tables
+
+Every missing path segment signals a structured runtime error. The runtime does not silently return =nil= for a missing field because =nil= may be a valid stored value.
+
+=document-type-p= compares the registered schema name, not a host Common Lisp class name.
+
+** Actor definitions
+
+An actor is defined declaratively:
+
+#+begin_src lisp
+(define-actor name-to-email
+  (:name "name-to-email")
+  (:receive name-to-email-handler)
+  (:state nil)
+  (:dispatcher :shared)
+  (:queue-size 128))
+#+end_src
+
+Required option:
+
+- =:receive=: registered runtime handler identifier
+
+Optional options:
+
+- =:name=: external actor name; defaults to the logical definition name
+- =:state=: initial state
+- =:dispatcher=: dispatcher identifier; defaults to =:shared=
+- =:queue-size=: positive bounded mailbox size
+- =:parent=: logical parent actor definition name
+
+The source names a registered handler. Version 0.1 does not persist or evaluate a Common Lisp lambda embedded in Star-Lang source.
+
+** Actor lifecycle
+
+#+begin_src lisp
+(start-actor name-to-email)
+(send (actor-ref 'name-to-email) document)
+(stop-actor name-to-email)
+#+end_src
+
+Lifecycle events:
+
+- =actor-defined=
+- =actor-started=
+- =message-sent=
+- =actor-stopped=
+
+Starting an already-started logical actor fails. Resolving an actor that has not started fails. The runtime may later add an explicit idempotent-start policy, but it must not silently change lifecycle semantics.
+
+** Sento mapping
+
+The production actor adapter is the ASDF system =star-lang/sento= and depends on Sento[fn:sento].
+
+The mapping is:
+
+| Star-Lang operation | Sento operation |
+|---------------------+-----------------|
+| create runtime root | =asys:make-actor-system= |
+| start root actor | =ac:actor-of= with the actor system context |
+| start child actor | =ac:actor-of= with the parent actor context |
+| actor reference | Star-Lang adapter registry over returned actor references |
+| send | =act:tell= |
+| stop | =ac:stop= with =:wait t= |
+| shutdown | =ac:shutdown= with =:wait t= |
+
+The adapter passes =:name=, =:receive=, =:state=, =:dispatcher=, and =:queue-size= when declared.
+
+Sento's actor-context protocol accepts an actor system, actor context, or actor as the creation context and supports =:receive=, =:init=, =:destroy=, =:dispatcher=, =:state=, =:type=, =:name=, and queue configuration.[fn:sento-actor-context]
+
+The Star-Lang compiler and reference interpreter do not depend directly on Sento packages. They depend on the actor-adapter protocol.
+
+** CouchDB source definition
+
+#+begin_src lisp
+(define-couchdb-source flock-couch
+  (:server "http://localhost:5984")
+  (:database "flock")
+  (:path (list "flock" "_all_docs"))
+  (:keys (list :include_docs true))
+  (:decoder 'couch-document-decoder))
+
+(load-documents flock-couch *documents*
+  (:limit 500)
+  (:dataset "flock"))
+#+end_src
+
+The production ASDF system is =star-lang/cl-couch=.
+
+It calls =couchdb-client:couch-request*= with:
+
+- method =:get=
+- configured server
+- declared path list
+- declared key list
+
+Cl-Couch documents =couch-request*= as its functional request entry point. It accepts a method, server, path, optional keys, content type, and content.[fn:cl-couch-request]
+
+A source requires either =:database= or =:path=. A decoder is a registered runtime handler. The adapter never evaluates decoder source from a document.
+
+CouchDB responses containing =rows= are normalized by extracting each row's =doc= value when present. Other response shapes are returned to the decoder for explicit normalization.
+
+** RabbitMQ source definition
+
+#+begin_src lisp
+(define-rabbitmq-source flock-queue
+  (:host "localhost")
+  (:port 5672)
+  (:vhost "/")
+  (:username "guest")
+  (:password "guest")
+  (:queue "flock.documents")
+  (:channel 1)
+  (:ack true)
+  (:decoder 'rabbit-document-decoder))
+
+(load-documents flock-queue *documents*
+  (:limit 100)
+  (:dataset "flock-events"))
+#+end_src
+
+The production ASDF system is =star-lang/cl-rabbit=.
+
+The adapter maps to cl-rabbit[fn:cl-rabbit] operations:
+
+1. =with-connection=
+2. =tcp-socket-new=
+3. =socket-open=
+4. =login-sasl-plain=
+5. =with-channel=
+6. optional =queue-declare=
+7. optional =queue-bind=
+8. =basic-consume=
+9. repeated =consume-message=
+10. =envelope/message=
+11. =message/body=
+12. optional =basic-ack=
+
+A positive =:limit= is mandatory. An unbounded source read is rejected before opening a connection. This keeps one Star-Lang execution step bounded and replayable.
+
+The current adapter consumes UTF-8 message bodies and passes strings to a registered decoder when declared.
+
+** Credentials
+
+Examples may use local development values. Production plans must not contain passwords.
+
+Production source definitions must resolve credentials through a capability or secret reference. The compiler must reject literal passwords under production policy. The current prototype retains literal options only to exercise adapter contracts and local fixtures; this is not the final credential model.
+
+** Adapter boundary
+
+The reference runtime defines:
+
+#+begin_src lisp
+(defgeneric actor-adapter-start (adapter spec runtime))
+(defgeneric actor-adapter-stop (adapter actor-name runtime))
+(defgeneric actor-adapter-ref (adapter actor-name runtime))
+(defgeneric actor-adapter-send (adapter actor-reference message runtime))
+(defgeneric actor-adapter-shutdown (adapter runtime))
+
+(defgeneric source-adapter-read (adapter spec runtime &key limit))
+#+end_src
+
+Core tests use memory adapters. Production adapter contracts are also executed in dependency-free CI through API-compatible stubs. Separate ASDF systems load the same implementations against the real libraries.
+
+** Examples
+
+The repository contains at least fifteen compiled examples under:
+
+#+begin_example
+prototypes/star-lang/examples/
+#+end_example
+
+They cover:
+
+- the binding employment-routing syntax
+- actor definition
+- parent and child actors
+- state and bounded queues
+- actor shutdown
+- CouchDB all-document retrieval
+- CouchDB view paths
+- RabbitMQ consumption
+- RabbitMQ-to-actor routing
+- CouchDB-to-actor routing
+- source-to-dataset attachment
+- multiple datasets
+- nested document routing
+- loop collection
+- loop append
+
+Every =.star= example must compile in CI.
+
+** Current acceptance tests
+
+The Common Lisp suite verifies:
+
+1. the binding employment-routing source compiles and executes
+2. only matching employment relations are sent
+3. nested =document-ref= works
+4. actor definition, start, reference, send, parent, queue, and stop forms work
+5. =nil= is compiled as a literal
+6. quoted symbol shorthand accepts symbols and rejects quoted forms
+7. =collect= and =append= preserve order
+8. CouchDB and RabbitMQ sources load through memory adapters
+9. actual Sento, Cl-Couch, and cl-rabbit adapter call shapes run against contract stubs
+10. all example files compile
+11. the full suite runs through =asdf:test-system "star-lang"=
+
+** Deferred requirements
+
+- embedded actor handler bodies
+- receive-pattern matching
+- typed actor message schemas in the surface declaration
+- actor supervision and restart declarations
+- RabbitMQ streaming runs rather than bounded batches
+- CouchDB continuous changes-feed consumption
+- credential capability references
+- durable source offsets and delivery checkpoints
+- dead-letter and negative-ack policies
+- real service integration tests with containerized RabbitMQ and CouchDB
+- real Sento integration tests using the pinned upstream commit
+
+* Footnotes and Glossary
+
+[fn:star-lang] Star-Lang: The StarIntel language for typed document flows, actor work, reasoning, persistence, recovery, and resumable analysis behavior.
+
+[fn:couchdb] CouchDB: A document database exposing HTTP request, document, view, and changes-feed interfaces.
+
+[fn:rabbitmq] RabbitMQ: A message broker implementing queue and exchange routing through the Advanced Message Queuing Protocol.
+
+[fn:sento] Sento: The actor framework distributed from the =mdbergmann/cl-gserver= repository.
+
+[fn:cl-rabbit] cl-rabbit: A Common Lisp foreign-function interface to the RabbitMQ C client API.
+
+* Citations
+
+[fn:sento-actor-context] =mdbergmann/cl-gserver=, commit =a889b8375709ca9396bba5d06b6e460689a23716=, =src/actor-context-api.lisp= and =src/actor-api.lisp=, reviewed 2026-07-21: https://github.com/mdbergmann/cl-gserver
+
+[fn:cl-couch-request] =ryszard/Cl-Couch=, commit =de6900e38395dac3ddce53876b05d5e24c8d8f52=, =client/request.lisp=, reviewed 2026-07-21: https://github.com/ryszard/Cl-Couch
+
+- =lokedhs/cl-rabbit=, commit =9603204715bb13f09243dc286c5ad4bd51b4fd7b=, =src/examples.lisp= and =src/package.lisp=, reviewed 2026-07-21: https://github.com/lokedhs/cl-rabbit

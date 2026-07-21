@@ -1,6 +1,6 @@
 (asdf:defsystem "star-lang"
   :description "Common Lisp compiler and deterministic reference runtime for Star-Lang."
-  :version "0.3.1"
+  :version "0.3.2"
   :author "StarIntel"
   :license "UNLICENSED"
   :serial t
@@ -10,6 +10,7 @@
    (:file "canonical")
    (:file "surface-syntax")
    (:file "surface-runtime")
+   (:file "surface-fixes")
    (:file "source-support"))
   :in-order-to
   ((asdf:test-op (asdf:test-op "star-lang/tests"))))

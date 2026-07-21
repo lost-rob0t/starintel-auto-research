@@ -29,11 +29,11 @@
                    (fail 'execution-error :parent-actor-not-started nil
                          "Parent actor ~A is not started." parent-name))
                (sento-actor-system adapter)))
-         (handler (runtime-handler runtime (actor-spec-handler spec)))
          (arguments
            (list :name (actor-spec-external-name spec)
-                 :receive (lambda (message)
-                            (funcall handler message runtime))
+                 :receive
+                 (lambda (message)
+                   (invoke-supervised-actor-handler runtime spec message))
                  :state (actor-spec-state spec)
                  :dispatcher
                  (sento-dispatcher-designator
@@ -43,7 +43,8 @@
             "Actor ~A is already started." logical-name))
     (when (actor-spec-queue-size spec)
       (setf arguments
-            (append arguments (list :queue-size (actor-spec-queue-size spec)))))
+            (append arguments
+                    (list :queue-size (actor-spec-queue-size spec)))))
     (let ((actor (apply #'ac:actor-of context arguments)))
       (setf (gethash logical-name (sento-actors adapter)) actor)
       actor)))

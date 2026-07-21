@@ -1,12 +1,13 @@
 (asdf:defsystem "star-lang"
   :description "Common Lisp compiler and deterministic reference runtime for Star-Lang."
-  :version "0.2.0"
+  :version "0.2.1"
   :author "StarIntel"
   :license "UNLICENSED"
   :serial t
   :components
   ((:file "prototype")
-   (:file "core"))
+   (:file "core")
+   (:file "canonical"))
   :in-order-to
   ((asdf:test-op (asdf:test-op "star-lang/tests"))))
 

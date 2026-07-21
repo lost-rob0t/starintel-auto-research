@@ -102,10 +102,12 @@
          :crash-predicate
          (lambda (event)
            (when (and (not crashed)
-                      (= (star-lang.core:run-event-sequence event) 7))
+                      (eq (star-lang.core:run-event-type event)
+                          :command-result))
              (setf crashed t)
              t)))
       (star-lang.core:simulated-runtime-crash () nil))
+    (ensure-true crashed "checkpointless crash after durable result")
     (ensure-equal
      nil
      (star-lang.core:read-run-checkpoint

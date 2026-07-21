@@ -1,6 +1,6 @@
 (asdf:defsystem "star-lang"
   :description "Common Lisp compiler and deterministic durable runtime for Star-Lang."
-  :version "0.5.0"
+  :version "0.5.1"
   :author "StarIntel"
   :license "UNLICENSED"
   :serial t
@@ -10,6 +10,7 @@
    (:file "canonical")
    (:file "durable")
    (:file "durable-advanced")
+   (:file "durable-advanced-fixes")
    (:file "surface-syntax")
    (:file "surface-runtime")
    (:file "surface-fixes")

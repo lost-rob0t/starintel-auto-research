@@ -1,6 +1,6 @@
 (asdf:defsystem "star-lang"
-  :description "Common Lisp compiler and deterministic reference runtime for Star-Lang."
-  :version "0.3.3"
+  :description "Common Lisp compiler and deterministic durable runtime for Star-Lang."
+  :version "0.4.0"
   :author "StarIntel"
   :license "UNLICENSED"
   :serial t
@@ -8,6 +8,7 @@
   ((:file "prototype")
    (:file "core")
    (:file "canonical")
+   (:file "durable")
    (:file "surface-syntax")
    (:file "surface-runtime")
    (:file "surface-fixes")
@@ -16,7 +17,7 @@
   ((asdf:test-op (asdf:test-op "star-lang/tests"))))
 
 (asdf:defsystem "star-lang/tests"
-  :description "Star-Lang Common Lisp and production-adapter contract tests."
+  :description "Star-Lang compiler, durable runtime, surface, and adapter contract tests."
   :depends-on ("star-lang")
   :serial t
   :components
@@ -26,11 +27,12 @@
    (:file "sento-adapter")
    (:file "couch-adapter")
    (:file "rabbit-adapter")
-   (:file "adapter-contract-tests"))
+   (:file "adapter-contract-tests")
+   (:file "durable-tests"))
   :perform
   (asdf:test-op (operation component)
     (declare (ignore operation component))
-    (uiop:symbol-call :star-lang.core.tests :run-complete-tests)))
+    (uiop:symbol-call :star-lang.core.tests :run-advanced-tests)))
 
 (asdf:defsystem "star-lang/sento"
   :description "Star-Lang actor adapter for the cl-gserver Sento runtime."

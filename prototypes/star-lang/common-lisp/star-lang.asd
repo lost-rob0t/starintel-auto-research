@@ -1,6 +1,6 @@
 (asdf:defsystem "star-lang"
   :description "Common Lisp compiler, static verifier, supervised actor runtime, tooling, and durable execution for Star-Lang."
-  :version "0.8.0"
+  :version "0.8.1"
   :author "StarIntel"
   :license "UNLICENSED"
   :serial t
@@ -17,6 +17,7 @@
    (:file "source-support")
    (:file "surface-analysis")
    (:file "actor-protocols")
+   (:file "actor-protocol-fixes")
    (:file "cli"))
   :in-order-to
   ((asdf:test-op (asdf:test-op "star-lang/tests"))))

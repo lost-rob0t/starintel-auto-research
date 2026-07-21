@@ -40,6 +40,34 @@
     (t
      (canonical-value value))))
 
+(defun compile-surface-expression (syntax)
+  (let ((datum (syntax-object-datum syntax)))
+    (cond
+      ((null datum)
+       (make-surface-node*
+        :literal
+        (list :value nil)
+        (syntax-object-span syntax)))
+      ((source-symbol-p datum)
+       (if (source-symbol-keyword-p datum)
+           (make-surface-node*
+            :literal
+            (list :value
+                  (make-symbol-literal
+                   :name (source-symbol-name datum)))
+            (syntax-object-span syntax))
+           (make-surface-node*
+            :variable
+            (list :name (source-symbol-name datum))
+            (syntax-object-span syntax))))
+      ((not (listp datum))
+       (make-surface-node*
+        :literal
+        (list :value datum)
+        (syntax-object-span syntax)))
+      (t
+       (compile-surface-call syntax)))))
+
 (defun surface-node-effects (node)
   (case (surface-node-operation node)
     (:send (list :actor))

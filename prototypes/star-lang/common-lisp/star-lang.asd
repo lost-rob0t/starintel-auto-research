@@ -1,6 +1,6 @@
 (asdf:defsystem "star-lang"
-  :description "Common Lisp compiler, static verifier, tooling, and deterministic durable runtime for Star-Lang."
-  :version "0.7.0"
+  :description "Common Lisp compiler, static verifier, supervised actor runtime, tooling, and durable execution for Star-Lang."
+  :version "0.8.0"
   :author "StarIntel"
   :license "UNLICENSED"
   :serial t
@@ -16,12 +16,13 @@
    (:file "surface-fixes")
    (:file "source-support")
    (:file "surface-analysis")
+   (:file "actor-protocols")
    (:file "cli"))
   :in-order-to
   ((asdf:test-op (asdf:test-op "star-lang/tests"))))
 
 (asdf:defsystem "star-lang/tests"
-  :description "Star-Lang compiler, verifier, tooling, recovery, integrity, surface, and adapter tests."
+  :description "Star-Lang compiler, actor protocols, verifier, tooling, recovery, integrity, surface, and adapter tests."
   :depends-on ("star-lang")
   :serial t
   :components
@@ -36,11 +37,12 @@
    (:file "durable-advanced-tests")
    (:file "durable-advanced-test-fixes")
    (:file "surface-analysis-tests")
-   (:file "cli-tests"))
+   (:file "cli-tests")
+   (:file "actor-protocol-tests"))
   :perform
   (asdf:test-op (operation component)
     (declare (ignore operation component))
-    (uiop:symbol-call :star-lang.core.tests :run-tooling-tests)))
+    (uiop:symbol-call :star-lang.core.tests :run-actor-runtime-tests)))
 
 (asdf:defsystem "star-lang/cli"
   :description "Build the Star-Lang command-line compiler and verifier."

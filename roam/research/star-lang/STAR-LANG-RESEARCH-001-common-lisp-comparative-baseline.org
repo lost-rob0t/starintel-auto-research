@@ -1,0 +1,356 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-001
+:END:
+#+title: STAR-LANG-RESEARCH-001 Common Lisp Comparative Baseline
+#+description: Begin the cross-language Star-Lang comparison with one executable Common Lisp baseline, one shared fixture, normalized dataflow plans, and explicit limits on what the prototype proves.
+#+status: RESEARCHING
+#+filetags: :starintel:research:star-lang:common-lisp:dsl:prototype:comparison:draft:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                                        | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-21 | Begin the comparative loop with the shared fixture and Common Lisp baseline | No                    |
+
+* Related Nodes
+
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Language Research]]
+- [[file:STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations]]
+- [[file:../../design/STAR-00-Starintel-4th-generation-Ideas.org][STAR-00 StarIntel Fourth Generation Ideas]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+
+* Loop Question
+
+Can Common Lisp[fn:common-lisp] express the required Star-Lang[fn:star-lang] document, actor, agent, tool, and named-dataflow declarations as a small domain-specific language[fn:dsl] whose macro expansions[fn:macro-expansion] and normalized intermediate representation[fn:ir] are inspectable, without using reader macros[fn:reader-macro] or unrestricted =EVAL=[fn:eval]?
+
+This is the first implementation in a comparative research loop[fn:comparative-loop]. It is not a language-selection decision. Racket[fn:racket] and Scheme[fn:scheme] must implement the same fixture and behavior before the repository ranks any language.
+
+* Binding Comparison Rules
+
+Every language prototype must use the same:
+
+1. document schemas
+2. input fixture
+3. fake actor results
+4. declared tool
+5. fake large-language-model agent[fn:llm-agent] behavior
+6. named dataflow[fn:dataflow]
+7. transient-document[fn:transient-document] and persistent-document[fn:persistent-document] rules
+8. expected final review
+9. test assertions
+10. benchmark harness shape
+
+A prototype may use language-appropriate syntax, but it may not weaken the workflow or silently replace a required stage.
+
+No language may be selected from syntax screenshots, macro aesthetics, or familiarity alone. The final comparison must include implementation complexity, debugging, editor support, runtime behavior, deployment, and interoperability with existing StarIntel[fn:starintel] components.
+
+* Shared Conformance Fixture
+
+The first durable artifact is:
+
+#+begin_example
+prototypes/star-lang/fixtures/email-enumeration.sexp
+#+end_example
+
+The fixture is a restricted symbolic-expression file[fn:s-expression] containing only lists, strings, integers, and ordinary symbols. It intentionally avoids language-specific booleans, structures, packages, reader dispatch, and executable forms. Each implementation must decode the same values into its local document representation.
+
+The fixture defines:
+
+- one persistent =Target= document
+- =target.options.enumeration = true=
+- one nested persistent =User= document with username =ada=
+- the domains =gmail.com=, =outlook.com=, and =proton.me=
+- deterministic fake actor results
+- three expected transient candidates
+- two expected found email addresses
+- exactly one expected persisted =FinalReview= document
+
+The fixture is test input, not Star-Lang source. The Common Lisp prototype still reads it with =*READ-EVAL*= disabled, a private readtable[fn:readtable], a 65,536-byte limit, one top-level-form limit, and rejection of dispatch, quote, backquote, and comma syntax.
+
+* Common Lisp Prototype Scope
+
+The executable baseline is:
+
+#+begin_example
+prototypes/star-lang/common-lisp/prototype.lisp
+prototypes/star-lang/common-lisp/tests.lisp
+#+end_example
+
+The prototype uses only standard Common Lisp facilities. Steel Bank Common Lisp[fn:sbcl] is the current test runner, but the prototype does not use SBCL-specific runtime functions.
+
+The prototype includes:
+
+- explicit runtime-owned registries implemented with hash tables[fn:hash-table]
+- typed document schemas
+- persistent and transient document construction
+- closed-field document validation
+- nested document validation
+- email-address validation
+- actor, tool, agent, pure-function, and dataflow definitions
+- ordinary macros created with =DEFMACRO=[fn:defmacro]
+- inspectable expansion through =MACROEXPAND-1=
+- normalized dataflow-plan records
+- deterministic fake actor execution
+- declared-tool enforcement for the fake agent
+- transient persistence rejection
+- structured Common Lisp conditions[fn:condition]
+- an event list for prototype observations
+- an executable test entry point
+- a repeatable benchmark harness
+
+It deliberately does not use =EVAL=, =COMPILE=, a custom reader for Star-Lang source, reader macros, global mutable registries, Sento[fn:sento], RabbitMQ[fn:rabbitmq], CouchDB[fn:couchdb], Prolog[fn:prolog], a real model provider, or network access.
+
+* Required Workflow Implemented
+
+The named =email-enumeration= dataflow performs these stages:
+
+#+begin_src lisp
+(define-dataflow runtime email-enumeration
+  (from :target)
+  (filter enumeration-target-p)
+  (flat-map generate-email-candidates)
+  (parallel 4 (through email-testing-actor))
+  (filter found-candidate-p)
+  (through review-agent)
+  (into persist))
+#+end_src
+
+The runtime compiles those surface forms into a normalized plan shaped like:
+
+#+begin_src lisp
+((:op :from :type :target)
+ (:op :filter :function enumeration-target-p)
+ (:op :flat-map :function generate-email-candidates)
+ (:op :parallel
+  :limit 4
+  :stage (:op :through :target email-testing-actor :kind :actor))
+ (:op :filter :function found-candidate-p)
+ (:op :through :target review-agent :kind :agent)
+ (:op :into :sink :persist))
+#+end_src
+
+The interpreter[fn:interpreter] executes only registered plan operations. It resolves a pure function, actor, agent, or tool from the runtime registry and calls the registered implementation. The plan does not contain arbitrary host-language forms and is never passed to =EVAL=.
+
+* Macro Inspection
+
+The declaration macros expand into ordinary registry operations. For example, =define-dataflow= expands once into a call that registers quoted source stages:
+
+#+begin_src lisp
+(register-dataflow
+ runtime
+ 'email-enumeration
+ '((from :target)
+   (filter enumeration-target-p)
+   (flat-map generate-email-candidates)
+   (parallel 4 (through email-testing-actor))
+   (filter found-candidate-p)
+   (through review-agent)
+   (into persist)))
+#+end_src
+
+Common Lisp standardizes =MACROEXPAND-1= as the operation that expands a macro form once.[fn:source-macroexpand] The prototype exposes =example-expansions= so later Racket and Scheme reports can compare source declarations with their immediate compiled or expanded form.
+
+* Document and Persistence Findings
+
+The baseline makes persistence a property of the registered schema and the document instance.
+
+- =Target=, =User=, and =FinalReview= are persistent.
+- =EmailCandidate= and =TestedEmailCandidate= are transient.
+- attempting to persist a transient document signals =persistence-error=
+- actor boundaries revalidate accepted and produced document types
+- the final sink persists only the =FinalReview= document
+
+This is enough to test the required distinction. It is not yet the durable storage protocol from the foundation research. There is no content hash, revision, provenance graph, event journal, checkpoint, or CouchDB adapter in this prototype.
+
+* Actor and Agent Findings
+
+The testing actor is synchronous[fn:synchronous] and deterministic. It looks up the fixture-defined result for each email candidate and returns a typed tested-candidate document.
+
+The =review-agent= is an agent declaration with one allowed tool, =candidate-summary=. The runtime rejects a tool call when the agent did not declare that tool. The fake agent calls the declared tool, receives the found email list, and emits one typed final review.
+
+This demonstrates the declaration and capability boundary[fn:capability-boundary]. It does not demonstrate an asynchronous actor mailbox[fn:mailbox], actor supervision[fn:supervision], model-generated tool selection, prompt execution, or remote transport.
+
+* Parallel Stage Interpretation
+
+The surface plan declares a parallel limit of four. The baseline interpreter records the limit but executes the fake actor deterministically in sequence.
+
+That choice is intentional. This loop compares language structures before introducing scheduler timing as a confounding variable[fn:confounding-variable]. A later runtime experiment must implement bounded parallel execution and verify:
+
+- stable output ordering or explicit unordered semantics
+- backpressure[fn:backpressure]
+- cancellation
+- timeouts
+- actor failure isolation
+- deterministic test replay
+
+The current prototype must not be cited as evidence for Common Lisp actor throughput.
+
+* Test Contract
+
+The test script checks:
+
+1. reader dispatch syntax such as sharpsign-dot is rejected
+2. the source fixture produces three transient candidate events
+3. the fake actor marks the expected two addresses as found
+4. the declared tool is called exactly once
+5. exactly one document is persisted
+6. the persisted document type is =FinalReview=
+7. transient persistence signals a structured error
+8. the two required macro expansions are available
+
+Run from the repository root:
+
+#+begin_src sh
+sbcl --script prototypes/star-lang/common-lisp/tests.lisp
+#+end_src
+
+SBCL documents =--script= as a non-interactive script-loading mode that disables the interactive debugger and exits after the file is processed.[fn:source-sbcl-script]
+
+The dedicated GitHub Actions[fn:github-actions] workflow installs SBCL and runs the same command. The research status remains =RESEARCHING= until that workflow has executed successfully on the branch. This document does not claim a passing runtime result from an unexecuted command.
+
+* Benchmark Contract
+
+=benchmark-example= accepts the fixture path and a positive iteration count. It measures repeated end-to-end fixture loading, registry construction, plan execution, validation, fake actor work, fake agent work, and persistence.
+
+The default continuous-integration script prints 100 iterations. This value is a smoke benchmark[fn:smoke-benchmark], not a production-performance result. The later cross-language benchmark must pin:
+
+- machine and operating system
+- language implementation and version
+- optimization settings
+- warm-up method
+- iteration count
+- garbage-collection observations
+- elapsed time distribution
+- memory use
+- whether fixture parsing is included
+
+No performance score is recorded in this node until the command runs in a controlled environment and the raw output is preserved.
+
+* Findings So Far
+
+1. Ordinary Common Lisp macros are sufficient to create readable declaration forms without reader macros.
+2. Immediate macro expansion is easy to inspect through the standardized expansion interface.
+3. A small normalized plan prevents the runtime from treating arbitrary Common Lisp code as executable Star-Lang data.
+4. Explicit registries provide a clear boundary for actors, agents, tools, and pure functions.
+5. Common Lisp conditions provide structured prototype errors without forcing string-only failures.[fn:source-conditions]
+6. The host language makes it easy to close over deterministic fixture data, but those closures are implementation details and cannot become the durable Star-Lang plan format.
+7. The current prototype is compact enough to serve as a comparison baseline, but it does not yet prove safe untrusted-source parsing, durable replay, real actor behavior, or production performance.
+
+* Open Problems Before Common Lisp Scoring
+
+- add source spans and origin chains
+- replace symbol-only plan names with stable identifiers
+- define the exact shared type vocabulary
+- add schema version fields
+- add provenance and content hashes
+- add a safe Star-Lang source reader rather than only a fixture reader
+- add negative compilation fixtures
+- add one branch stage and one merge stage
+- add actor timeout and structured failure fixtures
+- add a fake model transcript with validated tool-call events
+- add deterministic event-history comparison
+- determine how the baseline maps to Sento actor references
+- determine how the plan maps to Dataset Manifests[fn:dataset-manifest]
+- run the same fixture through the Racket and Scheme prototypes
+
+* Next Loops
+
+** TODO Loop 002: Racket Embedded Baseline
+
+Implement the same fixture with ordinary Racket forms, explicit registries, an inspectable normalized plan, and runnable tests.
+
+** TODO Loop 003: Racket =#lang starintel= Baseline
+
+Implement a dedicated language reader and module boundary while preserving the exact workflow and expected output.
+
+** TODO Loop 004: Scheme Baseline
+
+Implement the same fixture in one selected practical Scheme implementation while keeping the portable surface separate from implementation-specific support.
+
+** TODO Loop 005: Comparative Evaluation
+
+Run the same test and benchmark contract, score each required category separately, record unresolved risks, and only then make a language recommendation.
+
+* Promotion Rule
+
+This research node does not approve a Star-Lang implementation design and does not enter the one-design implementation slot. A later design may freeze interfaces only after all comparison prototypes are complete and the evidence supports the decision.
+
+* Footnotes and Glossary
+
+[fn:common-lisp] Common Lisp: A standardized Lisp programming language with ordinary functions, macros, object facilities, hash tables, and a structured condition and restart system.
+
+[fn:star-lang] Star-Lang: The proposed StarIntel language for declaring typed document flows, actor work, agent tools, persistence, recovery, and resumable analysis behavior.
+
+[fn:dsl] Domain-specific language, or DSL: A deliberately limited language designed for one problem area instead of general-purpose programming.
+
+[fn:macro-expansion] Macro expansion: The code transformation that replaces a macro call with the ordinary language form the compiler or evaluator will process.
+
+[fn:ir] Intermediate representation, or IR: A compiler-owned data structure between source syntax and runtime execution. In this prototype it is the normalized dataflow plan.
+
+[fn:reader-macro] Reader macro: A character-level extension that changes how the Common Lisp reader converts source text into objects. The comparison backlog explicitly forbids using reader macros for the Common Lisp prototype.
+
+[fn:eval] =EVAL=: The Common Lisp operation that evaluates a data object as a program form. Unrestricted use would let input data become arbitrary host-language execution.
+
+[fn:comparative-loop] Comparative research loop: A sequence of controlled prototypes that hold the workflow constant while changing the implementation language, followed by evidence-based scoring.
+
+[fn:racket] Racket: A Lisp-family language and language-building platform that supports ordinary embedded languages and dedicated =#lang= module languages.
+
+[fn:scheme] Scheme: A Lisp-family language standardized around a small core, lexical scope, procedures, and macros, with multiple practical implementations.
+
+[fn:llm-agent] Large-language-model agent, or LLM agent: A runtime component that sends structured context to a language model, validates requested tool calls, limits steps, and returns a typed result.
+
+[fn:dataflow] Dataflow: A named graph or ordered plan describing how documents move through filters, transformations, actors, agents, branches, and sinks.
+
+[fn:transient-document] Transient document: A typed document allowed to move through the running dataflow but forbidden from durable persistence.
+
+[fn:persistent-document] Persistent document: A typed document permitted to be written to durable storage under the applicable schema and policy.
+
+[fn:starintel] StarIntel: The local-first intelligence platform being designed in this repository to collect, normalize, connect, search, analyze, and export structured documents through actor-based components.
+
+[fn:s-expression] Symbolic expression, or S-expression: A list-and-atom notation used by Lisp-family languages to represent nested data and program structure.
+
+[fn:readtable] Readtable: The Common Lisp table that assigns parsing behavior to source characters.
+
+[fn:sbcl] Steel Bank Common Lisp, or SBCL: A Common Lisp implementation used here to run the portable prototype and tests.
+
+[fn:hash-table] Hash table: A data structure that maps keys to values for efficient lookup. The prototype uses separate tables for schemas, actors, tools, agents, dataflows, and pure functions.
+
+[fn:defmacro] =DEFMACRO=: The Common Lisp operator for defining a source-to-source transformation using ordinary Lisp data.
+
+[fn:sento] Sento: The Common Lisp actor library used by StarIntel for in-process actors, mailboxes, dispatchers, routers, and supervision.
+
+[fn:rabbitmq] RabbitMQ: A message broker that stores and routes messages between processes through queues and exchanges.
+
+[fn:couchdb] CouchDB: A document database accessed through Hypertext Transfer Protocol interfaces and capable of change feeds, views, and document attachments.
+
+[fn:prolog] Prolog: A logic-programming language family that answers queries from facts and rules through unification and proof search.
+
+[fn:interpreter] Interpreter: A runtime component that directly executes a normalized plan one operation at a time instead of first generating native machine code.
+
+[fn:condition] Common Lisp condition: A structured object describing a warning, error, or other runtime situation that handlers may inspect.
+
+[fn:synchronous] Synchronous execution: Work in which the caller waits for the operation to complete before continuing.
+
+[fn:capability-boundary] Capability boundary: A rule that permits an operation only when it was explicitly declared or granted. Here an agent may call only tools listed in its definition.
+
+[fn:mailbox] Actor mailbox: The queue of messages waiting for one actor to process them, normally one message at a time for that actor.
+
+[fn:supervision] Actor supervision: A runtime policy in which a supervisor observes child actors and applies bounded restart, replacement, or shutdown rules after failure.
+
+[fn:confounding-variable] Confounding variable: A changed factor that makes it difficult to know which tested cause produced the observed result. Scheduler timing would obscure a first comparison of language structure.
+
+[fn:backpressure] Backpressure: A mechanism that slows or limits producers when downstream consumers cannot safely process more work.
+
+[fn:github-actions] GitHub Actions: GitHub's repository automation service for running declared workflows on hosted or self-managed machines.
+
+[fn:smoke-benchmark] Smoke benchmark: A small automated timing run used to detect gross regressions or broken execution, not to establish a production performance ranking.
+
+[fn:dataset-manifest] Dataset Manifest: A StarIntel declaration that identifies a dataset and describes how documents should be routed, processed, stored, or indexed.
+
+* Citations
+
+[fn:source-macroexpand] Common Lisp HyperSpec, =MACROEXPAND= and =MACROEXPAND-1=, retrieved 2026-07-21: https://www.lispworks.com/documentation/HyperSpec/Body/f_mexp_.htm
+
+[fn:source-conditions] Common Lisp HyperSpec, “Condition System Concepts,” retrieved 2026-07-21: https://www.lispworks.com/documentation/HyperSpec/Body/09_a.htm
+
+[fn:source-sbcl-script] Steel Bank Common Lisp User Manual, script execution and =--script=, retrieved 2026-07-21: https://www.sbcl.org/manual/index.html

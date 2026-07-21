@@ -1,0 +1,809 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-001
+:END:
+#+title: STAR-LANG-001 Common Lisp Language and Durable Runtime
+#+description: Define the first implementable Star-Lang compiler, checked plan model, deterministic runtime, actor boundary, durable event history, recovery protocol, package layout, and acceptance gates in Common Lisp.
+#+status: DRAFT
+#+filetags: :starintel:design:star-lang:common-lisp:dsl:compiler:runtime:actors:replay:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                                                 | Did nsaspy approve it |
+|---------+------------+---------------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-21 | Create the implementable Common Lisp language and durable runtime design              | Pending               |
+
+* TODO Design File System
+
+** Purpose
+
+Star-Lang[fn:star-lang] is the declarative language used to define versioned StarIntel[fn:starintel] analyses, document dataflows[fn:dataflow], actor commands, reasoning requests, checkpoints, conditions, legal recovery actions, and final artifacts.
+
+This design freezes the first Common Lisp[fn:common-lisp] implementation boundary. It converts the completed language-foundation research and the passing Common Lisp comparison prototype into one coherent compiler and reference runtime.
+
+This design does not approve production implementation by itself. It remains outside =roam/implement/=[fn:implementation-slot] until nsaspy explicitly approves it and the repository implementation slot is available.
+
+** Research basis
+
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-001-common-lisp-comparative-baseline.org][STAR-LANG-RESEARCH-001 Common Lisp Comparative Baseline]]
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Language Research]]
+- [[file:../STAR-00-Starintel-4th-generation-Ideas.org][STAR-00 StarIntel Fourth Generation Ideas]]
+
+** Design decision
+
+Implement the first complete Star-Lang compiler and authoritative reference runtime in Common Lisp.
+
+The implementation must use:
+
+- ordinary Common Lisp source files
+- a local ASDF[fn:asdf] system
+- no Quicklisp requirement
+- a private Star-Lang reader implemented as a bounded tokenizer and parser
+- syntax objects carrying source spans and origin chains
+- a closed checked intermediate representation[fn:ir]
+- immutable content-addressed plans
+- an append-only event history
+- deterministic replay
+- explicit capability and effect declarations
+- structured Common Lisp conditions and declared durable restarts
+- actor adapters behind protocols rather than actor-library calls inside the compiler
+- one authoritative interpreter before any optimizer or alternate executor
+
+The implementation must not use:
+
+- unrestricted =READ= on untrusted Star-Lang source
+- =EVAL= or =COMPILE= on Star-Lang input
+- reader macros
+- global mutable definition registries
+- hidden network, storage, model, actor, clock, random, or Prolog[fn:prolog] operations
+- persisted Common Lisp closures or continuations
+- engine-specific Prolog syntax in the core language
+- a production dependency selected only because the prototype used it
+
+** Language boundary
+
+Star-Lang declares orchestration and policy. It does not replace:
+
+- Common Lisp as the actor and runtime implementation language
+- Prolog as a rule and proof language
+- CouchDB[fn:couchdb] as a document persistence engine
+- Sento[fn:sento] as the normal in-process actor runtime
+- Star Router[fn:star-router] as the client-facing or cross-process routing boundary
+- Dataset Manifests[fn:dataset-manifest] as the declaration of document routing between registered capabilities
+- Actor Manifests[fn:actor-manifest] as the declaration of actor capabilities and contracts
+
+A Star-Lang program may refer to those capabilities by stable identifiers. It may not embed their implementation code.
+
+** Repository package layout
+
+The implementation begins under the current research repository path:
+
+#+begin_example
+prototypes/star-lang/common-lisp/
+├── star-lang.asd
+├── src/
+│   ├── package.lisp
+│   ├── conditions.lisp
+│   ├── hash.lisp
+│   ├── syntax.lisp
+│   ├── model.lisp
+│   ├── registry.lisp
+│   ├── reader.lisp
+│   ├── compiler.lisp
+│   ├── runtime.lisp
+│   ├── replay.lisp
+│   ├── adapters.lisp
+│   └── example.lisp
+├── tests/
+│   ├── package.lisp
+│   ├── reader.lisp
+│   ├── compiler.lisp
+│   ├── runtime.lisp
+│   ├── replay.lisp
+│   └── suite.lisp
+└── fixtures/
+    ├── email-enumeration.star
+    ├── email-enumeration.sexp
+    └── invalid/
+#+end_example
+
+The initial implementation may combine files while interfaces stabilize, but the final design boundaries above must remain visible as packages or source modules.
+
+The ASDF system must load from the repository without Quicklisp:
+
+#+begin_src lisp
+(asdf:load-system :star-lang)
+(asdf:test-system :star-lang)
+#+end_src
+
+** Packages
+
+Required packages:
+
+| Package | Responsibility |
+|---------+----------------|
+| =STAR-LANG.SYNTAX= | Source positions, spans, tokens, syntax objects, and origin chains |
+| =STAR-LANG.MODEL= | Schemas, documents, core forms, plans, commands, events, conditions, restarts, and checkpoints |
+| =STAR-LANG.READER= | Bounded tokenizer and parser for the closed source grammar |
+| =STAR-LANG.COMPILER= | Expansion, name resolution, schema checks, effect checks, capability checks, plan construction, and diagnostics |
+| =STAR-LANG.RUNTIME= | Authoritative deterministic interpreter and run lifecycle |
+| =STAR-LANG.REPLAY= | Event-history validation, replay, checkpoint restoration, and compatibility checks |
+| =STAR-LANG.ADAPTERS= | Protocols for actors, storage, journal, clock, random values, approvals, and logic engines |
+| =STAR-LANG= | Stable public API re-exporting reviewed operations |
+| =STAR-LANG.TESTS= | Test harness and fixtures |
+
+Internal packages may be added, but applications must not depend on undocumented internal symbols.
+
+** Public API
+
+Version 0.1 must expose:
+
+#+begin_src lisp
+(star-lang:read-source pathname)
+(star-lang:parse-string source :source-name name)
+(star-lang:expand syntax registry)
+(star-lang:check syntax registry policy)
+(star-lang:compile-analysis syntax registry policy)
+(star-lang:plan-hash plan)
+(star-lang:run-plan plan runtime :inputs inputs)
+(star-lang:resume-run run-id runtime)
+(star-lang:replay-run run-id runtime)
+(star-lang:explain-plan plan)
+(star-lang:explain-run run-id runtime)
+(star-lang:register-schema registry schema)
+(star-lang:register-capability registry capability)
+(star-lang:register-actor-adapter registry adapter)
+(star-lang:register-reasoner-adapter registry adapter)
+#+end_src
+
+Every public operation must either return a typed value or signal a documented =STAR-LANG-ERROR= subtype. Public functions must not drop failures into log output and return an ambiguous value.
+
+** Source grammar
+
+The source grammar is a closed S-expression[fn:s-expression] grammar implemented by Star-Lang itself.
+
+Allowed lexical values:
+
+- parentheses
+- registered language symbols
+- keywords
+- UTF-8 strings
+- bounded integers
+- bounded ratios only when explicitly enabled
+- =true=
+- =false=
+- =nil=
+- registered literal forms such as duration and timestamp
+
+Rejected syntax:
+
+- Common Lisp package prefixes
+- quote, backquote, comma, and comma-at
+- dispatch syntax beginning with sharpsign
+- circular notation
+- structure literals
+- pathname literals
+- character literals unless registered later
+- unreadable objects
+- implementation-specific syntax
+- source exceeding configured byte, token, depth, list-length, or numeric limits
+
+The parser must record:
+
+- source name
+- starting and ending byte offsets
+- starting and ending line and column
+- exact token text where applicable
+- parent source span
+- origin chain for generated forms
+
+** Surface language
+
+Version 0.1 surface definitions:
+
+- =analysis=
+- =document-schema=
+- =actor-capability=
+- =reasoning-capability=
+- =tool-capability=
+- =dataflow=
+
+Version 0.1 orchestration forms:
+
+- =bind=
+- =sequence=
+- =parallel=
+- =branch=
+- =command=
+- =await=
+- =reason=
+- =checkpoint=
+- =condition=
+- =restart=
+- =emit=
+
+Reviewed convenience forms may expand into the core:
+
+- =from=
+- =filter=
+- =map=
+- =flat-map=
+- =through=
+- =into=
+- =collect=
+- =normalize=
+- =on-condition=
+- =request-human=
+
+Convenience forms do not receive independent runtime semantics. The expander must convert them into the closed core before checking and planning.
+
+** Core intermediate representation
+
+Every checked core node contains:
+
+#+begin_src lisp
+(defstruct core-node
+  id
+  operation
+  inputs
+  output
+  type
+  effects
+  capabilities
+  source-span
+  origin-chain
+  policy
+  metadata)
+#+end_src
+
+Required properties:
+
+1. =id= is stable for the same normalized source and compiler version.
+2. =operation= belongs to the closed core operation set.
+3. inputs reference bindings or prior node identifiers, not host-language variables.
+4. output names one immutable binding or no binding.
+5. type names a versioned schema or built-in type.
+6. effects are explicit.
+7. capabilities are explicit.
+8. source mapping survives expansion.
+9. policy is normalized and bounded.
+10. metadata is versioned and cannot contain executable closures.
+
+** Type and schema model
+
+Every document schema has:
+
+- schema identifier
+- schema version
+- persistence policy
+- field definitions
+- requiredness
+- null behavior
+- default behavior
+- validators
+- secret and redaction metadata
+- index metadata
+- migration identifiers
+
+Document instances have:
+
+- document identifier
+- schema identifier and version
+- persistence policy
+- immutable field values
+- provenance references
+- content hash
+- creation event identifier
+
+The compiler checks declared relationships. Runtime adapters revalidate every value crossing an actor, process, storage, model, or reasoning boundary.
+
+Transient documents must never reach a persistent sink. A runtime adapter that receives a transient document for persistence must signal =TRANSIENT-PERSISTENCE-DENIED= before external I/O.
+
+** Effects and capabilities
+
+Initial effects:
+
+- =:read-repository=
+- =:read-dataset=
+- =:network=
+- =:llm=
+- =:prolog=
+- =:write-transient=
+- =:write-artifact=
+- =:write-canonical-proposal=
+- =:human-approval=
+- =:clock=
+- =:random=
+
+A capability[fn:capability] identifies a registered authority and contract. An effect identifies an externally observable class of operation.
+
+Rules:
+
+1. each effectful node declares its effect and capability
+2. the analysis header declares a maximum effect set
+3. compilation fails when a node exceeds that set
+4. runtime policy may remove authority but may not add undeclared authority
+5. capability lookup returns a versioned descriptor, never raw actor implementation code
+6. external writes require stable idempotency keys[fn:idempotency]
+7. clock and random results are recorded events
+8. replay consumes recorded effect results
+
+** Plan model
+
+A compiled plan contains:
+
+#+begin_src lisp
+(defstruct plan
+  analysis-id
+  analysis-version
+  compiler-version
+  schema-registry-hash
+  capability-registry-hash
+  normalized-source-hash
+  plan-hash
+  nodes
+  dependencies
+  effects
+  capabilities
+  inputs
+  outputs
+  checkpoints
+  source-map)
+#+end_src
+
+The plan hash is a SHA-256[fn:sha256] digest of a canonical serialization containing every field that affects observable behavior.
+
+Canonical serialization must:
+
+- sort maps and sets
+- preserve list order where order is semantic
+- normalize symbol names and keywords
+- include schema and capability versions
+- exclude memory addresses, implementation object printing, timestamps, random values, hash-table iteration order, and closures
+
+** Runtime state
+
+The authoritative logical state is:
+
+#+begin_example
+<plan, status, ready-set, bindings, pending-commands, active-condition,
+ legal-restarts, resource-counters, event-position>
+#+end_example
+
+Run states:
+
+- =CREATED=
+- =RUNNING=
+- =AWAITING=
+- =CONDITION=
+- =WAITING-HUMAN=
+- =CANCELLING=
+- =CANCELLED=
+- =COMPLETED=
+- =FAILED=
+
+Every state transition appends an event before the new logical state is acknowledged.
+
+** Event history
+
+Each event contains:
+
+#+begin_src lisp
+(defstruct run-event
+  event-id
+  sequence
+  run-id
+  analysis-id
+  analysis-version
+  plan-hash
+  node-id
+  event-type
+  event-schema-version
+  causation-id
+  correlation-id
+  attempt
+  actor-identity
+  recorded-time
+  input-hash
+  output-hash
+  effect
+  capability
+  payload)
+#+end_src
+
+The journal adapter[fn:journal-adapter] is the authority for logical progress. A runtime must not publish an external command as completed until the matching result event is durably recorded.
+
+Initial events include:
+
+- =run-created=
+- =run-started=
+- =node-ready=
+- =node-started=
+- =pure-result=
+- =command-created=
+- =command-dispatched=
+- =command-result=
+- =condition-signalled=
+- =restart-offered=
+- =restart-selected=
+- =checkpoint-written=
+- =artifact-emitted=
+- =run-completed=
+- =run-failed=
+- =cancellation-requested=
+- =run-cancelled=
+
+** Commands and actors
+
+An effectful actor command has:
+
+- stable command identifier
+- stable idempotency key
+- run, plan, and node identifiers
+- attempt number
+- capability identifier and version
+- input schema identifier and version
+- input hash
+- deadline
+- resource policy
+- payload or artifact reference
+
+Star-Lang depends on an actor-adapter protocol:
+
+#+begin_src lisp
+(defgeneric dispatch-command (adapter command runtime-context))
+(defgeneric cancel-command (adapter command-id runtime-context))
+(defgeneric capability-available-p (adapter capability policy))
+#+end_src
+
+The reference adapter may execute deterministically in-process. The Sento adapter must preserve actor mailbox and supervision semantics. External adapters may use Star Router or ZeroMQ[fn:zeromq] only behind the same command contract.
+
+The compiler and core runtime must not import Sento implementation packages.
+
+** Prolog boundary
+
+A reasoning node names a reasoning capability, immutable facts, rule-set version, query, output schema, limits, and proof requirement.
+
+The reasoner adapter returns:
+
+- engine identifier and version
+- adapter version
+- answers
+- proof or explanation reference
+- completeness status
+- input, rule, and output hashes
+- resource use
+- warnings or a structured condition
+
+The core language never contains engine-specific directives. Engine selection belongs to capability routing.
+
+** Conditions and durable restarts
+
+Runtime conditions are versioned data, not only dynamic Common Lisp objects.
+
+Each condition descriptor contains:
+
+- condition type
+- schema version
+- node identifier
+- command identifier when applicable
+- structured payload
+- source span
+- causation event
+- legal restart descriptors
+
+Initial durable restarts:
+
+- =retry=
+- =retry-after=
+- =use-value=
+- =skip-branch=
+- =select-fallback-capability=
+- =request-human=
+- =abort-analysis=
+
+Common Lisp conditions and restarts implement local control transfer. The runtime persists only the condition and restart descriptors plus the selected restart event. It never persists dynamic restart closures.
+
+** Replay
+
+Replay rebuilds logical state from the immutable plan and ordered events.
+
+Rules:
+
+1. replay does not dispatch a command that already has a recorded result
+2. replay validates event sequence, schema version, plan hash, node identifier, causation, and correlation
+3. replay rejects an event that cannot legally follow the reconstructed state
+4. replay consumes recorded clock, random, actor, model, storage, approval, and reasoning results
+5. checkpoint state is optional acceleration
+6. deleting all checkpoints must not destroy recoverability
+7. an incompatible checkpoint signals =INCOMPATIBLE-CHECKPOINT=
+8. a changed plan requires an explicit migration or a new linked run
+
+** Checkpoints
+
+A checkpoint stores only declarative state:
+
+- plan hash
+- interpreter version
+- checkpoint schema version
+- ready nodes and cursor state
+- immutable bindings or artifact references
+- completed command identifiers
+- pending awaits
+- active condition and legal restarts
+- resource counters
+- last included event identifier and sequence
+
+The event history remains authoritative.
+
+** Deterministic scheduling
+
+The reference interpreter chooses ready nodes by stable node identifier unless a core form defines another order.
+
+Parallel blocks expose a bounded ready set. Their effect results may arrive in any order, but binding and merge semantics must be explicit and deterministic.
+
+A production actor scheduler may execute commands concurrently. It must produce an event history accepted by the reference interpreter.
+
+** Storage protocols
+
+Required protocols:
+
+#+begin_src lisp
+(defgeneric append-event (journal event))
+(defgeneric read-events (journal run-id &key after-sequence))
+(defgeneric write-checkpoint (store checkpoint))
+(defgeneric read-latest-checkpoint (store run-id plan-hash))
+(defgeneric persist-artifact (store artifact command-context))
+(defgeneric load-artifact (store artifact-id))
+#+end_src
+
+The first test adapters are in-memory. A later CouchDB adapter may implement journals, checkpoints, and artifacts, but the runtime must not depend directly on HTTP or CouchDB client code.
+
+** Registry model
+
+Registries are explicit immutable snapshots passed to compilation.
+
+Registry classes:
+
+- schemas
+- actors
+- tools
+- agents
+- reasoning capabilities
+- storage capabilities
+- literal parsers
+- surface expanders
+- condition schemas
+- restart schemas
+
+Compilation records hashes of relevant registry snapshots. Changing a registered contract changes the plan hash or fails compatibility checks.
+
+** Diagnostics and tooling
+
+Required operations:
+
+- =star-lang expand=
+- =star-lang check=
+- =star-lang plan=
+- =star-lang run=
+- =star-lang trace=
+- =star-lang replay=
+- =star-lang explain=
+
+Each diagnostic contains:
+
+- stable code
+- severity
+- message
+- primary source span
+- related spans
+- relevant schema, capability, effect, condition, or restart identifier
+- machine-readable payload
+
+Required Emacs entry points:
+
+- =star/lang-expand-buffer=
+- =star/lang-check-buffer=
+- =star/lang-show-plan=
+- =star/lang-run-fixture=
+- =star/lang-trace-run=
+- =star/lang-explain-at-point=
+
+The Common Lisp implementation is authoritative. Emacs commands invoke the public API through SLY[fn:sly], a subprocess, or a reviewed local protocol; they do not reimplement the compiler in Emacs Lisp.
+
+** Security requirements
+
+- no host-language evaluation of source data
+- bounded parser resources
+- canonical serialization before hashing
+- explicit capability authority
+- runtime revalidation at every external boundary
+- secret fields excluded or redacted from diagnostics and events
+- artifact payloads stored by reference when too large or sensitive
+- no credentials in plans, events, checkpoints, source files, or repository fixtures
+- policy denial recorded as a structured condition
+- external writes idempotent by command identity
+- unrecorded progress never acknowledged
+
+** Testing
+
+Required layers:
+
+1. tokenizer and parser unit tests
+2. rejection fixtures for every forbidden syntax class and limit
+3. golden source-to-syntax tests
+4. golden expansion tests
+5. golden checked-core tests
+6. golden canonical-plan tests
+7. schema, type, effect, capability, and restart negative tests
+8. stable identifier and SHA-256 tests
+9. deterministic run-state-machine tests
+10. actor adapter contract tests
+11. duplicate delivery tests
+12. crash-after-every-event replay tests
+13. checkpoint deletion and corruption tests
+14. condition and restart tests
+15. human-decision wait and resume tests
+16. Prolog adapter isolation and proof-metadata tests
+17. differential tests between reference and optimized executors
+18. migration tests
+19. fuzz and property tests for reader and replay boundaries
+20. controlled benchmark tests
+
+The existing email-enumeration fixture remains the first end-to-end conformance test.
+
+** Implementation phases
+
+*** TODO Phase 0: Local ASDF system
+
+- create packages and system definitions
+- preserve the passing baseline fixture
+- remove Quicklisp assumptions
+- run through =asdf:test-system=
+
+*** TODO Phase 1: Reader and syntax model
+
+- implement bounded tokenizer
+- implement parser
+- attach source spans
+- add syntax-origin chains
+- add rejection fixtures
+
+*** TODO Phase 2: Registries and checked core
+
+- version schemas and capabilities
+- implement immutable registry snapshots
+- expand surface forms
+- check types, effects, capabilities, and restart legality
+- emit closed core nodes
+
+*** TODO Phase 3: Immutable plan
+
+- assign stable node identifiers
+- implement canonical serialization
+- implement SHA-256 plan hashes
+- emit source map and dependency graph
+
+*** TODO Phase 4: Reference runtime
+
+- implement run state machine
+- implement deterministic scheduler
+- implement in-memory adapters
+- implement append-only event history
+- implement commands, awaits, branches, parallel blocks, checkpoints, conditions, restarts, and outputs
+
+*** TODO Phase 5: Replay and recovery
+
+- replay from empty state
+- restore compatible checkpoints
+- avoid duplicate effects
+- implement crash-boundary harness
+- implement human-decision resume
+
+*** TODO Phase 6: Actor and reasoning adapters
+
+- implement deterministic test adapter
+- implement Sento adapter
+- implement Star Router or ZeroMQ adapter where required
+- implement Prolog capability adapter
+
+*** TODO Phase 7: Tooling
+
+- command-line interface
+- Emacs commands
+- source-mapped diagnostics
+- plan, trace, replay, and explanation views
+
+*** TODO Phase 8: Measured optimization
+
+- phase caches
+- pure-node optimizations
+- bounded concurrent scheduler
+- differential event-history tests
+- optimization only after profiling
+
+** Acceptance criteria
+
+This design is implementation-ready when:
+
+- the local ASDF system loads without Quicklisp
+- untrusted Star-Lang input cannot invoke the Common Lisp reader or evaluator
+- every accepted surface form expands into the closed core
+- every syntax, core, and plan node has a source span or origin chain
+- schemas and capabilities are versioned
+- every plan has a reproducible SHA-256 hash
+- undeclared effects and unavailable capabilities fail before execution
+- transient documents cannot reach persistent storage
+- the same plan and event history reconstruct the same logical state
+- replay does not repeat completed effects
+- duplicate command delivery does not duplicate logical or external results
+- checkpoints can be deleted without losing recoverability
+- conditions expose only legal typed restarts
+- human restart decisions are recorded and resumable
+- actor failure and analysis recovery remain separate
+- reasoning results include engine, rule-set, proof, and hash metadata
+- the email-enumeration fixture passes through compile, execute, crash, resume, and replay
+- =asdf:test-system :star-lang= passes
+- GitHub Actions passes the Common Lisp suite, Org-roam Pages build, link audit, Kindle export, and EPUB validation
+- the design is explicitly approved before entering =roam/implement/=
+
+** Deferred work
+
+- native-code generation
+- unrestricted user macros
+- a public package ecosystem
+- distributed consensus
+- automatic plan migration
+- arbitrary host-language escape forms
+- a Racket or Scheme production runtime
+- a graphical language editor
+- optimizer claims without differential tests
+
+* Footnotes and Glossary
+
+[fn:star-lang] Star-Lang: The proposed StarIntel language for declaring typed document flows, actor work, reasoning, persistence, recovery, and resumable analysis behavior.
+
+[fn:starintel] StarIntel: The local-first intelligence platform being designed to collect, normalize, connect, search, analyze, and export structured documents through actor-based components.
+
+[fn:dataflow] Dataflow: A named graph or ordered plan describing how documents move through filters, transformations, actors, agents, branches, and sinks.
+
+[fn:common-lisp] Common Lisp: A standardized Lisp programming language with functions, macros, objects, generic functions, and a structured condition and restart system.
+
+[fn:implementation-slot] Implementation slot: The repository rule that permits exactly zero or one selected design file beneath =roam/implement/= at one time.
+
+[fn:asdf] Another System Definition Facility, or ASDF: The standard Common Lisp system loader used to describe source-file order and test operations.
+
+[fn:ir] Intermediate representation, or IR: A compiler-owned data structure between source syntax and executable plans.
+
+[fn:prolog] Prolog: A logic-programming language family that answers queries from facts and rules through unification and proof search.
+
+[fn:couchdb] CouchDB: A document database with HTTP interfaces, revisions, attachments, views, and change feeds.
+
+[fn:sento] Sento: The Common Lisp actor library used by StarIntel for in-process actors, mailboxes, dispatchers, routers, and supervision.
+
+[fn:star-router] Star Router: The StarIntel routing boundary for clients and cross-process actor communication.
+
+[fn:dataset-manifest] Dataset Manifest: A StarIntel declaration describing a dataset and how documents are routed, processed, stored, or indexed.
+
+[fn:actor-manifest] Actor Manifest: A StarIntel declaration describing an actor's identity, accepted inputs, outputs, capabilities, dependencies, and runtime requirements.
+
+[fn:s-expression] Symbolic expression, or S-expression: A nested list-and-atom notation used by Lisp-family languages for data and source structure.
+
+[fn:capability] Capability: An explicit authority and versioned contract permitting one bounded operation.
+
+[fn:idempotency] Idempotency: The property that repeating an operation with the same identity does not create another logical effect after the first successful application.
+
+[fn:sha256] SHA-256: A cryptographic hash algorithm producing a 256-bit digest used here to identify normalized source, registries, plans, documents, and artifacts.
+
+[fn:journal-adapter] Journal adapter: The component implementing append and retrieval operations for the authoritative ordered run-event history.
+
+[fn:zeromq] ZeroMQ: A messaging library providing socket patterns for communication inside or across processes without prescribing a broker.
+
+[fn:sly] SLY: An Emacs development environment for Common Lisp that connects Emacs to a running Lisp process.
+
+* Citations
+
+- Common Lisp HyperSpec, “Condition System Concepts”: https://www.lispworks.com/documentation/HyperSpec/Body/09_a.htm
+- Common Lisp HyperSpec, =RESTART-CASE=: https://www.lispworks.com/documentation/HyperSpec/Body/m_rst_ca.htm
+- Common Lisp HyperSpec, =*READ-EVAL*=: https://clhs.lisp.se/Body/v_rd_eva.htm
+- ASDF Manual: https://asdf.common-lisp.dev/asdf.html
+- National Institute of Standards and Technology, Secure Hash Standard, FIPS PUB 180-4: https://csrc.nist.gov/pubs/fips/180-4/upd1/final

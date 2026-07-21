@@ -1,6 +1,6 @@
 (asdf:defsystem "star-lang"
   :description "Common Lisp compiler and deterministic durable runtime for Star-Lang."
-  :version "0.5.1"
+  :version "0.5.2"
   :author "StarIntel"
   :license "UNLICENSED"
   :serial t
@@ -31,7 +31,8 @@
    (:file "rabbit-adapter")
    (:file "adapter-contract-tests")
    (:file "durable-tests")
-   (:file "durable-advanced-tests"))
+   (:file "durable-advanced-tests")
+   (:file "durable-advanced-test-fixes"))
   :perform
   (asdf:test-op (operation component)
     (declare (ignore operation component))

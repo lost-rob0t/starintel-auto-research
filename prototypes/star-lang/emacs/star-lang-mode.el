@@ -1,6 +1,5 @@
 ;;; star-lang-mode.el --- Star-Lang editing and Flymake support -*- lexical-binding: t; -*-
 
-(require 'cl-lib)
 (require 'compile)
 (require 'flymake)
 (require 'lisp-mode)
@@ -67,8 +66,8 @@
 (defun star-lang--compilation-command (command)
   (let* ((file (star-lang--buffer-file))
          (default-directory
-          (or (locate-dominating-file file ".git")
-              default-directory)))
+           (or (locate-dominating-file file ".git")
+               default-directory)))
     (save-buffer)
     (compilation-start
      (star-lang--shell-command command file)
@@ -96,15 +95,15 @@
   (let* ((file (star-lang--buffer-file))
          (buffer (get-buffer-create "*Star-Lang Graph*"))
          (arguments
-          (append (list "graph" file)
-                  (star-lang--policy-arguments))))
+           (append (list "graph" file)
+                   (star-lang--policy-arguments))))
     (save-buffer)
     (with-current-buffer buffer
       (erase-buffer)
       (let ((status
               (apply #'call-process
                      star-lang-executable nil buffer nil arguments)))
-        (unless (zerop status)
+        (unless (and (integerp status) (zerop status))
           (error "Star-Lang graph command failed with status %s" status)))
       (goto-char (point-min))
       (when (fboundp 'graphviz-dot-mode)
@@ -134,60 +133,59 @@
 
 (defun star-lang--flymake-report (source report-fn process-buffer status)
   (unwind-protect
-      (let ((forms (star-lang--read-diagnostic-forms process-buffer))
-            diagnostics)
-        (dolist (form forms)
-          (when (and (listp form) (plist-get form :message))
-            (pcase-let ((`(,begin . ,end)
-                         (star-lang--diagnostic-region
-                          source
-                          (plist-get form :line)
-                          (plist-get form :column))))
+      (when (buffer-live-p source)
+        (let ((forms (star-lang--read-diagnostic-forms process-buffer))
+              diagnostics)
+          (dolist (form forms)
+            (when (and (listp form) (plist-get form :message))
+              (pcase-let ((`(,begin . ,end)
+                           (star-lang--diagnostic-region
+                            source
+                            (plist-get form :line)
+                            (plist-get form :column))))
+                (push
+                 (flymake-make-diagnostic
+                  source begin end
+                  (if (eq (plist-get form :severity) :warning)
+                      :warning
+                    :error)
+                  (format "%s: %s"
+                          (or (plist-get form :code) :star-lang)
+                          (plist-get form :message)))
+                 diagnostics))))
+          (when (and (null diagnostics) (not (zerop status)))
+            (with-current-buffer source
               (push
                (flymake-make-diagnostic
-                source begin end
-                (if (eq (plist-get form :severity) :warning)
-                    :warning
-                  :error)
-                (format "%s: %s"
-                        (or (plist-get form :code) :star-lang)
-                        (plist-get form :message)))
-               diagnostics))))
-        (when (and (null diagnostics) (not (zerop status)))
-          (with-current-buffer source
-            (push
-             (flymake-make-diagnostic
-              source (point-min) (min (point-max) (1+ (point-min)))
-              :error
-              "Star-Lang lint failed before structured diagnostics were produced")
-             diagnostics)))
-        (funcall report-fn (nreverse diagnostics)))
-    (kill-buffer process-buffer)))
+                source (point-min) (min (point-max) (1+ (point-min)))
+                :error
+                "Star-Lang lint failed before structured diagnostics were produced")
+               diagnostics)))
+          (funcall report-fn (nreverse diagnostics))))
+    (when (buffer-live-p process-buffer)
+      (kill-buffer process-buffer))))
 
 (defun star-lang-flymake-backend (report-fn &rest _args)
   "Run Star-Lang lint and report diagnostics through Flymake."
-  (unless buffer-file-name
-    (funcall report-fn nil)
-    (cl-return-from star-lang-flymake-backend))
-  (let* ((source (current-buffer))
-         (process-buffer (generate-new-buffer " *star-lang-flymake*"))
-         (command
-          (append (list star-lang-executable "lint" buffer-file-name)
-                  (star-lang--policy-arguments)))
-         (process
-          (make-process
-           :name "star-lang-flymake"
-           :buffer process-buffer
-           :command command
-           :noquery t
-           :connection-type 'pipe
-           :sentinel
-           (lambda (process _event)
-             (when (memq (process-status process) '(exit signal))
-               (star-lang--flymake-report
-                source report-fn process-buffer
-                (process-exit-status process)))))))
-    (process-put process 'source source)))
+  (if (not buffer-file-name)
+      (funcall report-fn nil)
+    (let* ((source (current-buffer))
+           (process-buffer (generate-new-buffer " *star-lang-flymake*"))
+           (command
+             (append (list star-lang-executable "lint" buffer-file-name)
+                     (star-lang--policy-arguments))))
+      (make-process
+       :name (generate-new-buffer-name "star-lang-flymake")
+       :buffer process-buffer
+       :command command
+       :noquery t
+       :connection-type 'pipe
+       :sentinel
+       (lambda (process _event)
+         (when (memq (process-status process) '(exit signal))
+           (star-lang--flymake-report
+            source report-fn process-buffer
+            (process-exit-status process))))))))
 
 ;;;###autoload
 (define-derived-mode star-lang-mode lisp-mode "Star-Lang"

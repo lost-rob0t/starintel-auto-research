@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "prototypes/star-lang/common-lisp/**"
+      - "prototypes/star-lang/emacs/**"
       - "prototypes/star-lang/examples/**"
       - "prototypes/star-lang/fixtures/**"
       - ".github/workflows/star-lang-common-lisp.yml"
@@ -12,6 +13,7 @@ on:
       - main
     paths:
       - "prototypes/star-lang/common-lisp/**"
+      - "prototypes/star-lang/emacs/**"
       - "prototypes/star-lang/examples/**"
       - "prototypes/star-lang/fixtures/**"
       - ".github/workflows/star-lang-common-lisp.yml"
@@ -41,6 +43,43 @@ jobs:
         with:
           name: star-lang-test-log
           path: star-lang-test.log
+          if-no-files-found: error
+
+  emacs-tooling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Emacs
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes emacs-nox
+      - name: Byte-compile Star-Lang mode
+        shell: bash
+        run: |
+          set -o pipefail
+          emacs --batch -Q \
+            -L prototypes/star-lang/emacs \
+            -f batch-byte-compile \
+            prototypes/star-lang/emacs/star-lang-mode.el \
+            2>&1 | tee star-lang-emacs-byte-compile.log
+      - name: Run Star-Lang ERT tests
+        shell: bash
+        run: |
+          set -o pipefail
+          emacs --batch -Q \
+            -L prototypes/star-lang/emacs \
+            -l prototypes/star-lang/emacs/star-lang-mode-tests.el \
+            -f ert-run-tests-batch-and-exit \
+            2>&1 | tee star-lang-emacs-ert.log
+      - name: Upload Emacs tooling logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-emacs-tooling-logs
+          path: |
+            star-lang-emacs-byte-compile.log
+            star-lang-emacs-ert.log
           if-no-files-found: error
 
   sento-integration:

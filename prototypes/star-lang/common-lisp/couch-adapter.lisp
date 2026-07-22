@@ -8,8 +8,13 @@
 (defun make-cl-couch-source-adapter ()
   (make-instance 'cl-couch-source-adapter))
 
+(defun two-element-proper-list-p (value)
+  (and (consp value)
+       (consp (cdr value))
+       (null (cddr value))))
+
 (defun association-result (entry)
-  (if (and (listp entry) (= (length entry) 2))
+  (if (two-element-proper-list-p entry)
       (second entry)
       (cdr entry)))
 
@@ -34,14 +39,6 @@
        response)
       (t
        (list response)))))
-
-(defun source-option-value (spec name runtime &optional default)
-  (evaluate-option-node (source-spec-options spec) name runtime default))
-
-(defun source-decoder (spec runtime)
-  (let ((designator (source-option-value spec "decoder" runtime nil)))
-    (when designator
-      (runtime-handler runtime (normalize-reference-key designator)))))
 
 (defmethod source-adapter-read ((adapter cl-couch-source-adapter)
                                 spec runtime &key limit)

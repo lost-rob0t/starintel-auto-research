@@ -1,6 +1,9 @@
 (in-package #:star-lang.core-surface.prototype)
 
-(export '(compile-core-library validate-library-semantics validate-actor-contract))
+(export '(compile-core-library
+          emit-core-manifest
+          validate-library-semantics
+          validate-actor-contract))
 
 (defun local-qualified-name-p (library qualified-name)
   (let ((prefix (format nil "~A/" (getf library :name))))
@@ -119,3 +122,9 @@
        (format nil "Actor ~A produces" actor-name)
        '(:message :document))))
   actor)
+
+(defun emit-core-manifest (library actors)
+  (validate-library-semantics library)
+  (dolist (actor actors)
+    (validate-actor-contract library actor))
+  (emit-portable-manifest library actors))

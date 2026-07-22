@@ -8,6 +8,7 @@
   (load quicklisp))
 
 (ql:register-local-projects)
+(ql:quickload :sento)
 
 (let* ((directory
          (uiop/pathname:pathname-directory-pathname *load-truename*))

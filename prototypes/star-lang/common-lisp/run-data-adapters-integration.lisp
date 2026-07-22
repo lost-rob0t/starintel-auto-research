@@ -7,7 +7,53 @@
     (error "Quicklisp is not installed at ~A." quicklisp))
   (load quicklisp))
 
+(defun replace-required-text (pathname old new)
+  (let ((content (uiop:read-file-string pathname :external-format :utf-8)))
+    (unless (search old content)
+      (error "Expected compatibility text not found in ~A: ~S" pathname old))
+    (with-open-file (stream pathname
+                            :direction :output
+                            :if-exists :supersede
+                            :external-format :utf-8)
+      (loop with start = 0
+            for position = (search old content :start2 start)
+            do
+               (if position
+                   (progn
+                     (write-string content stream :start start :end position)
+                     (write-string new stream)
+                     (setf start (+ position (length old))))
+                   (progn
+                     (write-string content stream :start start)
+                     (return)))))))
+
+(defun modernize-cl-couch-client ()
+  (let* ((root
+           (merge-pathnames
+            "quicklisp/local-projects/Cl-Couch/"
+            (user-homedir-pathname)))
+         (http-request (merge-pathnames "client/http-request.lisp" root))
+         (utils (merge-pathnames "client/utils.lisp" root)))
+    (unless (and (probe-file http-request) (probe-file utils))
+      (error "Pinned Cl-Couch checkout was not found at ~A." root))
+    (with-open-file (stream http-request
+                            :direction :output
+                            :if-exists :supersede
+                            :external-format :utf-8)
+      (write-string
+       "(in-package :cl-couchdb-client)\n\n(setf drakma:*drakma-default-external-format* :utf-8)\n\n(defun http-request (method uri &key content content-type)\n  (multiple-value-bind (body status-code headers reply-uri stream closed-p reason)\n      (drakma:http-request\n       uri\n       :content (when content\n                  (if (string= content-type +json-content-type+)\n                      (json content)\n                      content))\n       :force-binary nil\n       :content-type content-type\n       :method method\n       :user-agent \"cl-couchdb-client\"\n       :external-format-in :utf-8\n       :external-format-out :utf-8)\n    (declare (ignore headers reply-uri stream closed-p reason))\n    (values (dejson body) status-code)))\n"
+       stream))
+    (replace-required-text
+     utils
+     "(trivial-utf-8:string-to-utf-8-bytes (string c))"
+     "(babel:string-to-octets (string c) :encoding :utf-8)")
+    (replace-required-text
+     utils
+     "trivial-utf-8:utf-8-bytes-to-string"
+     "babel:octets-to-string")))
+
 (ql:register-local-projects)
+(modernize-cl-couch-client)
 (ql:quickload :cl-couchdb-client)
 (ql:quickload :cl-rabbit)
 

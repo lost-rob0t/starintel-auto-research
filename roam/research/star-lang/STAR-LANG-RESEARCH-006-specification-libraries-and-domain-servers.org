@@ -1,0 +1,775 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-006
+:END:
+#+title: STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers
+#+description: Define immutable importable specification libraries, additive typed-document extension, canonical relation traversal, actor contracts, and keyed domain-server declarations for Star-Lang.
+#+status: REVIEW
+#+filetags: :starintel:research:star-lang:specifications:schemas:imports:actors:domain-servers:graphs:common-lisp:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                                                 | Did nsaspy approve it |
+|---------+------------+---------------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-21 | Define locked spec libraries, relation semantics, domain servers, and a CL prototype | No                    |
+
+* Related Nodes
+
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Language Research]]
+- [[file:STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations]]
+- [[file:STAR-LANG-RESEARCH-001-common-lisp-comparative-baseline.org][STAR-LANG-RESEARCH-001 Common Lisp Comparative Baseline]]
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+
+* Loop Question
+
+How should Star-Lang let a project import typed document and relation specifications from libraries, extend those specifications without mutating their meaning, attach document datasets, traverse graph relations without dot syntax, invoke typed actors, and declare supervised domain servers that compile into the StarIntel actor runtime?
+
+* Decision Summary
+
+Star-Lang should treat a specification library as a data-only, versioned module whose exact artifact is resolved before compilation and recorded in an immutable lock graph. A source program may name a URL, local path, or later an OCI artifact, but neither macro expansion nor run execution may perform import resolution.
+
+The resolver must:
+
+1. resolve every import before the Star-Lang compiler checks executable declarations
+2. require an exact content digest for every remote artifact
+3. enforce byte, depth, dependency-count, and redirect limits
+4. parse imported specifications with the same closed reader boundary as local Star-Lang source
+5. build a complete dependency graph and reject unresolved, conflicting, or cyclic definitions
+6. emit a lock file and a locally cached compiled specification graph
+7. make the compiler and runtime consume only that local immutable graph
+
+Specification inheritance is additive. A derived document schema may add fields and constraints, but it may not remove required fields, alter inherited field types, weaken persistence, widen capabilities, or replace a predicate contract. An incompatible change requires a new major library identity.
+
+A relation has three canonical graph positions:
+
+- =source=
+- =predicate=
+- =destination=
+
+The destination organization in an employment relation is not a generic =target= field. Star-Lang queries and indexes must use the exact graph position.
+
+A domain server is a keyed, supervised authority over a bounded domain state and its indexes. It is not a raw untyped gserver and it is not one actor per document. Star-Lang compiles domain-server declarations into runtime manifests consumed by cl-gserver/Sento adapters.
+
+This loop adds a requirements prototype. It does not choose Common Lisp over Racket or Scheme, does not complete the comparative loops, and does not open the implementation promotion gate.
+
+* Scope
+
+This loop covers:
+
+- data-only specification libraries
+- exact import locking
+- artifact and semantic identities
+- document-schema extension
+- predicate contracts
+- canonical relation documents
+- attached dataset views
+- relation traversal and filtering
+- typed actor declarations
+- keyed domain-server declarations
+- compiler and runtime boundaries
+- graph-index and visualizer contracts
+- a standard-Common-Lisp requirements prototype
+
+This loop does not cover:
+
+- a public package registry implementation
+- cryptographic publisher signatures
+- arbitrary user-defined schema keywords
+- arbitrary Common Lisp inside imported specifications
+- actor transport implementation
+- distributed consensus
+- a completed graph visualizer
+- final language selection
+
+* Specification Library Model
+
+** Library identity
+
+A library has two names:
+
+1. a stable major identity, such as =org.starintel/employment@1=
+2. an exact release version, such as =1.0.0=
+
+The major identity appears in qualified schema and predicate identifiers:
+
+#+begin_example
+org.starintel/core@1/person
+org.starintel/core@1/organization
+org.starintel/core@1/relation
+org.starintel/employment@1/employed
+#+end_example
+
+The exact release is recorded in the lock graph. Runtime plans never depend on a floating range.
+
+** Data-only source form
+
+A specification library should use the same restricted S-expression reader as Star-Lang source, but its declaration vocabulary is smaller and contains no executable actor body.
+
+#+begin_src lisp
+(spec-library "org.starintel/employment@1"
+  (:version "1.0.0")
+  (:imports
+   (("org.starintel/core@1"
+     :version "1.0.0"
+     :digest "sha256:...")))
+
+  (document employee
+    (:extends "org.starintel/core@1/person"
+     :persistence persistent)
+    (employee-number string :optional))
+
+  (predicate employed
+    (:source "org.starintel/core@1/person"
+     :destination "org.starintel/core@1/organization")))
+#+end_src
+
+Allowed declarations in version 0.1 should be closed:
+
+| Declaration | Purpose |
+|-------------+---------|
+| =import= | Require one exact locked library artifact |
+| =scalar= | Name a constrained scalar type |
+| =enum= | Declare a closed symbolic value set |
+| =document= | Declare one typed persistent or transient document |
+| =predicate= | Declare valid source and destination schema identities |
+| =message= | Declare a domain-server or actor message schema |
+| =capability= | Name a capability contract understood by the runtime |
+| =view= | Declare a pure derived dataset view |
+
+Imported files cannot define reader macros, Common Lisp packages, functions, methods, classes, ASDF systems, environment reads, file reads, network requests, or compile-time hooks.
+
+** Why not load ASDF definitions
+
+ASDF is appropriate for trusted Common Lisp software systems and supports system dependencies and versions.[fn:asdf] An =.asd= file is nevertheless executable Common Lisp system-definition code. It is therefore not the untrusted or remotely imported Star-Lang specification format. Trusted runtime adapters may be delivered through ASDF; specification data may not execute through ASDF.
+
+** Why not adopt JSON Schema unchanged
+
+JSON Schema Draft 2020-12 provides useful prior art for URI identities, references, vocabularies, dialects, and bundled schema resources.[fn:json-schema] Star-Lang needs several semantics outside ordinary JSON validation:
+
+- persistent versus transient document classes
+- graph predicate source/destination contracts
+- actor input/output contracts
+- capability requirements
+- domain ownership and indexes
+- replay and provenance fields
+- additive extension rules
+
+Star-Lang should borrow the concepts of stable resource identity, explicit vocabulary, and reference resolution without pretending that generic JSON Schema already defines the execution model.
+
+* Import Resolution
+
+** Source declaration
+
+A project source file may declare an import request:
+
+#+begin_src lisp
+(use-spec "org.starintel/employment@1"
+  :from "https://specs.starintel.actor/employment/v1/library.star"
+  :version "1.0.0"
+  :digest "sha256:...")
+#+end_src
+
+The source declaration is a resolution request. It is not the resolved dependency itself.
+
+** Resolution phases
+
+The resolver runs as an explicit build operation:
+
+#+begin_example
+source requests
+  -> policy check
+  -> bounded fetch
+  -> artifact verification
+  -> closed parsing
+  -> dependency expansion
+  -> cycle/conflict detection
+  -> schema and predicate normalization
+  -> semantic hashing
+  -> lock graph
+  -> compiled specification bundle
+#+end_example
+
+The build operation may have network capability. The Star-Lang compiler and run interpreter do not.
+
+** Allowed locations
+
+Version 0.1 should support:
+
+- =file:= for project and system-local libraries
+- =https:= for pinned remote artifacts
+
+An OCI artifact transport may be added after media types and registry policy are frozen. OCI descriptors are useful prior art because descriptors bind content through a media type, digest, and size.[fn:oci-descriptor]
+
+Unsupported by default:
+
+- unencrypted =http:=
+- source-controlled shell commands
+- redirects to another scheme
+- environment-variable interpolation in imported source
+- arbitrary request headers declared inside source
+- mutable branch or tag references without a digest
+
+Private registry credentials belong to resolver configuration, not to the imported specification language.
+
+** Lock graph
+
+The resolver emits a data-only lock artifact:
+
+#+begin_src lisp
+(spec-lock
+  (:format 1)
+  (artifact
+    :library "org.starintel/core@1"
+    :version "1.0.0"
+    :source "https://specs.starintel.actor/core/v1/library.star"
+    :media-type "application/vnd.starintel.spec+sexp"
+    :size 18420
+    :artifact-digest "sha256:..."
+    :semantic-digest "sha256:..."
+    :imports ())
+  (artifact
+    :library "org.starintel/employment@1"
+    :version "1.0.0"
+    :source "https://specs.starintel.actor/employment/v1/library.star"
+    :media-type "application/vnd.starintel.spec+sexp"
+    :size 4920
+    :artifact-digest "sha256:..."
+    :semantic-digest "sha256:..."
+    :imports ("org.starintel/core@1")))
+#+end_src
+
+The lock graph is part of the compiled plan identity. A changed lock graph changes the plan hash.
+
+** Two digests
+
+Star-Lang should preserve two distinct identities:
+
+1. =artifact-digest=: SHA-256 over the exact fetched bytes, verified before parsing
+2. =semantic-digest=: SHA-256 over the compiler's canonical normalized specification graph, including resolved transitive meaning
+
+Dhall demonstrates digest-pinned remote imports, local caching, and semantic integrity checks that detect transitive meaning changes while ignoring behavior-preserving textual changes.[fn:dhall-imports][fn:dhall-safety] Star-Lang should adopt the separation between fetched artifact identity and normalized meaning, but define its own canonical encoding and test vectors before treating semantic hashes as stable public identifiers.
+
+A digest proves content identity. It does not prove who published the content. Publisher signatures, transparency, or TUF-style metadata remain later work.
+
+** Resolver limits
+
+The resolver must have explicit policy bounds:
+
+- maximum artifact bytes
+- maximum total dependency bytes
+- maximum import depth
+- maximum dependency count
+- maximum redirects
+- maximum fetch time
+- allowed host list or registry roots
+- accepted media types
+- accepted hash algorithms
+- offline mode
+
+Resolution failure is a build condition. It never falls back silently to a different version or unverified body.
+
+* Additive Schema Extension
+
+** Rule
+
+A derived schema creates a new qualified identity. It does not mutate the imported base schema.
+
+#+begin_src lisp
+(document employee
+  (:extends "org.starintel/core@1/person"
+   :persistence persistent)
+  (employee-number string :optional))
+#+end_src
+
+Allowed:
+
+- add an optional field
+- add a required field when constructing a new derived identity
+- add a stronger scalar constraint
+- add indexes or views outside the base declaration
+- narrow an accepted enum in a derived message when substitutability is not claimed
+
+Rejected:
+
+- remove an inherited field
+- redeclare an inherited field under the same name
+- make an inherited required field optional
+- change an inherited field type
+- change persistent to transient or transient to persistent
+- widen actor or domain capabilities through a schema extension
+- alter the source or destination contract of an imported predicate
+
+The compiler should emit a flattened schema for runtime validation while retaining the complete origin chain for diagnostics and provenance.
+
+** Compatibility
+
+Within one major library identity:
+
+- patch releases may correct metadata without changing normalized behavior
+- minor releases may add optional declarations and additive schemas
+- incompatible changes require a new =@major= identity
+
+Version ranges may eventually be accepted by an update command, but the committed lock graph always records exact versions and digests.
+
+* Canonical Document and Relation Model
+
+** Documents
+
+A runtime document carries at least:
+
+- qualified schema identity
+- document identity
+- persistence class
+- schema version or semantic digest
+- field map
+- source/provenance references
+- content hash when persisted
+
+Field access is explicit and does not use dot syntax:
+
+#+begin_src lisp
+(field person given-name)
+(field organization domain)
+(field relation destination)
+#+end_src
+
+This keeps field lookup inside the Star-Lang checker and avoids pretending Star-Lang symbols are Common Lisp structures or JavaScript objects.
+
+** Entity references
+
+Relations store typed references instead of embedding mutable copies:
+
+#+begin_src lisp
+(ref "org.starintel/core@1/person" "person:ada")
+(ref "org.starintel/core@1/organization" "organization:example-labs")
+#+end_src
+
+A reference contains the expected schema identity and document identity. Resolution through an attached dataset revalidates both.
+
+** Relations
+
+#+begin_src lisp
+(relation "relation:ada-example-labs"
+  :predicate employed
+  :source (ref person "person:ada")
+  :destination (ref organization "organization:example-labs"))
+#+end_src
+
+The =employed= predicate declaration requires a person source and organization destination. Reversing the references is a schema error.
+
+The graph model must not use =target= as a synonym for destination. =target= is already overloaded in intelligence workflows and would make traversal ambiguous.
+
+* Dataset Attachment and Traversal
+
+** Attached view
+
+#+begin_src lisp
+(attach-dataset "flock" *documents*)
+#+end_src
+
+Attachment creates an immutable checked view over a document collection for the current compilation or run scope. It must:
+
+- validate every document against the resolved schema graph
+- reject duplicate qualified document identities
+- record the dataset name and snapshot identity
+- build or attach declared indexes
+- preserve deterministic iteration order unless a query explicitly declares unordered output
+
+It does not copy every document into a new canonical database.
+
+** Relation filter
+
+The employer filter is the destination organization:
+
+#+begin_src lisp
+(loop for relation in
+      (relations *documents*
+        :predicate employed
+        :destination employer)
+      collect relation)
+#+end_src
+
+A normalized query plan should become:
+
+#+begin_src lisp
+(:scan-dataset "flock")
+(:select-schema "org.starintel/core@1/relation")
+(:lookup-index :predicate employed)
+(:lookup-index :destination employer)
+(:stable-order :document-id)
+#+end_src
+
+The surface =loop= form is convenience syntax. The checked plan uses graph operations and typed references.
+
+** Pattern form
+
+A later pattern form may provide concise graph traversal:
+
+#+begin_src lisp
+(match *documents*
+  ((?person)-[employed]->(employer))
+  (emit ?person))
+#+end_src
+
+It must compile to the same relation scan and index lookup as the explicit form. It is not a second graph engine.
+
+* Actor Model
+
+** Actor declaration
+
+Actors perform bounded work and communicate through typed messages or documents:
+
+#+begin_src lisp
+(actor combine-names-into-emails
+  (:accepts (list "org.starintel/core@1/relation")
+   :produces (list email)
+   :capabilities (:read-dataset))
+  (receive (employment-relations)
+    (for relation in employment-relations
+      (let ((person (resolve (field relation source)))
+            (organization (resolve (field relation destination))))
+        (emit-email
+          (field person given-name)
+          (field person family-name)
+          (field organization domain))))))
+#+end_src
+
+The actor implementation language remains a separate question. The Star-Lang declaration freezes the contract, capabilities, routing metadata, and observable result type.
+
+** Actor versus domain server
+
+Use an actor worker when:
+
+- work is stateless or request-scoped
+- many items can execute independently
+- retry is controlled by command identity and idempotency
+- no single process owns canonical domain state
+
+Use a domain server when:
+
+- operations require serialized authority for one logical key
+- the component owns mutable indexes or cached domain state
+- callers need a stable logical address
+- lifecycle and restart policy are part of correctness
+
+Do not create one long-lived actor for every document. Broad document processing belongs in bounded worker pools. Domain servers are keyed by meaningful aggregate identities such as organization, investigation, dataset shard, or target scope.
+
+* Domain Servers
+
+** Declaration
+
+#+begin_src lisp
+(domain-server employment-domain
+  (:key-type "org.starintel/core@1/organization"
+   :owns ("org.starintel/core@1/person"
+          "org.starintel/core@1/organization"
+          "org.starintel/core@1/relation")
+   :indexes ((by-predicate relation predicate)
+             (by-source relation source)
+             (by-destination relation destination))
+   :accepts ((employees-for-organization organization-ref)
+             (relations-for-predicate symbol))
+   :restart transient
+   :capabilities (:read-dataset :write-transient)))
+#+end_src
+
+The declaration should compile into a domain-server manifest containing:
+
+- stable domain-server type identity
+- logical key schema
+- owned document and relation schemas
+- accepted message schemas
+- reply schemas
+- index declarations
+- capability set
+- mailbox and backpressure policy
+- timeout policy
+- restart class
+- persistence/checkpoint adapter
+- event and trace schema
+- implementation adapter identity
+
+** Logical identity
+
+A domain-server address is the pair:
+
+#+begin_example
+<domain-server type, typed key>
+#+end_example
+
+This follows the useful virtual-actor distinction between logical actor identity and the location or activation that currently serves it.[fn:orleans] StarIntel does not need to copy Orleans activation semantics wholesale. The important requirement is that Star-Lang plans address a stable logical domain identity while the runtime resolves it to a local or transported actor reference.
+
+** Supervision
+
+OTP generic servers provide a standardized server behavior and fit into supervision trees.[fn:otp-gen-server] OTP supervisors make restart strategy, intensity, and child restart classes explicit.[fn:otp-supervisor] Star-Lang should expose only the portable declarative subset needed by cl-gserver/Sento:
+
+- =permanent=
+- =transient=
+- =temporary=
+- restart intensity and period
+- startup timeout
+- shutdown timeout
+- escalation target
+
+The Common Lisp runtime adapter maps these declarations to its actual supervisor implementation. Star-Lang does not emulate Erlang callback functions.
+
+** Ownership and consistency
+
+A domain server owns authority over operations for its logical key, not exclusive physical possession of every document. Canonical persisted documents may remain in CouchDB or another store. The server may own:
+
+- serialized mutation decisions
+- current in-memory aggregate state
+- temporary indexes
+- cache entries
+- subscriptions
+- deduplication keys
+- checkpoint cursors
+
+Read-only dataset snapshots can be shared. Mutations that require domain invariants route through the keyed server.
+
+** Replay
+
+Every effectful domain-server message uses:
+
+- message schema identity
+- correlation identifier
+- idempotency key
+- sender identity
+- domain-server logical address
+- plan and run identifiers
+- attempt number
+- recorded result or condition
+
+A restarted server rebuilds state from a declared snapshot plus event cursor or from canonical storage. Raw in-memory continuation state is not persisted.
+
+* Graph Index and Visualizer Contract
+
+The graph visualizer must consume the same normalized graph representation as the query engine. It should not infer edges by scanning arbitrary fields.
+
+Required graph projection record:
+
+#+begin_src lisp
+(:node
+ :id "person:ada"
+ :schema "org.starintel/core@1/person"
+ :label "Ada Lovelace"
+ :provenance (...))
+
+(:edge
+ :id "relation:ada-example-labs"
+ :predicate employed
+ :source "person:ada"
+ :destination "organization:example-labs"
+ :confidence 0.93
+ :provenance (...))
+#+end_src
+
+Declared indexes should initially include:
+
+- relation by predicate
+- relation by source reference
+- relation by destination reference
+- relation by source and predicate
+- relation by destination and predicate
+- document by qualified identity
+- document by schema identity
+
+A visualizer request is a pure projection over a checked dataset snapshot. Layout coordinates and UI state are not canonical intelligence data.
+
+* Compiler Architecture
+
+#+begin_example
+Star-Lang source
+  -> safe reader
+  -> syntax objects
+  -> import-request extraction
+  -> explicit resolver
+  -> verified artifact cache
+  -> locked specification graph
+  -> surface expansion
+  -> schema, relation, actor, domain, effect checks
+  -> normalized IR
+  -> immutable execution plan and runtime manifests
+#+end_example
+
+** Core IR additions
+
+The foundation core should gain data nodes equivalent to:
+
+| IR node | Purpose |
+|---------+---------|
+| =spec-ref= | Reference one resolved library identity and digest |
+| =schema-ref= | Reference one qualified compiled schema |
+| =attach-dataset= | Bind an immutable checked dataset snapshot |
+| =relation-query= | Query canonical source/predicate/destination positions |
+| =actor-command= | Send a typed command to a declared actor |
+| =domain-address= | Construct a typed logical domain-server address |
+| =domain-command= | Send a typed command to a domain server |
+
+Import resolution itself is not a run-plan node.
+
+** Compile-time checks
+
+The compiler must reject:
+
+- unknown or unlocked library identities
+- a source whose bytes do not match its artifact digest
+- duplicate library identities with different exact versions in one lock graph
+- import cycles that cannot be reduced to an allowed reference cycle
+- unknown base schemas
+- inherited field redefinition
+- predicate source or destination mismatches
+- relation queries against an incompatible field position
+- actor commands with wrong input types
+- actor results with wrong output types
+- domain-server keys with wrong schema types
+- indexes over unknown fields
+- undeclared effects or capabilities
+
+* Common Lisp Requirements Prototype
+
+The loop adds:
+
+#+begin_example
+prototypes/star-lang/common-lisp/spec-domain-prototype.lisp
+prototypes/star-lang/common-lisp/spec-domain-tests.lisp
+#+end_example
+
+The prototype uses standard Common Lisp and demonstrates:
+
+- runtime-owned specification, schema, predicate, dataset, actor, and domain-server registries
+- data-only declaration macro inputs
+- exact version and digest matching for already resolved imports
+- remote-source digest requirements
+- additive document extension
+- typed entity references
+- typed relation source and destination validation
+- immutable dataset attachment
+- destination organization filtering
+- explicit field access without dot syntax
+- a typed actor that combines person names with an organization domain
+- a keyed employment domain-server declaration
+- structured conditions and executable tests
+
+The prototype intentionally does not:
+
+- fetch URLs
+- calculate SHA-256
+- prove publisher identity
+- implement a package solver
+- implement a custom Star-Lang source reader
+- start a real cl-gserver/Sento actor
+- persist documents
+- implement distributed routing
+
+It models the post-resolution compiler/runtime boundary. The resolver remains a separate implementation unit.
+
+* Acceptance Tests
+
+The prototype tests require:
+
+1. a remote specification without a digest is rejected
+2. an imported digest that differs from the installed locked library is rejected
+3. an exact version and digest import is accepted
+4. a derived schema cannot redefine an inherited field
+5. an employment relation rejects a person in the organization destination position
+6. dataset attachment and destination filtering return both expected employment relations
+7. the actor emits =ada.lovelace@example.org= and =grace.hopper@example.org=
+8. the employment domain server records the organization key type, transient restart class, and three relation indexes
+
+Later resolver tests must add:
+
+- byte-level digest verification
+- semantic-hash test vectors
+- offline cache resolution
+- redirect and size limits
+- dependency cycles
+- conflicting versions
+- media-type rejection
+- tampered transitive dependencies
+
+* Rejected Alternatives
+
+** Fetch imports during macro expansion
+
+Rejected. It makes compilation depend on network timing, lets remote state affect expansion, complicates replay, and violates the foundation rule that expansion is deterministic and effect free.
+
+** Fetch imports during run execution
+
+Rejected. A run plan would not have a stable schema graph or plan hash and could change meaning during replay.
+
+** Treat URLs as identities
+
+Rejected. A URL is a location hint, not immutable content identity.
+
+** Use ASDF files as remote specifications
+
+Rejected. ASDF definitions are trusted executable Common Lisp build declarations, not data-only schemas.
+
+** Permit arbitrary code in specification libraries
+
+Rejected. Actor implementations and runtime adapters are trusted software artifacts with separate capability and deployment review.
+
+** Allow derived schemas to override base fields
+
+Rejected. It destroys substitutability, makes import order significant, and permits a downstream library to weaken reviewed constraints.
+
+** Use dot syntax
+
+Rejected. Star-Lang field access remains explicit and checked. Documents are not host-language objects.
+
+** Name relation destination =target=
+
+Rejected. Graph positions remain source, predicate, and destination.
+
+** Expose raw unkeyed gservers
+
+Rejected. Star-Lang declares typed domain servers with logical keys, ownership, indexes, capabilities, and supervision policy.
+
+** One actor per document
+
+Rejected as a default architecture. It creates unnecessary lifecycle and mailbox overhead for document-scale batch work. Keyed aggregate servers and bounded workers serve different purposes.
+
+* Open Problems
+
+- define the exact canonical semantic-hash encoding
+- select lock-file serialization and canonical ordering
+- decide whether import graphs permit mutually recursive schema references
+- define namespace ownership and registry publication rules
+- add publisher signatures or transparency metadata
+- specify version-solving behavior for the explicit update command
+- define private registry credential configuration
+- map domain-server manifests exactly onto cl-gserver/Sento APIs
+- define mailbox backpressure and cancellation fields
+- define dataset snapshot identities across CouchDB and in-memory collections
+- decide whether relation confidence belongs in the core relation schema or an evidence extension
+- freeze graph projection and visualizer pagination APIs
+- implement equivalent requirements prototypes in the remaining language candidates
+
+* Next Work
+
+1. Keep comparative Loops 002 through 005 in their existing order.
+2. Add these specification and domain-server requirements to each language prototype after its baseline fixture passes.
+3. Implement a resolver-only prototype with byte verification, lock output, offline cache, and negative fixtures.
+4. Map the domain-server manifest to the current cl-gserver/Sento supervisor and transport designs.
+5. Add a graph-query fixture using source, predicate, destination, and destination-organization filtering.
+6. Do not promote an implementation design until Loop 005 completes and a numbered design is approved.
+
+* Footnotes and Sources
+
+[fn:json-schema] JSON Schema Draft 2020-12 defines schema resources, URI-based dialect identifiers, references, vocabularies, and compound schema bundling. [[https://json-schema.org/draft/2020-12][Draft 2020-12 overview]]; [[https://json-schema.org/draft/2020-12/json-schema-core.html][JSON Schema Core]].
+
+[fn:dhall-imports] Dhall supports remote imports protected by =sha256:= integrity checks, verifies them on fetch or cache use, and caches frozen imports locally. [[https://docs.dhall-lang.org/tutorials/Language-Tour.html#installing-packages][Dhall Language Tour: Installing packages]].
+
+[fn:dhall-safety] Dhall documents semantic integrity checks over normalized meaning, including transitive imports. [[https://docs.dhall-lang.org/discussions/Safety-guarantees.html][Dhall Safety Guarantees]].
+
+[fn:cue-modules] CUE provides prior art for versioned schema/data modules and package organization. [[https://cue.dev/docs/official-modules/][CUE Official Modules]].
+
+[fn:oci-descriptor] OCI descriptors identify content using media type, digest, and size. [[https://specs.opencontainers.org/image-spec/descriptor/?v=v1.1.0][OpenContainers Descriptor Specification]].
+
+[fn:otp-gen-server] Erlang/OTP =gen_server= defines a standardized generic server behavior with tracing/error support and supervision-tree integration. [[https://www.erlang.org/docs/26/man/gen_server.html][Erlang gen_server]].
+
+[fn:otp-supervisor] OTP supervisor specifications define restart strategies, restart intensity, and permanent, transient, and temporary child restart classes. [[https://www.erlang.org/doc/system/sup_princ.html][OTP Supervisor Behaviour]].
+
+[fn:orleans] Orleans grains provide prior art for virtual actors identified by user-defined keys, with runtime-managed activation and placement. [[https://learn.microsoft.com/en-us/dotnet/orleans/overview][Orleans overview]].
+
+[fn:asdf] ASDF defines trusted Common Lisp software systems and dependency/version metadata. [[https://asdf.common-lisp.dev/asdf.html][ASDF Manual]].

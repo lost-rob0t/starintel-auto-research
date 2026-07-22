@@ -33,8 +33,8 @@
           (insert "(:severity :warning :code :warn :message \"careful\" :line 3 :column 1)\n")
           (let ((forms (star-lang--read-diagnostic-forms buffer)))
             (should (= (length forms) 2))
-            (should (eq (plist-get (first forms) :code) :broken))
-            (should (eq (plist-get (second forms) :severity) :warning))))
+            (should (eq (plist-get (car forms) :code) :broken))
+            (should (eq (plist-get (cadr forms) :severity) :warning))))
       (kill-buffer buffer))))
 
 (ert-deftest star-lang-diagnostic-region-clamps ()

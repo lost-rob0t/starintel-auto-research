@@ -124,3 +124,91 @@ jobs:
           name: star-lang-sento-integration-log
           path: star-lang-sento-integration.log
           if-no-files-found: error
+
+  data-adapters-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      couchdb:
+        image: couchdb:3.4
+        env:
+          COUCHDB_USER: admin
+          COUCHDB_PASSWORD: password
+        ports:
+          - 5984:5984
+      rabbitmq:
+        image: rabbitmq:3.13
+        ports:
+          - 5672:5672
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install Lisp and native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            sbcl curl git librabbitmq-dev netcat-openbsd
+      - name: Wait for data services
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 90 bash -c \
+            'until curl --fail --silent --user admin:password http://127.0.0.1:5984/_up; do sleep 1; done'
+          timeout 90 bash -c \
+            'until nc -z 127.0.0.1 5672; do sleep 1; done'
+      - name: Seed CouchDB fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --user admin:password \
+            --request PUT \
+            http://127.0.0.1:5984/star_lang
+          curl --fail --silent --show-error \
+            --user admin:password \
+            --header 'Content-Type: application/json' \
+            --request PUT \
+            --data '{"type":"person","name":"Ada"}' \
+            http://127.0.0.1:5984/star_lang/ada
+          curl --fail --silent --show-error \
+            --user admin:password \
+            --header 'Content-Type: application/json' \
+            --request PUT \
+            --data '{"type":"person","name":"Grace"}' \
+            http://127.0.0.1:5984/star_lang/grace
+      - name: Install Quicklisp
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            --output quicklisp.lisp \
+            https://beta.quicklisp.org/quicklisp.lisp
+          sbcl --non-interactive \
+            --load quicklisp.lisp \
+            --eval '(quicklisp-quickstart:install :path (merge-pathnames "quicklisp/" (user-homedir-pathname)))' \
+            --quit
+      - name: Pin Cl-Couch and cl-rabbit upstreams
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/quicklisp/local-projects"
+          git clone https://github.com/ryszard/Cl-Couch.git \
+            "$HOME/quicklisp/local-projects/Cl-Couch"
+          git -C "$HOME/quicklisp/local-projects/Cl-Couch" \
+            checkout de6900e38395dac3ddce53876b05d5e24c8d8f52
+          git clone https://github.com/lokedhs/cl-rabbit.git \
+            "$HOME/quicklisp/local-projects/cl-rabbit"
+          git -C "$HOME/quicklisp/local-projects/cl-rabbit" \
+            checkout 9603204715bb13f09243dc286c5ad4bd51b4fd7b
+      - name: Run live data adapter integration
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/run-data-adapters-integration.lisp \
+            2>&1 | tee star-lang-data-adapters-integration.log
+      - name: Upload data adapter integration log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-data-adapters-integration-log
+          path: star-lang-data-adapters-integration.log
+          if-no-files-found: error

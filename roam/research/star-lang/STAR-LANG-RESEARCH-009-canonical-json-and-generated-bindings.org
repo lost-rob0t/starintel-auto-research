@@ -1,0 +1,136 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-009
+:END:
+#+title: STAR-LANG-RESEARCH-009 Canonical JSON and Generated Bindings
+#+description: Serialize the portable Star-Lang manifest and typed message envelopes as deterministic JSON and generate Python and TypeScript bindings from the same normalized contracts.
+#+status: REVIEW
+#+filetags: :starintel:star-lang:json:wire-protocol:python:typescript:bindings:compiler:research:
+
+* Purpose
+
+Loop 008 established one normalized specification and actor-contract model. This pass makes that model consumable outside Common Lisp without inventing a second schema language.
+
+The compiler now projects the same manifest into:
+
+- canonical JSON manifest data
+- schema-validated canonical JSON message envelopes
+- Python typing bindings
+- TypeScript typing bindings
+
+* Canonical JSON
+
+Canonical output uses:
+
+- lexicographically sorted object keys
+- declaration order for arrays
+- UTF-8 strings with JSON escaping
+- integers as JSON numbers
+- booleans as JSON booleans
+- exact decimal values as JSON strings
+- omitted absent optional envelope members
+- qualified Star-Lang identifiers as wire type names
+
+Floating-point values are not accepted as canonical numeric values. Financial and other decimal fields use strings so runtimes do not silently round values while crossing language boundaries.
+
+* Schema-Aware Envelopes
+
+Envelope serialization resolves =message_type= against the portable manifest before encoding =payload=. The encoder validates:
+
+- required fields
+- closed message field names
+- list shapes
+- integer and boolean values
+- precision-safe decimal strings
+- enumeration membership
+- scalar aliases
+- map and reference object shapes
+- local qualified types
+
+The existing envelope remains transport-neutral. RabbitMQ, HTTP, Unix sockets, NATS, ZeroMQ, and subprocess transports may carry the same bytes and contract identifiers.
+
+* Python Bindings
+
+The generator emits Python 3 typing definitions using:
+
+- =TypedDict=
+- =Required=
+- =NotRequired=
+- =Literal=
+- exact source field strings
+- flattened inherited document fields
+- actor contract metadata
+
+Hyphenated Star-Lang field names remain exact dictionary keys instead of being silently renamed. Scalar and enumeration type names become PascalCase aliases. Decimal wire types map to =str=.
+
+* TypeScript Bindings
+
+The generator emits:
+
+- scalar aliases
+- string-literal enumeration unions
+- document interfaces
+- interface inheritance
+- message interfaces
+- quoted source field names
+- actor contract metadata with =as const=
+
+Decimal wire types map to =string= for the same precision rule used by Python and canonical JSON.
+
+* FEC Conformance Output
+
+The FEC fixture produces four CI artifacts:
+
+- =star-lang-fec-manifest.json=
+- =star-lang-fec-envelope.json=
+- =star_lang_fec.py=
+- =star_lang_fec.ts=
+
+CI parses both JSON files and compiles the generated Python source. The TypeScript source receives deterministic structural assertions in the Common Lisp test suite until a pinned TypeScript compiler is added.
+
+* Compiler Boundary
+
+The flow is:
+
+#+begin_example
+fec-core.star
+  -> normalized specification IR
+  -> semantic validation
+  -> portable manifest
+  -> canonical JSON
+  -> Python / TypeScript bindings
+#+end_example
+
+No generator reads the original source independently. All language adapters consume the same validated manifest.
+
+* Tests
+
+The pass checks:
+
+1. repeated manifest serialization is byte-identical
+2. qualified FEC type names survive serialization
+3. envelope object keys are canonicalized
+4. list fields encode as JSON arrays
+5. decimal strings pass and numeric decimal values fail
+6. invalid enum values fail
+7. Python preserves exact source keys
+8. Python document bindings include inherited fields
+9. TypeScript preserves interface inheritance
+10. Python and TypeScript both map decimal wire values to strings
+11. actor contracts appear in both generated languages
+12. generated manifest and envelope files parse as JSON
+13. generated Python bindings compile
+
+* Boundary
+
+This pass does not:
+
+- define a transport acknowledgement protocol
+- implement actor registration or discovery
+- generate Rust, Java, Go, or Prolog bindings yet
+- pin a TypeScript compiler toolchain
+- publish an SDK package
+- start native or external actors
+- select the final Star-Lang host implementation
+- bypass the comparative language and promotion gates
+
+The next wire pass should define acknowledgements, errors, correlation, cancellation, and idempotency semantics before transport adapters are treated as production interfaces.

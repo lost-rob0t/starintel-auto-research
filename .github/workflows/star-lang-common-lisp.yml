@@ -199,33 +199,33 @@ jobs:
             "$HOME/quicklisp/local-projects/cl-rabbit"
           git -C "$HOME/quicklisp/local-projects/cl-rabbit" \
             checkout 9603204715bb13f09243dc286c5ad4bd51b4fd7b
-      - name: Add Cl-Couch legacy compatibility systems
+      - name: Patch unused Cl-Couch legacy dependencies
         shell: bash
         run: |
           set -euo pipefail
-          compat="$HOME/quicklisp/local-projects/cl-couch-legacy-compat"
-          mkdir -p "$compat"
-          cat > "$compat/defclass-star.asd" <<'EOF'
-          (asdf:defsystem "defclass-star"
-            :serial t
-            :components ((:file "defclass-star")))
-          EOF
-          cat > "$compat/defclass-star.lisp" <<'EOF'
-          (defpackage #:defclass-star
-            (:use #:cl))
-          EOF
-          cat > "$compat/logv.asd" <<'EOF'
-          (asdf:defsystem "logv"
-            :serial t
-            :components ((:file "logv")))
-          EOF
-          cat > "$compat/logv.lisp" <<'EOF'
-          (defpackage #:logv
-            (:use #:cl)
-            (:export #:*log-output*))
-          (in-package #:logv)
-          (defparameter *log-output* nil)
-          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path.home() / "quicklisp/local-projects/Cl-Couch"
+          asd = root / "cl-couchdb-client.asd"
+          package = root / "cl-couchdb-client.lisp"
+
+          asd_text = asd.read_text()
+          old_dependencies = ":depends-on (:iterate :drakma :cl-json :defclass-star :logv)"
+          if old_dependencies not in asd_text:
+              raise SystemExit("Cl-Couch dependency declaration changed")
+          asd.write_text(asd_text.replace(
+              old_dependencies,
+              ":depends-on (:iterate :drakma :cl-json)"))
+
+          package_text = package.read_text()
+          old_use = "(:use :cl :iterate :json :defclass-star :logv)"
+          if old_use not in package_text:
+              raise SystemExit("Cl-Couch package declaration changed")
+          package_text = package_text.replace(old_use, "(:use :cl :iterate :json)")
+          package_text = package_text.replace("(setf logv:*log-output* nil)\n", "")
+          package.write_text(package_text)
+          PY
       - name: Run live data adapter integration
         shell: bash
         run: |

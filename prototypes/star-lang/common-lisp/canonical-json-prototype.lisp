@@ -4,11 +4,8 @@
           canonical-manifest-json
           validate-wire-value))
 
-(defstruct (json-object (:constructor %make-json-object (entries)))
-  entries)
-
-(defstruct (json-array (:constructor %make-json-array (values)))
-  values)
+(defstruct (json-object (:constructor %make-json-object (entries))) entries)
+(defstruct (json-array (:constructor %make-json-array (values))) values)
 
 (defparameter +json-true+ (gensym "JSON-TRUE"))
 (defparameter +json-false+ (gensym "JSON-FALSE"))
@@ -36,41 +33,13 @@
                  (string key)))))
 
 (defun json-symbol-value (value)
-  (substitute #\- #\_
-              (string-downcase (symbol-name value))))
+  (substitute #\- #\_ (string-downcase (symbol-name value))))
 
 (defun json-array-key-p (key)
   (member key
           '(:imports :types :predicates :messages :actors :fields :values
             :accepts :produces :capabilities)
           :test #'eq))
-
-(defun manifest-json-value (value &optional key)
-  (cond
-    ((eq key :required)
-     (if value +json-true+ +json-false+))
-    ((json-array-key-p key)
-     (%make-json-array
-      (mapcar (lambda (item) (manifest-json-value item)) (or value '()))))
-    ((eq value t) +json-true+)
-    ((null value) +json-null+)
-    ((stringp value) value)
-    ((integerp value) value)
-    ((keywordp value) (json-symbol-value value))
-    ((and (symbolp value) (not (keywordp value)))
-     (identifier-string value))
-    ((keyword-plist-p value)
-     (manifest-json-object value))
-    ((string-alist-p value)
-     (%make-json-object
-      (mapcar (lambda (entry)
-                (cons (car entry) (manifest-json-value (cdr entry))))
-              value)))
-    ((listp value)
-     (%make-json-array (mapcar #'manifest-json-value value)))
-    (t
-     (fail 'invalid-envelope-error
-           "Cannot convert ~S to canonical JSON." value))))
 
 (defun manifest-json-object (plist)
   (let ((entries '()))
@@ -82,6 +51,29 @@
                            (manifest-json-value value key))
                      entries)))
     (%make-json-object entries)))
+
+(defun manifest-json-value (value &optional key)
+  (cond
+    ((eq key :required) (if value +json-true+ +json-false+))
+    ((json-array-key-p key)
+     (%make-json-array
+      (mapcar (lambda (item) (manifest-json-value item)) (or value '()))))
+    ((eq value t) +json-true+)
+    ((null value) +json-null+)
+    ((stringp value) value)
+    ((integerp value) value)
+    ((keywordp value) (json-symbol-value value))
+    ((symbolp value) (identifier-string value))
+    ((keyword-plist-p value) (manifest-json-object value))
+    ((string-alist-p value)
+     (%make-json-object
+      (mapcar (lambda (entry)
+                (cons (car entry) (manifest-json-value (cdr entry))))
+              value)))
+    ((listp value) (%make-json-array (mapcar #'manifest-json-value value)))
+    (t
+     (fail 'invalid-envelope-error
+           "Cannot convert ~S to canonical JSON." value))))
 
 (defun write-json-escaped-string (value stream)
   (write-char #\" stream)
@@ -143,8 +135,7 @@
 
 (defun payload-entry (payload field-name)
   (cond
-    ((string-alist-p payload)
-     (assoc field-name payload :test #'string=))
+    ((string-alist-p payload) (assoc field-name payload :test #'string=))
     ((keyword-plist-p payload)
      (let ((key (intern (string-upcase field-name) :keyword)))
        (when (plist-has-key-p payload key)
@@ -155,9 +146,8 @@
   (cond
     ((string-alist-p payload) (mapcar #'car payload))
     ((keyword-plist-p payload)
-     (loop for (key value) on payload by #'cddr
-           declare (ignore value)
-           collect (identifier-string key)))
+     (loop for tail on payload by #'cddr
+           collect (identifier-string (first tail))))
     ((null payload) '())
     (t nil)))
 
@@ -173,11 +163,9 @@
       (mapcar (lambda (entry)
                 (cons (car entry) (generic-wire-json-value (cdr entry))))
               value)))
-    ((listp value)
-     (%make-json-array (mapcar #'generic-wire-json-value value)))
+    ((listp value) (%make-json-array (mapcar #'generic-wire-json-value value)))
     (t
-     (fail 'invalid-envelope-error
-           "Unsupported wire value ~S." value))))
+     (fail 'invalid-envelope-error "Unsupported wire value ~S." value))))
 
 (defun wire-map-value (value context)
   (cond
@@ -187,20 +175,18 @@
       (mapcar (lambda (entry)
                 (cons (car entry) (generic-wire-json-value (cdr entry))))
               value)))
-    ((keyword-plist-p value)
-     (manifest-json-object value))
+    ((keyword-plist-p value) (manifest-json-object value))
     (t
      (fail 'invalid-envelope-error
            "~A requires an object/map value." context))))
 
 (defun wire-reference-value (value context)
-  (let ((object (wire-map-value value context))
-        (schema (payload-entry value "schema"))
+  (let ((schema (payload-entry value "schema"))
         (id (payload-entry value "id")))
     (unless (and schema (stringp (cdr schema)) id (stringp (cdr id)))
       (fail 'invalid-envelope-error
             "~A requires reference fields schema and id as strings." context))
-    object))
+    (wire-map-value value context)))
 
 (defun wire-enum-value (contract value context)
   (let ((normalized
@@ -227,36 +213,13 @@
          (manifest-document-fields manifest parent)))
      (copy-tree (getf contract :fields)))))
 
-(defun wire-fields-object (manifest fields value context)
-  (unless (or (string-alist-p value) (keyword-plist-p value) (null value))
-    (fail 'invalid-envelope-error "~A requires an object payload." context))
-  (let ((known (mapcar (lambda (field) (getf field :name)) fields))
-        (entries '()))
-    (dolist (name (payload-field-names value))
-      (unless (member name known :test #'string=)
-        (fail 'invalid-envelope-error
-              "~A contains unknown field ~A." context name)))
-    (dolist (field fields)
-      (let* ((name (getf field :name))
-             (entry (payload-entry value name)))
-        (cond
-          (entry
-           (push (cons name
-                       (wire-json-value-for-type
-                        manifest (getf field :type) (cdr entry)
-                        (format nil "~A field ~A" context name)))
-                 entries))
-          ((getf field :required)
-           (fail 'invalid-envelope-error
-                 "~A is missing required field ~A." context name)))))
-    (%make-json-object entries)))
-
 (defun decimal-wire-string-p (value)
   (and (stringp value)
        (> (length value) 0)
        (let* ((start (if (member (char value 0) '(#\+ #\-)) 1 0))
               (dot (position #\. value :start start)))
          (and (< start (length value))
+              (or (null dot) (> dot start))
               (every #'digit-char-p
                      (if dot (subseq value start dot) (subseq value start)))
               (or (null dot)
@@ -284,6 +247,30 @@
               "~A requires a decimal string with at most ~D fractional digits."
               context scale))))
   value)
+
+(defun wire-fields-object (manifest fields value context)
+  (unless (or (string-alist-p value) (keyword-plist-p value) (null value))
+    (fail 'invalid-envelope-error "~A requires an object payload." context))
+  (let ((known (mapcar (lambda (field) (getf field :name)) fields))
+        (entries '()))
+    (dolist (name (payload-field-names value))
+      (unless (member name known :test #'string=)
+        (fail 'invalid-envelope-error
+              "~A contains unknown field ~A." context name)))
+    (dolist (field fields)
+      (let* ((name (getf field :name))
+             (entry (payload-entry value name)))
+        (cond
+          (entry
+           (push (cons name
+                       (wire-json-value-for-type
+                        manifest (getf field :type) (cdr entry)
+                        (format nil "~A field ~A" context name)))
+                 entries))
+          ((getf field :required)
+           (fail 'invalid-envelope-error
+                 "~A is missing required field ~A." context name)))))
+    (%make-json-object entries)))
 
 (defun wire-json-value-for-type (manifest type value context)
   (cond
@@ -331,8 +318,7 @@
                    manifest (getf contract :base) value context)))
             (validate-scalar-constraints contract value context)
             encoded))
-         (:enum
-          (wire-enum-value contract value context))
+         (:enum (wire-enum-value contract value context))
          (:document
           (wire-fields-object
            manifest (manifest-document-fields manifest contract) value context))

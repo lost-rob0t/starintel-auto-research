@@ -199,6 +199,33 @@ jobs:
             "$HOME/quicklisp/local-projects/cl-rabbit"
           git -C "$HOME/quicklisp/local-projects/cl-rabbit" \
             checkout 9603204715bb13f09243dc286c5ad4bd51b4fd7b
+      - name: Add Cl-Couch legacy compatibility systems
+        shell: bash
+        run: |
+          set -euo pipefail
+          compat="$HOME/quicklisp/local-projects/cl-couch-legacy-compat"
+          mkdir -p "$compat"
+          cat > "$compat/defclass-star.asd" <<'EOF'
+          (asdf:defsystem "defclass-star"
+            :serial t
+            :components ((:file "defclass-star")))
+          EOF
+          cat > "$compat/defclass-star.lisp" <<'EOF'
+          (defpackage #:defclass-star
+            (:use #:cl))
+          EOF
+          cat > "$compat/logv.asd" <<'EOF'
+          (asdf:defsystem "logv"
+            :serial t
+            :components ((:file "logv")))
+          EOF
+          cat > "$compat/logv.lisp" <<'EOF'
+          (defpackage #:logv
+            (:use #:cl)
+            (:export #:*log-output*))
+          (in-package #:logv)
+          (defparameter *log-output* nil)
+          EOF
       - name: Run live data adapter integration
         shell: bash
         run: |

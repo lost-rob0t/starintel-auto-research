@@ -1,4 +1,4 @@
-name: Star-Lang Common Lisp Baseline
+name: Star-Lang Specification Libraries
 
 on:
   pull_request:
@@ -28,5 +28,24 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes sbcl
-      - name: Run Common Lisp baseline tests
-        run: sbcl --script prototypes/star-lang/common-lisp/tests.lisp
+      - name: Run existing Common Lisp baseline
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/tests.lisp \
+            2>&1 | tee star-lang-baseline.log
+      - name: Run specification and domain suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/spec-domain-tests.lisp \
+            2>&1 | tee star-lang-spec-domain.log
+      - name: Upload Common Lisp test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-specification-test-logs
+          path: |
+            star-lang-baseline.log
+            star-lang-spec-domain.log
+          if-no-files-found: error

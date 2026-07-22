@@ -71,18 +71,19 @@
                       ("retrieved-at" . "2026-07-22T20:00:00Z")))))
     (assert-true (validate-wire-envelope manifest envelope)
                  "valid envelope accepted")
-    (assert-true
-     (condition-signaled-p
-      'invalid-envelope-error
-      (lambda ()
-        (validate-wire-envelope
-         manifest
-         (make-wire-envelope
-          :message-type "org.starintel/fec@1/ingest-page"
-          :message-id "01JBROKEN"
-          :actor "fec-importer"
-          :payload '(("page" . 1)))))))
-     "missing required field rejected"))
+    (let ((missing-field-rejected-p
+            (condition-signaled-p
+             'invalid-envelope-error
+             (lambda ()
+               (validate-wire-envelope
+                manifest
+                (make-wire-envelope
+                 :message-type "org.starintel/fec@1/ingest-page"
+                 :message-id "01JBROKEN"
+                 :actor "fec-importer"
+                 :payload '(("page" . 1))))))))
+      (assert-true missing-field-rejected-p
+                   "missing required field rejected"))))
 
 (defun test-unknown-type-rejected ()
   (assert-true

@@ -1,0 +1,207 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-007
+:END:
+#+title: STAR-LANG-RESEARCH-007 Normalized IR and cl-gserver Binding
+#+description: Separate Star-Lang surface declarations from a closed runtime-neutral intermediate representation and bind actor operations to cl-gserver only after compilation.
+#+status: REVIEW
+#+filetags: :starintel:research:star-lang:compiler:ir:common-lisp:actors:cl-gserver:sento:domain-servers:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                                  | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-22 | Define normalized IR v1 and a declarative cl-gserver adapter prototype | No                    |
+
+* Related Nodes
+
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Language Research]]
+- [[file:STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations]]
+- [[file:STAR-LANG-RESEARCH-001-common-lisp-comparative-baseline.org][STAR-LANG-RESEARCH-001 Common Lisp Comparative Baseline]]
+- [[file:STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org][STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers]]
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+
+* Loop Question
+
+How should the Common Lisp comparative prototype lower Star-Lang surface declarations into a deterministic, inspectable, runtime-neutral intermediate representation, then bind actor operations and keyed domain servers to the existing cl-gserver/Sento runtime without leaking runtime APIs into the language core?
+
+* Current Problem
+
+The first Common Lisp baseline proves that typed documents, actors, agents, and dataflow stages can be represented with ordinary macros. Its declarations currently register runtime objects directly. That is useful as a language-shape experiment, but it collapses three boundaries:
+
+1. source declaration and macro expansion
+2. compiler-owned normalized plan construction
+3. runtime-specific actor binding
+
+That collapse makes it difficult to compare language frontends, hash plans, inspect actor graphs, reuse the same normalized graph in the visualizer, or bind another runtime without changing source semantics.
+
+Common Lisp =macroexpand-1= expands one outer macro invocation and does not recursively define a compiler walk over nested forms.[fn:macroexpand] Star-Lang therefore needs an explicit compiler pass rather than relying on recursive host macro expansion.
+
+The existing StarIntel actor runtime creates actors with =actor-of= and sends asynchronous messages with =tell=.[fn:starintel-actors] cl-gserver/Sento documents the same actor construction and tell/ask model.[fn:cl-gserver] These are runtime binding details, not Star-Lang core operations.
+
+* Decision Summary
+
+The next Common Lisp pass uses four explicit phases:
+
+#+begin_example
+resolved local specification graph
+  -> closed Star-Lang declarations
+  -> normalized Star-Lang IR v1
+  -> cl-gserver binding manifests
+  -> runtime construction and execution
+#+end_example
+
+The source-level operation is =send=. The normalized IR retains =:send=. Only the cl-gserver binder lowers that node to =:tell= and records =:actor-of= as the actor constructor.
+
+The compiler accepts only a resolved local specification graph with exact versions, SHA-256 digests, local artifact paths, and a lock-graph digest. It rejects HTTP or HTTPS artifact paths. Network access remains confined to the earlier resolver phase defined by =STAR-LANG-RESEARCH-006=.
+
+Domain servers remain keyed aggregate authorities. The binder records one actor authority per domain key, not one actor per document.
+
+This is a comparative requirements prototype. It does not select Common Lisp, approve a production compiler, revive the full closed PR #20 branch, or bypass the Racket and Scheme comparison loops.
+
+* Closed Surface Vocabulary
+
+The prototype accepts these top-level declarations:
+
+| Declaration | Purpose |
+|-------------+---------|
+| =spec-graph= | Supply the already resolved immutable specification graph |
+| =document= | Bind a local name to a locked schema and persistence class |
+| =actor= | Declare typed input/output, handler identity, mailbox, restart policy, and capabilities |
+| =domain-server= | Declare keyed ownership, indexes, messages, restart policy, and capabilities |
+| =dataflow= | Declare an ordered graph of runtime-neutral operations |
+
+The dataflow vocabulary in this pass is intentionally small:
+
+| Stage | Normalized operation |
+|-------+----------------------|
+| =(from-dataset "flock")= | =:from-dataset= |
+| =(relations :source S :predicate P :destination D)= | =:relations= |
+| =(send ACTOR MESSAGE)= | =:send= |
+| =(collect NAME)= | =:collect= |
+
+Relation traversal requires all three canonical positions. There is no dot syntax and no generic relation =target= slot.
+
+* Normalized IR Contract
+
+The compiler emits a data-only property-list tree:
+
+#+begin_src lisp
+(:ir-version 1
+ :spec-lock-digest "sha256:..."
+ :declarations
+ ((:kind :spec-graph ...)
+  (:kind :actor
+   :name "combine-names-into-emails"
+   :accepts (:list "org.starintel/core@1/relation")
+   :produces (:list :email)
+   :handler "combine-names-handler"
+   :mailbox (:kind :bounded :capacity 128)
+   :restart :transient
+   :capabilities (:read-dataset))
+  (:kind :dataflow
+   :name "employment-emails"
+   :nodes
+   ((:node-id "employment-emails/000"
+     :op :from-dataset
+     :dataset "flock")
+    (:node-id "employment-emails/001"
+     :op :relations
+     :source :any
+     :predicate "employed"
+     :destination "employer")
+    (:node-id "employment-emails/002"
+     :op :send
+     :target "combine-names-into-emails"
+     :message :current)))))
+#+end_src
+
+IR v1 invariants:
+
+1. it is data, not executable Common Lisp
+2. every dataflow node has a deterministic identifier
+3. actor and domain-server targets must be declared before a send can compile
+4. the specification lock digest is part of the plan
+5. relation positions are explicit
+6. runtime-specific names such as =tell= are absent
+7. declaration order is preserved for deterministic comparison
+8. the same normalized graph can feed execution, diagnostics, and visualization
+
+* cl-gserver Binding Contract
+
+The adapter consumes IR v1 and emits declarative runtime manifests. It does not start threads or perform effects during binding.
+
+#+begin_src lisp
+(:runtime :cl-gserver
+ :ir-version 1
+ :actors
+ ((:kind :actor-manifest
+   :name "combine-names-into-emails"
+   :constructor :actor-of
+   :send-operation :tell
+   ...))
+ :domain-servers
+ ((:kind :domain-server-manifest
+   :name "employment-domain"
+   :constructor :actor-of
+   :send-operation :tell
+   :authority :keyed-aggregate
+   :actor-cardinality :per-key
+   ...))
+ :dataflows
+ ((:kind :bound-dataflow
+   :nodes
+   (...
+    (:op :tell
+     :actor "combine-names-into-emails"
+     :message :current)))))
+#+end_src
+
+The later runtime constructor may translate these manifests into actual cl-gserver objects. That constructor must remain outside the compiler and must be tested against a pinned cl-gserver version.
+
+* Prototype
+
+- =prototypes/star-lang/common-lisp/compiler-ir-prototype.lisp=
+- =prototypes/star-lang/common-lisp/compiler-ir-tests.lisp=
+
+The prototype has no Quicklisp dependency and does not load cl-gserver. This keeps the compiler and binder contract independently testable.
+
+* Acceptance Checks
+
+The pass is acceptable when the test suite proves:
+
+1. the host macro expands only to a compiler call over quoted declarations
+2. normalized IR retains =:send=
+3. the cl-gserver binder lowers =:send= to =:tell=
+4. actor manifests record =:actor-of=
+5. domain-server manifests are =:keyed-aggregate= and =:per-key=
+6. unresolved remote specification paths are rejected
+7. relation traversal without source, predicate, or destination is rejected
+8. sends to undeclared actors or domain servers are rejected
+9. identical input compiles to equal IR
+
+* Deferred Work
+
+This pass intentionally defers:
+
+- the bounded text tokenizer and parser
+- source spans and source-mapped diagnostics
+- plan hashing beyond the carried specification-lock digest
+- executable actor handler compilation
+- actual cl-gserver actor construction
+- mailbox implementation conformance
+- supervision trees and restart-budget execution
+- durable journals, replay, and checkpoint recovery
+- CouchDB, RabbitMQ, Star Router, ZeroMQ, and Prolog adapters
+- Racket and Scheme equivalents
+- language selection
+
+* Result
+
+The next implementation-oriented research slice should extend this normalized IR rather than attach more behavior directly to the baseline macro registry. Runtime adapters must consume the same core graph. The graph visualizer should consume that graph or a lossless projection of it, preventing a second incompatible graph model.
+
+* Footnotes and Sources
+
+[fn:macroexpand] ANSI Common Lisp HyperSpec, =MACROEXPAND= and =MACROEXPAND-1=: https://www.lispworks.com/documentation/HyperSpec/Body/f_mexp_.htm
+
+[fn:starintel-actors] StarIntel Server actor runtime, actor creation and target routing: https://github.com/lost-rob0t/starintel-server/blob/3ef241192f670c43a8d27c13a641e4d445891386/source/actors.lisp
+
+[fn:cl-gserver] cl-gserver/Sento actor API and examples: https://github.com/mdbergmann/cl-gserver and https://mdbergmann.github.io/cl-gserver/index.html

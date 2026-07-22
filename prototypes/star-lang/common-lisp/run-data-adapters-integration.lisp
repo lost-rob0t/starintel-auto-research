@@ -7,125 +7,108 @@
     (error "Quicklisp is not installed at ~A." quicklisp))
   (load quicklisp))
 
-(defun replace-required-text (pathname old new)
-  (let ((content (uiop:read-file-string pathname :external-format :utf-8)))
-    (unless (search old content)
-      (error "Expected compatibility text not found in ~A: ~S" pathname old))
-    (with-open-file (stream pathname
-                            :direction :output
-                            :if-exists :supersede
-                            :external-format :utf-8)
-      (loop with start = 0
-            for position = (search old content :start2 start)
-            do
-               (if position
-                   (progn
-                     (write-string content stream :start start :end position)
-                     (write-string new stream)
-                     (setf start (+ position (length old))))
-                   (progn
-                     (write-string content stream :start start)
-                     (return)))))))
-
 (defun write-lines (pathname lines)
+  (ensure-directories-exist pathname)
   (with-open-file (stream pathname
                           :direction :output
                           :if-exists :supersede
+                          :if-does-not-exist :create
                           :external-format :utf-8)
     (dolist (line lines)
       (write-line line stream))))
 
-(defun write-modern-cl-couch-http-request (pathname)
-  (write-lines
-   pathname
-   '("(in-package :cl-couchdb-client)"
-     ""
-     "(setf drakma:*drakma-default-external-format* :utf-8)"
-     ""
-     "(defun http-request (method uri &key content content-type)"
-     "  (multiple-value-bind (body status-code headers reply-uri stream closed-p reason)"
-     "      (drakma:http-request"
-     "       uri"
-     "       :content (when content"
-     "                  (if (string= content-type +json-content-type+)"
-     "                      (json content)"
-     "                      content))"
-     "       :force-binary nil"
-     "       :content-type content-type"
-     "       :method method"
-     "       :user-agent \"cl-couchdb-client\""
-     "       :external-format-in :utf-8"
-     "       :external-format-out :utf-8)"
-     "    (declare (ignore headers reply-uri stream closed-p reason))"
-     "    (values (dejson body) status-code)))")))
-
-(defun write-modern-cl-couch-conditions (pathname)
-  (write-lines
-   pathname
-   '("(in-package :cl-couchdb-client)"
-     ""
-     "(export '(couchdb-condition couchdb-server-error couchdb-conflict"
-     "          couchdb-not-found old-doc-of new-doc-of))"
-     ""
-     "(define-condition couchdb-condition (error)"
-     "  ((number :initarg :number :initform nil :reader number-of)"
-     "   (error-value :initarg :error :initform nil :reader error-of)"
-     "   (reason :initarg :reason :initform nil :reader reason-of))"
-     "  (:report"
-     "   (lambda (condition stream)"
-     "     (format stream \"CouchDB returned an error: ~A (~A). Reason: ~A.\""
-     "             (error-of condition)"
-     "             (number-of condition)"
-     "             (reason-of condition)))))"
-     ""
-     "(define-condition couchdb-not-found (couchdb-condition) ()"
-     "  (:documentation \"404\"))"
-     ""
-     "(define-condition couchdb-conflict (couchdb-condition)"
-     "  ((old-doc :initarg :old-doc :initform nil :reader old-doc-of)"
-     "   (new-doc :initarg :new-doc :initform nil :reader new-doc-of)"
-     "   (server :initarg :server :initform nil :reader server-of)"
-     "   (db :initarg :db :initform nil :reader db-of))"
-     "  (:default-initargs :number 412)"
-     "  (:documentation \"412\")"
-     "  (:report"
-     "   (lambda (condition stream)"
-     "     (format stream"
-     "             \"CouchDB returned an error: ~A (~A). Reason: ~A in ~A/~A.\""
-     "             (error-of condition)"
-     "             (number-of condition)"
-     "             (reason-of condition)"
-     "             (server-of condition)"
-     "             (db-of condition)))))"
-     ""
-     "(define-condition couchdb-server-error (couchdb-condition) ()"
-     "  (:documentation \"50x errors.\"))")))
-
-(defun modernize-cl-couch-client ()
-  (let* ((root
+(defun install-cl-couch-api-compatibility ()
+  (let* ((local-projects
            (merge-pathnames
-            "quicklisp/local-projects/Cl-Couch/"
+            "quicklisp/local-projects/"
             (user-homedir-pathname)))
-         (http-request (merge-pathnames "client/http-request.lisp" root))
-         (conditions (merge-pathnames "client/conditions.lisp" root))
-         (request (merge-pathnames "client/request.lisp" root))
-         (utils (merge-pathnames "client/utils.lisp" root)))
-    (unless (every #'probe-file (list http-request conditions request utils))
-      (error "Pinned Cl-Couch checkout was not found at ~A." root))
-    (write-modern-cl-couch-http-request http-request)
-    (write-modern-cl-couch-conditions conditions)
-    (replace-required-text request "(logv uri)" "nil")
-    (replace-required-text
-     utils
-     "(trivial-utf-8:string-to-utf-8-bytes (string c))"
-     "(babel:string-to-octets (string c) :encoding :utf-8)")
-    (replace-required-text
-     utils
-     "trivial-utf-8:utf-8-bytes-to-string"
-     "babel:octets-to-string")))
+         (legacy-asd
+           (merge-pathnames "Cl-Couch/cl-couchdb-client.asd"
+                            local-projects))
+         (compat-root
+           (merge-pathnames "cl-couchdb-client-compat/"
+                            local-projects))
+         (compat-asd
+           (merge-pathnames "cl-couchdb-client.asd" compat-root))
+         (compat-source
+           (merge-pathnames "cl-couchdb-client.lisp" compat-root)))
+    (when (probe-file legacy-asd)
+      (delete-file legacy-asd))
+    (write-lines
+     compat-asd
+     '("(asdf:defsystem \"cl-couchdb-client\""
+       "  :description \"Modern compatibility implementation of the Cl-Couch client API used by Star-Lang.\""
+       "  :depends-on (\"drakma\" \"cl-json\" \"babel\")"
+       "  :serial t"
+       "  :components ((:file \"cl-couchdb-client\")))"))
+    (write-lines
+     compat-source
+     '("(defpackage #:cl-couchdb-client"
+       "  (:use #:cl)"
+       "  (:nicknames #:couchdb-client)"
+       "  (:export #:couch-request*))"
+       ""
+       "(in-package #:cl-couchdb-client)"
+       ""
+       "(defun query-key-string (key)"
+       "  (string-downcase"
+       "   (substitute #\_ #\-"
+       "               (etypecase key"
+       "                 (symbol (symbol-name key))"
+       "                 (string key)))))"
+       ""
+       "(defun query-value-string (value)"
+       "  (cond"
+       "    ((eq value t) \"true\")"
+       "    ((null value) \"false\")"
+       "    ((stringp value) value)"
+       "    ((symbolp value) (string-downcase (symbol-name value)))"
+       "    ((numberp value) (princ-to-string value))"
+       "    (t (error \"Unsupported CouchDB query value ~S.\" value))))"
+       ""
+       "(defun query-string (keys)"
+       "  (when keys"
+       "    (format nil \"?~{~A~^&~}\""
+       "            (loop for (key value) on keys by #'cddr"
+       "                  collect (format nil \"~A=~A\""
+       "                                  (query-key-string key)"
+       "                                  (query-value-string value))))))"
+       ""
+       "(defun response-string (body)"
+       "  (etypecase body"
+       "    (string body)"
+       "    ((vector (unsigned-byte 8))"
+       "     (babel:octets-to-string body :encoding :utf-8))))"
+       ""
+       "(defun couch-request* (method server path &optional keys content-type content)"
+       "  (let* ((uri (format nil \"~A~{/~A~}~A\""
+       "                      server path (or (query-string keys) \"\")))"
+       "         (arguments"
+       "           (list uri"
+       "                 :method method"
+       "                 :force-binary nil"
+       "                 :external-format-in :utf-8"
+       "                 :external-format-out :utf-8)))"
+       "    (when content"
+       "      (setf arguments"
+       "            (append arguments"
+       "                    (list :content"
+       "                          (if (and content-type"
+       "                                   (search \"application/json\" content-type))"
+       "                              (json:encode-json-to-string content)"
+       "                              content)"
+       "                          :content-type content-type))))"
+       "    (multiple-value-bind (body status-code)"
+       "        (apply #'drakma:http-request arguments)"
+       "      (unless (<= 200 status-code 299)"
+       "        (error \"CouchDB request ~A returned status ~D.\" uri status-code))"
+       "      (let ((text (response-string body)))"
+       "        (if (zerop (length text))"
+       "            nil"
+       "            (json:decode-json-from-string text))))))"))))
 
+(install-cl-couch-api-compatibility)
 (ql:register-local-projects)
-(modernize-cl-couch-client)
 (ql:quickload :cl-couchdb-client)
 (ql:quickload :cl-rabbit)
 

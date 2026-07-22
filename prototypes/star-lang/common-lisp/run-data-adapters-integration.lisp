@@ -52,7 +52,7 @@
        ""
        "(defun query-key-string (key)"
        "  (string-downcase"
-       "   (substitute #\_ #\-"
+       "   (substitute (code-char 95) (code-char 45)"
        "               (etypecase key"
        "                 (symbol (symbol-name key))"
        "                 (string key)))))"

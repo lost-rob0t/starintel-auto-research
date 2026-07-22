@@ -1,0 +1,190 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-008
+:END:
+#+title: STAR-LANG-RESEARCH-008 Core Surface and Wire Protocol
+#+description: Define the concrete Star-Lang specification surface, normalized schema IR, semantic validation, portable actor contracts, and the first language-neutral message envelope without exposing compiler lock internals to ordinary source authors.
+#+status: REVIEW
+#+filetags: :starintel:star-lang:dsl:schemas:messages:actors:wire-protocol:common-lisp:research:
+
+* Purpose
+
+This pass closes the gap between the language users were shown and the lower-level compiler fixture from Loop 007. Ordinary Star-Lang source now starts with =spec-library= and declares scalars, enumerations, documents, predicates, and messages directly. It does not require users to write or understand a =spec-graph= form.
+
+The compiler still retains exact import versions and digests. Those values are lock and provenance inputs, not the conceptual center of the language.
+
+* Concrete Surface
+
+The core specification surface is:
+
+#+begin_src lisp
+(spec-library "org.starintel/fec@1"
+  (:version "1.0.0"
+   :digest "sha256:fec-core-v1-research-fixture")
+
+  (import "org.starintel/core@1"
+    :version "1.0.0"
+    :digest "sha256:core-v1-research-fixture")
+
+  (scalar candidate-id
+    (:base string
+     :pattern "^[HSP][A-Z0-9]{8}$"))
+
+  (enum office
+    (president senate house))
+
+  (document candidate
+    (:persistence persistent)
+    (candidate-id candidate-id :required)
+    (name string :required)
+    (office office :required))
+
+  (predicate candidate-committee
+    (:source candidate
+     :destination committee))
+
+  (message ingest-page
+    (:fields
+     ((endpoint string :required)
+      (page integer :required)
+      (results (list map) :required)))))
+#+end_src
+
+This is data-only specification syntax. It does not execute arbitrary Common Lisp.
+
+* Normalized Core IR
+
+The Common Lisp prototype lowers each source declaration to closed property-list data with:
+
+- a qualified library name and exact version
+- exact digest-locked imports
+- qualified scalar, enumeration, document, predicate, and message identifiers
+- explicit required or optional field status
+- normalized persistence values
+- explicit predicate source and destination types
+- deterministic declaration order
+
+Unqualified local types are resolved to their library-qualified identifiers. Unknown unqualified types are rejected instead of being guessed.
+
+* Semantic Validation
+
+The normalized declarations pass through a semantic gate before a portable manifest is emitted. The gate enforces:
+
+- document parents are documents rather than scalars or enumerations
+- local inheritance chains are acyclic
+- derived documents cannot redefine inherited fields
+- predicate source and destination declarations are documents
+- actor input contracts refer to messages
+- actor output contracts refer to messages or documents
+
+External qualified identifiers remain resolvable by the import/link phase. The local compiler does not fabricate declarations for them.
+
+* Actor Boundary
+
+Actors remain outside specification libraries because schemas and executable deployment are separate concerns. The same actor contract can be bound in two ways.
+
+A native actor declares a Common Lisp handler and binds to cl-gserver:
+
+#+begin_src lisp
+(actor amendment-resolver
+  (:runtime native
+   :accepts (resolve-amendments)
+   :produces (filing)
+   :handler resolve-amendments-handler
+   :restart transient
+   :mailbox (bounded 256)))
+#+end_src
+
+The binding records =actor-of= construction and =tell= message delivery.
+
+An external actor declares a wire protocol and endpoint:
+
+#+begin_src lisp
+(actor fec-importer
+  (:runtime external
+   :protocol star-message-v1
+   :endpoint "rabbitmq:star.fec.ingest"
+   :accepts (ingest-page)
+   :produces (candidate committee filing)
+   :restart permanent
+   :mailbox (bounded 1024)))
+#+end_src
+
+The external binding records protocol dispatch without pretending that the process is a local cl-gserver actor.
+
+* Portable Manifest
+
+The compiler emits a =star-message-v1= manifest containing:
+
+- library identity and imports
+- scalar, enumeration, and document contracts
+- predicate endpoints
+- message payload contracts
+- actor input and output contracts
+- native or external runtime placement
+- external protocol and endpoint data when applicable
+
+The manifest is runtime-neutral data. JSON, MessagePack, CBOR, Protobuf generation, and language SDK generation are serialization adapters over this model rather than alternate schema systems.
+
+* Wire Envelope
+
+The first envelope contract contains:
+
+#+begin_src lisp
+(:star-version 1
+ :message-type "org.starintel/fec@1/ingest-page"
+ :message-id "01JTEST"
+ :actor "fec-importer"
+ :dataset "fec-2026"
+ :reply-to nil
+ :payload (("endpoint" . "/candidates/search/")
+           ("page" . 1)
+           ("results" . nil)))
+#+end_src
+
+The prototype validates the wire version, resolves the message contract, and rejects payloads missing required fields. Deep scalar validation and transport acknowledgements remain later work.
+
+* FEC Fixture
+
+=prototypes/star-lang/fixtures/fec-core.star= is the first concrete external-domain specification fixture. It defines:
+
+- FEC candidate and committee identifiers
+- money, state, office, amendment, and support/oppose types
+- entity, candidate, committee, filing, receipt, disbursement, and independent-expenditure documents
+- candidate/committee, receipt, disbursement, filing, and expenditure predicates
+- ingestion, amendment-resolution, and indexing messages
+
+The fixture preserves raw source maps and filing provenance fields instead of claiming that the normalized schema exhausts the FEC source.
+
+* Tests
+
+The Common Lisp suites check:
+
+1. the =spec-library= surface compiles without a source-level =spec-graph=
+2. local types become qualified identifiers
+3. required and optional fields remain explicit
+4. portable message and actor contracts are emitted
+5. native actors bind to =actor-of= and =tell=
+6. external actors bind to protocol dispatch
+7. valid envelopes pass contract validation
+8. missing required payload fields fail
+9. unknown local types fail
+10. duplicate declarations fail
+11. inheritance cycles fail
+12. inherited-field redefinition fails
+13. non-document parents fail
+14. non-document predicate endpoints fail
+15. actors cannot accept document contracts as messages
+
+* Boundary
+
+This pass does not:
+
+- select Common Lisp as the final Star-Lang implementation
+- replace the Racket and Scheme comparison loops
+- implement transport acknowledgements or retries
+- generate Python, Rust, TypeScript, or Prolog bindings yet
+- serialize the manifest to a final wire encoding
+- start cl-gserver actors or external processes
+- promote the work into =roam/implement/=
+
+The next core pass should add a canonical serialization adapter and generated bindings from this manifest while keeping the core IR independent from any one transport or host language.

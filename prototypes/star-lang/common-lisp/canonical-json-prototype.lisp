@@ -151,6 +151,16 @@
          (cons field-name (getf payload key)))))
     (t nil)))
 
+(defun payload-field-names (payload)
+  (cond
+    ((string-alist-p payload) (mapcar #'car payload))
+    ((keyword-plist-p payload)
+     (loop for (key value) on payload by #'cddr
+           declare (ignore value)
+           collect (identifier-string key)))
+    ((null payload) '())
+    (t nil)))
+
 (defun generic-wire-json-value (value)
   (cond
     ((eq value t) +json-true+)
@@ -183,6 +193,15 @@
      (fail 'invalid-envelope-error
            "~A requires an object/map value." context))))
 
+(defun wire-reference-value (value context)
+  (let ((object (wire-map-value value context))
+        (schema (payload-entry value "schema"))
+        (id (payload-entry value "id")))
+    (unless (and schema (stringp (cdr schema)) id (stringp (cdr id)))
+      (fail 'invalid-envelope-error
+            "~A requires reference fields schema and id as strings." context))
+    object))
+
 (defun wire-enum-value (contract value context)
   (let ((normalized
           (cond
@@ -196,16 +215,27 @@
             context (getf contract :values) value))
     normalized))
 
+(defun manifest-document-fields (manifest contract)
+  (let ((parent-name (getf contract :extends)))
+    (append
+     (when parent-name
+       (let ((parent (manifest-type-contract manifest parent-name)))
+         (unless (and parent (eq (getf parent :kind) :document))
+           (fail 'invalid-envelope-error
+                 "Cannot resolve document parent ~A while validating wire data."
+                 parent-name))
+         (manifest-document-fields manifest parent)))
+     (copy-tree (getf contract :fields)))))
+
 (defun wire-fields-object (manifest fields value context)
   (unless (or (string-alist-p value) (keyword-plist-p value) (null value))
     (fail 'invalid-envelope-error "~A requires an object payload." context))
   (let ((known (mapcar (lambda (field) (getf field :name)) fields))
         (entries '()))
-    (when (string-alist-p value)
-      (dolist (entry value)
-        (unless (member (car entry) known :test #'string=)
-          (fail 'invalid-envelope-error
-                "~A contains unknown field ~A." context (car entry)))))
+    (dolist (name (payload-field-names value))
+      (unless (member name known :test #'string=)
+        (fail 'invalid-envelope-error
+              "~A contains unknown field ~A." context name)))
     (dolist (field fields)
       (let* ((name (getf field :name))
              (entry (payload-entry value name)))
@@ -220,6 +250,40 @@
            (fail 'invalid-envelope-error
                  "~A is missing required field ~A." context name)))))
     (%make-json-object entries)))
+
+(defun decimal-wire-string-p (value)
+  (and (stringp value)
+       (> (length value) 0)
+       (let* ((start (if (member (char value 0) '(#\+ #\-)) 1 0))
+              (dot (position #\. value :start start)))
+         (and (< start (length value))
+              (every #'digit-char-p
+                     (if dot (subseq value start dot) (subseq value start)))
+              (or (null dot)
+                  (and (< dot (1- (length value)))
+                       (every #'digit-char-p (subseq value (1+ dot)))))))))
+
+(defun decimal-fraction-digits (value)
+  (let ((dot (position #\. value)))
+    (if dot (- (length value) dot 1) 0)))
+
+(defun validate-scalar-constraints (contract value context)
+  (let ((minimum (getf contract :minimum))
+        (maximum (getf contract :maximum))
+        (scale (getf contract :scale)))
+    (when (and minimum (numberp value) (< value minimum))
+      (fail 'invalid-envelope-error
+            "~A is below scalar minimum ~A." context minimum))
+    (when (and maximum (numberp value) (> value maximum))
+      (fail 'invalid-envelope-error
+            "~A exceeds scalar maximum ~A." context maximum))
+    (when scale
+      (unless (and (decimal-wire-string-p value)
+                   (<= (decimal-fraction-digits value) scale))
+        (fail 'invalid-envelope-error
+              "~A requires a decimal string with at most ~D fractional digits."
+              context scale))))
+  value)
 
 (defun wire-json-value-for-type (manifest type value context)
   (cond
@@ -250,23 +314,28 @@
        (fail 'invalid-envelope-error "~A requires a boolean." context))
      (if value +json-true+ +json-false+))
     ((string= type "decimal")
-     (unless (stringp value)
+     (unless (decimal-wire-string-p value)
        (fail 'invalid-envelope-error
              "~A requires a decimal string to preserve wire precision." context))
      value)
     ((string= type "map") (wire-map-value value context))
-    ((string= type "reference") (wire-map-value value context))
+    ((string= type "reference") (wire-reference-value value context))
     (t
      (let ((contract (manifest-type-contract manifest type)))
        (unless contract
          (fail 'invalid-envelope-error "~A references unknown type ~A." context type))
        (case (getf contract :kind)
          (:scalar
-          (wire-json-value-for-type manifest (getf contract :base) value context))
+          (let ((encoded
+                  (wire-json-value-for-type
+                   manifest (getf contract :base) value context)))
+            (validate-scalar-constraints contract value context)
+            encoded))
          (:enum
           (wire-enum-value contract value context))
          (:document
-          (wire-fields-object manifest (getf contract :fields) value context))
+          (wire-fields-object
+           manifest (manifest-document-fields manifest contract) value context))
          (otherwise
           (fail 'invalid-envelope-error
                 "~A cannot use type kind ~A."

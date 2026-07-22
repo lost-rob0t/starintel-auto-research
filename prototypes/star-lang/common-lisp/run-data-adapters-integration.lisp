@@ -27,6 +27,35 @@
                      (write-string content stream :start start)
                      (return)))))))
 
+(defun write-modern-cl-couch-http-request (pathname)
+  (with-open-file (stream pathname
+                          :direction :output
+                          :if-exists :supersede
+                          :external-format :utf-8)
+    (dolist
+        (line
+          '("(in-package :cl-couchdb-client)"
+            ""
+            "(setf drakma:*drakma-default-external-format* :utf-8)"
+            ""
+            "(defun http-request (method uri &key content content-type)"
+            "  (multiple-value-bind (body status-code headers reply-uri stream closed-p reason)"
+            "      (drakma:http-request"
+            "       uri"
+            "       :content (when content"
+            "                  (if (string= content-type +json-content-type+)"
+            "                      (json content)"
+            "                      content))"
+            "       :force-binary nil"
+            "       :content-type content-type"
+            "       :method method"
+            "       :user-agent \"cl-couchdb-client\""
+            "       :external-format-in :utf-8"
+            "       :external-format-out :utf-8)"
+            "    (declare (ignore headers reply-uri stream closed-p reason))"
+            "    (values (dejson body) status-code)))"))
+      (write-line line stream))))
+
 (defun modernize-cl-couch-client ()
   (let* ((root
            (merge-pathnames
@@ -36,13 +65,7 @@
          (utils (merge-pathnames "client/utils.lisp" root)))
     (unless (and (probe-file http-request) (probe-file utils))
       (error "Pinned Cl-Couch checkout was not found at ~A." root))
-    (with-open-file (stream http-request
-                            :direction :output
-                            :if-exists :supersede
-                            :external-format :utf-8)
-      (write-string
-       "(in-package :cl-couchdb-client)\n\n(setf drakma:*drakma-default-external-format* :utf-8)\n\n(defun http-request (method uri &key content content-type)\n  (multiple-value-bind (body status-code headers reply-uri stream closed-p reason)\n      (drakma:http-request\n       uri\n       :content (when content\n                  (if (string= content-type +json-content-type+)\n                      (json content)\n                      content))\n       :force-binary nil\n       :content-type content-type\n       :method method\n       :user-agent \"cl-couchdb-client\"\n       :external-format-in :utf-8\n       :external-format-out :utf-8)\n    (declare (ignore headers reply-uri stream closed-p reason))\n    (values (dejson body) status-code)))\n"
-       stream))
+    (write-modern-cl-couch-http-request http-request)
     (replace-required-text
      utils
      "(trivial-utf-8:string-to-utf-8-bytes (string c))"

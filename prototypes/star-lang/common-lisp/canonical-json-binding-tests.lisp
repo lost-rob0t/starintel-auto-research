@@ -95,8 +95,64 @@
    (wire-condition-signaled-p
     'invalid-envelope-error
     (lambda ()
+      (validate-wire-value manifest "org.starintel/fec@1/fec-money" "12.345")))
+   "decimal values exceeding declared scale rejected")
+  (wire-assert-true
+   (wire-condition-signaled-p
+    'invalid-envelope-error
+    (lambda ()
+      (validate-wire-value manifest "org.starintel/fec@1/fec-money" ".50")))
+   "canonical decimal requires a leading digit")
+  (wire-assert-true
+   (wire-condition-signaled-p
+    'invalid-envelope-error
+    (lambda ()
+      (validate-wire-value manifest "org.starintel/fec@1/file-number" 0)))
+   "scalar minimum enforced")
+  (wire-assert-true
+   (wire-condition-signaled-p
+    'invalid-envelope-error
+    (lambda ()
       (validate-wire-value manifest "org.starintel/fec@1/office" "governor")))
    "invalid enum wire value rejected"))
+
+(defun test-reference-validation (manifest)
+  (wire-assert-true
+   (validate-wire-value
+    manifest "reference"
+    '(("schema" . "org.starintel/fec@1/candidate")
+      ("id" . "H2OH03116")))
+   "reference requires schema and id")
+  (wire-assert-true
+   (wire-condition-signaled-p
+    'invalid-envelope-error
+    (lambda ()
+      (validate-wire-value
+       manifest "reference"
+       '(("schema" . "org.starintel/fec@1/candidate")))))
+   "incomplete reference rejected"))
+
+(defun test-inherited-document-validation (manifest)
+  (let ((candidate
+          '(("name" . "Example Candidate")
+            ("raw" . ())
+            ("candidate-id" . "H2OH03116")
+            ("office" . "house")
+            ("election-years" . (2026)))))
+    (wire-assert-true
+     (validate-wire-value manifest "org.starintel/fec@1/candidate" candidate)
+     "document validation includes inherited fields")
+    (wire-assert-true
+     (wire-condition-signaled-p
+      'invalid-envelope-error
+      (lambda ()
+        (validate-wire-value
+         manifest "org.starintel/fec@1/candidate"
+         '(("raw" . ())
+           ("candidate-id" . "H2OH03116")
+           ("office" . "house")
+           ("election-years" . (2026))))))
+     "missing inherited required field rejected")))
 
 (defun test-python-bindings (manifest)
   (let ((source (generate-python-bindings manifest)))
@@ -136,6 +192,8 @@
             (python-source (test-python-bindings manifest))
             (typescript-source (test-typescript-bindings manifest)))
         (test-wire-type-validation manifest)
+        (test-reference-validation manifest)
+        (test-inherited-document-validation manifest)
         (write-text-file "star-lang-fec-manifest.json" manifest-json)
         (write-text-file "star-lang-fec-envelope.json" envelope-json)
         (write-text-file "star_lang_fec.py" python-source)

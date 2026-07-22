@@ -90,10 +90,18 @@
             (source-string (getf field :name))
             (if (getf field :required) "Required" "NotRequired")
             (python-type-expression (getf field :type))))
-  (write-string "})\n\n" stream))
+  (format stream "})~%~%"))
+
+(defun write-python-string-list (stream values)
+  (write-char #\[ stream)
+  (loop for value in values
+        for first-p = t then nil
+        do (unless first-p (write-string ", " stream))
+           (write-string (source-string value) stream))
+  (write-char #\] stream))
 
 (defun write-python-actor-contracts (stream actors)
-  (write-string "ACTOR_CONTRACTS: dict[str, dict[str, object]] = {\n" stream)
+  (format stream "ACTOR_CONTRACTS: dict[str, dict[str, object]] = {~%")
   (dolist (actor actors)
     (format stream "    ~A: {~%" (source-string (getf actor :name)))
     (format stream "        \"runtime\": ~A,~%"
@@ -104,26 +112,26 @@
     (when (getf actor :endpoint)
       (format stream "        \"endpoint\": ~A,~%"
               (source-string (getf actor :endpoint))))
-    (format stream "        \"accepts\": (~{~A~^, ~}),~%"
-            (mapcar #'source-string (getf actor :accepts)))
-    (format stream "        \"produces\": (~{~A~^, ~}),~%"
-            (mapcar #'source-string (getf actor :produces)))
-    (write-string "    },\n" stream))
-  (write-string "}\n" stream))
+    (write-string "        \"accepts\": " stream)
+    (write-python-string-list stream (getf actor :accepts))
+    (format stream ",~%        \"produces\": ")
+    (write-python-string-list stream (getf actor :produces))
+    (format stream ",~%    },~%"))
+  (format stream "}~%"))
 
 (defun generate-python-bindings (manifest)
   (with-output-to-string (stream)
-    (write-string "from __future__ import annotations\n\n" stream)
-    (write-string "from typing import Any, Literal, NotRequired, Required, TypedDict\n\n" stream)
-    (write-string "class StarReference(TypedDict):\n    schema: str\n    id: str\n\n" stream)
+    (format stream "from __future__ import annotations~%~%")
+    (format stream "from typing import Any, Literal, NotRequired, Required, TypedDict~%~%")
+    (format stream "class StarReference(TypedDict):~%    schema: str~%    id: str~%~%")
     (dolist (contract (getf manifest :types))
       (case (getf contract :kind)
         (:scalar
-         (format stream "~A = ~A\n\n"
+         (format stream "~A = ~A~%~%"
                  (pascal-name (getf contract :name))
                  (python-type-expression (getf contract :base))))
         (:enum
-         (format stream "~A = Literal[~{~A~^, ~}]\n\n"
+         (format stream "~A = Literal[~{~A~^, ~}]~%~%"
                  (pascal-name (getf contract :name))
                  (mapcar #'source-string (getf contract :values))))
         (:document
@@ -145,7 +153,7 @@
             (source-string (getf field :name))
             (getf field :required)
             (typescript-type-expression (getf field :type))))
-  (write-string "}\n\n" stream))
+  (format stream "}~%~%"))
 
 (defun write-typescript-string-array (stream values)
   (write-char #\[ stream)
@@ -156,7 +164,7 @@
   (write-char #\] stream))
 
 (defun write-typescript-actor-contracts (stream actors)
-  (write-string "export const actorContracts = {\n" stream)
+  (format stream "export const actorContracts = {~%")
   (dolist (actor actors)
     (format stream "  ~A: {~%" (source-string (getf actor :name)))
     (format stream "    runtime: ~A,~%"
@@ -167,14 +175,14 @@
       (format stream "    endpoint: ~A,~%" (source-string (getf actor :endpoint))))
     (write-string "    accepts: " stream)
     (write-typescript-string-array stream (getf actor :accepts))
-    (write-string ",\n    produces: " stream)
+    (format stream ",~%    produces: ")
     (write-typescript-string-array stream (getf actor :produces))
-    (write-string ",\n  },\n" stream))
-  (write-string "} as const;\n" stream))
+    (format stream ",~%  },~%"))
+  (format stream "} as const;~%"))
 
 (defun generate-typescript-bindings (manifest)
   (with-output-to-string (stream)
-    (write-string "export interface StarReference {\n  schema: string;\n  id: string;\n}\n\n" stream)
+    (format stream "export interface StarReference {~%  schema: string;~%  id: string;~%}~%~%")
     (dolist (contract (getf manifest :types))
       (case (getf contract :kind)
         (:scalar

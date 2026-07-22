@@ -27,34 +27,79 @@
                      (write-string content stream :start start)
                      (return)))))))
 
-(defun write-modern-cl-couch-http-request (pathname)
+(defun write-lines (pathname lines)
   (with-open-file (stream pathname
                           :direction :output
                           :if-exists :supersede
                           :external-format :utf-8)
-    (dolist
-        (line
-          '("(in-package :cl-couchdb-client)"
-            ""
-            "(setf drakma:*drakma-default-external-format* :utf-8)"
-            ""
-            "(defun http-request (method uri &key content content-type)"
-            "  (multiple-value-bind (body status-code headers reply-uri stream closed-p reason)"
-            "      (drakma:http-request"
-            "       uri"
-            "       :content (when content"
-            "                  (if (string= content-type +json-content-type+)"
-            "                      (json content)"
-            "                      content))"
-            "       :force-binary nil"
-            "       :content-type content-type"
-            "       :method method"
-            "       :user-agent \"cl-couchdb-client\""
-            "       :external-format-in :utf-8"
-            "       :external-format-out :utf-8)"
-            "    (declare (ignore headers reply-uri stream closed-p reason))"
-            "    (values (dejson body) status-code)))"))
+    (dolist (line lines)
       (write-line line stream))))
+
+(defun write-modern-cl-couch-http-request (pathname)
+  (write-lines
+   pathname
+   '("(in-package :cl-couchdb-client)"
+     ""
+     "(setf drakma:*drakma-default-external-format* :utf-8)"
+     ""
+     "(defun http-request (method uri &key content content-type)"
+     "  (multiple-value-bind (body status-code headers reply-uri stream closed-p reason)"
+     "      (drakma:http-request"
+     "       uri"
+     "       :content (when content"
+     "                  (if (string= content-type +json-content-type+)"
+     "                      (json content)"
+     "                      content))"
+     "       :force-binary nil"
+     "       :content-type content-type"
+     "       :method method"
+     "       :user-agent \"cl-couchdb-client\""
+     "       :external-format-in :utf-8"
+     "       :external-format-out :utf-8)"
+     "    (declare (ignore headers reply-uri stream closed-p reason))"
+     "    (values (dejson body) status-code)))")))
+
+(defun write-modern-cl-couch-conditions (pathname)
+  (write-lines
+   pathname
+   '("(in-package :cl-couchdb-client)"
+     ""
+     "(export '(couchdb-condition couchdb-server-error couchdb-conflict"
+     "          couchdb-not-found old-doc-of new-doc-of))"
+     ""
+     "(define-condition couchdb-condition (error)"
+     "  ((number :initarg :number :initform nil :reader number-of)"
+     "   (error-value :initarg :error :initform nil :reader error-of)"
+     "   (reason :initarg :reason :initform nil :reader reason-of))"
+     "  (:report"
+     "   (lambda (condition stream)"
+     "     (format stream \"CouchDB returned an error: ~A (~A). Reason: ~A.\""
+     "             (error-of condition)"
+     "             (number-of condition)"
+     "             (reason-of condition)))))"
+     ""
+     "(define-condition couchdb-not-found (couchdb-condition) ()"
+     "  (:documentation \"404\"))"
+     ""
+     "(define-condition couchdb-conflict (couchdb-condition)"
+     "  ((old-doc :initarg :old-doc :initform nil :reader old-doc-of)"
+     "   (new-doc :initarg :new-doc :initform nil :reader new-doc-of)"
+     "   (server :initarg :server :initform nil :reader server-of)"
+     "   (db :initarg :db :initform nil :reader db-of))"
+     "  (:default-initargs :number 412)"
+     "  (:documentation \"412\")"
+     "  (:report"
+     "   (lambda (condition stream)"
+     "     (format stream"
+     "             \"CouchDB returned an error: ~A (~A). Reason: ~A in ~A/~A.\""
+     "             (error-of condition)"
+     "             (number-of condition)"
+     "             (reason-of condition)"
+     "             (server-of condition)"
+     "             (db-of condition)))))"
+     ""
+     "(define-condition couchdb-server-error (couchdb-condition) ()"
+     "  (:documentation \"50x errors.\"))")))
 
 (defun modernize-cl-couch-client ()
   (let* ((root
@@ -62,10 +107,14 @@
             "quicklisp/local-projects/Cl-Couch/"
             (user-homedir-pathname)))
          (http-request (merge-pathnames "client/http-request.lisp" root))
+         (conditions (merge-pathnames "client/conditions.lisp" root))
+         (request (merge-pathnames "client/request.lisp" root))
          (utils (merge-pathnames "client/utils.lisp" root)))
-    (unless (and (probe-file http-request) (probe-file utils))
+    (unless (every #'probe-file (list http-request conditions request utils))
       (error "Pinned Cl-Couch checkout was not found at ~A." root))
     (write-modern-cl-couch-http-request http-request)
+    (write-modern-cl-couch-conditions conditions)
+    (replace-required-text request "(logv uri)" "nil")
     (replace-required-text
      utils
      "(trivial-utf-8:string-to-utf-8-bytes (string c))"

@@ -598,17 +598,21 @@
                                            (source "https://specs.starintel.actor/employment/v1/library.star")
                                            (digest "sha256:employment-v1-example")
                                            (import-digest "sha256:core-v1-example"))
-  (define-spec-library runtime "org.starintel/employment@1"
-    (:version "1.0.0" :source source :digest digest)
-    (import "org.starintel/core@1"
-      :version "1.0.0"
-      :digest import-digest)
-    (document employee
-      (:extends "org.starintel/core@1/person" :persistence :persistent)
-      (employee-number :string :required nil))
-    (predicate employed
-      (:source "org.starintel/core@1/person"
-       :destination "org.starintel/core@1/organization"))))
+  (install-spec-library
+   runtime
+   "org.starintel/employment@1"
+   (list :version "1.0.0" :source source :digest digest)
+   (list
+    (list 'import
+          "org.starintel/core@1"
+          :version "1.0.0"
+          :digest import-digest)
+    '(document employee
+       (:extends "org.starintel/core@1/person" :persistence :persistent)
+       (employee-number :string :required nil))
+    '(predicate employed
+       (:source "org.starintel/core@1/person"
+        :destination "org.starintel/core@1/organization")))))
 
 (defun build-example-runtime ()
   (let ((runtime (make-runtime)))

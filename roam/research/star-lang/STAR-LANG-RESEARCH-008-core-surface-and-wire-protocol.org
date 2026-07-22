@@ -2,7 +2,7 @@
 :ID:       starintel-star-lang-research-008
 :END:
 #+title: STAR-LANG-RESEARCH-008 Core Surface and Wire Protocol
-#+description: Define the concrete Star-Lang specification surface, normalized schema IR, portable actor contracts, and the first language-neutral message envelope without exposing compiler lock internals to ordinary source authors.
+#+description: Define the concrete Star-Lang specification surface, normalized schema IR, semantic validation, portable actor contracts, and the first language-neutral message envelope without exposing compiler lock internals to ordinary source authors.
 #+status: REVIEW
 #+filetags: :starintel:star-lang:dsl:schemas:messages:actors:wire-protocol:common-lisp:research:
 
@@ -64,6 +64,19 @@ The Common Lisp prototype lowers each source declaration to closed property-list
 - deterministic declaration order
 
 Unqualified local types are resolved to their library-qualified identifiers. Unknown unqualified types are rejected instead of being guessed.
+
+* Semantic Validation
+
+The normalized declarations pass through a semantic gate before a portable manifest is emitted. The gate enforces:
+
+- document parents are documents rather than scalars or enumerations
+- local inheritance chains are acyclic
+- derived documents cannot redefine inherited fields
+- predicate source and destination declarations are documents
+- actor input contracts refer to messages
+- actor output contracts refer to messages or documents
+
+External qualified identifiers remain resolvable by the import/link phase. The local compiler does not fabricate declarations for them.
 
 * Actor Boundary
 
@@ -144,7 +157,7 @@ The fixture preserves raw source maps and filing provenance fields instead of cl
 
 * Tests
 
-The Common Lisp suite checks:
+The Common Lisp suites check:
 
 1. the =spec-library= surface compiles without a source-level =spec-graph=
 2. local types become qualified identifiers
@@ -156,6 +169,11 @@ The Common Lisp suite checks:
 8. missing required payload fields fail
 9. unknown local types fail
 10. duplicate declarations fail
+11. inheritance cycles fail
+12. inherited-field redefinition fails
+13. non-document parents fail
+14. non-document predicate endpoints fail
+15. actors cannot accept document contracts as messages
 
 * Boundary
 

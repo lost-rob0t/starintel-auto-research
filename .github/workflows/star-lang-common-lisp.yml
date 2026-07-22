@@ -58,6 +58,15 @@ jobs:
           set -o pipefail
           sbcl --script prototypes/star-lang/common-lisp/core-semantics-tests.lisp \
             2>&1 | tee star-lang-core-semantics.log
+      - name: Run canonical JSON and binding generator suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/canonical-json-binding-tests.lisp \
+            2>&1 | tee star-lang-canonical-json-bindings.log
+          python -m json.tool star-lang-fec-manifest.json >/dev/null
+          python -m json.tool star-lang-fec-envelope.json >/dev/null
+          python -m py_compile star_lang_fec.py
       - name: Upload Common Lisp test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -69,4 +78,9 @@ jobs:
             star-lang-compiler-ir.log
             star-lang-core-surface.log
             star-lang-core-semantics.log
-          if-no-files-found: error
+            star-lang-canonical-json-bindings.log
+            star-lang-fec-manifest.json
+            star-lang-fec-envelope.json
+            star_lang_fec.py
+            star_lang_fec.ts
+          if-no-files-found: warn

@@ -1,4 +1,4 @@
-name: Star-Lang Common Lisp Baseline
+name: Star-Lang Specification Libraries
 
 on:
   pull_request:
@@ -29,24 +29,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes sbcl
       - name: Run existing Common Lisp baseline
-        run: sbcl --script prototypes/star-lang/common-lisp/tests.lisp
-      - name: Load specification and domain prototype
-        run: sbcl --noinform --disable-debugger --load prototypes/star-lang/common-lisp/spec-domain-prototype.lisp --quit
-      - name: Test remote digest requirement
-        run: sbcl --noinform --disable-debugger --load prototypes/star-lang/common-lisp/spec-domain-prototype.lisp --eval '(star-lang.spec-domain.prototype::test-remote-library-requires-digest)' --quit
-      - name: Test import lock mismatch
-        run: sbcl --noinform --disable-debugger --load prototypes/star-lang/common-lisp/spec-domain-prototype.lisp --eval '(star-lang.spec-domain.prototype::test-import-lock-mismatch-rejected)' --quit
-      - name: Test exact import lock
-        run: sbcl --noinform --disable-debugger --load prototypes/star-lang/common-lisp/spec-domain-prototype.lisp --eval '(star-lang.spec-domain.prototype::test-exact-import-lock-accepted)' --quit
-      - name: Test additive extension
-        run: sbcl --noinform --disable-debugger --load prototypes/star-lang/common-lisp/spec-domain-prototype.lisp --eval '(star-lang.spec-domain.prototype::test-extension-is-additive)' --quit
-      - name: Test relation type constraints
-        run: sbcl --noinform --disable-debugger --load prototypes/star-lang/common-lisp/spec-domain-prototype.lisp --eval '(star-lang.spec-domain.prototype::test-relation-type-constraints)' --quit
-      - name: Test dataset destination filter
-        run: sbcl --noinform --disable-debugger --load prototypes/star-lang/common-lisp/spec-domain-prototype.lisp --eval '(star-lang.spec-domain.prototype::test-dataset-destination-filter)' --quit
-      - name: Test email actor output
-        run: sbcl --noinform --disable-debugger --load prototypes/star-lang/common-lisp/spec-domain-prototype.lisp --eval '(star-lang.spec-domain.prototype::test-email-actor-output)' --quit
-      - name: Test domain-server metadata
-        run: sbcl --noinform --disable-debugger --load prototypes/star-lang/common-lisp/spec-domain-prototype.lisp --eval '(star-lang.spec-domain.prototype::test-domain-server-metadata)' --quit
-      - name: Run specification and domain test script
-        run: sbcl --script prototypes/star-lang/common-lisp/spec-domain-tests.lisp
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/tests.lisp \
+            2>&1 | tee star-lang-baseline.log
+      - name: Run specification and domain suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/spec-domain-tests.lisp \
+            2>&1 | tee star-lang-spec-domain.log
+      - name: Upload Common Lisp test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-specification-test-logs
+          path: |
+            star-lang-baseline.log
+            star-lang-spec-domain.log
+          if-no-files-found: error

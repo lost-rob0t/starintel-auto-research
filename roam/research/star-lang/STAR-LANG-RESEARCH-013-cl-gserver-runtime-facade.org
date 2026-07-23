@@ -1,43 +1,123 @@
 :PROPERTIES:
 :ID:       starintel-star-lang-research-013
 :END:
-#+title: STAR-LANG-RESEARCH-013 cl-gserver Runtime Facade
-#+description: Bind native Star-Lang actor contracts to asynchronous cl-gserver actor creation and tell operations while preserving dispatcher, outbox, lifecycle, and transport ownership boundaries.
+#+title: STAR-LANG-RESEARCH-013 Optional cl-gserver Runtime Adapter
+#+description: Preserve standalone Star-Lang execution while optionally binding native actor contracts to asynchronous cl-gserver mailboxes and runtime liveness discovery.
 #+status: REVIEW
-#+filetags: :starintel:star-lang:cl-gserver:sento:actors:runtime:dispatcher:transport:outbox:common-lisp:research:
+#+filetags: :starintel:star-lang:cl-gserver:sento:actors:runtime:standalone:directory:liveness:dispatcher:transport:outbox:common-lisp:research:
 
 * Purpose
 
-Loop 012 proved transport publication and settlement independently of the actor runtime. This pass defines the native Common Lisp actor boundary without moving Star-Lang delivery semantics into cl-gserver.
+Star-Lang is not a cl-gserver language and does not require an actor system to execute.
 
-The runtime facade has one responsibility:
+Loop 011 already proves standalone execution through the deterministic dispatcher and ordinary registered Common Lisp handler functions. Loop 012 adds an optional transport boundary. This pass adds cl-gserver as one replaceable execution adapter for native actors.
+
+The invariant is:
 
 #+begin_quote
-Translate a validated native Star-Lang actor contract into asynchronous actor creation and mailbox delivery, then return the actor's dispatch result to the existing Star-Lang coordinator.
+Star-Lang owns language semantics. cl-gserver may execute actor work and report runtime topology, but it does not define whether a valid Star-Lang program can run.
 #+end_quote
 
-The facade does not own document schemas, lifecycle envelopes, command idempotency, output publication order, broker settlement, or durable recovery policy.
+* Execution Modes
+
+The same validated Star-Lang manifest supports multiple execution modes.
+
+** Standalone in-process execution
+
+The dispatcher directly invokes registered Common Lisp handler functions.
+
+#+begin_src text
+command
+  -> deterministic dispatcher
+  -> registered handler function
+  -> lifecycle outcomes
+#+end_src
+
+This mode requires no cl-gserver actor system, coordinator actor, actor mailbox, actor registry, or runtime discovery service.
+
+It is appropriate for:
+
+- command-line execution
+- tests
+- small local ingest jobs
+- embedded use
+- batch processing
+- environments where actor concurrency is unnecessary
+
+** cl-gserver-backed execution
+
+The dispatcher delegates native handler execution to cl-gserver actors through asynchronous =tell= operations.
+
+#+begin_src text
+command
+  -> deterministic dispatcher proxy
+  -> tell native actor
+  -> native handler
+  -> tell runtime coordinator
+  -> finish deferred dispatcher command
+  -> lifecycle outcomes
+#+end_src
+
+This mode adds actor isolation, mailbox execution, runtime identity, topology, and liveness information while preserving the same Star-Lang contracts and outcomes.
+
+** External actor execution
+
+Portable actor contracts may also be implemented by external processes through the Star message protocol. cl-gserver is not involved unless it is intentionally used as a local bridge or supervisor.
+
+* Ownership Boundary
+
+Star-Lang owns:
+
+- specification libraries and typed documents
+- actor input and output contracts
+- command validation
+- lifecycle envelopes
+- correlation, causation, attempts, and idempotency
+- accepted, completed, retry, failure, and cancellation semantics
+- deterministic dispatcher state
+- publication outbox ordering
+- transport settlement policy
+
+cl-gserver may own:
+
+- actor construction
+- actor paths and runtime references
+- asynchronous mailbox delivery
+- actor running state
+- actor-context membership
+- local actor lookup
+- dispatcher threads and mailbox scheduling
+- actor stop and actor-system shutdown
+
+The optional adapter may use cl-gserver information for routing and operations, but a missing cl-gserver system is not a language error.
 
 * cl-gserver Semantics Used
 
-Sento documents =actor-of= as actor construction under an actor context with a =:receive= message-processing function. It documents =tell= as asynchronous fire-and-forget message delivery whose receive return value is ignored.
+Sento documents =actor-of= as actor construction under an actor context with a =:receive= message-processing function. It documents =tell= as asynchronous fire-and-forget delivery whose receive return value is ignored.
+
+Sento also documents:
+
+- =all-actors= for retrieving actors in an actor context
+- =find-actors= for path-based actor lookup
+- =running-p= for checking whether an actor cell is running
+- actor-system registration that tracks which actors exist
 
 Source:
 
 - [[https://mdbergmann.github.io/cl-gserver/index.html][Sento reference manual]]
 
-The Star-Lang adapter therefore does not use a synchronous return from =tell=. Native work is represented as a runtime job and completed by a separate coordinator message.
+The adapter therefore uses asynchronous jobs and a coordinator result message rather than treating =tell= as a function call.
 
-* Runtime Port
+* Execution Port
 
-The runtime-neutral cl-gserver port exposes:
+The optional cl-gserver execution port exposes:
 
 1. =actor-of= to construct an actor under a context
 2. =tell= to enqueue one message asynchronously
 3. =stop= to stop an actor
 4. =shutdown= to shut down the actor context or system
 
-The prototype injects those operations. The conformance tests use a deterministic mailbox implementation. A later concrete Sento adapter may call:
+A later concrete Sento adapter may call:
 
 #+begin_src lisp
 (ac:actor-of system
@@ -47,11 +127,41 @@ The prototype injects those operations. The conformance tests use a deterministi
 (act:tell actor message sender)
 #+end_src
 
-The Star-Lang facade itself does not depend on Sento packages during this comparative pass.
+The Star-Lang adapter itself does not require Sento packages during the comparative conformance pass.
+
+* Optional Runtime Directory
+
+Runtime discovery is separate from execution semantics.
+
+The runtime-directory port returns normalized actor observations such as:
+
+#+begin_src lisp
+((:name "fec-native-importer"
+  :runtime :cl-gserver
+  :alive t
+  :path "/user/fec-native-importer")
+ (:name "stopped-worker"
+  :runtime :cl-gserver
+  :alive nil
+  :path "/user/stopped-worker"))
+#+end_src
+
+A concrete cl-gserver directory adapter can build this snapshot using =ac:all-actors= or =ac:find-actors= and =act-cell:running-p=.
+
+The directory can support:
+
+- determining which declared actors currently exist
+- selecting an available local actor
+- displaying runtime health in Quasar
+- supervisor and operations views
+- avoiding sends to actors already known to be stopped
+- comparing declared actor contracts with observed runtime topology
+
+The runtime directory is optional. Standalone Star-Lang execution does not construct or query one.
 
 * Native Actor Contracts
 
-The facade accepts compiled native actor declarations such as:
+The optional adapter accepts compiled native actor declarations such as:
 
 #+begin_src lisp
 (actor fec-native-importer
@@ -68,29 +178,18 @@ Before actor construction it verifies:
 - the declaration is a compiled native actor contract
 - the actor appears as native in the portable manifest
 - the named handler has been registered as a Common Lisp function
-- the runtime facade and transport adapter share the same deterministic dispatcher
+- the runtime adapter and transport adapter share the same deterministic dispatcher
 
-The portable manifest remains language-neutral and does not carry executable Common Lisp function objects.
+The same native contract may instead be registered directly with the standalone dispatcher. The contract does not imply cl-gserver execution.
 
 * Actor Topology
 
-The facade creates:
+When the optional adapter is started, it creates:
 
 - one coordinator actor named =star-runtime-coordinator=
-- one native actor for each compiled native Star-Lang actor contract
+- one native actor for each selected native Star-Lang actor contract
 
 The coordinator serializes runtime result handling. Native actors execute domain handlers but do not publish transport messages or settle broker deliveries directly.
-
-#+begin_src text
-transport delivery
-  -> deterministic dispatcher proxy
-  -> tell native actor
-  -> native handler
-  -> tell runtime coordinator
-  -> finish deferred dispatcher command
-  -> publication outbox
-  -> transport settlement
-#+end_src
 
 * Runtime Jobs
 
@@ -134,15 +233,15 @@ The coordinator resolves the original command and invokes =finish-deferred-dispa
 - produce a retryable or terminal error
 - report =:late-terminal= when cancellation already completed the command
 
-The coordinator then hands emitted lifecycle outcomes to the existing transport publication outbox. The original source delivery is settled only after those outcomes publish.
+The coordinator hands emitted lifecycle outcomes to the existing publication outbox. The source delivery is settled only after those outcomes publish.
 
 * Tell Failure Before Actor Acceptance
 
 A failure while telling the native actor occurs before the actor mailbox accepted the job.
 
-The proxy removes the runtime job and returns an explicit =retry-dispatch= result with a configured delay. The normal dispatcher and transport layers then publish accepted and retry acknowledgements and schedule a new Star-Lang attempt.
+The proxy removes the runtime job and returns an explicit =retry-dispatch= result with a configured delay. The normal dispatcher and transport layers publish accepted and retry acknowledgements and schedule a new Star-Lang attempt.
 
-This is not represented as a poison message because the command contract and route were valid. It is a runtime availability failure.
+This is a runtime availability failure, not a malformed Star-Lang command.
 
 * Handler Failure
 
@@ -155,7 +254,7 @@ A Common Lisp condition escaping the registered native handler becomes:
  :retryable nil)
 #+end_src
 
-This prototype uses a terminal default because it cannot infer whether arbitrary domain handler conditions are safe to retry. Later actor declarations may add typed condition-to-restart policy.
+This prototype uses a terminal default because it cannot infer whether an arbitrary domain condition is safe to retry. Later actor declarations may add typed condition-to-restart policy.
 
 * Cancellation Race
 
@@ -169,38 +268,42 @@ The cancellation path:
 4. classifies the later result as =:late-terminal=
 5. clears the runtime job without publishing new outcomes or reopening the command
 
-This preserves the terminal dispatcher record as the authority.
+The terminal dispatcher record remains authoritative.
 
 * Shutdown
 
-Facade shutdown:
+Optional adapter shutdown:
 
-1. stops every native actor
+1. stops every actor created by the adapter
 2. stops the coordinator actor
 3. invokes runtime-system shutdown
 
-The current pass does not define graceful drain deadlines, forced termination, or persistence of pending runtime jobs.
+Stopping the cl-gserver adapter does not invalidate the Star-Lang manifest. The same contracts may later be executed in standalone mode or through another adapter.
 
 * Conformance Tests
 
-The injected mailbox runtime checks:
+The execution-mode and injected-mailbox suites check:
 
-1. coordinator and native actors are constructed through =actor-of=
-2. transport command handling performs asynchronous =tell=
-3. accepted publishes while the source delivery remains held
-4. native completion publishes reply and completed before source acknowledgement
-5. native retry creates a delayed next Star-Lang attempt
-6. a failed initial =tell= becomes explicit retry without a queued actor message
-7. native handler conditions become stable terminal errors
-8. cancellation settles transport work and ignores the later actor result
-9. runtime jobs clear after completion or late-terminal handling
-10. shutdown stops native actors and the coordinator and shuts down the runtime context
-11. native contracts without registered handlers are rejected
+1. a native Star-Lang actor completes directly through an ordinary handler with no cl-gserver facade
+2. standalone execution emits the same accepted, reply, and completed lifecycle sequence
+3. runtime liveness snapshots are optional and validated separately from execution
+4. coordinator and native actors are constructed through =actor-of= when the adapter is selected
+5. adapter command handling performs asynchronous =tell=
+6. accepted publishes while the source delivery remains held
+7. native completion publishes reply and completed before source acknowledgement
+8. native retry creates a delayed next Star-Lang attempt
+9. a failed initial =tell= becomes explicit retry without a queued actor message
+10. native handler conditions become stable terminal errors
+11. cancellation settles transport work and ignores the later actor result
+12. runtime jobs clear after completion or late-terminal handling
+13. shutdown stops adapter actors and the runtime context
+14. native contracts without registered handlers are rejected
 
 * Boundary
 
 This pass does not:
 
+- make cl-gserver mandatory for Star-Lang execution
 - load Sento or cl-gserver in continuous integration
 - create operating-system threads
 - implement actor supervision trees
@@ -211,4 +314,4 @@ This pass does not:
 - run external-language actors
 - promote Common Lisp as the final selected Star-Lang implementation
 
-The next pass should define supervision, mailbox pressure, and durable runtime-job recovery as explicit adapter policies. A concrete Sento smoke test should remain downstream of the injected-port conformance suite.
+The next pass should keep standalone execution as the baseline while adding supervision, mailbox pressure, durable runtime-job recovery, and a concrete Sento smoke adapter as optional runtime capabilities.

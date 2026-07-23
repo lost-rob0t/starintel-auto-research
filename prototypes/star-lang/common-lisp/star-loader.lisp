@@ -1,6 +1,6 @@
 (require :asdf)
 
-(unless (find-package #:star-lang.core-surface.prototype)
+(unless (find-package "STAR-LANG.CORE-SURFACE.PROTOTYPE")
   (load (merge-pathnames "core-surface-prototype.lisp" *load-truename*)))
 
 (defpackage #:star-lang.loader
@@ -156,7 +156,7 @@
 
 (defun read-star-source (source source-name)
   (let ((*read-eval* nil)
-        (*package* (find-package #:star-lang.loader))
+        (*package* (find-package "STAR-LANG.LOADER"))
         (*readtable* (copy-readtable nil)))
     (set-macro-character #\# #'rejecting-sharp-reader nil *readtable*)
     (with-input-from-string (stream source)

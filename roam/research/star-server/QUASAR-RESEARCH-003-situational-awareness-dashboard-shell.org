@@ -2,16 +2,17 @@
 :ID:       fa451205-2d9f-43ae-972d-68af1a731145
 :END:
 #+title: QUASAR-RESEARCH-003 Situational Awareness Dashboard Shell
-#+description: WorldMonitor-derived research for a composable operational dashboard UI beside the Quasar typed graph workbench.
+#+description: Architecture for a composable operational dashboard beside the Quasar typed graph workbench.
 #+status: REVIEW
-#+filetags: :starintel:quasar:research:dashboard:situational-awareness:worldmonitor:map:panels:projections:ui:
+#+filetags: :starintel:quasar:research:dashboard:situational-awareness:map:panels:projections:ui:
 #+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
 #+created: [2026-07-23 Thu]
 #+last_modified: [2026-07-23 Thu]
 
-| Version | Date       | Description of change                                                                 | Did nsaspy approve it |
-|---------+------------+---------------------------------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-23 | Extract a Quasar operational-dashboard architecture from WorldMonitor behavior.       | No                    |
+| Version | Date       | Description of change                                                    | Did nsaspy approve it |
+|---------+------------+--------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-23 | Define the initial operational-dashboard architecture.                   | No                    |
+| 0.1.1   | 2026-07-23 | Remove external product references and retain only architecture.         | No                    |
 
 * Related Nodes
 
@@ -24,13 +25,7 @@
 
 * Research Question
 
-How should Quasar add a WorldMonitor-like situational-awareness dashboard[fn:situational-dashboard] without turning the dashboard into the canonical data model, weakening the typed graph editor, duplicating StarIntel domain authority, or coupling every panel directly to a data source?
-
-* Source Scope and Method
-
-This pass examined the public World Monitor repository at commit =b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5=, including its repository overview, system architecture, design philosophy, application bootstrap, panel base class, panel layout manager, variant configuration, map-layer registry, URL state, refresh scheduler, bootstrap hydration, and data-freshness tracker.
-
-The goal is to extract durable product behavior and architecture contracts rather than copy implementation details. Quasar remains a TypeScript and React client around a thin Common Lisp service, as selected in [[file:QUASAR-RESEARCH-002-client-library-stack.org][QUASAR-RESEARCH-002]].
+How should Quasar add a situational-awareness dashboard[fn:situational-dashboard] without turning the dashboard into the canonical data model, weakening the typed graph editor, duplicating StarIntel domain authority, or coupling every panel directly to a data source?
 
 * Decision Summary
 
@@ -99,11 +94,9 @@ Both surfaces share:
 
 A panel click may open or focus the graph workbench. A graph selection may filter dashboard panels. Neither surface directly mutates the other renderer.
 
-* WorldMonitor Patterns Worth Preserving
+* Operational Dashboard Patterns
 
 ** Phased startup
-
-World Monitor initializes storage and localization, workers, desktop-sidecar readiness, bootstrap data, layout, user-interface modules, bulk data, and refresh loops in distinct phases.
 
 Quasar should use a visible startup state machine[fn:state-machine] with at least:
 
@@ -120,8 +113,6 @@ Quasar should use a visible startup state machine[fn:state-machine] with at leas
 The shell should appear before all panel data is ready. Slow panels must not block the graph, map, command bar, or already-hydrated panels.
 
 ** Stable shell footprint
-
-World Monitor reserves panel and map space before deferred components mount, then checks for layout drift.
 
 Quasar should persist a panel footprint declaration containing:
 
@@ -163,8 +154,6 @@ Panel instances own presentation lifecycle only. Domain data ownership remains i
 
 ** Resizable, collapsible, reorderable layout
 
-World Monitor treats panel dimensions, collapse state, order, and tabs as persistent user state.
-
 Quasar should save dashboard layout separately from panel definitions. A saved layout records:
 
 - panel instance identifier;
@@ -181,8 +170,6 @@ Quasar should save dashboard layout separately from panel definitions. A saved l
 Layouts must survive panel upgrades by stable identifiers and explicit migration rules.
 
 ** Variant manifests
-
-World Monitor builds several domain variants from one codebase by changing panel defaults, map layers, refresh intervals, theme, and copy.
 
 Quasar should define dashboard variants[fn:variant] as data manifests rather than separate applications.
 
@@ -201,13 +188,11 @@ A variant selects defaults. It does not hide the underlying registries or fork t
 
 ** Layer registry
 
-World Monitor centralizes map-layer identity, renderer support, access requirements, labels, explanations, freshness, confidence, limitations, related views, and evidence paths.
-
 Quasar should use one map-layer registry containing:
 
 - layer identifier and version;
 - geometry kinds;
-- flat-map and optional globe support;
+- renderer support;
 - source projection;
 - styling function;
 - clustering and aggregation behavior;
@@ -224,15 +209,11 @@ Map layers must not be scattered across renderer-specific conditionals.
 
 ** Renderer capability declarations
 
-World Monitor declares whether a layer works on a flat map, globe, or only a specific renderer.
-
 Quasar should declare renderer capability explicitly. Unsupported layers are disabled with an explanation rather than silently omitted.
 
-The first Quasar map remains MapLibre GL JS[fn:maplibre]. An optional globe renderer is a later projection adapter, not an MVP dependency.
+The first map implementation should use a browser-based vector renderer behind a stable adapter. An optional globe renderer is a later projection adapter, not an initial dependency.
 
 ** Shareable state
-
-World Monitor serializes map view, center, zoom, time range, layers, country focus, and focused chokepoints into URL state.
 
 Quasar should support bounded deep links[fn:deep-link] for:
 
@@ -246,11 +227,9 @@ Quasar should support bounded deep links[fn:deep-link] for:
 - run or alert identifier;
 - object-inspector target.
 
-Sensitive identifiers or private query contents must not be serialized into public URLs by default. The service may issue opaque share tokens under explicit policy.
+Sensitive identifiers or private query contents must not be serialized into public links by default. The service may issue opaque share tokens under explicit policy.
 
 ** Freshness and intelligence gaps
-
-World Monitor tracks source status as fresh, stale, very stale, no data, disabled, or error and surfaces insufficient coverage instead of presenting missing data as calm conditions.
 
 Quasar must treat data freshness and coverage as first-class records.
 
@@ -279,8 +258,6 @@ A panel must distinguish:
 
 ** Viewport-aware hydration
 
-World Monitor defers panel mounting and data loading until a panel approaches the viewport.
-
 Quasar should prioritize data in this order:
 
 1. shell and current selection;
@@ -293,8 +270,6 @@ Quasar should prioritize data in this order:
 Panel hydration requests must be cancellable and deduplicated by projection identity, parameters, revision, and user scope.
 
 ** Smart refresh scheduling
-
-World Monitor pauses polling while hidden, prevents duplicate in-flight requests, backs off after errors, and staggers refresh after a hidden tab returns.
 
 Quasar needs a central refresh scheduler[fn:refresh-scheduler]. Individual panels declare policy but do not create unmanaged timers.
 
@@ -311,11 +286,9 @@ A refresh registration should include:
 - cancellation key;
 - freshness source mapping.
 
-Live event subscriptions should replace polling where the service supports revision streams.
+Live event subscriptions should replace polling where the service supports revision streams. Polling pauses while hidden, duplicate in-flight work is rejected, failures back off, and recovery is staggered.
 
 ** Bootstrap hydration and stale fallback
-
-World Monitor hydrates fast and slow data tiers concurrently, retains cached snapshots, fills missing keys from cache, and serves stale data rather than blank data during failure.
 
 Quasar should support:
 
@@ -327,13 +300,11 @@ Quasar should support:
 - explicit cached and mixed-state labels;
 - revision guards that prevent old requests from overwriting a newer workspace state.
 
-Cached data must retain its source revision and collection time.
+Cached data must retain its source revision and collection time. A stale usable result is preferable to a blank screen, but its age must be explicit.
 
 ** Cross-source correlation
 
-World Monitor elevates events when independent streams converge.
-
-Quasar should represent correlation as a derived result with inspectable inputs rather than a colored UI-only score.
+Quasar should represent correlation as a derived result with inspectable inputs rather than a colored user-interface-only score.
 
 A correlation result should name:
 
@@ -347,9 +318,7 @@ A correlation result should name:
 - expiration or invalidation conditions;
 - drill-down query.
 
-** Agent and application programming interface parity
-
-World Monitor exposes operational data through browser, command-line, software-development-kit, REST, and Model Context Protocol surfaces.
+** Interface parity
 
 Quasar should expose the same typed operations used by the user interface through its protocol and action registry. The dashboard is a client of those operations, not a privileged implementation path.
 
@@ -390,13 +359,13 @@ The projection coordinator[fn:projection-coordinator] is the key boundary. It:
 
 The selected package direction should become:
 
-- =quasar-core=: Common Lisp graph-document model, commands, batches, revisions, undo, persistence, import, export, and action registry;
+- =quasar-core=: graph-document model, commands, batches, revisions, undo, persistence, import, export, and action registry;
 - =quasar-protocol=: typed request, event, projection, dashboard, freshness, and error contracts;
-- =quasar-client=: TypeScript transport, generated protocol types, caches, selection model, and shared user-interface primitives;
-- =quasar-workbench=: React investigation workbench around Cytoscape.js, tables, inspectors, evidence, timeline, and editors;
-- =quasar-dashboard=: React operational shell, panel registry, map-layer registry, variants, layouts, freshness, alerts, and projection coordination;
-- =quasar-desktop=: optional Tauri host, service discovery, local process lifecycle, filesystem integration, and desktop permissions;
-- =starintel-quasar-adapter=: optional mapping between Quasar projections/actions and StarIntel objects, claims, datasets, actors, and Star-Lang runs.
+- =quasar-client=: transport, generated protocol types, caches, selection model, and shared user-interface primitives;
+- =quasar-workbench=: investigation workbench around the graph renderer, tables, inspectors, evidence, timeline, and editors;
+- =quasar-dashboard=: operational shell, panel registry, map-layer registry, variants, layouts, freshness, alerts, and projection coordination;
+- =quasar-desktop=: optional desktop host, service discovery, local process lifecycle, filesystem integration, and desktop permissions;
+- =starintel-quasar-adapter=: optional mapping between Quasar projections and actions and StarIntel objects, claims, datasets, actors, and Star-Lang runs.
 
 The dashboard package may be deployed without StarIntel when only local Quasar graph documents and external Quasar actions are installed.
 
@@ -533,7 +502,7 @@ Every rendered feature should carry stable projection and source identifiers suf
 - Cancel requests when workspace, revision, query, panel parameters, or permissions change.
 - Preserve cached data with explicit age and revision metadata.
 - Batch live updates before rendering while preserving event order.
-- Keep map and graph renderer state outside React component trees.
+- Keep map and graph renderer state outside component trees.
 - Virtualize long tables and streams.
 - Set explicit per-panel record, byte, time, and memory budgets.
 - Degrade to summary or table views before freezing the client.
@@ -567,14 +536,14 @@ The first dashboard slice should prove the architecture without implementing a f
    - saved-query result;
    - source freshness;
    - action-run status.
-4. Add one MapLibre map with a registered object/event point layer.
+4. Add one map with a registered object and event point layer.
 5. Add shared selection synchronization between map, graph, and inspector.
 6. Add one central projection coordinator with request deduplication and cancellation.
 7. Add one central visibility-aware refresh scheduler.
 8. Persist layout, panel parameters, map state, and active variant.
 9. Implement live, cached, stale, empty, denied, and error states.
 10. Add deep links for dashboard, layout, time range, map state, and selection.
-11. Add Playwright tests for restore, selection sync, stale display, hidden-tab refresh, and panel resize.
+11. Add end-to-end tests for restore, selection synchronization, stale display, hidden-tab refresh, and panel resize.
 
 This slice can operate entirely against the thin Quasar service and a fixture dataset. StarIntel integration follows through an adapter.
 
@@ -582,7 +551,7 @@ This slice can operate entirely against the thin Quasar service and a fixture da
 
 - The graph document remains canonical for Quasar graph editing.
 - The dashboard stores manifests and snapshots, not duplicate canonical intelligence records.
-- Panels never call Cytoscape.js or MapLibre internals outside their adapters.
+- Panels never call graph or map renderer internals outside their adapters.
 - Panels never own unmanaged refresh timers.
 - Variant manifests select defaults rather than fork the application.
 - Source-health state is visible and inspectable.
@@ -603,22 +572,6 @@ This slice can operate entirely against the thin Quasar service and a fixture da
 
 The next design should be =QUASAR-013 Dashboard Manifest and Layout Protocol=. It freezes the saved-dashboard format without committing to domain-specific panels.
 
-* Sources
-
-- World Monitor repository overview: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/README.md
-- System topology and application phases: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/ARCHITECTURE.md
-- Design principles and TypeScript architecture: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/docs/architecture.mdx
-- Application composition: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/App.ts
-- Panel layout and deferred shell behavior: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/app/panel-layout.ts
-- Panel lifecycle and persistent sizing: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/components/Panel.ts
-- Variant selection: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/config/variant.ts
-- Panel defaults and variant-specific configuration: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/config/panels.ts
-- Map-layer registry and explanations: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/config/map-layer-definitions.ts
-- Shareable map state: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/utils/urlState.ts
-- Visibility-aware refresh scheduler: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/app/refresh-scheduler.ts
-- Bootstrap hydration and cache fallback: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/services/bootstrap.ts
-- Source freshness and coverage: https://github.com/koala73/worldmonitor/blob/b6c7268fb0a1a3e2ed2561b2216bbbb6008ff6b5/src/services/data-freshness.ts
-
 * Footnotes and Glossary
 
 [fn:situational-dashboard] Situational-awareness dashboard: A continuously refreshed interface that summarizes events, objects, risks, source status, maps, alerts, and operational activity so a user can rapidly understand what is happening and drill into supporting records.
@@ -630,8 +583,6 @@ The next design should be =QUASAR-013 Dashboard Manifest and Layout Protocol=. I
 [fn:panel] Panel: A bounded dashboard component that renders one projection or operational control, has a declared lifecycle and footprint, and can report loading, freshness, permission, and error state.
 
 [fn:variant] Variant: A named set of default panels, map layers, refresh policies, theme choices, and labels assembled from shared registries. A variant changes product emphasis without creating a separate protocol or application fork.
-
-[fn:maplibre] MapLibre GL JS: An open-source WebGL map renderer used to display interactive vector maps in a web browser without requiring a single proprietary map provider.
 
 [fn:deep-link] Deep link: A link that restores a specific application state, such as one workspace, layout, selected object, map location, time range, or saved query rather than opening only the application home page.
 

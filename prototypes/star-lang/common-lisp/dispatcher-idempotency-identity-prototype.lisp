@@ -22,13 +22,9 @@
 (defun dispatcher-command-record-if-addressable (dispatcher command)
   (when (and (deterministic-dispatcher-p dispatcher)
              (listp command))
-    (let ((actor (getf command :actor))
-          (idempotency-key (getf command :idempotency-key)))
-      (when (and (stringp actor)
-                 (stringp idempotency-key))
-        (gethash
-         (list actor idempotency-key)
-         (deterministic-dispatcher-idempotency dispatcher))))))
+    (gethash
+     (idempotency-scope-key command)
+     (deterministic-dispatcher-idempotency dispatcher))))
 
 (defun ensure-dispatcher-command-identity-compatible
     (record command)

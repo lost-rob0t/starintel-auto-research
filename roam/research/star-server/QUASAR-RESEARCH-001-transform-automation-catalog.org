@@ -1,0 +1,638 @@
+:PROPERTIES:
+:ID:       quasar-transform-automation-catalog-001
+:END:
+#+title: QUASAR-RESEARCH-001 Transform Automation Catalog
+#+description: Concrete Maltego-inspired transform families, automation semantics, auto-expansion rules, and Star-Lang playbooks for Quasar.
+#+status: REVIEW
+#+filetags: :starintel:quasar:automation:transforms:maltego:star-lang:actors:osint:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+#+created: [2026-07-22 Wed]
+#+last_modified: [2026-07-22 Wed]
+
+| Version | Date       | Description of change                                                   | Did nsaspy approve it |
+|---------+------------+-------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-22 | Define the initial transform catalog and automation execution model.     | No                    |
+
+* Related Nodes
+
+- [[file:QUASAR-RESEARCH-000-investigation-workspace-architecture.org][QUASAR-RESEARCH-000 Quasar Investigation Workspace Architecture]]
+- [[file:../star-lang/STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org][STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers]]
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+
+* Decision
+
+Quasar should adopt Maltego's strongest interaction model—typed entities, transforms filtered by selected input types, transform sets, and machines—while making automation more complete and more programmable.
+
+Transforms are ordinary typed StarIntel actions. They may run interactively, in bulk, on schedules, from graph conditions, from actor events, or inside Star-Lang playbooks. Their results persist directly into the workspace with provenance and run metadata.
+
+The user does not need to approve every transform result. Human control is provided through transform selection, configuration, scheduling, limits, cancellation, rollback, result editing, and optional explicit pause points.
+
+* Maltego Patterns to Preserve and Extend
+
+Maltego provides several durable ideas:
+
+- entities determine which transforms are available;
+- transforms map one or more typed inputs into typed graph results;
+- transform sets organize large catalogs;
+- machines compose transforms sequentially and in parallel;
+- graph selection can be supplied as a transform input;
+- custom entities and transforms extend the system;
+- transform results can create multiple entities and links.
+
+Quasar should extend those ideas with:
+
+- first-class batch and whole-selection transforms;
+- streaming outputs instead of one final response;
+- durable run state and checkpoint replay;
+- triggers and feeders as implemented actor primitives;
+- automatic continuation policies;
+- typed cost, fan-out, cache, idempotency, and rollback contracts;
+- direct integration with Star-Lang, domain servers, generated bindings, and the actor lifecycle protocol;
+- deterministic result identity and deduplication across repeated runs;
+- evidence and provenance attached to every generated claim and relationship.
+
+* Transform Kinds
+
+** Entity transform
+
+Runs against one entity or canonical object.
+
+Examples:
+
+- domain to DNS records;
+- email address to accounts;
+- document to extracted entities;
+- organization to known domains.
+
+** Batch transform
+
+Runs once against a homogeneous or heterogeneous selection rather than dispatching one isolated request per node.
+
+Examples:
+
+- resolve 500 domains in one DNS batch;
+- compare selected people across datasets;
+- hash and classify a document set;
+- calculate shared infrastructure among selected organizations.
+
+** Graph transform
+
+Receives a bounded graph projection including selected nodes, edges, claims, and layout-independent identifiers.
+
+Examples:
+
+- shortest evidentiary path;
+- community detection;
+- common-neighbor expansion;
+- temporal path comparison;
+- identify bridge nodes across clusters.
+
+** Stream transform
+
+Emits results incrementally and remains observable while running.
+
+Examples:
+
+- web crawl;
+- large document extraction;
+- continuous feed ingestion;
+- paginated social or registry collection;
+- long-running enrichment across a list.
+
+** Feeder
+
+Creates initial entities or claims from an external or scheduled source.
+
+Examples:
+
+- RSS and Atom feed;
+- saved-query results;
+- watched directory;
+- message queue;
+- recurring API poll;
+- imported CSV, JSON, JSONL, STIX, or FollowTheMoney data.
+
+** Trigger
+
+Starts an action or playbook when a graph, workspace, run, schedule, or message condition becomes true.
+
+Examples:
+
+- when a new domain is added, resolve DNS and certificates;
+- when a new document arrives, extract entities and claims;
+- when a monitored page changes, capture and diff it;
+- when an actor emits a retryable error, route it to a fallback actor;
+- when two clusters become connected, recompute paths and summaries.
+
+** Machine / playbook
+
+Composes transforms with branches, loops, concurrency, retries, checkpoints, cancellation, restart handling, and optional pause points.
+
+* Transform Contract
+
+Every transform definition should declare:
+
+- stable qualified identifier and semantic version;
+- display name, description, tags, aliases, and transform sets;
+- accepted input types and selection cardinality;
+- produced object, claim, relationship, evidence, and event types;
+- parameter schema and defaults;
+- precondition predicate;
+- implementation actor or domain server;
+- required capabilities and credentials;
+- network, filesystem, process, database, and model effects;
+- direct-persistence behavior;
+- merge, conflict, replacement, and deduplication behavior;
+- idempotency scope and deterministic result-key function;
+- cache policy and freshness window;
+- pagination and continuation-token behavior;
+- expected fan-out and hard result limit;
+- concurrency, rate, time, memory, and monetary limits;
+- retry and backoff policy;
+- cancellation semantics;
+- rollback or compensating action when meaningful;
+- provenance and evidence production;
+- streaming event types;
+- whether the transform is safe for automatic continuation;
+- optional pause points or intervention conditions.
+
+A transform catalog must be queryable by input type, output type, tag, cost, capability, expected yield, implementation, freshness, and automation safety.
+
+* Core Transform Sets
+
+** Identity and resolution
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Normalize identifier | person, account, email, phone, domain, organization | normalized identifier claims |
+| Exact identifier resolution | identifiers | source records and canonical candidates |
+| Fuzzy name resolution | person or organization name | ranked identity candidates and feature evidence |
+| Resolve aliases | person, organization, account | aliases and alias relationships |
+| Resolve shared identifiers | selection | clusters linked by email, phone, address, username, certificate, domain, or account ID |
+| Merge by configured rule | candidate cluster | canonical grouping and resolution activity |
+| Split canonical grouping | canonical object | restored groupings and affected projections |
+
+** Infrastructure and DNS
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Domain to DNS records | domain | A, AAAA, MX, NS, TXT, CNAME, SOA claims |
+| Domain to subdomains | domain | DNS names and discovery evidence |
+| DNS name to addresses | DNS name | IPv4 and IPv6 objects |
+| Address to reverse DNS | IP address | DNS names |
+| Address to ASN and netblock | IP address | autonomous system and netblock objects |
+| ASN to announced prefixes | ASN | netblocks |
+| Netblock to observed hosts | netblock | host objects |
+| Domain to registration records | domain | registrar, dates, nameservers, contacts, and source record |
+| Certificate to domains | certificate or hash | DNS names and certificate relationships |
+| Domain to certificates | domain | certificates, issuers, validity claims, and transparency evidence |
+| Host to services | host | port and service objects |
+| Service to banners | service | protocol banners and observations |
+| Infrastructure overlap | selection | shared hosts, certificates, nameservers, ASNs, and netblocks |
+
+** Web surface
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| URL to response metadata | URL | status, headers, redirects, timing, content type, and evidence |
+| URL to links | URL or captured document | URLs and link relationships |
+| URL to forms and endpoints | URL or document | forms, actions, methods, parameters, and endpoint objects |
+| URL to scripts | URL or document | JavaScript resources |
+| Script to referenced endpoints | JavaScript resource | URLs, paths, domains, and source locations |
+| URL to technologies | URL | technology and version claims |
+| URL to trackers | URL | analytics, advertising, tag-manager, and tracking identifiers |
+| URL to screenshots | URL | image evidence and render metadata |
+| URL to archived versions | URL | archived captures and timestamps |
+| Page to structured metadata | document | OpenGraph, JSON-LD, microdata, title, author, and publication claims |
+| Crawl bounded site | URL or domain | streamed pages, documents, links, assets, and crawl activity |
+| Diff captures | two captures | changed regions, text deltas, assets, and change claims |
+
+** Organization and business
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Organization to domains | organization | domains and attribution evidence |
+| Organization to subsidiaries | organization | organizations and ownership relationships |
+| Organization to officers | organization | people, roles, and time intervals |
+| Organization to filings | organization | filing documents and registry identifiers |
+| Organization to addresses | organization | address and location objects |
+| Organization to known accounts | organization | social, code-hosting, marketplace, and directory accounts |
+| Domain to organization candidates | domain | ranked organizations and attribution features |
+| Website to staff references | domain or document set | people, titles, teams, and source passages |
+| Organization to technology footprint | organization | domains, services, providers, certificates, and technologies |
+| Compare organizations | selection | shared people, addresses, infrastructure, filings, accounts, and identifiers |
+
+** Person and contact
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Person to aliases | person | names, handles, and source records |
+| Person to organizations | person | roles, employment, memberships, and date ranges |
+| Person to public accounts | person or alias | account candidates and match evidence |
+| Email to domain | email | domain and relationship |
+| Email to account candidates | email | accounts and source evidence |
+| Phone to normalization | phone | normalized number, country, and numbering claims |
+| Phone to account candidates | phone | public account candidates and evidence |
+| Address to residents or organizations | address | source-record candidates and temporal claims |
+| Person to documents | person | documents mentioning or authored by the person |
+| Person to co-occurrence graph | person or document set | people, organizations, events, and weighted co-occurrence links |
+
+** Social and communications
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Account to profile snapshot | account | profile claims, media, identifiers, and evidence |
+| Account to posts | account | posts and attached media |
+| Account to following | account | account relationships |
+| Account to followers | account | account relationships |
+| Account to mentions | account or post | accounts and mention relationships |
+| Account to external links | account | URLs and domains |
+| Post to replies and quotes | post | posts and interaction relationships |
+| Post to hashtags and topics | post | tags, topics, and classification claims |
+| Media to reused media | media | duplicate or near-duplicate media objects |
+| Accounts to interaction graph | selection | weighted reply, mention, repost, and co-occurrence relationships |
+| Account activity timeline | account | temporal event projection |
+
+** Documents, media, and evidence
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| File to hash set | file | cryptographic hashes |
+| Document to metadata | document | author, timestamps, software, language, and format claims |
+| Document to text | document | extracted text and page or region anchors |
+| Document to entities | document | people, organizations, locations, accounts, domains, URLs, identifiers, and mentions |
+| Document to atomic claims | document | typed claims linked to exact passages |
+| Document to citations | document | cited documents, URLs, identifiers, and relationships |
+| Image to metadata | image | EXIF and container metadata |
+| Image to perceptual hashes | image | perceptual-hash objects |
+| Image to similar media | image | ranked media candidates and match features |
+| Video to frames and transcript | video | frame evidence, transcript segments, speakers, and timestamps |
+| Evidence capture | URL or document | preserved artifact, hash, acquisition metadata, and source locator |
+| Evidence package | selection or workspace | manifest, artifacts, hashes, provenance, and export record |
+
+** Geospatial and temporal
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Address to coordinates | address | location candidates and geocoding evidence |
+| Coordinates to place | coordinates | place and administrative-region candidates |
+| Place to containing regions | location | city, county, state, country, and region relationships |
+| Place to nearby objects | location | nearby objects from selected datasets |
+| Event to time normalization | event | instant, interval, timezone, and uncertainty claims |
+| Selection to timeline | selection | ordered event projection |
+| Selection to movement paths | geotemporal selection | paths, stops, transitions, and uncertainty ranges |
+| Geospatial intersection | selection | shared regions, proximity events, and overlap claims |
+
+** Cryptocurrency and financial records
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Address to transactions | cryptocurrency address | transactions and block references |
+| Transaction to inputs and outputs | transaction | addresses, values, and transfer relationships |
+| Address to counterparties | address | addresses and aggregate interaction claims |
+| Address to token balances | address | asset and balance observations |
+| Address to labels | address | labels and source records |
+| Selection to flow graph | addresses or transactions | directed value-flow projection |
+| Transaction to time and exchange-rate context | transaction | temporal and valuation claims |
+
+** Threat intelligence and technical investigation
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Indicator to related indicators | indicator | domains, IPs, hashes, URLs, certificates, and relationships |
+| Hash to sample metadata | hash | file or malware sample candidates and observations |
+| Domain or IP to reputation observations | domain or IP | source-specific observations with timestamps |
+| Service to known product metadata | service | product and version candidates |
+| Product and version to advisory candidates | product claim | advisories and affected-version claims |
+| Repository to dependencies | repository | packages, versions, and dependency relationships |
+| Package to advisories | package | advisories and affected ranges |
+| Artifact to YARA or rule matches | artifact | rule matches and evidence regions |
+
+** Bug-bounty and web-assessment automation
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Program to scope objects | program | domains, wildcard domains, URLs, mobile apps, repositories, and exclusions |
+| Domain to discovered assets | domain | subdomains, hosts, URLs, certificates, and source evidence |
+| Host to HTTP services | host or service set | URLs and response observations |
+| URL to crawl graph | URL | pages, endpoints, parameters, forms, scripts, and links |
+| JavaScript to endpoint graph | script set | endpoints, domains, paths, parameters, and source locations |
+| URL to technology and version candidates | URL | technologies, versions, and evidence |
+| Endpoint to parameter observations | endpoint | parameter names, locations, types, and samples |
+| Asset to historical observations | asset | archived URLs, DNS, certificates, screenshots, and timestamps |
+| Selection to duplicate infrastructure | asset selection | shared hosts, certificates, analytics IDs, and providers |
+
+** Cross-reference and graph analysis
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| List cross-reference | two lists or datasets | matches, conflicts, unmatched records, and match evidence |
+| Common neighbors | graph selection | shared neighbors and ranked connectors |
+| Path search | two or more nodes | bounded paths and supporting claims |
+| Community detection | graph projection | cluster membership claims |
+| Centrality analysis | graph projection | ranked nodes and metric observations |
+| Temporal graph diff | two time ranges | added, removed, and changed nodes, edges, and claims |
+| Source agreement analysis | claims | agreement, contradiction, and source-coverage summaries |
+| High-degree summarization | node | grouped relationship summaries and expansion handles |
+
+** Language-model and semantic transforms
+
+Language-model transforms are ordinary typed transforms. They do not receive authority to bypass the transform contract or create an alternate schema.
+
+| Transform | Input | Output |
+|-----------+-------+--------|
+| Document to typed entities | document | typed objects and anchored mentions |
+| Document to typed claims | document | atomic claims, confidence, and passage evidence |
+| Selection to summary | selection | summary document linked to source objects and claims |
+| Query text to Star-Lang IR | text | validated structured query |
+| Investigation question to playbook draft | text and workspace schema | typed playbook source and diagnostics |
+| Cluster to descriptive labels | graph cluster | labels and supporting feature references |
+| Claims to contradiction candidates | claims | candidate conflicts and explanations |
+
+* Transform Sets and Discovery
+
+The action registry should expose transform sets similar to Maltego while permitting multiple overlapping classifications.
+
+Initial sets:
+
+- =Resolve=;
+- =Infrastructure=;
+- =DNS=;
+- =Web=;
+- =Organization=;
+- =Person and Contact=;
+- =Social=;
+- =Documents and Media=;
+- =Evidence=;
+- =Geospatial=;
+- =Timeline=;
+- =Cryptocurrency=;
+- =Threat Intelligence=;
+- =Bug Bounty=;
+- =Cross-reference=;
+- =Graph Analysis=;
+- =Language Model=;
+- =Automation=.
+
+Transform discovery should rank actions using:
+
+1. exact input-type match;
+2. selection-cardinality match;
+3. current workspace and dataset availability;
+4. required capabilities and credentials;
+5. expected novelty relative to existing results;
+6. expected result yield and fan-out;
+7. freshness of existing equivalent results;
+8. runtime and monetary cost;
+9. user history and pinned transforms;
+10. configured automation policies.
+
+The menu should show why a transform is unavailable and should support fuzzy search across names, aliases, tags, accepted types, and produced types.
+
+* Automatic Expansion Engine
+
+Automatic expansion should be a policy-driven actor, not a hard-coded recursive graph callback.
+
+For every newly persisted object or claim, the expansion actor may evaluate eligible transforms and enqueue work when all policy predicates pass.
+
+Required controls:
+
+- maximum expansion depth;
+- maximum new objects and claims per root;
+- maximum fan-out per transform;
+- maximum concurrent runs;
+- maximum runtime and monetary cost;
+- allowed and denied transform sets;
+- allowed input and output types;
+- dataset and workspace scope;
+- freshness and cache requirements;
+- stop conditions;
+- deduplication key;
+- cycle detection;
+- novelty threshold;
+- confidence threshold when a transform consumes inferred claims;
+- per-domain or per-source rate limits;
+- cancellation propagation;
+- rollback grouping.
+
+** Continuation modes
+
+- =off=: never continue automatically;
+- =one-hop=: execute configured transforms only on the initial selection;
+- =bounded=: continue until depth, fan-out, novelty, cost, or time limits are reached;
+- =playbook=: continue according to an explicit Star-Lang playbook;
+- =triggered=: continue only when declared graph or event predicates match;
+- =continuous=: keep a feeder, query, or alert active and execute downstream actions on new results.
+
+** Novelty and duplicate suppression
+
+Before enqueueing a transform, the actor should calculate a deterministic invocation key over:
+
+- transform identifier and version;
+- normalized input identifiers;
+- relevant parameter values;
+- dataset and policy scope;
+- freshness bucket.
+
+It should suppress:
+
+- exact terminal duplicates within the idempotency window;
+- runs whose outputs are still fresh;
+- recursive cycles that do not add new typed information;
+- fan-out branches whose expected novelty is below policy threshold.
+
+* Proposed Machines / Star-Lang Playbooks
+
+** Domain footprint
+
+1. normalize the domain;
+2. resolve DNS records;
+3. discover subdomains;
+4. resolve addresses, ASNs, and netblocks;
+5. collect certificates and certificate-linked domains;
+6. discover HTTP services;
+7. capture response metadata, technologies, links, scripts, and screenshots;
+8. extract script-referenced endpoints;
+9. group shared infrastructure;
+10. persist a bounded graph projection and run summary.
+
+** Organization map
+
+1. resolve organization identifiers;
+2. collect domains, filings, addresses, officers, subsidiaries, and public accounts;
+3. expand domains into infrastructure and web properties;
+4. extract people and organizations from official documents;
+5. cross-reference identifiers and addresses;
+6. build ownership, role, infrastructure, and document projections.
+
+** Person identity graph
+
+1. normalize the name and known identifiers;
+2. generate alias and account candidates;
+3. collect public profile snapshots and referenced URLs;
+4. find organization roles and authored or mentioning documents;
+5. score identity-resolution features;
+6. automatically merge only when configured thresholds pass;
+7. retain ambiguous candidates as separate objects with match evidence.
+
+** Social-account expansion
+
+1. capture profile state;
+2. collect bounded recent posts;
+3. extract mentions, replies, quotes, hashtags, media, and external links;
+4. resolve linked domains and accounts;
+5. build interaction and timeline projections;
+6. schedule incremental refresh from the last continuation cursor.
+
+** Document-set analysis
+
+1. hash and identify files;
+2. extract metadata and text;
+3. detect language and document structure;
+4. extract typed entities and anchored claims;
+5. create citation and co-occurrence graphs;
+6. compare claims across documents;
+7. generate summaries linked to source passages;
+8. export an evidence package.
+
+** Bug-bounty surface map
+
+1. import declared scope;
+2. expand wildcard domains and known assets;
+3. resolve DNS, certificates, hosts, and HTTP services;
+4. crawl bounded web surfaces;
+5. extract scripts, endpoints, forms, and parameters;
+6. identify technology and historical observations;
+7. deduplicate shared infrastructure;
+8. stream new assets and observations into the workspace;
+9. schedule refresh according to asset freshness.
+
+** Continuous change watch
+
+1. run a saved query or feeder on schedule;
+2. compare results against the prior checkpoint;
+3. persist additions, removals, and changed claims;
+4. capture changed source material;
+5. execute configured downstream transforms;
+6. emit an alert and update the workspace timeline.
+
+* Star-Lang Surface
+
+#+begin_src lisp
+(transform dns-records
+  (:sets infrastructure dns automation)
+  (:accepts (domain :cardinality one-or-many))
+  (:produces dns-record dns-name ip-address claim evidence)
+  (:actor dns-collector)
+  (:persistence direct)
+  (:idempotency
+   (:key (transform-version normalized-inputs parameters freshness-bucket)))
+  (:cache (:ttl "15m"))
+  (:fanout (:expected 12 :maximum 4096))
+  (:limits (:timeout "2m" :concurrency 32))
+  (:retry (:maximum-attempts 4 :backoff exponential))
+  (:automatic-continuation t))
+
+(transform crawl-site
+  (:sets web automation bug-bounty)
+  (:accepts (url :cardinality one-or-many))
+  (:produces url document form endpoint script relationship evidence)
+  (:actor web-crawler)
+  (:streaming t)
+  (:persistence direct)
+  (:checkpoint (:every-results 100 :every "30s"))
+  (:fanout (:maximum 10000))
+  (:limits (:timeout "30m" :concurrency 8))
+  (:cancellation cooperative))
+
+(playbook domain-footprint
+  (:input root domain)
+  (:persistence direct)
+  (:interruptible t)
+  (:limits (:maximum-depth 4
+            :maximum-results 50000
+            :maximum-runtime "2h"))
+  (parallel
+    (run dns-records root :as dns)
+    (run registration-records root :as registration)
+    (run domain-certificates root :as certificates))
+  (checkpoint initial-infrastructure)
+  (run discover-http-services dns.addresses :as web)
+  (parallel-for-each service in web.services
+    (:concurrency 16)
+    (run inspect-web-service service))
+  (run shared-infrastructure
+       (outputs dns registration certificates web)))
+
+(trigger expand-new-domain
+  (:when (and (event-type-p event 'object-created)
+              (object-type-p event.object 'domain)
+              (workspace-policy-p event.workspace 'auto-expand-domains)))
+  (:run domain-footprint event.object))
+#+end_src
+
+* Implementation Order
+
+** Phase 0: protocol
+
+- freeze transform manifest fields;
+- map transform invocation onto the existing Star-Lang message lifecycle;
+- define generated Common Lisp, Python, and TypeScript bindings;
+- define deterministic invocation and result keys;
+- define streaming event and checkpoint envelopes.
+
+** Phase 1: useful vertical slice
+
+Implement:
+
+- domain to DNS records;
+- DNS name to addresses;
+- address to ASN and netblock;
+- host to HTTP services;
+- URL to response metadata;
+- URL to links and scripts;
+- document to entities;
+- evidence capture;
+- common-neighbor analysis;
+- one =domain-footprint= playbook.
+
+** Phase 2: automation
+
+- automatic expansion actor;
+- transform ranking and search;
+- feeders and triggers;
+- batch and graph transforms;
+- scheduled and continuous playbooks;
+- cancellation and rollback groups.
+
+** Phase 3: broad catalog
+
+- organization and person transforms;
+- social platform adapters;
+- geospatial and temporal transforms;
+- cryptocurrency transforms;
+- entity resolution;
+- language-model transforms;
+- extension-distributed transform packages.
+
+* Required Follow-up Designs
+
+- =QUASAR-TRANSFORM-001 Transform Manifest and Registry=
+- =QUASAR-TRANSFORM-002 Invocation, Streaming, and Checkpoint Protocol=
+- =QUASAR-TRANSFORM-003 Automatic Expansion Actor=
+- =QUASAR-TRANSFORM-004 Transform Search and Ranking=
+- =QUASAR-TRANSFORM-005 Feeder and Trigger Runtime=
+- =QUASAR-TRANSFORM-006 Direct Persistence and Deduplication=
+- =QUASAR-TRANSFORM-007 Rollback and Compensating Actions=
+- =QUASAR-TRANSFORM-008 Transform Package Format=
+
+* Source References
+
+- [[https://docs.maltego.com/en/support/solutions/articles/15000009613-running-transforms][Maltego: Running Transforms]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000047415-introduction-to-maltego-machines][Maltego: Introduction to Machines]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000019249-machines-transform-macros-][Maltego: Machines and Transform Macros]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000062362-writing-your-first-transform-quickstart-][Maltego Transforms SDK: Quickstart]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000062354-sdk-api-reference][Maltego Transforms SDK: API Reference]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000062357-standard-entities-overview][Maltego: Standard Entities Overview]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000062373-standard-entities-catalog][Maltego: Standard Entities Catalog]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000061976-composition-and-composed-entities][Maltego: Composition and Composed Entities]]

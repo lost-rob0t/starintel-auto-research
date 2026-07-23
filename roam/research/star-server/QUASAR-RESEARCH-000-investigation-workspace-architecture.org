@@ -1,0 +1,549 @@
+:PROPERTIES:
+:ID:       fd9a2d8d-57c0-4b3f-8760-7f6cd35c3ad6
+:END:
+#+title: QUASAR-RESEARCH-000 Quasar Investigation Workspace Architecture
+#+description: Research and architecture decisions for turning the original Quasar graph-interface concept into an automation-first, typed, provenance-aware, extensible StarIntel investigation workspace.
+#+status: REVIEW
+#+filetags: :starintel:quasar:research:osint:gui:graph:investigation:evidence:provenance:automation:star-lang:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+#+created: [2023-06-03 Sat 18:13]
+#+last_modified: [2026-07-22 Wed]
+
+| Version | Date       | Description of change                                                                    | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2023-06-03 | Record the original Quasar graph-interface and transform concept.                        | Yes                   |
+| 0.2.0   | 2026-07-22 | Expand the concept into a sourced investigation-workspace architecture and roadmap.      | No                    |
+| 0.2.1   | 2026-07-22 | Remove mandatory staging and approval framing; make automation direct and first-class.   | No                    |
+
+* Related Nodes
+
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:STAR-RESEARCH-001-osint-feature-landscape.org][STAR-RESEARCH-001 OSINT Feature Landscape]]
+- [[file:../star-lang/STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations]]
+- [[file:../star-lang/STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org][STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers]]
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+
+* Research Question
+
+How should Quasar become the graphical investigation workspace[fn:workspace] for StarIntel[fn:starintel] while preserving the original fast, transform-driven graph workflow, supporting public or otherwise authorized open-source intelligence (OSINT)[fn:osint], integrating Star-Lang[fn:star-lang] and supervised actors[fn:actor], allowing automation to execute end-to-end, and preserving evidence[fn:evidence], provenance[fn:provenance], reproducibility, and human control without mandatory review gates?
+
+* Scope and Method
+
+This pass treats the 2023 note as the product seed rather than disposable rough text. It compares official documentation for Maltego, Palantir Foundry, Flock Safety, OCCRP Aleph and FollowTheMoney, OpenCTI, Timesketch, Hunchly, Linkurious, the World Wide Web Consortium Provenance Ontology, Structured Threat Information Expression, the Cyber-investigation Analysis Standard Expression and Unified Cyber Ontology, Cytoscape.js, Sigma.js, and Graphology.
+
+The comparison extracts durable product and architecture patterns. It does not assume that StarIntel should copy closed data sources, vendor deployment models, opaque scoring systems, or surveillance practices. Quasar must expose the source, activity, policy, confidence, and execution history behind results while allowing configured automation to persist them directly.
+
+* Original Concept and Constraints
+
+The original 2023 Quasar note established these requirements:
+
+- Quasar is a graphical interface to StarIntel and related tools.
+- The primary interaction is a Maltego-like graph where nodes can be added and expanded.
+- Common Lisp extensions provide new data types and operations.
+- A host may expose a port-scan transform that creates port children from an authorized Nmap run.
+- Multi-step machines may run additional tools, such as HTTP discovery.
+- StarIntel supplies normalized OSINT data.
+- A lightweight Lisp shell extends and queries the graph.
+- The user interface should provide a fast intermediate command mode as well as context menus.
+- Action availability depends on selected types and predicates.
+- User configuration can add actions and data types.
+- The original note also considered an embedded Lightning Memory-Mapped Database (LMDB)[fn:lmdb] data layer.
+
+These constraints remain valid. The missing work was the model underneath the graph: investigations, source records, claims, evidence, job state, automation, permissions, rollback, and reproducibility.
+
+* Decision Summary
+
+Quasar should be an automation-first typed investigation workspace, not merely a graph canvas with tool callbacks.
+
+The canonical abstraction is:
+
+#+begin_quote
+A bounded workspace in which automated and manual activity share one typed model, and every visible object, relationship, property, action, search, and conclusion can be traced to its source and reproduced.
+#+end_quote
+
+The graph is one projection[fn:projection] of that workspace. Tables, maps, timelines, documents, evidence, jobs, and findings must operate on the same selections and object identifiers.
+
+The core decisions are:
+
+1. Store source records, atomic claims, canonical identities, evidence, activities, and view state separately.
+2. Persist automated output directly with source, activity, confidence, derivation method, and run metadata.
+3. Replace arbitrary type-to-function callbacks with a typed action registry[fn:action-registry].
+4. Use the same action definitions for context menus, intermediate commands, the Lisp shell, application programming interfaces, actors, and Star-Lang.
+5. Replace fragile transform macros with resumable Star-Lang playbooks[fn:playbook].
+6. Compile natural-language search into a typed, inspectable query intermediate representation that may execute directly under configured policy and resource limits.
+7. Keep evidence lineage separate from the subject-matter graph.
+8. Run untrusted or third-party Common Lisp extensions outside the graphical client process.
+9. Start with Cytoscape.js for an editable graph workbench; evaluate Sigma.js for later read-mostly overview projections.
+10. Automation runs end-to-end by default. Humans control configuration, invocation, interruption, rollback, overrides, and final use; explicit pause points are optional workflow features.
+
+* Comparative Findings
+
+| System | Reusable pattern | Quasar mapping | Pattern to avoid |
+|--------+------------------+----------------+------------------|
+| Maltego | typed entities, transforms, local execution, machines, manual links | typed actions, extension manifests, direct transform output, automation and manual edges | loss of provenance, uncontrolled result fan-out, and long unstructured transform menus |
+| Palantir Foundry | ontology, object explorer, shared selections, map/time views, actions, permissioned objects | one typed object model projected into graph, table, map, timeline, and object views | closed platform coupling and opaque operational scoring |
+| Flock Safety | partial-description search, unified evidence review, saved alerts, audit history | incomplete-observation search over authorized datasets with candidate evidence and automated alerting | silently converting a fuzzy match into identity or guilt |
+| Aleph and FollowTheMoney | investigations, cross-referencing, network diagrams, atomic statements, source entities | workspace model, list cross-reference, property-level provenance, source/canonical separation | flattening conflicting source values into one unexplained property |
+| OpenCTI | graph-native model, connectors, cases, pivoting, application programming interface parity | connector lifecycle, case objects, shared action/query service | forcing every OSINT domain into threat-intelligence semantics |
+| Timesketch | collaborative timelines, saved searches, analyzers, stories | timeline projection, event annotations, saved query collections, findings narrative | treating time analysis as a separate data silo |
+| Hunchly | automatic web capture, timestamps, hashes, notes, evidence exports | capture actor, content hashes, acquisition metadata, reproducible evidence bundle | assuming a hash proves that source content was truthful |
+| Linkurious | natural-language graph query with visible structured output | natural language to compiled Star-Lang query with visible intermediate representation | executing untyped generated text without validation or limits |
+| W3C PROV | entity, activity, agent, generation, derivation, attribution | evidence and activity lineage vocabulary | mixing provenance edges with ordinary subject relationships |
+| STIX and CASE/UCO | typed connected records, markings, observations, digital-evidence semantics | optional specification libraries and export adapters | making one external standard the internal universal ontology |
+
+* Automation Model
+
+Automation is a primary operating mode, not a suggestion generator.
+
+An action, actor, transform, query, resolver, or playbook may create and update workspace records directly when its contract permits those effects. Results are not forced through a universal proposed, staged, accepted, or rejected lifecycle.
+
+Direct persistence still records:
+
+- the action or actor identifier and version;
+- the exact input object identifiers;
+- parameters and configuration;
+- start, checkpoint, and completion times;
+- generated objects, claims, relationships, and evidence;
+- confidence and derivation method when applicable;
+- logs, failures, retries, and partial completion;
+- the responsible user, service account, or supervisor;
+- rollback or compensating-action information when mutation is reversible.
+
+Human control is exercised through:
+
+- choosing and configuring actions and playbooks;
+- defining policy and resource limits;
+- starting, scheduling, pausing, resuming, cancelling, and rerunning work;
+- editing or overriding results;
+- reverting a run or applying compensating actions;
+- inserting explicit pause points only where the workflow requires them;
+- deciding how results are used in findings, exports, reports, or downstream operations.
+
+Optional manual inspection does not redefine automated output as second-class data.
+
+* Workspace Model
+
+A workspace contains:
+
+- investigation metadata and access policy;
+- selected canonical objects and source records;
+- observed, derived, inferred, disputed, retracted, and superseded claims;
+- imported documents and captured evidence;
+- graph, table, map, timeline, and document views;
+- saved structured queries and alert definitions;
+- action runs, playbook runs, checkpoints, logs, and outputs;
+- tasks, leads, hypotheses, findings, comments, and assignments;
+- an append-only audit journal;
+- export manifests and signed or hashed evidence packages.
+
+Opening a workspace restores query definitions, layout overrides, selections, filters, panels, active jobs, run output, and actor state. It does not copy the entire StarIntel database into a graphical file.
+
+* Object, Claim, and Evidence Model
+
+** Source records
+
+A source record preserves what one source asserted or emitted. It carries its source locator, collection activity, collection time, raw artifact reference, source-specific identifier, language, policy snapshot, and parser version.
+
+** Canonical objects
+
+A canonical object is a versioned identity grouping over source records. Examples include a person, organization, account, domain, host, vehicle, location, event, document, media item, or software artifact.
+
+Canonical objects do not erase source records. Merging two source records records the resolution method, evidence, confidence, responsible actor or user, and time. Splitting a mistaken merge is therefore possible.
+
+** Atomic claims
+
+Each property value or relationship is an atomic claim[fn:claim], not an unexplained mutable field. A claim contains:
+
+- subject;
+- predicate;
+- value or destination object;
+- source record and evidence references;
+- activity that generated, imported, or modified it;
+- valid-time and observation-time intervals when known;
+- confidence and confidence method;
+- status: observed, derived, inferred, disputed, retracted, or superseded;
+- actor or user responsible for the operation.
+
+Conflicting names, dates, locations, and ownership assertions can coexist and remain traceable.
+
+** Evidence
+
+Evidence is a preserved artifact or observation supporting or challenging a claim. Minimum evidence metadata includes:
+
+- stable identifier;
+- acquisition activity and actor;
+- source locator and retrieval time;
+- media type and byte size;
+- content hash;
+- storage locator;
+- original filename or source label;
+- capture method and tool version;
+- policy and retention markings;
+- relationships to claims, objects, runs, and exports.
+
+The preferred evidence object is the original response or file plus capture metadata. Rendered previews and screenshots are derivatives.
+
+** Activities and lineage
+
+Every collection, transform, entity-resolution operation, query, import, export, automated mutation, or manual edit is an activity. Activities name their inputs, outputs, implementation version, parameters, policy snapshot, start and finish times, result status, and responsible actor or user.
+
+This activity graph answers:
+
+- Which source produced this value?
+- Which parser, actor, action, or playbook changed it?
+- Which query included it?
+- Which automated or manual operation created the current state?
+- Which report or evidence package exported it?
+
+* Action Registry
+
+The original type-to-function map becomes a declared action registry. Each action definition includes:
+
+- stable qualified identifier and version;
+- display label, description, tags, and command key;
+- accepted object, claim, evidence, or workspace types;
+- output types;
+- parameter schema and defaults;
+- precondition predicate;
+- required capabilities[fn:capability] and permissions;
+- implementation kind: local actor, remote actor, domain server, external tool, query, or playbook;
+- side-effect declaration;
+- scope, time, concurrency, memory, and monetary limits;
+- cancellation and retry policy;
+- provenance and evidence behavior;
+- result persistence, merge, conflict, and rollback behavior;
+- optional pause or intervention points.
+
+Action discovery returns allowed, disabled, and hidden actions with reasons. The client never determines authorization only from a menu predicate.
+
+An invocation produces an immutable request and a durable run. Results stream into the workspace and run-output view as they are produced. The user can inspect provenance and logs, filter or group results, cancel work, rerun it, or revert the run where supported. None of those controls require a mandatory acceptance step.
+
+* Playbooks and Star-Lang
+
+Maltego-style machines become Star-Lang playbooks. A playbook is a durable composition of typed actions with branching, concurrency limits, retries, checkpoints, cancellation, restart handling, direct output persistence, and reproducible execution.
+
+A conceptual surface is:
+
+#+begin_src lisp
+(spec-library "org.starintel/quasar@1"
+  (document workspace ...)
+  (document claim ...)
+  (document evidence ...)
+  (document action-run ...))
+
+(action port-scan
+  (:accepts host)
+  (:produces service claim evidence)
+  (:requires (:capability authorized-network-scan))
+  (:persistence direct)
+  (:rollback compensating-action)
+  (:limits (:timeout "10m" :max-results 4096)))
+
+(playbook inspect-web-target
+  (:input target host)
+  (:persistence direct)
+  (:interruptible t)
+  (run port-scan target :as scan)
+  (checkpoint after-scan)
+  (for-each service in scan.services
+    (when (service-http-p service)
+      (run http-discovery service))))
+
+(domain-server workspace-server
+  (:key workspace-id)
+  (:owns workspace claim evidence action-run saved-view)
+  (:indexes object-id source-id predicate time-range geospatial-cell))
+#+end_src
+
+The compiled plan, action versions, parameters, inputs, policy snapshots, checkpoints, and output claims are stored with the run. Replay uses recorded results unless a new live run is requested. A playbook may declare a pause point, but pause points are explicit and local rather than a default imposed on every automated step.
+
+* Investigation Views
+
+** Graph workbench
+
+The graph displays a bounded projection, never the entire global graph. It supports:
+
+- expand by relationship, action, source, time, or saved query;
+- collapse, pin, group, annotate, hide, and compare;
+- manual objects and links with explicit authorship;
+- visual distinction among observed, derived, inferred, disputed, and retracted material;
+- source-count, confidence, conflict, and freshness indicators;
+- path finding and neighborhood summaries;
+- deterministic saved layouts plus local overrides;
+- an evidence path from every edge or property to its supporting claims;
+- live insertion and update of automated results.
+
+** Object inspector
+
+The inspector separates:
+
+1. canonical identity;
+2. source records;
+3. claims grouped by predicate, method, and status;
+4. supporting and contradicting evidence;
+5. relationships;
+6. available actions;
+7. activity, run, and audit history.
+
+A single flattened property panel would conceal conflicts and provenance.
+
+** Table view
+
+The table is the primary surface for large result analysis, bulk selection, sorting, filtering, cross-referencing, editing, export, rollback, and rerunning actions. Every row remains linked to the graph and object inspector.
+
+** Map and timeline
+
+Map and timeline projections share the current workspace selection. They support points, regions, paths, events, uncertain locations, uncertain times, interval queries, playback, synchronized selection, and live automated updates. A map marker or timeline event is backed by claims and evidence rather than being an isolated annotation.
+
+** Document and evidence view
+
+This view renders original files, extracted text, metadata, hashes, source locators, annotations, claim links, and acquisition history. It can compare versions and show the exact passage or region supporting a claim.
+
+** Job and actor view
+
+The job view exposes action and playbook state, mailbox or queue status, checkpoints, logs, retries, partial results, cancellation, responsible actor, configured pause points, restarts, and rollback support. Quasar must not hide long-running analysis behind a spinner.
+
+* Search, Saved Queries, and Alerts
+
+Quasar supports exact, full-text, structured, graph, geospatial, temporal, similarity, and partial-description search.
+
+Natural-language input is a query-authoring and execution interface. The system must:
+
+1. compile text into a bounded Star-Lang or query intermediate representation;
+2. expose the structured query, datasets, joins, limits, and uncertainty;
+3. validate it against type and capability contracts;
+4. execute it under configured policy and resource checks without requiring a separate human confirmation step;
+5. return matches with evidence and match explanations;
+6. permit direct reuse, editing, scheduling, and composition of the structured form.
+
+A saved query is live and versioned. It may be attached to a workspace, list, dashboard, actor, playbook, or alert. Alert records preserve the query version, schedule, scope, match explanation, deduplication key, acknowledgement state, and downstream actions.
+
+* Entity Resolution Workflow
+
+Entity resolution is a first-class service and actor workflow, not a hidden side effect and not necessarily a manual queue.
+
+Candidate generation may use exact identifiers, normalized names, shared contact points, graph context, temporal overlap, geographic compatibility, document co-occurrence, or model similarity. Each resolution operation records supporting and contradicting features, source quality, conflicts, thresholds, model or rule version, and merge consequences.
+
+Configured resolvers may automatically merge, keep separate, defer, or split identities. Every operation records the responsible actor or user, method, evidence, confidence, and affected claims. Manual intervention remains available for ambiguous or disputed cases, but it is not the universal execution path.
+
+Derived graph projections update from the resolution history rather than destructively rewriting source data.
+
+* Collaboration, Permissions, and Governance
+
+Permissions may apply to workspace, dataset, object, claim, evidence, action, source, export, or individual sensitive properties. Derived material inherits policy according to declared propagation rules.
+
+The user interface must show why a resource or action is hidden, disabled, redacted, or export-blocked without leaking protected values.
+
+Collaboration includes tasks, assignments, comments, mentions, hypotheses, leads, findings, and optional review requests. A finding references the claims, evidence, queries, runs, and activity versions supporting it. Comments are not evidence unless deliberately promoted into a sourced claim.
+
+The append-only audit journal records searches, object reads where required, action invocations, query compilation, automated and manual mutations, resolution operations, sharing, exports, permission changes, and administrative overrides.
+
+* Extension System and Trust Boundaries
+
+An extension package may contribute:
+
+- specification libraries and object types;
+- action definitions and actor implementations;
+- importers, exporters, and connectors;
+- graph styles and inspector panels;
+- query functions;
+- evidence renderers;
+- playbooks;
+- optional user-interface components.
+
+Each package has a manifest containing identifier, version, digest, publisher, compatible protocol versions, dependencies, declared capabilities, network and filesystem access, executable entry points, and signature metadata.
+
+Default execution boundaries are:
+
+- data-only specifications load into the normal compiler path;
+- trusted built-in user-interface modules run in the client;
+- third-party Common Lisp code runs in a supervised worker process;
+- external tools run through bounded actors with explicit arguments and scope;
+- web user-interface extensions run in a restricted frame or worker;
+- no extension receives ambient database, filesystem, credential, network, or shell access.
+
+Extension results use the same direct action-run, evidence, claim, persistence, provenance, rollback, and audit protocols as built-in actions.
+
+* Client and Service Boundaries
+
+Logical services are:
+
+- =workspace-server=: workspace metadata, membership, journal, tasks, findings, and saved views;
+- =object-server=: canonical objects and source records;
+- =claim-server=: atomic claims, conflicts, status transitions, and provenance queries;
+- =evidence-server=: artifact metadata, hashes, locators, capture chains, and exports;
+- =action-server=: action discovery, validation, invocation, cancellation, direct result persistence, and rollback;
+- =playbook-server=: Star-Lang run plans, checkpoints, branches, restarts, optional pause points, and replay;
+- =projection-server=: bounded graph, table, map, and timeline projections;
+- =resolution-server=: automated entity resolution, candidates, thresholds, and operation history;
+- =search-server=: exact, text, graph, temporal, geospatial, and similarity queries;
+- =alert-server=: schedules, continuous matches, deduplication, and downstream actions;
+- =policy-server=: capability, permission, marking, retention, and export decisions;
+- =extension-server=: package registry, digest locks, compatibility, and worker supervision.
+
+These are domain authorities, not a requirement for one operating-system process per service. Star-Lang domain-server declarations can map them onto supervised Common Lisp actors and external workers.
+
+* User Interface
+
+The initial layout should contain:
+
+- command bar and workspace tabs at the top;
+- primary graph, table, map, timeline, document, or job view in the center;
+- object, claim, evidence, action, and history inspector on the right;
+- live run output, actor activity, logs, and rollback controls at the bottom;
+- collapsible workspace navigation and saved searches on the left.
+
+Intermediate mode is a first-class interface. Example command groups:
+
+- =g=: graph expansion, collapse, path, layout, and grouping;
+- =a=: discover, invoke, cancel, rerun, inspect, and revert actions;
+- =q=: query, filter, save, explain, schedule, and alert;
+- =e=: evidence, provenance, capture, verify hash, and export;
+- =r=: run resolution, inspect candidates, merge, separate, defer, and split;
+- =w=: workspace, task, finding, share, and history;
+- =v=: switch projection and synchronize selection.
+
+Context menus show the same action registry but prioritize a small relevant set. Searchable action discovery handles the long tail.
+
+* Rendering and Performance
+
+Cytoscape.js is the first graph-renderer candidate because Quasar requires editing, compound nodes, selection, event handling, layouts, extensions, and live result insertion. Sigma.js is a later candidate for very large read-mostly overview projections. Graphology can provide client-side graph algorithms independently of the renderer.
+
+Performance rules:
+
+- project only the visible or requested subgraph;
+- page and stream large result sets;
+- use server-side filtering and aggregation;
+- summarize high-degree nodes before expansion;
+- impose explicit node, edge, time, and memory budgets;
+- keep layout state separate from identity and claim data;
+- cancel stale projection and action requests;
+- preserve selection by stable identifiers across view refreshes;
+- batch automated graph updates without delaying persistence;
+- degrade from graph to table or summary rather than freezing the client.
+
+* Minimum Viable Product
+
+** MVP-0: protocols
+
+- Define workspace, source record, object, claim, evidence, activity, action-run, and saved-view records.
+- Define action discovery, invocation, direct result persistence, cancellation, and rollback metadata.
+- Define graph projection and live-result update protocols.
+- Define append-only workspace journal and extension manifest.
+
+** MVP-1: automated graph workbench
+
+- Create and open a workspace.
+- Search and add existing objects.
+- Create manual objects and relationships.
+- Inspect source records, claims, and evidence.
+- Run one local typed action against an authorized target.
+- Stream results directly into the workspace and graph.
+- Inspect, filter, rerun, cancel, and revert supported runs.
+- Save query, filters, layout, and view state.
+
+** MVP-2: investigation operations
+
+- Table and document views.
+- Automated entity resolution with a conflict queue for ambiguous cases.
+- Tasks, leads, hypotheses, and findings.
+- Evidence package export with manifest and hashes.
+- Saved searches and lists.
+
+** MVP-3: geotemporal and collaboration
+
+- Map and timeline projections.
+- Shared workspaces, comments, assignments, and optional review requests.
+- Granular permissions and audit viewer.
+
+** MVP-4: playbooks and alerts
+
+- Resumable Star-Lang playbooks with checkpoints, restart handling, direct persistence, and optional explicit pause points.
+- Scheduled queries, alert matches, and downstream automated actions.
+- Natural-language-to-structured-query compilation and execution.
+
+* Required Follow-up Designs
+
+- =QUASAR-001 Product Architecture=
+- =QUASAR-002 Workspace and Journal Model=
+- =QUASAR-003 Object, Claim, and Evidence Model=
+- =QUASAR-004 Action Registry, Direct Persistence, and Rollback Protocol=
+- =QUASAR-005 Graph Projection Protocol=
+- =QUASAR-006 Extension Package and Capability Model=
+- =QUASAR-007 Investigation Interface and Intermediate Commands=
+- =QUASAR-008 Automated Entity Resolution Workflow=
+- =QUASAR-009 Evidence Preservation and Export=
+- =QUASAR-010 Map and Timeline Model=
+- =QUASAR-011 Search, Saved Queries, Alerts, and Automated Actions=
+- =QUASAR-012 Collaboration, Permissions, and Audit=
+
+* Unresolved Decisions
+
+- Desktop shell: Qt/QML, local web application, or another host around a web renderer.
+- Workspace storage: direct LMDB use or a transactional service over another store.
+- Exact boundary between StarIntel canonical data and workspace-local claims.
+- Canonical query intermediate representation compiled from Star-Lang.
+- Permission propagation through derived inference and aggregates.
+- Transaction, rollback, and compensating-action semantics across multiple domain servers.
+- Whether large overview graphs justify a second Sigma.js renderer.
+- Representation of report templates, findings, signatures, and attestations.
+- Extension signing, trust roots, revocation, and reproducible builds.
+
+* Footnotes and Glossary
+
+[fn:workspace] Investigation workspace: A bounded project containing selected objects, source material, views, searches, automation, jobs, tasks, hypotheses, findings, permissions, and history. It is not merely a saved graph layout.
+
+[fn:starintel] StarIntel: The local-first intelligence platform designed in this repository to collect, normalize, connect, search, analyze, and export public or otherwise authorized data through document and actor-based components.
+
+[fn:osint] Open-source intelligence (OSINT): Information collected and analyzed from legally accessible public sources. The term describes the source and method, not permission to bypass access controls or collect restricted data.
+
+[fn:star-lang] Star-Lang: The bounded declarative language being designed in this repository for typed specifications, actor workflows, durable analysis jobs, checkpoints, direct result persistence, restart handling, and reproducible transformations.
+
+[fn:actor] Actor: A small independent software component that owns its state and processes messages through a mailbox. In StarIntel, actors perform bounded collection, enrichment, indexing, reasoning, automation, or storage work under supervision.
+
+[fn:evidence] Evidence: A preserved source artifact or observation used to support or challenge a claim, together with acquisition and integrity metadata.
+
+[fn:provenance] Provenance: The recorded origin and transformation history of data, including the activities, inputs, software versions, and responsible agents involved.
+
+[fn:audit-journal] Audit journal: An append-only history of searches, actions, mutations, runs, exports, and permission-sensitive operations performed in a workspace.
+
+[fn:lmdb] Lightning Memory-Mapped Database (LMDB): An embedded transactional key-value database that maps data through the operating system's virtual-memory facilities.
+
+[fn:projection] Projection: A bounded query result prepared for a particular view. It contains only the objects, relationships, properties, and view metadata needed by that view.
+
+[fn:action-registry] Action registry: The catalog describing every action's identifier, input and output types, parameters, implementation, permissions, limits, persistence, rollback, and evidence behavior.
+
+[fn:playbook] Playbook: A declared multi-step workflow with inputs, branches, retries, checkpoints, cancellation, restarts, outputs, direct persistence, and durable execution state. Human pause points are optional declarations rather than universal gates.
+
+[fn:claim] Claim: One atomic assertion about an object or relationship. A claim records whether it is observed, derived, inferred, disputed, retracted, or superseded without destroying its source record.
+
+[fn:capability] Capability: An explicit grant allowing a component or extension to perform a bounded class of operation, such as reading one dataset or invoking one tool.
+
+* Source References
+
+- [[https://docs.maltego.com/en/support/solutions/articles/15000015758-writing-transforms][Maltego: Writing Transforms]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000010781-local-transforms][Maltego: Local Transforms]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000047415-introduction-to-maltego-machines][Maltego: Introduction to Machines]]
+- [[https://docs.maltego.com/en/support/solutions/articles/15000010433-creating-manual-links][Maltego: Creating Manual Links]]
+- [[https://www.palantir.com/docs/foundry/ontology/overview/][Palantir Foundry: Ontology Overview]]
+- [[https://www.palantir.com/docs/foundry/object-explorer/overview/][Palantir Foundry: Object Explorer]]
+- [[https://www.palantir.com/docs/foundry/map/][Palantir Foundry: Map]]
+- [[https://www.palantir.com/docs/foundry/object-permissioning/overview/][Palantir Foundry: Object Permissioning]]
+- [[https://www.flocksafety.com/products/flock-freeform][Flock Safety: FreeForm]]
+- [[https://docs.aleph.occrp.org/about/][OCCRP Aleph: About]]
+- [[https://docs.aleph.occrp.org/users/investigations/network-diagrams/][OCCRP Aleph: Network Diagrams]]
+- [[https://followthemoney.tech/docs/statements/][FollowTheMoney: Statements]]
+- [[https://nomenklatura.followthemoney.tech/tutorial/][Nomenklatura: Entity Resolution]]
+- [[https://docs.opencti.io/latest/usage/data-model/][OpenCTI: Data Model]]
+- [[https://docs.opencti.io/latest/deployment/connectors/][OpenCTI: Connectors]]
+- [[https://docs.opencti.io/latest/usage/case-management/][OpenCTI: Case Management]]
+- [[https://timesketch.org/guides/user/sketch-overview/][Timesketch: Sketch Overview]]
+- [[https://support.hunch.ly/article/52-2-content-photo-and-attachment-hashing][Hunchly: Content and Attachment Hashing]]
+- [[https://support.hunch.ly/article/55-1-hunchly-evidence-introduction][Hunchly: Evidence Introduction]]
+- [[https://linkurious.com/blog/linkurious-enterprise-4-3/][Linkurious: Natural-Language Graph Queries]]
+- [[https://www.w3.org/TR/prov-o/][W3C PROV-O]]
+- [[https://docs.oasis-open.org/cti/stix/v2.1/os/stix-v2.1-os.html][OASIS STIX 2.1]]
+- [[https://caseontology.org/ontology/intro.html][CASE/UCO Introduction]]
+- [[https://js.cytoscape.org/][Cytoscape.js Documentation]]
+- [[https://www.sigmajs.org/docs/][Sigma.js Documentation]]
+- [[https://graphology.github.io/][Graphology Documentation]]

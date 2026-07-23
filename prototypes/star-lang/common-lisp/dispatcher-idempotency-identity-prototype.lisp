@@ -45,6 +45,12 @@
   (symbol-function 'process-command))
 
 (defun process-command (dispatcher command)
+  (unless (deterministic-dispatcher-p dispatcher)
+    (fail 'deterministic-dispatcher-error
+          "process-command requires a dispatcher."))
+  (validate-lifecycle-envelope
+   (deterministic-dispatcher-manifest dispatcher)
+   command)
   (let ((record
           (dispatcher-command-record-if-addressable
            dispatcher command)))

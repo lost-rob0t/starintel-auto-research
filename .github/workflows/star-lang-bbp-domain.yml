@@ -50,7 +50,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes sbcl
-      - name: Install Quicklisp and Sento remoting
+      - name: Install Quicklisp and pinned Sento remoting
         run: |
           curl --fail --silent --show-error --location \
             --output quicklisp.lisp \
@@ -60,8 +60,14 @@ jobs:
           sbcl --non-interactive \
             --load quicklisp.lisp \
             --eval '(quicklisp-quickstart:install :path #P"/home/runner/quicklisp/")'
+          git clone --no-checkout \
+            https://github.com/mdbergmann/cl-gserver.git \
+            /home/runner/quicklisp/local-projects/cl-gserver
+          git -C /home/runner/quicklisp/local-projects/cl-gserver \
+            checkout a889b8375709ca9396bba5d06b6e460689a23716
           sbcl --non-interactive \
             --load /home/runner/quicklisp/setup.lisp \
+            --eval '(ql:register-local-projects)' \
             --eval '(ql:quickload :sento-remoting)'
       - name: Check BBP Lisp form balance
         run: |

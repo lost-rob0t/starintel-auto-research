@@ -1,0 +1,662 @@
+:PROPERTIES:
+:ID:       quasar-client-library-stack-002
+:END:
+#+title: QUASAR-RESEARCH-002 Client Library Stack
+#+description: Opinionated browser-first client, visualization, state, transport, testing, and desktop-shell library choices for Quasar.
+#+status: REVIEW
+#+filetags: :starintel:quasar:client:typescript:react:cytoscape:tauri:libraries:architecture:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+#+created: [2026-07-22 Wed]
+#+last_modified: [2026-07-22 Wed]
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-22 | Select the initial Quasar client and visualization stack.  | No                    |
+
+* Related Nodes
+
+- [[file:QUASAR-RESEARCH-000-investigation-workspace-architecture.org][QUASAR-RESEARCH-000 Quasar Investigation Workspace Architecture]]
+- [[file:QUASAR-RESEARCH-001-transform-automation-catalog.org][QUASAR-RESEARCH-001 Transform Automation Catalog]]
+- [[file:../star-lang/STAR-LANG-RESEARCH-009-canonical-json-and-generated-bindings.org][STAR-LANG-RESEARCH-009 Canonical JSON and Generated Bindings]]
+- [[file:../star-lang/STAR-LANG-RESEARCH-010-message-lifecycle-protocol.org][STAR-LANG-RESEARCH-010 Message Lifecycle Protocol]]
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+
+* Decision Summary
+
+Quasar should use a browser-first TypeScript client served by the existing StarIntel backend.
+
+Selected baseline:
+
+- TypeScript;
+- React;
+- Vite;
+- Cytoscape.js;
+- selected Cytoscape.js extensions;
+- TanStack Query;
+- XState v5;
+- TanStack Table and TanStack Virtual;
+- MapLibre GL JS;
+- vis-timeline;
+- CodeMirror 6;
+- Radix Primitives;
+- react-resizable-panels;
+- native Fetch and WebSocket transport using generated Star-Lang TypeScript bindings;
+- Vitest for unit and protocol tests;
+- Playwright for end-to-end client tests;
+- Tauri 2 as an optional later desktop shell.
+
+The backend remains Common Lisp, cl-gserver/Sento, Star-Lang domain servers, and external supervised workers. Quasar must not introduce a Node.js business-logic backend or a second schema system.
+
+* Architecture Principle
+
+The client is a projection and control surface over StarIntel domain servers. It does not become the canonical object store, graph database, workflow engine, policy engine, or actor supervisor.
+
+The client owns:
+
+- viewport and panel state;
+- temporary selection state;
+- keyboard and command-mode state;
+- local layout overrides;
+- optimistic presentation state;
+- cached server projections;
+- editors and inspectors;
+- browser or desktop integration.
+
+The backend owns:
+
+- canonical objects and source records;
+- claims and evidence;
+- transform and playbook execution;
+- actor lifecycle;
+- action permissions and capabilities;
+- durable workspace journal;
+- graph, table, map, and timeline projection queries;
+- direct automated result persistence;
+- cancellation, retry, checkpoints, and rollback records.
+
+* Frontend Language and Build
+
+** TypeScript
+
+Use TypeScript as the client language because the repository already generates TypeScript contracts from the Star-Lang portable manifest.
+
+Rules:
+
+- generated bindings are imported, never copied;
+- generated message names and field keys remain exact;
+- no handwritten duplicate interface for a generated protocol type;
+- no runtime schema library becomes a competing source of truth;
+- client-only types remain in a separate namespace from generated domain types;
+- strict type checking is required.
+
+** React
+
+Use React for panels, inspectors, forms, menus, tables, command surfaces, and view composition.
+
+React must not render graph nodes as a large DOM component tree. Cytoscape.js owns the graph canvas imperatively. React owns the surrounding controls and receives stable selection and viewport snapshots through an adapter.
+
+This division avoids rerendering thousands of graph elements through React while retaining the mature component ecosystem for the workbench shell.
+
+** Vite
+
+Use Vite for development, TypeScript compilation integration, static production builds, code splitting, and test-adjacent tooling.
+
+Do not use a server-rendering framework. Quasar is a local application and investigation workbench, not a content website.
+
+* Graph Workbench
+
+** Primary renderer: Cytoscape.js
+
+Cytoscape.js is the selected editable graph renderer.
+
+Reasons:
+
+- graph-specific data model;
+- compound nodes;
+- selection and event APIs;
+- styling by typed data and state;
+- graph algorithms;
+- multiple layout families;
+- extensibility;
+- direct control over nodes and edges;
+- suitability for interactive editing and transform-driven expansion.
+
+The Cytoscape instance is isolated behind a =GraphAdapter= interface. No component outside the graph package should mutate the instance directly.
+
+** Selected extensions
+
+Initial extensions:
+
+- =cytoscape-fcose=: compound-aware force-directed layout;
+- =cytoscape-elk=: hierarchical, layered, and orthogonal layouts;
+- =cytoscape-dagre=: fast directed-graph layouts for playbooks and provenance chains;
+- =cytoscape-edgehandles=: manual relationship creation;
+- =cytoscape-expand-collapse=: cluster and compound expansion;
+- =cytoscape-context-menus=: graph-local action entry point;
+- =cytoscape-navigator=: minimap for larger projections;
+- =cytoscape-automove=: constrained and synchronized node movement.
+
+Extension loading must be centralized. Each extension receives a compatibility test and a pinned version through the Nix and package lockfiles.
+
+** Layout policy
+
+- fCoSE for ordinary investigation neighborhoods and compound groups;
+- ELK for layered infrastructure, provenance, and workflow projections;
+- Dagre for small directed trees and chains;
+- preset layout for restored analyst layouts;
+- grid or concentric layout for deterministic comparison views;
+- no automatic relayout of pinned nodes;
+- layout computation runs in a worker when the extension supports it or when projection size warrants it.
+
+** Sigma.js and Graphology
+
+Defer Sigma.js to a second read-mostly overview renderer for very large projections.
+
+Graphology should enter only with Sigma.js or a specific algorithm missing from Cytoscape.js. Maintaining two client graph models during MVP would create needless synchronization work.
+
+** React Flow
+
+Do not use React Flow as the investigation graph renderer. It is useful for node editors and workflow diagrams, but Quasar needs graph-analysis semantics, large projections, compound grouping, and direct transform expansion rather than a DOM-heavy flow editor.
+
+React Flow may be reconsidered only for a dedicated visual Star-Lang playbook editor.
+
+* Tables and Large Result Sets
+
+** TanStack Table
+
+Use TanStack Table for headless table behavior:
+
+- sorting;
+- filtering;
+- grouping;
+- column visibility and ordering;
+- row selection;
+- expandable detail rows;
+- controlled server-side state;
+- typed column definitions.
+
+The backend remains responsible for large joins, graph queries, aggregation, and pagination. The table should not download an entire dataset merely to filter it locally.
+
+** TanStack Virtual
+
+Use TanStack Virtual for large row and column windows.
+
+Virtualization is mandatory for result sets beyond the small-workspace threshold. Selection uses stable object or claim identifiers and must survive window eviction.
+
+** AG Grid
+
+Do not use AG Grid initially. It is feature-rich but introduces a heavier framework and licensing split. TanStack Table exposes enough behavior while allowing Quasar-specific rendering and keyboard commands.
+
+* Maps
+
+** MapLibre GL JS
+
+Use MapLibre GL JS for map projection.
+
+Required adapter features:
+
+- point, line, polygon, and uncertainty-region layers;
+- clustering;
+- temporal filtering;
+- selection synchronization with graph and table views;
+- source and claim identifiers on every rendered feature;
+- streaming updates;
+- bounded GeoJSON or vector-tile projections;
+- configurable local or remote tile sources;
+- no hard dependency on a single commercial tile provider.
+
+Large geospatial result sets should use server-generated vector tiles or bounded clusters rather than one giant GeoJSON object.
+
+* Timeline
+
+** vis-timeline
+
+Use vis-timeline for the first interactive timeline.
+
+It provides items, ranges, groups, subgroups, selection, zooming, editable items, and event callbacks without requiring a custom time-axis implementation.
+
+Quasar must wrap it behind a =TimelineAdapter= because timeline libraries are easier to replace than the graph renderer and because uncertain dates, multiple valid-time models, and evidence-linked intervals require domain-specific behavior.
+
+Timeline editing creates explicit claims or layout annotations; it never silently rewrites source timestamps.
+
+* Star-Lang and Query Editor
+
+** CodeMirror 6
+
+Use CodeMirror 6 for:
+
+- Star-Lang source;
+- structured query intermediate representation;
+- transform and playbook definitions;
+- JSON and canonical message inspection;
+- log and trace navigation;
+- read-only evidence snippets.
+
+Required custom packages:
+
+- Star-Lang Lezer grammar;
+- syntax highlighting;
+- indentation and bracket behavior;
+- completion from the action, type, predicate, and dataset registries;
+- hover documentation;
+- go-to-definition for specification libraries;
+- inline diagnostics from the Star-Lang compiler;
+- execution commands that send the exact source and compiler digest to the backend.
+
+Monaco is not selected because CodeMirror 6 is more modular and lighter for an embedded workbench editor. Monaco may be reconsidered only if Language Server Protocol integration becomes the dominant requirement.
+
+* Client State and Actor Model
+
+** TanStack Query for server state
+
+Use TanStack Query for request caching, refetching, invalidation, mutations, pagination, and synchronization of server-owned projections.
+
+Examples:
+
+- workspace metadata;
+- object inspectors;
+- transform catalog queries;
+- graph projection pages;
+- table result pages;
+- actor and run status;
+- evidence metadata;
+- saved queries.
+
+TanStack Query cache is not durable canonical storage.
+
+** XState v5 for interaction actors
+
+Use XState v5 for client workflows whose legal states matter:
+
+- workspace connection and reconnection;
+- transform invocation lifecycle;
+- long-running run inspector;
+- cancellation and retry interaction;
+- graph selection modes;
+- manual edge creation;
+- query compile and execute flow;
+- evidence capture flow;
+- desktop-shell startup and backend discovery;
+- synchronized view orchestration.
+
+Client XState actors mirror or coordinate backend actors but do not replace them. Backend lifecycle messages drive client actor events through generated protocol bindings.
+
+Do not put ordinary fetched data into XState merely because XState uses actors. TanStack Query handles server data; XState handles behavior and lifecycle.
+
+** Redux and Zustand
+
+Do not add Redux during MVP. TanStack Query, XState, React state, and small typed stores cover the required state classes.
+
+A small =@xstate/store= or plain external store may be used for high-frequency ephemeral values such as pointer mode or panel focus if React state causes measurable problems. Do not add a general store preemptively.
+
+* Component and Workbench Shell
+
+** Radix Primitives
+
+Use Radix Primitives for accessible low-level components:
+
+- dialogs;
+- popovers;
+- dropdown and context menus;
+- tabs;
+- tooltips;
+- scroll areas;
+- toggles;
+- sliders;
+- command-related overlays.
+
+Quasar supplies its own visual design and CSS variables. Do not adopt a large opinionated component theme as the core UI contract.
+
+** react-resizable-panels
+
+Use react-resizable-panels for the initial left, center, right, and bottom workbench regions.
+
+Persist panel identifiers and layouts as workspace view state. Touch hit targets must be configured explicitly for convertible and touchscreen systems.
+
+Do not build a full IDE docking system for MVP. Add detachable and freely dockable panels only after the stable workbench regions prove insufficient.
+
+** Styling
+
+Use:
+
+- CSS custom properties for design tokens;
+- scoped CSS modules or plain colocated CSS;
+- data attributes for object, claim, run, and selection states;
+- no utility framework as a required architectural dependency.
+
+Tailwind may be used experimentally but should not define the extension API or saved view format.
+
+* Transport and Generated Contracts
+
+Use native Fetch for request-response operations and native WebSocket for live lifecycle, result, projection, and log streams.
+
+The wire contract is the existing Star-Lang canonical JSON and message lifecycle protocol.
+
+Required client transport packages:
+
+- generated TypeScript domain and message types;
+- generated validators or validation tables from the Star-Lang manifest;
+- one =StarClient= transport adapter;
+- one reconnecting WebSocket actor implemented with XState;
+- correlation, causation, idempotency, cancellation, acknowledgement, reply, event, and error handling;
+- NDJSON trace import and export for debugging.
+
+Do not add GraphQL. It would create another schema, query, and code-generation layer beside Star-Lang without solving a missing problem.
+
+Do not introduce Socket.IO. Native WebSocket plus the existing typed lifecycle envelopes is sufficient and keeps non-JavaScript actors first-class.
+
+* Desktop Shell
+
+** Browser-first MVP
+
+The initial Quasar client runs as a normal browser application served by the local StarIntel HTTP service.
+
+Benefits:
+
+- fastest UI iteration;
+- no desktop packaging dependency during protocol development;
+- direct browser debugging;
+- same client can be used remotely when deployment policy permits;
+- easy automated testing;
+- no native GUI binding between Common Lisp and the renderer.
+
+** Tauri 2 later
+
+Use Tauri 2 as the preferred desktop wrapper after the browser client is functional.
+
+Tauri responsibilities:
+
+- launch or discover the local StarIntel backend;
+- manage application windows;
+- provide file pickers and drag-and-drop;
+- handle protocol links;
+- integrate notifications, tray, and desktop lifecycle;
+- expose tightly scoped native commands;
+- package static client assets.
+
+Tauri must not duplicate StarIntel domain logic in Rust. Rust is the shell boundary, not a second backend.
+
+** Electron
+
+Do not select Electron initially. Shipping a bundled Chromium and Node runtime is unnecessary when the client already works in a browser and Tauri can wrap the same static assets with the operating system webview.
+
+Electron remains a fallback if webview compatibility becomes a larger operational problem than package size and runtime duplication.
+
+** Qt/QML
+
+Do not select Qt/QML as the first Quasar client.
+
+The strongest graph, map, timeline, table, and editor options are web libraries. Qt/QML would require embedding web views for core surfaces or rebuilding them in a second ecosystem. It also creates a harder extension boundary with TypeScript bindings generated from Star-Lang.
+
+Qt may still host specialized native tools, but it should not define the primary Quasar UI stack.
+
+* Backend Libraries and Boundaries
+
+Quasar reuses the approved StarIntel backend direction:
+
+- Common Lisp;
+- cl-gserver/Sento managed components;
+- Star-Lang domain-server manifests;
+- generated canonical JSON bindings;
+- message lifecycle protocol;
+- deterministic dispatcher and later transport adapters;
+- supervised external workers for Python, Prolog, browser automation, and command-line tools.
+
+No Node.js API server is added.
+
+The Quasar backend adapter should be a thin frontend domain exposing:
+
+- static client assets;
+- workspace and projection requests;
+- action discovery and invocation;
+- run lifecycle and cancellation;
+- evidence retrieval;
+- WebSocket streams;
+- generated manifest and version endpoints.
+
+HTTP and WebSocket implementation libraries should be selected in the StarIntel frontend design, not hidden inside the Quasar client decision. The browser contract must remain transport-adapter neutral.
+
+* Client Persistence
+
+Durable investigation data remains on the backend.
+
+Client-local persistence is limited to:
+
+- cached static assets;
+- reconnect information;
+- unsent editor buffers;
+- optional offline projection cache;
+- panel and window preferences not stored in a workspace;
+- temporary command history.
+
+Use IndexedDB through a small typed adapter only when offline caching is implemented. Do not allow a browser cache to become an undocumented second workspace database.
+
+* Testing Stack
+
+** Vitest
+
+Use Vitest for:
+
+- pure adapters;
+- generated binding tests;
+- XState actor tests;
+- transform-menu ranking;
+- graph projection reducers;
+- command parser and keymap tests;
+- canonical JSON fixtures;
+- protocol trace replay.
+
+** Playwright
+
+Use Playwright for:
+
+- graph interaction;
+- context menus and intermediate commands;
+- transform invocation and streaming results;
+- cancellation and reconnect behavior;
+- table, map, and timeline selection synchronization;
+- touchscreen and pointer interactions;
+- browser and Tauri-webview smoke paths;
+- accessibility checks integrated into critical workflows.
+
+** Visual and performance tests
+
+Maintain deterministic fixture workspaces for:
+
+- 100-node editable graph;
+- 10,000-node bounded projection;
+- high-degree node summarization;
+- streaming transform results;
+- 100,000-row virtualized table;
+- dense timeline;
+- clustered map;
+- reconnect and replay after backend restart.
+
+Performance budgets belong in CI and should fail regressions rather than remain prose.
+
+* Package Boundary
+
+Proposed client packages:
+
+#+begin_src text
+quasar-client/
+  src/
+    app/
+    generated/
+    transport/
+    actors/
+    graph/
+    table/
+    map/
+    timeline/
+    editor/
+    evidence/
+    commands/
+    components/
+    workspace/
+    testing/
+#+end_src
+
+Rules:
+
+- =generated/= is overwritten from Star-Lang output;
+- =transport/= is the only package that knows HTTP and WebSocket details;
+- =graph/= is the only package that knows the Cytoscape instance;
+- =map/= and =timeline/= expose stable adapters;
+- =actors/= owns XState machine definitions;
+- =components/= contains generic visual primitives, not domain authority;
+- domain components consume generated types and application services;
+- no circular imports between view adapters.
+
+* Initial Dependency Set
+
+#+begin_src json
+{
+  "dependencies": {
+    "@tanstack/react-query": "pinned",
+    "@tanstack/react-table": "pinned",
+    "@tanstack/react-virtual": "pinned",
+    "@xstate/react": "pinned",
+    "@codemirror/autocomplete": "pinned",
+    "@codemirror/commands": "pinned",
+    "@codemirror/language": "pinned",
+    "@codemirror/state": "pinned",
+    "@codemirror/view": "pinned",
+    "cytoscape": "pinned",
+    "maplibre-gl": "pinned",
+    "radix-ui": "pinned",
+    "react": "pinned",
+    "react-dom": "pinned",
+    "react-resizable-panels": "pinned",
+    "vis-timeline": "pinned",
+    "xstate": "pinned"
+  },
+  "devDependencies": {
+    "@playwright/test": "pinned",
+    "@types/react": "pinned",
+    "@types/react-dom": "pinned",
+    "@vitejs/plugin-react": "pinned",
+    "typescript": "pinned",
+    "vite": "pinned",
+    "vitest": "pinned"
+  }
+}
+#+end_src
+
+Cytoscape extensions should be added individually after compatibility tests rather than copied wholesale into the initial package set.
+
+=pinned= means exact versions in the package lock and Nix source hash. The design document intentionally does not freeze version numbers before implementation because package versions change independently of the architectural choice.
+
+* Nix Integration
+
+The client development shell should provide:
+
+- Node.js LTS selected by the repository flake;
+- pnpm or npm selected once for the repository;
+- Playwright browser dependencies;
+- Rust and Tauri build dependencies only in the desktop-shell output;
+- deterministic production build output;
+- separate browser-client and desktop-wrapper derivations;
+- no globally installed JavaScript packages.
+
+The Common Lisp backend and browser client should remain separate build outputs joined by the final application package.
+
+* Rejected or Deferred Choices
+
+| Choice | Status | Reason |
+|--------+--------+--------|
+| Cytoscape.js | selected | editable graph semantics and extension ecosystem |
+| Sigma.js | deferred | useful for huge read-mostly overviews, unnecessary second graph model for MVP |
+| Graphology | deferred | introduce only with Sigma.js or a proven missing algorithm |
+| React | selected | workbench component ecosystem; graph canvas remains imperative |
+| Svelte or Solid | not selected | viable, but generated binding and component ecosystem gains do not outweigh switching cost |
+| React Flow | specialized only | possible playbook editor, not investigation graph |
+| TanStack Table | selected | headless typed control and server-state compatibility |
+| AG Grid | deferred | weight and licensing split |
+| MapLibre GL JS | selected | open map renderer and provider independence |
+| vis-timeline | selected behind adapter | sufficient first timeline; domain wrapper protects replacement |
+| CodeMirror 6 | selected | modular embedded editor |
+| Monaco | deferred | heavier; reconsider if full LSP integration dominates |
+| XState v5 | selected | explicit client actor and lifecycle orchestration |
+| Redux | rejected for MVP | duplicates existing state responsibilities |
+| GraphQL | rejected | duplicates Star-Lang schema and protocol work |
+| Socket.IO | rejected | native WebSocket and typed envelopes are sufficient |
+| Electron | fallback | bundled runtime and larger package |
+| Tauri 2 | selected later shell | reuses browser client and keeps native surface narrow |
+| Qt/QML | rejected as primary client | would split the visualization stack or embed web views anyway |
+
+* Implementation Order
+
+** Phase 0: spike
+
+- Vite, TypeScript, React shell;
+- generated Star-Lang TypeScript fixture;
+- native WebSocket lifecycle trace replay;
+- Cytoscape graph with selection and live insertion;
+- XState connection actor;
+- TanStack Query workspace request;
+- Vitest and Playwright baseline.
+
+** Phase 1: workbench
+
+- resizable panels;
+- command bar and intermediate-mode keymap;
+- graph adapter and selected layouts;
+- object and claim inspector;
+- transform menu from the action registry;
+- live run output;
+- virtualized table.
+
+** Phase 2: investigation projections
+
+- MapLibre map;
+- vis-timeline timeline;
+- CodeMirror Star-Lang editor;
+- evidence document viewer;
+- synchronized selections;
+- saved view state.
+
+** Phase 3: desktop
+
+- Tauri wrapper;
+- backend discovery and launch;
+- file and protocol integration;
+- notifications;
+- packaging and updater evaluation.
+
+** Phase 4: scale
+
+- Web Workers for layouts and parsing;
+- vector-tile map projection;
+- second Sigma.js overview renderer only if measured requirements justify it;
+- offline cache only if a concrete disconnected workflow requires it.
+
+* Required Follow-up Designs
+
+- =QUASAR-CLIENT-001 Generated TypeScript Client and Transport=
+- =QUASAR-CLIENT-002 Graph Adapter and Projection Protocol=
+- =QUASAR-CLIENT-003 Client Actor System=
+- =QUASAR-CLIENT-004 Intermediate Mode and Keymap=
+- =QUASAR-CLIENT-005 Workbench Layout and Saved Views=
+- =QUASAR-CLIENT-006 Map and Timeline Adapters=
+- =QUASAR-CLIENT-007 Star-Lang CodeMirror Package=
+- =QUASAR-CLIENT-008 Browser and Tauri Packaging=
+- =QUASAR-CLIENT-009 Performance and Fixture Suite=
+
+* Source References
+
+- [[https://react.dev/][React Documentation]]
+- [[https://vite.dev/guide/][Vite Guide]]
+- [[https://js.cytoscape.org/][Cytoscape.js Documentation and Extension Catalog]]
+- [[https://tanstack.com/query/latest/docs/framework/react/overview][TanStack Query Overview]]
+- [[https://tanstack.com/table/latest/docs/overview][TanStack Table Overview]]
+- [[https://tanstack.com/table/latest/docs/guide/virtualization][TanStack Table Virtualization Guide]]
+- [[https://stately.ai/docs/actors][XState Actors]]
+- [[https://maplibre.org/maplibre-gl-js/docs/API/][MapLibre GL JS API]]
+- [[https://visjs.github.io/vis/docs/timeline/index.html][vis-timeline Documentation]]
+- [[https://codemirror.net/docs/guide/][CodeMirror System Guide]]
+- [[https://www.radix-ui.com/primitives][Radix Primitives]]
+- [[https://github.com/bvaughn/react-resizable-panels][react-resizable-panels]]
+- [[https://v2.tauri.app/concept/architecture/][Tauri 2 Architecture]]
+- [[https://vitest.dev/guide/][Vitest Guide]]
+- [[https://playwright.dev/docs/intro][Playwright Introduction]]

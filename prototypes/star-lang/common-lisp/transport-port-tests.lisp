@@ -251,13 +251,13 @@
        "input remains redeliverable after publish failure")
       (transport-assert-equal
        :acked (run-transport-adapter-next adapter)
-       "redelivery replays terminal outcomes and acknowledges")
+       "redelivery resumes retained outcomes and acknowledges")
       (transport-assert-equal 1 (car calls)
                               "publication recovery does not rerun handler")
       (transport-assert-equal
-       '(:reply :ack)
+       '(:ack :reply :ack)
        (transport-envelope-kinds (fake-transport-published transport))
-       "terminal replay repairs lost publication")
+       "outbox repairs every outcome that failed to publish")
       (transport-assert-equal
        '(:requeue :ack)
        (transport-settlement-actions transport)

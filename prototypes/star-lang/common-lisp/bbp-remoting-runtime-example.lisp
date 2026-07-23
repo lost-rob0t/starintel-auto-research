@@ -11,11 +11,15 @@
 (load (merge-pathnames "domain-server-core-prototype.lisp" *load-truename*))
 (load (merge-pathnames "bbp-domain-server-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-prototype.lisp" *load-truename*))
+(load (merge-pathnames "domain-remoting-runtime-port-prototype.lisp" *load-truename*))
+(load (merge-pathnames "domain-remoting-lease-prototype.lisp" *load-truename*))
+(load (merge-pathnames "domain-remoting-config-prototype.lisp" *load-truename*))
 (load (merge-pathnames "sento-remoting-domain-adapter.lisp" *load-truename*))
 
 (in-package #:star-lang.core-surface.prototype)
 
 (export '(bbp-main-runtime-uri
+          bbp-worker-runtime-actor-contract
           drain-bbp-main-results
           run-bbp-runtime-loop
           start-bbp-main-gserver
@@ -29,6 +33,7 @@
   remoting-port
   dispatcher
   gateway
+  config
   uri)
 
 (defstruct (bbp-worker-runtime (:constructor %make-bbp-worker-runtime))
@@ -36,24 +41,16 @@
   remoting-port
   engine
   node
+  config
+  actor-contract
   uri)
-
-(defun sento-remoting-options
-    (host port hostname tls-config serializer max-message-length)
-  (append
-   (list :host host :port port :hostname hostname)
-   (when tls-config (list :tls-config tls-config))
-   (when serializer (list :serializer serializer))
-   (when max-message-length
-     (list :max-message-length max-message-length))))
 
 (defun start-bbp-main-gserver
     (&key system
-          (host "0.0.0.0")
-          (port 4711)
-          (hostname "127.0.0.1")
-          tls-config serializer
-          (max-message-length (* 2 1024 1024)))
+          config
+          (heartbeat-timeout-ms 15000)
+          heartbeat-clock)
+  (require-domain-remoting-config config)
   (multiple-value-bind (library tools domain actor manifest)
       (compile-bbp-domain-program)
     (declare (ignore library tools domain actor))
@@ -65,67 +62,77 @@
              (make-main-domain-gateway
               :system actor-system
               :remoting-port remoting-port
-              :dispatcher dispatcher))
-           (uri
-             (format nil "sento://~A:~A/user/star-domain-ingress"
-                     hostname port)))
+              :dispatcher dispatcher)))
+      (configure-main-domain-gateway-lease
+       gateway
+       :timeout-ms heartbeat-timeout-ms
+       :clock heartbeat-clock)
       (remoting-enable
        remoting-port
        actor-system
-       (sento-remoting-options
-        host port hostname tls-config serializer max-message-length))
-      (start-main-domain-gateway gateway)
-      (%make-bbp-main-runtime
-       :system actor-system
-       :remoting-port remoting-port
-       :dispatcher dispatcher
-       :gateway gateway
-       :uri uri))))
+       (domain-remoting-config-options config))
+      (let* ((resolved-config
+               (resolve-domain-remoting-config
+                config
+                (remoting-runtime-port remoting-port actor-system)))
+             (uri
+               (domain-remoting-actor-uri
+                resolved-config "star-domain-ingress")))
+        (start-main-domain-gateway gateway)
+        (%make-bbp-main-runtime
+         :system actor-system
+         :remoting-port remoting-port
+         :dispatcher dispatcher
+         :gateway gateway
+         :config resolved-config
+         :uri uri)))))
 
 (defun start-bbp-tool-domain-server
     (&key main-uri
           node-id
           system
-          (host "0.0.0.0")
-          (port 4712)
-          (hostname "127.0.0.1")
-          tls-config serializer
-          (max-message-length (* 2 1024 1024))
+          config
           (dispatcher :shared)
           tool-runner)
   (required-nonempty-string main-uri "main gserver URI")
   (required-nonempty-string node-id "BBP node-id")
+  (require-domain-remoting-config config)
   (multiple-value-bind (library tools domain actor manifest)
       (compile-bbp-domain-program)
-    (declare (ignore library actor manifest))
+    (declare (ignore library manifest))
     (let* ((actor-system (or system (asys:make-actor-system)))
            (remoting-port (make-sento-remoting-domain-port))
            (engine
              (make-bbp-domain-engine
-              domain tools (or tool-runner (make-process-tool-runner))))
-           (uri
-             (format nil "sento://~A:~A/user/bbp-domain"
-                     hostname port)))
+              domain tools (or tool-runner (make-process-tool-runner)))))
       (remoting-enable
        remoting-port
        actor-system
-       (sento-remoting-options
-        host port hostname tls-config serializer max-message-length))
-      (let ((node
-              (start-bbp-remote-node
-               :node-id node-id
-               :endpoint uri
-               :system actor-system
-               :remoting-port remoting-port
-               :engine engine
-               :main-uri main-uri
-               :tools tools
-               :dispatcher dispatcher)))
+       (domain-remoting-config-options config))
+      (let* ((resolved-config
+               (resolve-domain-remoting-config
+                config
+                (remoting-runtime-port remoting-port actor-system)))
+             (actor-contract
+               (materialize-domain-actor actor resolved-config))
+             (uri (getf actor-contract :endpoint))
+             (node
+               (start-bbp-remote-node
+                :node-id node-id
+                :endpoint uri
+                :system actor-system
+                :remoting-port remoting-port
+                :engine engine
+                :main-uri main-uri
+                :tools tools
+                :dispatcher dispatcher)))
         (%make-bbp-worker-runtime
          :system actor-system
          :remoting-port remoting-port
          :engine engine
          :node node
+         :config resolved-config
+         :actor-contract actor-contract
          :uri uri)))))
 
 (defun submit-bbp-main-command (runtime command)

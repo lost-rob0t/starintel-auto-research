@@ -2,16 +2,24 @@
 :ID:       quasar-transform-automation-catalog-001
 :END:
 #+title: QUASAR-RESEARCH-001 Transform Automation Catalog
-#+description: Concrete Maltego-inspired transform families, automation semantics, auto-expansion rules, and Star-Lang playbooks for Quasar.
+#+description: Concrete Maltego-inspired Quasar extension families, automation semantics, auto-expansion rules, and optional Star-Lang playbook orchestration.
 #+status: REVIEW
 #+filetags: :starintel:quasar:automation:transforms:maltego:star-lang:actors:osint:
 #+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
 #+created: [2026-07-22 Wed]
-#+last_modified: [2026-07-22 Wed]
+#+last_modified: [2026-07-23 Thu]
 
 | Version | Date       | Description of change                                                   | Did nsaspy approve it |
 |---------+------------+-------------------------------------------------------------------------+-----------------------|
 | 0.1.0   | 2026-07-22 | Define the initial transform catalog and automation execution model.     | No                    |
+
+* Corrected Ownership Boundary
+
+Quasar owns graph actions, transforms, action discovery, action invocation, graph-operation batches, renderer integration, and undo grouping.
+
+Star-Lang does not provide Quasar transforms or context-menu actions. Star-Lang owns typed document and relation specifications, specification libraries, datasets, actors, declarative playbooks, and resumable analysis-run semantics. A Star-Lang playbook may invoke a registered Quasar action through an explicit adapter, but the action remains a Quasar extension or external integration.
+
+Any older transform wording in this note must be read under this boundary.
 
 * Related Nodes
 
@@ -23,7 +31,7 @@
 
 Quasar should adopt Maltego's strongest interaction model—typed entities, transforms filtered by selected input types, transform sets, and machines—while making automation more complete and more programmable.
 
-Transforms are ordinary typed StarIntel actions. They may run interactively, in bulk, on schedules, from graph conditions, from actor events, or inside Star-Lang playbooks. Their results persist directly into the workspace with provenance and run metadata.
+Transforms are Quasar-owned extensions or external integrations. They may run interactively, in bulk, on schedules, from graph conditions, from external events, or when invoked by a Star-Lang playbook through an adapter. Their results return through the Quasar action API and are applied to the graph with run metadata.
 
 The user does not need to approve every transform result. Human control is provided through transform selection, configuration, scheduling, limits, cancellation, rollback, result editing, and optional explicit pause points.
 
@@ -47,7 +55,7 @@ Quasar should extend those ideas with:
 - triggers and feeders as implemented actor primitives;
 - automatic continuation policies;
 - typed cost, fan-out, cache, idempotency, and rollback contracts;
-- direct integration with Star-Lang, domain servers, generated bindings, and the actor lifecycle protocol;
+- interoperability with Star-Lang typed data and optional playbook orchestration, plus adapters to existing services where useful;
 - deterministic result identity and deduplication across repeated runs;
 - evidence and provenance attached to every generated claim and relationship.
 
@@ -126,11 +134,11 @@ Examples:
 
 ** Machine / playbook
 
-Composes transforms with branches, loops, concurrency, retries, checkpoints, cancellation, restart handling, and optional pause points.
+A Quasar machine or a Star-Lang playbook may compose registered Quasar transforms with branches, loops, concurrency, retries, checkpoints, cancellation, restart handling, and optional pause points. Star-Lang owns orchestration semantics, not transform definitions.
 
 * Transform Contract
 
-Every transform definition should declare:
+Every Quasar transform definition should declare:
 
 - stable qualified identifier and semantic version;
 - display name, description, tags, aliases, and transform sets;
@@ -138,7 +146,7 @@ Every transform definition should declare:
 - produced object, claim, relationship, evidence, and event types;
 - parameter schema and defaults;
 - precondition predicate;
-- implementation actor or domain server;
+- implementation adapter: in-process function, subprocess, HTTP integration, existing actor or service, or optional domain server;
 - required capabilities and credentials;
 - network, filesystem, process, database, and model effects;
 - direct-persistence behavior;
@@ -519,7 +527,7 @@ It should suppress:
 * Star-Lang Surface
 
 #+begin_src lisp
-(transform dns-records
+(quasar-transform dns-records
   (:sets infrastructure dns automation)
   (:accepts (domain :cardinality one-or-many))
   (:produces dns-record dns-name ip-address claim evidence)
@@ -533,7 +541,7 @@ It should suppress:
   (:retry (:maximum-attempts 4 :backoff exponential))
   (:automatic-continuation t))
 
-(transform crawl-site
+(quasar-transform crawl-site
   (:sets web automation bug-bounty)
   (:accepts (url :cardinality one-or-many))
   (:produces url document form endpoint script relationship evidence)

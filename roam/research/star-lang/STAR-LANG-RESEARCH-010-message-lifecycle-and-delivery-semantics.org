@@ -1,0 +1,172 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-010
+:END:
+#+title: STAR-LANG-RESEARCH-010 Message Lifecycle and Delivery Semantics
+#+description: Define correlation, causation, acknowledgement, retry, error, cancellation, and idempotency semantics for Star-Lang actor messages without claiming transport-level exactly-once delivery.
+#+status: REVIEW
+#+filetags: :starintel:star-lang:actors:messages:delivery:idempotency:retries:cancellation:wire-protocol:research:
+
+* Purpose
+
+Loops 008 and 009 established portable message contracts, canonical JSON, and generated language bindings. This pass defines what happens around delivery so native and external actors share the same lifecycle instead of each transport inventing incompatible acknowledgement and retry behavior.
+
+The lifecycle model is transport-neutral. RabbitMQ, HTTP, NATS, Unix sockets, ZeroMQ, and subprocess adapters may carry the same envelope semantics.
+
+* Delivery Guarantee
+
+The protocol assumes at-least-once delivery whenever the selected transport can redeliver. It does not claim exactly-once delivery.
+
+Exactly-once execution cannot be guaranteed merely by assigning a message identifier. A consumer may complete work and fail before its acknowledgement reaches the sender. The safe core therefore combines:
+
+- stable command idempotency keys
+- explicit delivery attempts
+- accepted and completed acknowledgement states
+- retryable errors
+- consumer-side deduplication or durable outcome storage
+
+* Lifecycle Kinds
+
+The version-one envelope kinds are:
+
+- =command=: asks one actor authority to perform work
+- =event=: states that something occurred
+- =reply=: returns a typed result in the same correlation chain
+- =ack=: reports accepted, completed, rejected, or retry status
+- =error=: reports a structured retryable or terminal failure
+- =cancel=: requests cooperative cancellation of an outstanding operation
+
+Commands, events, and replies use message types declared by a Star-Lang specification. Acknowledgements, errors, and cancellation use built-in protocol message types:
+
+- =star.protocol/ack@1=
+- =star.protocol/error@1=
+- =star.protocol/cancel@1=
+
+* Common Envelope
+
+Every lifecycle envelope carries:
+
+- =star_version=
+- =kind=
+- =message_id=
+- =message_type=
+- =actor=
+- =correlation_id=
+- =attempt=
+- =payload=
+
+Optional members include:
+
+- =sender=
+- =causation_id=
+- =idempotency_key=
+- =dataset=
+- =reply_to=
+- =sent_at=
+- =deadline=
+
+Commands require an idempotency key. Replies, acknowledgements, errors, and cancellation require a causation identifier.
+
+* Correlation and Causation
+
+A root command or event defaults its =correlation_id= to its own =message_id=.
+
+Derived envelopes preserve that correlation identifier and set =causation_id= to the immediate source message identifier. This permits both views:
+
+- correlation groups the entire logical operation
+- causation reconstructs the direct message chain
+
+A reply to a command therefore carries the command correlation identifier and names the command message as its cause.
+
+* Acknowledgements
+
+Acknowledgement status has four values:
+
+- =accepted=: the actor has accepted responsibility for the command; work is not necessarily complete
+- =completed=: the actor completed the operation successfully
+- =rejected=: the actor will not process the operation
+- =retry=: the operation was not completed and may be retried after =retry_after_ms=
+
+=accepted= is deliberately nonterminal. Treating queue receipt as completion would lose work when an actor crashes after accepting a command.
+
+A retry acknowledgement must carry a positive retry delay. Other acknowledgement states may not carry that field.
+
+* Errors
+
+Error envelopes contain:
+
+- source message identifier
+- stable machine-readable error code
+- human-readable message
+- explicit =retryable= boolean
+- optional structured details
+
+A retryable error produces a retry outcome. A nonretryable error is terminal.
+
+Errors are protocol outcomes, not untyped host-language exceptions crossing a process boundary.
+
+* Cancellation
+
+A cancellation envelope names both:
+
+- the target message
+- the target correlation chain
+
+Cancellation is a request, not proof that work stopped. The receiving actor must cooperate, check cancellation at safe boundaries, and later report a terminal acknowledgement or error. A transport adapter must not report successful cancellation merely because it delivered the cancel envelope.
+
+* Idempotency
+
+The core idempotency scope is:
+
+#+begin_example
+(actor, message-type, idempotency-key)
+#+end_example
+
+This prevents unrelated actors or command types from colliding on a shared key.
+
+A retry keeps the same idempotency key and correlation identifier while incrementing =attempt= and assigning a new delivery =message_id=. Consumers may then return a stored terminal outcome instead of repeating side effects.
+
+The protocol does not dictate one storage engine. Native actors may use durable Common Lisp runtime state; external actors may use their own database or a StarIntel domain server.
+
+* Canonical JSON
+
+Lifecycle envelopes use the canonical JSON rules from Loop 009. Typed command, event, and reply payloads are validated against the portable manifest before serialization. Built-in control payloads have closed protocol-specific validators.
+
+Generated lifecycle bindings are emitted for Python and TypeScript alongside the specification-generated bindings.
+
+* Tests
+
+The Common Lisp suite checks:
+
+1. commands require idempotency keys
+2. root commands start their correlation chain
+3. replies preserve correlation and record direct causation
+4. typed lifecycle payloads use the declared message contract
+5. accepted acknowledgement is nonterminal
+6. completed acknowledgement is terminal
+7. retry acknowledgement requires a positive delay
+8. retryable errors produce retry outcomes
+9. nonretryable errors are terminal
+10. cancellation targets both a message and its correlation chain
+11. attempts must be positive
+12. malformed or missing lifecycle version fails as a Star-Lang envelope error
+13. control payload booleans are explicit
+14. canonical lifecycle JSON parses
+15. generated Python lifecycle bindings compile
+16. Python and TypeScript lifecycle surfaces carry the same kinds and control payloads
+
+* Boundary
+
+This pass does not:
+
+- implement a RabbitMQ or HTTP adapter
+- select a durable idempotency store
+- claim exactly-once processing
+- force immediate cancellation
+- define distributed transaction semantics
+- define actor registration or service discovery
+- define retry backoff policy beyond an explicit delay
+- start native or external actors
+- select the final Star-Lang host implementation
+- bypass the comparative language and promotion gates
+
+The next runtime pass should define an adapter-independent dispatcher interface and a deterministic fake transport that exercises acknowledgement, redelivery, deduplication, deadlines, and cancellation end to end before binding the model to RabbitMQ or cl-gserver effects.

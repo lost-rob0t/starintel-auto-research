@@ -20,7 +20,7 @@
           transport-reject
           transport-requeue))
 
-(define-condition transport-port-error (star-lang-error) ())
+(define-condition transport-port-error (star-lang-core-error) ())
 
 (defstruct (transport-delivery (:constructor %make-transport-delivery))
   tag

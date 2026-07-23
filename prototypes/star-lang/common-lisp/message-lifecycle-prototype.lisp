@@ -193,6 +193,7 @@
 (defun validate-control-payload (envelope)
   (let ((kind (getf envelope :kind))
         (payload (getf envelope :payload)))
+    (ensure-plist payload "lifecycle control payload" 'invalid-envelope-error)
     (ecase kind
       (:ack
        (let ((status (normalize-ack-status
@@ -202,6 +203,7 @@
                (required-option payload :for-message-id "ack payload"
                                 'invalid-envelope-error))
              (retry-after-ms (getf payload :retry-after-ms)))
+         (setf (getf payload :status) status)
          (required-nonempty-string for-message-id "ack for-message-id")
          (when (eq status :retry)
            (positive-integer retry-after-ms "ack retry-after-ms"))
@@ -219,6 +221,9 @@
        (required-nonempty-string
         (required-option payload :message "error payload" 'invalid-envelope-error)
         "error message")
+       (unless (plist-has-key-p payload :retryable)
+         (fail 'invalid-envelope-error
+               "error payload requires explicit retryable boolean."))
        (unless (member (getf payload :retryable) '(t nil) :test #'eq)
          (fail 'invalid-envelope-error "error retryable must be boolean.")))
       (:cancel
@@ -232,9 +237,11 @@
         "cancel target-correlation-id")))))
 
 (defun validate-lifecycle-envelope (manifest envelope &key (validate-payload t))
-  (unless (= (getf envelope :star-version) 1)
+  (ensure-plist envelope "lifecycle envelope" 'invalid-envelope-error)
+  (unless (eql (getf envelope :star-version) 1)
     (fail 'invalid-envelope-error "Unsupported lifecycle wire version."))
   (let ((kind (normalize-lifecycle-kind (getf envelope :kind))))
+    (setf (getf envelope :kind) kind)
     (required-nonempty-string (getf envelope :message-id) "message-id")
     (required-nonempty-string (getf envelope :message-type) "message-type")
     (required-nonempty-string (getf envelope :actor) "actor")
@@ -338,14 +345,13 @@
     (canonical-json-string (%make-json-object entries))))
 
 (defun delivery-outcome (envelope)
-  (case (getf envelope :kind)
+  (case (normalize-lifecycle-kind (getf envelope :kind))
     (:ack
-     (case (getf (getf envelope :payload) :status)
+     (case (normalize-ack-status (getf (getf envelope :payload) :status))
        (:accepted :accepted)
        (:completed :completed)
        (:rejected :rejected)
-       (:retry :retry)
-       (otherwise :invalid)))
+       (:retry :retry)))
     (:error
      (if (getf (getf envelope :payload) :retryable)
          :retry
@@ -354,12 +360,13 @@
     (otherwise :pending)))
 
 (defun terminal-lifecycle-envelope-p (envelope)
-  (member (delivery-outcome envelope)
-          '(:completed :rejected :failed)
-          :test #'eq))
+  (not (null
+        (member (delivery-outcome envelope)
+                '(:completed :rejected :failed)
+                :test #'eq))))
 
 (defun idempotency-scope-key (envelope)
-  (unless (eq (getf envelope :kind) :command)
+  (unless (eq (normalize-lifecycle-kind (getf envelope :kind)) :command)
     (fail 'invalid-envelope-error
           "Idempotency scope keys are defined for command envelopes."))
   (list (getf envelope :actor)

@@ -11,6 +11,7 @@
 (load (merge-pathnames "domain-server-core-prototype.lisp" *load-truename*))
 (load (merge-pathnames "bbp-domain-server-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-prototype.lisp" *load-truename*))
+(load (merge-pathnames "domain-remoting-lease-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-config-prototype.lisp" *load-truename*))
 (load (merge-pathnames "sento-remoting-domain-adapter.lisp" *load-truename*))
 
@@ -43,7 +44,11 @@
   actor-contract
   uri)
 
-(defun start-bbp-main-gserver (&key system config)
+(defun start-bbp-main-gserver
+    (&key system
+          config
+          (heartbeat-timeout-ms 15000)
+          heartbeat-clock)
   (require-domain-remoting-config config)
   (multiple-value-bind (library tools domain actor manifest)
       (compile-bbp-domain-program)
@@ -60,6 +65,10 @@
            (uri
              (domain-remoting-actor-uri
               config "star-domain-ingress")))
+      (configure-main-domain-gateway-lease
+       gateway
+       :timeout-ms heartbeat-timeout-ms
+       :clock heartbeat-clock)
       (remoting-enable
        remoting-port
        actor-system

@@ -2,18 +2,26 @@
 :ID:       fd9a2d8d-57c0-4b3f-8760-7f6cd35c3ad6
 :END:
 #+title: QUASAR-RESEARCH-000 Quasar Investigation Workspace Architecture
-#+description: Research and architecture decisions for turning the original Quasar graph-interface concept into an automation-first, typed, provenance-aware, extensible StarIntel investigation workspace.
+#+description: Historical research for Quasar graph editing and optional advanced investigation features; QUASAR-001 defines the basic typed graph editor as the core product.
 #+status: REVIEW
 #+filetags: :starintel:quasar:research:osint:gui:graph:investigation:evidence:provenance:automation:star-lang:
 #+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
 #+created: [2023-06-03 Sat 18:13]
-#+last_modified: [2026-07-22 Wed]
+#+last_modified: [2026-07-23 Thu]
 
 | Version | Date       | Description of change                                                                    | Did nsaspy approve it |
 |---------+------------+------------------------------------------------------------------------------------------+-----------------------|
 | 0.1.0   | 2023-06-03 | Record the original Quasar graph-interface and transform concept.                        | Yes                   |
 | 0.2.0   | 2026-07-22 | Expand the concept into a sourced investigation-workspace architecture and roadmap.      | No                    |
 | 0.2.1   | 2026-07-22 | Remove mandatory staging and approval framing; make automation direct and first-class.   | No                    |
+
+* Corrected Ownership Boundary
+
+Quasar owns graph actions, transforms, action discovery, action invocation, graph-operation batches, renderer integration, and undo grouping.
+
+Star-Lang does not provide Quasar transforms or context-menu actions. Star-Lang owns typed document and relation specifications, specification libraries, datasets, actors, declarative playbooks, and resumable analysis-run semantics. A Star-Lang playbook may invoke a registered Quasar action through an explicit adapter, but the action remains a Quasar extension or external integration.
+
+Any older transform wording in this note must be read under this boundary. QUASAR-001 also supersedes any statement here that makes StarIntel, Star-Lang runtime services, domain servers, evidence models, casework, or distributed automation prerequisites for the editor.
 
 * Related Nodes
 
@@ -49,27 +57,27 @@ The original 2023 Quasar note established these requirements:
 - User configuration can add actions and data types.
 - The original note also considered an embedded Lightning Memory-Mapped Database (LMDB)[fn:lmdb] data layer.
 
-These constraints remain valid. The missing work was the model underneath the graph: investigations, source records, claims, evidence, job state, automation, permissions, rollback, and reproducibility.
+The graph-interface constraints remain valid. The first missing work is the graph-document model, typed nodes and edges, editing commands, persistence, layout, import, export, and undo. Investigations, claims, evidence, automation, permissions, and reproducibility are optional layers added only after the editor works.
 
 * Decision Summary
 
-Quasar should be an automation-first typed investigation workspace, not merely a graph canvas with tool callbacks.
+Quasar should be a basic local-first typed graph editor. Automation, evidence handling, casework, and additional projections are optional extensions around that editor.
 
 The canonical abstraction is:
 
 #+begin_quote
-A bounded workspace in which automated and manual activity share one typed model, and every visible object, relationship, property, action, search, and conclusion can be traced to its source and reproduced.
+A graph-document editor in which users can create, inspect, connect, arrange, save, load, import, export, undo, and optionally extend typed nodes and edges.
 #+end_quote
 
-The graph is one projection[fn:projection] of that workspace. Tables, maps, timelines, documents, evidence, jobs, and findings must operate on the same selections and object identifiers.
+The graph document is the core product model. Tables, maps, timelines, evidence views, jobs, and findings may later project or reference the same identifiers, but they are not prerequisites for the graph editor.
 
 The core decisions are:
 
 1. Store source records, atomic claims, canonical identities, evidence, activities, and view state separately.
 2. Persist automated output directly with source, activity, confidence, derivation method, and run metadata.
 3. Replace arbitrary type-to-function callbacks with a typed action registry[fn:action-registry].
-4. Use the same action definitions for context menus, intermediate commands, the Lisp shell, application programming interfaces, actors, and Star-Lang.
-5. Replace fragile transform macros with resumable Star-Lang playbooks[fn:playbook].
+4. Use the same Quasar action definitions for context menus, intermediate commands, the Lisp shell, application programming interfaces, and adapters. Star-Lang may invoke a registered Quasar action only through an explicit integration boundary.
+5. Replace fragile transform macros with Quasar action declarations. Star-Lang playbooks[fn:playbook] may orchestrate registered Quasar actions through an adapter, but do not define the transforms.
 6. Compile natural-language search into a typed, inspectable query intermediate representation that may execute directly under configured policy and resource limits.
 7. Keep evidence lineage separate from the subject-matter graph.
 8. Run untrusted or third-party Common Lisp extensions outside the graphical client process.
@@ -121,9 +129,9 @@ Human control is exercised through:
 
 Optional manual inspection does not redefine automated output as second-class data.
 
-* Workspace Model
+* Optional Advanced Workspace Model
 
-A workspace contains:
+An optional advanced investigation workspace may contain:
 
 - investigation metadata and access policy;
 - selected canonical objects and source records;
@@ -136,9 +144,9 @@ A workspace contains:
 - an append-only audit journal;
 - export manifests and signed or hashed evidence packages.
 
-Opening a workspace restores query definitions, layout overrides, selections, filters, panels, active jobs, run output, and actor state. It does not copy the entire StarIntel database into a graphical file.
+The basic editor only needs to restore graph contents, layout, selection, filters, and view state. Advanced workspaces may additionally restore queries, jobs, run output, evidence, and external integration state.
 
-* Object, Claim, and Evidence Model
+* Optional Object, Claim, and Evidence Model
 
 ** Source records
 
@@ -218,44 +226,33 @@ Action discovery returns allowed, disabled, and hidden actions with reasons. The
 
 An invocation produces an immutable request and a durable run. Results stream into the workspace and run-output view as they are produced. The user can inspect provenance and logs, filter or group results, cancel work, rerun it, or revert the run where supported. None of those controls require a mandatory acceptance step.
 
-* Playbooks and Star-Lang
+* Quasar Actions and Star-Lang Playbooks
 
-Maltego-style machines become Star-Lang playbooks. A playbook is a durable composition of typed actions with branching, concurrency limits, retries, checkpoints, cancellation, restart handling, direct output persistence, and reproducible execution.
+Quasar defines and registers transforms. Star-Lang does not contain a Quasar transform declaration form.
 
-A conceptual surface is:
+Star-Lang may still own a declarative playbook that invokes registered Quasar actions through an adapter. In that arrangement:
 
-#+begin_src lisp
-(spec-library "org.starintel/quasar@1"
-  (document workspace ...)
-  (document claim ...)
-  (document evidence ...)
-  (document action-run ...))
+- Quasar owns action identity, accepted graph selection, parameters, execution adapter, progress, cancellation, returned graph operations, and undo grouping;
+- Star-Lang owns playbook branching, dependencies, retries, checkpoints, resume behavior, and execution-graph state;
+- the adapter converts Star-Lang typed inputs into a Quasar action request and converts the Quasar result into typed playbook output;
+- neither layer mutates Cytoscape directly.
 
-(action port-scan
-  (:accepts host)
-  (:produces service claim evidence)
-  (:requires (:capability authorized-network-scan))
-  (:persistence direct)
-  (:rollback compensating-action)
-  (:limits (:timeout "10m" :max-results 4096)))
+A conceptual boundary is:
 
-(playbook inspect-web-target
-  (:input target host)
-  (:persistence direct)
-  (:interruptible t)
-  (run port-scan target :as scan)
-  (checkpoint after-scan)
-  (for-each service in scan.services
-    (when (service-http-p service)
-      (run http-discovery service))))
-
-(domain-server workspace-server
-  (:key workspace-id)
-  (:owns workspace claim evidence action-run saved-view)
-  (:indexes object-id source-id predicate time-range geospatial-cell))
+#+begin_src text
+Star-Lang playbook run
+        |
+        | invoke registered action
+        v
+Quasar action registry
+        |
+        | execute extension / external integration
+        v
+Quasar graph-operation batch
+        |
+        v
+graph editor validation and application
 #+end_src
-
-The compiled plan, action versions, parameters, inputs, policy snapshots, checkpoints, and output claims are stored with the run. Replay uses recorded results unless a new live run is requested. A playbook may declare a pause point, but pause points are explicit and local rather than a default imposed on every automated step.
 
 * Investigation Views
 
@@ -431,7 +428,7 @@ Performance rules:
 - Define graph projection and live-result update protocols.
 - Define append-only workspace journal and extension manifest.
 
-** MVP-1: automated graph workbench
+** Optional advanced phase: automated graph workbench
 
 - Create and open a workspace.
 - Search and add existing objects.
@@ -442,7 +439,7 @@ Performance rules:
 - Inspect, filter, rerun, cancel, and revert supported runs.
 - Save query, filters, layout, and view state.
 
-** MVP-2: investigation operations
+** Optional advanced phase: investigation operations
 
 - Table and document views.
 - Automated entity resolution with a conflict queue for ambiguous cases.
@@ -450,19 +447,19 @@ Performance rules:
 - Evidence package export with manifest and hashes.
 - Saved searches and lists.
 
-** MVP-3: geotemporal and collaboration
+** Optional advanced phase: geotemporal and collaboration
 
 - Map and timeline projections.
 - Shared workspaces, comments, assignments, and optional review requests.
 - Granular permissions and audit viewer.
 
-** MVP-4: playbooks and alerts
+** Optional advanced phase: playbooks and alerts
 
 - Resumable Star-Lang playbooks with checkpoints, restart handling, direct persistence, and optional explicit pause points.
 - Scheduled queries, alert matches, and downstream automated actions.
 - Natural-language-to-structured-query compilation and execution.
 
-* Required Follow-up Designs
+* Optional Advanced Follow-up Designs
 
 - =QUASAR-001 Product Architecture=
 - =QUASAR-002 Workspace and Journal Model=

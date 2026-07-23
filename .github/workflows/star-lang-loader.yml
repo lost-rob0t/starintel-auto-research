@@ -1,0 +1,135 @@
+name: Star-Lang Loader
+
+on:
+  pull_request:
+    paths:
+      - "prototypes/star-lang/common-lisp/star-loader.lisp"
+      - "prototypes/star-lang/common-lisp/star-loader-tests.lisp"
+      - "prototypes/star-lang/common-lisp/run-star.lisp"
+      - "prototypes/star-lang/bin/star"
+      - "prototypes/star-lang/fixtures/starintel-core.star"
+      - ".github/workflows/star-lang-loader.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "prototypes/star-lang/common-lisp/star-loader.lisp"
+      - "prototypes/star-lang/common-lisp/star-loader-tests.lisp"
+      - "prototypes/star-lang/common-lisp/run-star.lisp"
+      - "prototypes/star-lang/bin/star"
+      - "prototypes/star-lang/fixtures/starintel-core.star"
+      - ".github/workflows/star-lang-loader.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  loader:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install loader runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sbcl curl python3
+
+      - name: Run loader conformance suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          sbcl --script prototypes/star-lang/common-lisp/star-loader-tests.lisp \
+            2>&1 | tee star-lang-loader-tests.log
+
+      - name: Verify CLI and remote digest-locked import
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          chmod +x prototypes/star-lang/bin/star
+
+          workspace=$(mktemp -d)
+          remote_dir="$workspace/remote"
+          cache_dir="$workspace/cache"
+          mkdir -p "$remote_dir" "$cache_dir"
+          cp prototypes/star-lang/fixtures/starintel-core.star \
+             "$remote_dir/starintel-core.star"
+
+          digest="sha256:$(sha256sum "$remote_dir/starintel-core.star" | awk '{print $1}')"
+          port_file="$workspace/port"
+
+          python3 - "$remote_dir" "$port_file" <<'PY' &
+          import os
+          import sys
+          from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+          from pathlib import Path
+
+          remote_dir = sys.argv[1]
+          port_file = Path(sys.argv[2])
+
+          class QuietHandler(SimpleHTTPRequestHandler):
+              def log_message(self, format, *args):
+                  pass
+
+          os.chdir(remote_dir)
+          server = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
+          port_file.write_text(str(server.server_port), encoding="utf-8")
+          server.serve_forever()
+          PY
+
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          for _ in $(seq 1 100); do
+            test -s "$port_file" && break
+            sleep 0.05
+          done
+
+          test -s "$port_file"
+          port=$(cat "$port_file")
+
+          cat >"$workspace/root.star" <<EOF
+          (spec-library "test/remote-root@1"
+            (:version "1.0.0")
+            (import "org.starintel/core@1"
+              :version "1.0.0"
+              :digest "$digest"
+              :url "http://127.0.0.1:$port/starintel-core.star")
+            (document remote-root
+              (:persistence persistent)
+              (id string :required)))
+          EOF
+
+          prototypes/star-lang/bin/star \
+            load "$workspace/root.star" \
+            --allow-network \
+            --cache "$cache_dir/" \
+            --manifest "$workspace/first.manifest" \
+            2>&1 | tee star-lang-loader-remote.log
+
+          kill "$server_pid"
+          wait "$server_pid" 2>/dev/null || true
+          trap - EXIT
+
+          prototypes/star-lang/bin/star \
+            load "$workspace/root.star" \
+            --cache "$cache_dir/" \
+            --manifest "$workspace/cached.manifest" \
+            2>&1 | tee star-lang-loader-cache.log
+
+          grep -q "test/remote-root@1" "$workspace/first.manifest"
+          grep -q "org.starintel/core@1" "$workspace/first.manifest"
+          cmp "$workspace/first.manifest" "$workspace/cached.manifest"
+
+      - name: Upload loader logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-loader-logs
+          path: |
+            star-lang-loader-tests.log
+            star-lang-loader-remote.log
+            star-lang-loader-cache.log
+          if-no-files-found: warn

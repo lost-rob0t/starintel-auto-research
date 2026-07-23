@@ -1,0 +1,214 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-013
+:END:
+#+title: STAR-LANG-RESEARCH-013 cl-gserver Runtime Facade
+#+description: Bind native Star-Lang actor contracts to asynchronous cl-gserver actor creation and tell operations while preserving dispatcher, outbox, lifecycle, and transport ownership boundaries.
+#+status: REVIEW
+#+filetags: :starintel:star-lang:cl-gserver:sento:actors:runtime:dispatcher:transport:outbox:common-lisp:research:
+
+* Purpose
+
+Loop 012 proved transport publication and settlement independently of the actor runtime. This pass defines the native Common Lisp actor boundary without moving Star-Lang delivery semantics into cl-gserver.
+
+The runtime facade has one responsibility:
+
+#+begin_quote
+Translate a validated native Star-Lang actor contract into asynchronous actor creation and mailbox delivery, then return the actor's dispatch result to the existing Star-Lang coordinator.
+#+end_quote
+
+The facade does not own document schemas, lifecycle envelopes, command idempotency, output publication order, broker settlement, or durable recovery policy.
+
+* cl-gserver Semantics Used
+
+Sento documents =actor-of= as actor construction under an actor context with a =:receive= message-processing function. It documents =tell= as asynchronous fire-and-forget message delivery whose receive return value is ignored.
+
+Source:
+
+- [[https://mdbergmann.github.io/cl-gserver/index.html][Sento reference manual]]
+
+The Star-Lang adapter therefore does not use a synchronous return from =tell=. Native work is represented as a runtime job and completed by a separate coordinator message.
+
+* Runtime Port
+
+The runtime-neutral cl-gserver port exposes:
+
+1. =actor-of= to construct an actor under a context
+2. =tell= to enqueue one message asynchronously
+3. =stop= to stop an actor
+4. =shutdown= to shut down the actor context or system
+
+The prototype injects those operations. The conformance tests use a deterministic mailbox implementation. A later concrete Sento adapter may call:
+
+#+begin_src lisp
+(ac:actor-of system
+  :name actor-name
+  :receive receive-function)
+
+(act:tell actor message sender)
+#+end_src
+
+The Star-Lang facade itself does not depend on Sento packages during this comparative pass.
+
+* Native Actor Contracts
+
+The facade accepts compiled native actor declarations such as:
+
+#+begin_src lisp
+(actor fec-native-importer
+  (:runtime native
+   :accepts (ingest-page)
+   :produces (index-fec-record)
+   :handler fec-native-handler
+   :restart permanent
+   :mailbox (bounded 128)))
+#+end_src
+
+Before actor construction it verifies:
+
+- the declaration is a compiled native actor contract
+- the actor appears as native in the portable manifest
+- the named handler has been registered as a Common Lisp function
+- the runtime facade and transport adapter share the same deterministic dispatcher
+
+The portable manifest remains language-neutral and does not carry executable Common Lisp function objects.
+
+* Actor Topology
+
+The facade creates:
+
+- one coordinator actor named =star-runtime-coordinator=
+- one native actor for each compiled native Star-Lang actor contract
+
+The coordinator serializes runtime result handling. Native actors execute domain handlers but do not publish transport messages or settle broker deliveries directly.
+
+#+begin_src text
+transport delivery
+  -> deterministic dispatcher proxy
+  -> tell native actor
+  -> native handler
+  -> tell runtime coordinator
+  -> finish deferred dispatcher command
+  -> publication outbox
+  -> transport settlement
+#+end_src
+
+* Runtime Jobs
+
+A dispatcher proxy creates a runtime job containing:
+
+- deterministic runtime job ID
+- target actor name
+- original Star-Lang command envelope
+
+It stores the job before calling =tell=. The native actor receives:
+
+#+begin_src lisp
+(:kind :star-runtime-job
+ :job-id "runtime-job-000001"
+ :actor-name "fec-native-importer"
+ :command <command-envelope>)
+#+end_src
+
+After successful =tell=, the proxy returns =defer-dispatch=. The deterministic dispatcher publishes its accepted lifecycle acknowledgement, records the command as in progress, and the transport adapter keeps the source delivery unsettled.
+
+* Runtime Results
+
+A native handler returns one existing dispatcher result:
+
+- =complete-dispatch=
+- =retry-dispatch=
+- =fail-dispatch=
+
+The actor wraps that result and asynchronously tells the coordinator:
+
+#+begin_src lisp
+(:kind :star-runtime-result
+ :job-id "runtime-job-000001"
+ :result <dispatch-result>)
+#+end_src
+
+The coordinator resolves the original command and invokes =finish-deferred-dispatch=. That operation may:
+
+- produce a typed reply and completed acknowledgement
+- produce a retry acknowledgement and next attempt
+- produce a retryable or terminal error
+- report =:late-terminal= when cancellation already completed the command
+
+The coordinator then hands emitted lifecycle outcomes to the existing transport publication outbox. The original source delivery is settled only after those outcomes publish.
+
+* Tell Failure Before Actor Acceptance
+
+A failure while telling the native actor occurs before the actor mailbox accepted the job.
+
+The proxy removes the runtime job and returns an explicit =retry-dispatch= result with a configured delay. The normal dispatcher and transport layers then publish accepted and retry acknowledgements and schedule a new Star-Lang attempt.
+
+This is not represented as a poison message because the command contract and route were valid. It is a runtime availability failure.
+
+* Handler Failure
+
+A Common Lisp condition escaping the registered native handler becomes:
+
+#+begin_src lisp
+(fail-dispatch
+ :code "star.native-handler-error"
+ :message <condition-text>
+ :retryable nil)
+#+end_src
+
+This prototype uses a terminal default because it cannot infer whether arbitrary domain handler conditions are safe to retry. Later actor declarations may add typed condition-to-restart policy.
+
+* Cancellation Race
+
+Cancellation is cooperative. A command may become terminal while its actor message is already queued or executing.
+
+The cancellation path:
+
+1. publishes the terminal cancellation error
+2. settles the held source delivery and cancellation control delivery
+3. leaves the runtime job until the actor result arrives
+4. classifies the later result as =:late-terminal=
+5. clears the runtime job without publishing new outcomes or reopening the command
+
+This preserves the terminal dispatcher record as the authority.
+
+* Shutdown
+
+Facade shutdown:
+
+1. stops every native actor
+2. stops the coordinator actor
+3. invokes runtime-system shutdown
+
+The current pass does not define graceful drain deadlines, forced termination, or persistence of pending runtime jobs.
+
+* Conformance Tests
+
+The injected mailbox runtime checks:
+
+1. coordinator and native actors are constructed through =actor-of=
+2. transport command handling performs asynchronous =tell=
+3. accepted publishes while the source delivery remains held
+4. native completion publishes reply and completed before source acknowledgement
+5. native retry creates a delayed next Star-Lang attempt
+6. a failed initial =tell= becomes explicit retry without a queued actor message
+7. native handler conditions become stable terminal errors
+8. cancellation settles transport work and ignores the later actor result
+9. runtime jobs clear after completion or late-terminal handling
+10. shutdown stops native actors and the coordinator and shuts down the runtime context
+11. native contracts without registered handlers are rejected
+
+* Boundary
+
+This pass does not:
+
+- load Sento or cl-gserver in continuous integration
+- create operating-system threads
+- implement actor supervision trees
+- map Star-Lang restart declarations to Sento supervision policy
+- enforce mailbox bounds or backpressure
+- persist runtime jobs, dispatcher records, or publication outboxes
+- implement distributed actor discovery
+- run external-language actors
+- promote Common Lisp as the final selected Star-Lang implementation
+
+The next pass should define supervision, mailbox pressure, and durable runtime-job recovery as explicit adapter policies. A concrete Sento smoke test should remain downstream of the injected-port conformance suite.

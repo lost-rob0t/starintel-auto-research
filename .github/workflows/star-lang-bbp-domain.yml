@@ -12,6 +12,8 @@ on:
       - "prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp"
       - "prototypes/star-lang/common-lisp/bbp-domain-remoting-tests.lisp"
       - "prototypes/star-lang/common-lisp/domain-remoting-config-tests.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-sento-smoke-main.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-sento-smoke-worker.lisp"
       - ".github/workflows/star-lang-bbp-domain.yml"
   push:
     branches:
@@ -26,6 +28,8 @@ on:
       - "prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp"
       - "prototypes/star-lang/common-lisp/bbp-domain-remoting-tests.lisp"
       - "prototypes/star-lang/common-lisp/domain-remoting-config-tests.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-sento-smoke-main.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-sento-smoke-worker.lisp"
       - ".github/workflows/star-lang-bbp-domain.yml"
   workflow_dispatch:
 
@@ -35,13 +39,26 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - name: Install SBCL
         run: |
           sudo apt-get update
           sudo apt-get install --yes sbcl
+      - name: Install Quicklisp and Sento remoting
+        run: |
+          curl --fail --silent --show-error --location \
+            --output quicklisp.lisp \
+            https://beta.quicklisp.org/quicklisp.lisp
+          echo "4a7a5c2aebe0716417047854267397e24a44d0cce096127411e9ce9ccfeb2c17  quicklisp.lisp" \
+            | sha256sum --check --strict
+          sbcl --non-interactive \
+            --load quicklisp.lisp \
+            --eval '(quicklisp-quickstart:install :path #P"/home/runner/quicklisp/")'
+          sbcl --non-interactive \
+            --load /home/runner/quicklisp/setup.lisp \
+            --eval '(ql:quickload :sento-remoting)'
       - name: Check BBP Lisp form balance
         run: |
           python - <<'PY'
@@ -56,6 +73,8 @@ jobs:
               Path('prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp'),
               Path('prototypes/star-lang/common-lisp/bbp-domain-remoting-tests.lisp'),
               Path('prototypes/star-lang/common-lisp/domain-remoting-config-tests.lisp'),
+              Path('prototypes/star-lang/common-lisp/bbp-sento-smoke-main.lisp'),
+              Path('prototypes/star-lang/common-lisp/bbp-sento-smoke-worker.lisp'),
           ]
 
           for path in paths:
@@ -117,6 +136,52 @@ jobs:
               json.loads(line)
           print(f'validated {len(lines)} BBP lifecycle envelopes')
           PY
+      - name: Run live two-process Sento smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f bbp-sento-main.ready \
+                bbp-sento-worker.ready \
+                bbp-sento-worker.stop \
+                bbp-sento-smoke.success
+
+          main_pid=""
+          worker_pid=""
+          cleanup() {
+            if [[ -n "$main_pid" ]]; then
+              kill "$main_pid" 2>/dev/null || true
+            fi
+            if [[ -n "$worker_pid" ]]; then
+              kill "$worker_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          sbcl --load /home/runner/quicklisp/setup.lisp \
+            --script prototypes/star-lang/common-lisp/bbp-sento-smoke-main.lisp \
+            > star-lang-bbp-sento-main.log 2>&1 &
+          main_pid=$!
+
+          for _ in $(seq 1 200); do
+            [[ -f bbp-sento-main.ready ]] && break
+            kill -0 "$main_pid" 2>/dev/null || {
+              cat star-lang-bbp-sento-main.log
+              exit 1
+            }
+            sleep 0.05
+          done
+          [[ -f bbp-sento-main.ready ]]
+
+          sbcl --load /home/runner/quicklisp/setup.lisp \
+            --script prototypes/star-lang/common-lisp/bbp-sento-smoke-worker.lisp \
+            > star-lang-bbp-sento-worker.log 2>&1 &
+          worker_pid=$!
+
+          wait "$main_pid"
+          main_pid=""
+          wait "$worker_pid"
+          worker_pid=""
+          [[ -f bbp-sento-smoke.success ]]
       - name: Upload BBP test artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -125,6 +190,8 @@ jobs:
           path: |
             star-lang-bbp-domain-remoting.log
             star-lang-domain-remoting-config.log
+            star-lang-bbp-sento-main.log
+            star-lang-bbp-sento-worker.log
             star-lang-bbp-domain-manifest.json
             star-lang-bbp-remote-trace.ndjson
           if-no-files-found: warn

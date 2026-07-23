@@ -36,7 +36,7 @@
          (make-domain-remoting-config
           :bind-host "127.0.0.1"
           :advertised-host "127.0.0.1"
-          :port 4911))
+          :port 0))
        (runtime nil))
   (unwind-protect
        (progn

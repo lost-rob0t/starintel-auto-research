@@ -187,34 +187,58 @@
     (when (main-domain-gateway-journal-state gateway)
       (redeliver-main-domain-gateway-pending gateway))))
 
-(defun main-domain-route-command (gateway command)
+(defun journal-route-command-to-node (gateway command node)
   (let* ((state (main-domain-gateway-journal-state gateway))
-         (node (and state (select-domain-node gateway command))))
-    (unless state
-      (return-from main-domain-route-command
-        (funcall *main-domain-route-command-without-journal*
-                 gateway command)))
-    (when node
-      (append-gateway-journal-event gateway :pending command))
-    (let ((result
-            (funcall *main-domain-route-command-without-journal*
-                     gateway command)))
-      (if (eq (getf result :outcome) :defer)
-          (progn
-            (unless node
-              (fail 'runtime-journal-error
-                    "Gateway deferred a command without a selected node."))
-            (setf (gethash
-                   (getf command :message-id)
-                   (main-domain-journal-state-delivered state))
-                  t))
-          (progn
-            (append-gateway-journal-event
-             gateway :route-result command result)
-            (remhash
-             (getf command :message-id)
-             (main-domain-journal-state-delivered state))))
-      result)))
+         (message-id (getf command :message-id)))
+    (append-gateway-journal-event gateway :pending command)
+    (setf (gethash message-id (main-domain-gateway-pending gateway))
+          (copy-tree command))
+    (handler-case
+        (progn
+          (remoting-tell
+           (main-domain-gateway-remoting-port gateway)
+           (remote-domain-node-ref node)
+           (list :kind :star-domain-command
+                 :domain "bbp"
+                 :node-id (remote-domain-node-node-id node)
+                 :command (copy-tree command))
+           (main-domain-gateway-actor gateway))
+          (setf (gethash message-id
+                         (main-domain-journal-state-delivered state))
+                t)
+          (defer-dispatch))
+      (domain-remoting-error ()
+        (remhash message-id (main-domain-gateway-pending gateway))
+        (let ((result
+                (retry-dispatch
+                 :retry-after-ms
+                 (main-domain-gateway-retry-delay-ms gateway)
+                 :reason
+                 "BBP remote tell failed before node acceptance.")))
+          (append-gateway-journal-event
+           gateway :route-result command result)
+          result)))))
+
+(defun journal-route-command-without-node (gateway command)
+  (let ((result
+          (retry-dispatch
+           :retry-after-ms
+           (main-domain-gateway-retry-delay-ms gateway)
+           :reason
+           "No live BBP domain node exports the requested tool.")))
+    (append-gateway-journal-event
+     gateway :route-result command result)
+    result))
+
+(defun main-domain-route-command (gateway command)
+  (unless (main-domain-gateway-journal-state gateway)
+    (return-from main-domain-route-command
+      (funcall *main-domain-route-command-without-journal*
+               gateway command)))
+  (let ((node (select-domain-node gateway command)))
+    (if node
+        (journal-route-command-to-node gateway command node)
+        (journal-route-command-without-node gateway command))))
 
 (defun main-domain-complete-command (gateway message)
   (let ((state (main-domain-gateway-journal-state gateway)))

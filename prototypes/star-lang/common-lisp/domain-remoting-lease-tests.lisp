@@ -42,6 +42,24 @@
               (declare (ignore system))
               :disabled)))
 
+(defun lease-test-command (&key message-id program-id run-id)
+  (make-bbp-run-tool-command
+   :message-id message-id
+   :program-id program-id
+   :run-id run-id
+   :tool 'subfinder
+   :target "api.example.com"))
+
+(defun lease-test-register-node (gateway node-id endpoint)
+  (main-domain-register-node
+   gateway
+   (list :node-id node-id
+         :domain "bbp"
+         :endpoint endpoint
+         :tools '("subfinder")
+         :generation 1
+         :heartbeat 0)))
+
 (defun test-main-domain-heartbeat-lease ()
   (multiple-value-bind (library tools domain actor manifest)
       (compile-bbp-domain-program)
@@ -53,24 +71,18 @@
               :remoting-port (lease-test-remoting-port)
               :dispatcher (make-deterministic-dispatcher manifest)))
            (command
-             (make-bbp-run-tool-command
+             (lease-test-command
               :message-id "lease-command"
               :program-id "program:lease"
-              :run-id "run:lease:1"
-              :tool 'subfinder
-              :target "api.example.com")))
+              :run-id "run:lease:1")))
       (configure-main-domain-gateway-lease
        gateway
        :timeout-ms 1000
        :clock (lambda () (car clock)))
-      (main-domain-register-node
+      (lease-test-register-node
        gateway
-       '(:node-id "lease-node"
-         :domain "bbp"
-         :endpoint "sento://worker:4912/user/bbp-domain"
-         :tools ("subfinder")
-         :generation 1
-         :heartbeat 0))
+       "lease-node"
+       "sento://worker:4912/user/bbp-domain")
       (lease-test-assert-equal
        1
        (main-domain-gateway-live-node-count gateway)
@@ -111,6 +123,60 @@
        (select-domain-node gateway command)
        "revived node is routable"))))
 
+(defun test-main-domain-deterministic-failover ()
+  (multiple-value-bind (library tools domain actor manifest)
+      (compile-bbp-domain-program)
+    (declare (ignore library tools domain actor))
+    (let* ((clock (list 0))
+           (gateway
+             (make-main-domain-gateway
+              :system :failover-test
+              :remoting-port (lease-test-remoting-port)
+              :dispatcher (make-deterministic-dispatcher manifest)))
+           (command
+             (lease-test-command
+              :message-id "failover-command"
+              :program-id "program:failover"
+              :run-id "run:failover:1")))
+      (configure-main-domain-gateway-lease
+       gateway
+       :timeout-ms 1000
+       :clock (lambda () (car clock)))
+      (lease-test-register-node
+       gateway
+       "bbp-node-b"
+       "sento://worker-b:4912/user/bbp-domain")
+      (lease-test-register-node
+       gateway
+       "bbp-node-a"
+       "sento://worker-a:4912/user/bbp-domain")
+      (lease-test-assert-equal
+       "bbp-node-a"
+       (remote-domain-node-node-id
+        (select-domain-node gateway command))
+       "routing chooses the lexically first live node")
+      (setf (car clock) 500)
+      (main-domain-heartbeat
+       gateway
+       '(:node-id "bbp-node-b"
+         :domain "bbp"
+         :generation 1
+         :heartbeat 1))
+      (setf (car clock) 1000)
+      (lease-test-assert-equal
+       '("bbp-node-a")
+       (expire-main-domain-gateway-nodes gateway)
+       "only the stale first-choice node expires")
+      (lease-test-assert-equal
+       1
+       (main-domain-gateway-live-node-count gateway)
+       "one worker survives failover")
+      (lease-test-assert-equal
+       "bbp-node-b"
+       (remote-domain-node-node-id
+        (select-domain-node gateway command))
+       "routing fails over to the surviving worker"))))
+
 (defun test-main-domain-heartbeat-lease-validation ()
   (multiple-value-bind (library tools domain actor manifest)
       (compile-bbp-domain-program)
@@ -128,5 +194,6 @@
       (lease-test-assert-true signaled "zero heartbeat timeout is rejected"))))
 
 (test-main-domain-heartbeat-lease)
+(test-main-domain-deterministic-failover)
 (test-main-domain-heartbeat-lease-validation)
 (format t "Star-Lang domain heartbeat lease tests passed.~%")

@@ -1,0 +1,86 @@
+#+title: STAR-LANG-RESEARCH-016 BBP Recovery Idempotency
+#+date: 2026-07-23
+#+status: implemented-prototype
+
+* Scope
+
+Define the worker-side invariants required before the main gserver can safely persist and replay pending BBP commands.
+
+A durable command journal can cause legitimate redelivery after process failure. The BBP worker therefore must distinguish a safe replay from reuse of an identity for different work.
+
+* Run identity
+
+A BBP tool run is identified inside one program aggregate by:
+
+#+begin_src text
+program-id + run-id
+#+end_src
+
+The stored request identity additionally records:
+
+- tool
+- target
+
+The current BBP tool declarations do not consume arbitrary options, so options are not yet part of execution identity. They must become part of identity before any tool implementation begins honoring them.
+
+* Run replay rules
+
+#+begin_src text
+same program-id + run-id + tool + target
+  -> return the stored result
+  -> do not invoke the external tool again
+
+same program-id + run-id + changed tool or target
+  -> fail terminally
+  -> code: star.bbp.run-id-conflict
+  -> do not invoke the external tool
+#+end_src
+
+Stored results are returned as defensive copies so callers cannot mutate aggregate state through the lookup API.
+
+* Registration replay rules
+
+A recovering main gserver may replay =register-program= before replaying a pending tool command. Re-registration must not erase completed runs.
+
+#+begin_src text
+same program-id + name + normalized scope
+  -> return the existing registration
+  -> preserve completed runs
+
+same program-id + changed name or normalized scope
+  -> fail terminally
+  -> code: star.bbp.program-registration-conflict
+  -> preserve existing state
+#+end_src
+
+Changing program metadata requires a future explicit update command. It is not overloaded onto registration.
+
+* Actor ordering
+
+The remote BBP node owns one actor per =program-id=. Commands for one program are therefore serialized through one mailbox. This makes run lookup and insertion atomic with respect to other commands for that program in the current actor runtime.
+
+Standalone callers still receive the same deterministic semantics, but concurrent direct invocation is outside the current prototype contract.
+
+* Verification
+
+The focused Common Lisp suite verifies:
+
+- exact run replay returns the original result
+- the external runner executes once
+- the program stores one run
+- stored-result lookup returns a defensive copy
+- changed tool reuse produces a stable terminal conflict
+- identical registration replay preserves completed runs
+- changed registration produces a stable terminal conflict
+
+The live two-process Sento test forces distinct main-dispatch idempotency keys through the same worker identities. This proves replay protection is enforced by the BBP worker rather than accidentally satisfied by the main dispatcher cache.
+
+* Next
+
+Add a runtime journal port beneath the main gateway and deterministic dispatcher with these recovery requirements:
+
+1. persist the command before remote delivery
+2. persist terminal completion before acknowledging durable removal
+3. restore pending commands and dispatcher idempotency records at startup
+4. redeliver pending commands only after a compatible worker registers
+5. rely on the worker invariants in this note to make redelivery safe

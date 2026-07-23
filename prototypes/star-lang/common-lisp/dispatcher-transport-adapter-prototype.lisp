@@ -3,13 +3,23 @@
 (export '(make-transport-dispatch-adapter
           run-transport-adapter
           run-transport-adapter-next
-          transport-dispatch-adapter-held-count))
+          transport-dispatch-adapter-held-count
+          transport-dispatch-adapter-pending-count))
+
+(defstruct (transport-publication-record
+            (:constructor make-transport-publication-record
+                (&key kind result outcomes)))
+  kind
+  result
+  (outcomes '())
+  (next-index 0))
 
 (defstruct (transport-dispatch-adapter
             (:constructor %make-transport-dispatch-adapter))
   dispatcher
   port
-  (held (make-hash-table :test #'equal)))
+  (held (make-hash-table :test #'equal))
+  (pending (make-hash-table :test #'equal)))
 
 (defun make-transport-dispatch-adapter (dispatcher port)
   (unless (deterministic-dispatcher-p dispatcher)
@@ -23,10 +33,43 @@
 (defun transport-dispatch-adapter-held-count (adapter)
   (hash-table-count (transport-dispatch-adapter-held adapter)))
 
-(defun transport-adapter-publish-outcomes (adapter outcomes)
-  (dolist (outcome outcomes)
-    (transport-publish (transport-dispatch-adapter-port adapter) outcome))
-  outcomes)
+(defun transport-dispatch-adapter-pending-count (adapter)
+  (hash-table-count (transport-dispatch-adapter-pending adapter)))
+
+(defun transport-delivery-message-id (delivery)
+  (required-nonempty-string
+   (getf (transport-delivery-envelope delivery) :message-id)
+   "transport delivery message-id"))
+
+(defun pending-publication-record (adapter delivery)
+  (gethash (transport-delivery-message-id delivery)
+           (transport-dispatch-adapter-pending adapter)))
+
+(defun store-pending-publication (adapter delivery kind result outcomes)
+  (let ((record
+          (make-transport-publication-record
+           :kind kind
+           :result result
+           :outcomes (copy-list outcomes))))
+    (setf (gethash (transport-delivery-message-id delivery)
+                   (transport-dispatch-adapter-pending adapter))
+          record)
+    record))
+
+(defun clear-pending-publication (adapter delivery)
+  (remhash (transport-delivery-message-id delivery)
+           (transport-dispatch-adapter-pending adapter)))
+
+(defun transport-adapter-publish-record (adapter record)
+  (let ((outcomes (transport-publication-record-outcomes record))
+        (port (transport-dispatch-adapter-port adapter)))
+    (loop while (< (transport-publication-record-next-index record)
+                   (length outcomes))
+          for index = (transport-publication-record-next-index record)
+          for outcome = (nth index outcomes)
+          do (transport-publish port outcome)
+             (incf (transport-publication-record-next-index record)))
+    outcomes))
 
 (defun retry-delay-from-outcomes (outcomes)
   (let ((retry
@@ -96,25 +139,51 @@
        (transport-ack port delivery)
        :acked))))
 
+(defun settle-cancel-result (adapter delivery)
+  (let ((port (transport-dispatch-adapter-port adapter))
+        (cancel-envelope (transport-delivery-envelope delivery)))
+    (settle-held-for-cancel adapter cancel-envelope)
+    (transport-ack port delivery)
+    :acked))
+
+(defun complete-pending-publication (adapter delivery record)
+  (transport-adapter-publish-record adapter record)
+  (let ((settlement
+          (ecase (transport-publication-record-kind record)
+            (:command
+             (settle-command-result
+              adapter
+              delivery
+              (transport-publication-record-result record)
+              (transport-publication-record-outcomes record)))
+            (:cancel
+             (settle-cancel-result adapter delivery)))))
+    (clear-pending-publication adapter delivery)
+    settlement))
+
 (defun process-command-delivery (adapter delivery)
   (let* ((dispatcher (transport-dispatch-adapter-dispatcher adapter))
          (command (transport-delivery-envelope delivery)))
     (submit-dispatch-envelope dispatcher command)
-    (let ((result (run-dispatcher-next dispatcher))
-          (outcomes (drain-dispatcher-emitted dispatcher)))
-      (transport-adapter-publish-outcomes adapter outcomes)
-      (settle-command-result adapter delivery result outcomes))))
+    (let* ((result (run-dispatcher-next dispatcher))
+           (outcomes (drain-dispatcher-emitted dispatcher))
+           (record
+             (store-pending-publication
+              adapter delivery :command result outcomes)))
+      (complete-pending-publication adapter delivery record))))
 
 (defun process-cancel-delivery (adapter delivery)
   (let* ((dispatcher (transport-dispatch-adapter-dispatcher adapter))
-         (port (transport-dispatch-adapter-port adapter))
          (cancel-envelope (transport-delivery-envelope delivery)))
     (submit-dispatch-envelope dispatcher cancel-envelope)
-    (transport-adapter-publish-outcomes
-     adapter (drain-dispatcher-emitted dispatcher))
-    (settle-held-for-cancel adapter cancel-envelope)
-    (transport-ack port delivery)
-    :acked))
+    (let ((record
+            (store-pending-publication
+             adapter
+             delivery
+             :cancel
+             :acked
+             (drain-dispatcher-emitted dispatcher))))
+      (complete-pending-publication adapter delivery record))))
 
 (defun recover-after-transport-failure (adapter delivery)
   (let ((port (transport-dispatch-adapter-port adapter)))
@@ -132,21 +201,31 @@
    (princ-to-string condition))
   :rejected)
 
+(defun resume-or-process-delivery (adapter delivery)
+  (let ((pending (pending-publication-record adapter delivery)))
+    (if pending
+        (complete-pending-publication adapter delivery pending)
+        (case (getf (transport-delivery-envelope delivery) :kind)
+          (:command (process-command-delivery adapter delivery))
+          (:cancel (process-cancel-delivery adapter delivery))
+          (otherwise
+           (fail 'invalid-envelope-error
+                 "Transport adapter accepts command and cancel inputs."))))))
+
 (defun run-transport-adapter-next (adapter)
   (let* ((port (transport-dispatch-adapter-port adapter))
          (delivery (transport-receive port)))
     (when delivery
       (handler-case
-          (case (getf (transport-delivery-envelope delivery) :kind)
-            (:command (process-command-delivery adapter delivery))
-            (:cancel (process-cancel-delivery adapter delivery))
-            (otherwise
-             (fail 'invalid-envelope-error
-                   "Transport adapter accepts command and cancel inputs.")))
+          (resume-or-process-delivery adapter delivery)
         (transport-port-error ()
           (recover-after-transport-failure adapter delivery))
+        ((or invalid-envelope-error invalid-actor-error) (condition)
+          (reject-poison-delivery adapter delivery condition))
         (error (condition)
-          (reject-poison-delivery adapter delivery condition))))))
+          (if (pending-publication-record adapter delivery)
+              (recover-after-transport-failure adapter delivery)
+              (reject-poison-delivery adapter delivery condition)))))))
 
 (defun run-transport-adapter (adapter &key (limit 100))
   (unless (and (integerp limit) (> limit 0))

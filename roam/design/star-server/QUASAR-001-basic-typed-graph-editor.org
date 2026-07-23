@@ -2,16 +2,17 @@
 :ID:       quasar-basic-typed-graph-editor-001
 :END:
 #+title: QUASAR-001 Basic Typed Graph Editor Architecture
-#+description: Define Quasar as a small graph editor first, with Star-Lang transforms layered on top and no required domain-server architecture.
+#+description: Define Quasar as a small local-first typed graph editor with its own optional action extension API; Star-Lang supplies compatible types and data specifications, not transforms.
 #+status: DRAFT
 #+filetags: :starintel:quasar:design:graph-editor:star-lang:cytoscape:local-first:
 #+todo: TODO REVIEW BLOCKED | DONE REJECTED
 #+created: [2026-07-23 Thu]
 #+last_modified: [2026-07-23 Thu]
 
-| Version | Date       | Description of change                                                         | Did nsaspy approve it |
-|---------+------------+-------------------------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-23 | Collapse Quasar around a basic typed graph editor and optional Star-Lang actions. | No                    |
+| Version | Date       | Description of change                                                                 | Did nsaspy approve it |
+|---------+------------+---------------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-23 | Collapse Quasar around a basic typed graph editor and optional actions.               | No                    |
+| 0.1.1   | 2026-07-23 | Correct the boundary: Quasar owns actions and transforms; Star-Lang does not.         | No                    |
 
 * Related Nodes
 
@@ -25,15 +26,53 @@
 
 Quasar is a basic typed graph editor at its core.
 
-Its first responsibility is to let a user create, inspect, edit, connect, arrange, save, load, import, and export typed nodes and edges. Star-Lang adds transforms and automation to this graph editor. It does not require Quasar to become a distributed actor platform, a domain-server coordinator, or a second StarIntel runtime.
+Its first responsibility is to let a user create, inspect, edit, connect, arrange, save, load, import, and export typed nodes and edges.
 
-The MVP must remain useful when every transform runs locally in one process and no domain server exists.
+Quasar owns its graph editing model, action registry, action extension interface, and graph-operation batches.
+
+Star-Lang does not define or provide Quasar transforms. Star-Lang may supply compatible type libraries, document specifications, predicates, relation shapes, canonical identifiers, and import or export contracts. Quasar may consume those definitions without moving graph actions into the Star-Lang language.
+
+The MVP must remain useful with no Star-Lang runtime, no StarIntel server, no domain server, and no external action installed.
 
 The core product is:
 
 #+begin_quote
-A local-first graph document editor with typed nodes, typed edges, extensible actions, and a direct path from Star-Lang transform output into the visible graph.
+A local-first typed graph-document editor with optional Quasar actions and adapters to Star-Lang and StarIntel data.
 #+end_quote
+
+* Explicit Ownership Boundary
+
+Quasar owns:
+
+- graph documents;
+- nodes and edges as visible editor objects;
+- graph commands;
+- graph-operation batches;
+- undo and redo;
+- layouts and view state;
+- the Quasar action and transform registry;
+- action invocation and result application;
+- import and export adapters.
+
+Star-Lang may own or describe:
+
+- typed document definitions;
+- relation and predicate definitions;
+- specification-library identifiers and digests;
+- datasets and data contracts;
+- actors, programs, or playbooks outside the graph editor;
+- canonical JSON and generated bindings where explicitly reused.
+
+Star-Lang does not own:
+
+- Quasar context-menu actions;
+- Quasar transform declarations;
+- graph renderer mutations;
+- graph undo groups;
+- Cytoscape integration;
+- Quasar action discovery.
+
+The existing transform automation catalog is therefore interpreted as a catalog of possible Quasar extensions and external integrations, not a catalog of Star-Lang language features.
 
 * Non-Goals
 
@@ -49,7 +88,8 @@ The Quasar core does not require:
 - a canonical intelligence database inside the client;
 - a full case-management suite;
 - Palantir-scale object permission propagation;
-- mandatory evidence, claim, or provenance objects for every manually created graph element.
+- mandatory evidence, claim, or provenance objects for every manually created graph element;
+- a Star-Lang transform subsystem.
 
 Those capabilities may integrate later where they solve a measured problem. They are not prerequisites for the editor.
 
@@ -63,12 +103,12 @@ A graph document contains:
 - edges;
 - graph metadata;
 - layout state;
-- type-library references;
+- optional type-library references;
 - optional action-run records;
 - optional source and provenance references;
 - view state required to reopen the graph.
 
-The graph document is the product-level unit of editing, undo, save, load, export, and collaboration.
+The graph document is the product-level unit of editing, undo, save, load, export, and later collaboration.
 
 * Minimal Graph Model
 
@@ -138,7 +178,7 @@ Graph metadata contains:
 - description;
 - format version;
 - created and updated times;
-- imported Star-Lang type-library digests;
+- optional imported type-library identifiers and digests;
 - layout name;
 - viewport state;
 - selected style sheet;
@@ -161,11 +201,9 @@ The editor core exposes a deliberately small command set:
 
 Everything else composes these operations.
 
-A transform that discovers five hosts does not mutate Cytoscape directly. It returns a batch containing node and edge additions. The graph editor validates and applies that batch through the same command path used by manual editing and import.
+A Quasar action that discovers five hosts does not mutate Cytoscape directly. It returns a Quasar graph batch containing node and edge additions. The editor validates and applies that batch through the same command path used by manual editing and import.
 
-* Architecture
-
-The minimum architecture has four parts:
+* Minimum Architecture
 
 #+begin_src text
 Browser client
@@ -179,18 +217,19 @@ Quasar service
   graph-document CRUD
   validation
   undoable command application
-  action registry
-  action invocation
+  Quasar action registry
+  Quasar action invocation
           |
-          +--> local Star-Lang transform runner
-          +--> optional external process adapter
-          +--> optional existing StarIntel service
+          +--> in-process Common Lisp action
+          +--> optional local subprocess
+          +--> optional HTTP integration
+          +--> optional StarIntel integration
           |
           v
 Graph-document storage
 #+end_src
 
-No domain server is required in this path.
+No domain server and no Star-Lang runtime are required in this path.
 
 The Quasar service may initially live inside the existing Common Lisp HTTP process. It should remain a normal library boundary, not a new platform layer.
 
@@ -208,7 +247,7 @@ The browser client owns:
 - property inspectors;
 - undo and redo controls;
 - import and export interaction;
-- display of action progress and results.
+- display of optional action progress and results.
 
 The client does not own the durable graph document when a backend is present.
 
@@ -221,11 +260,11 @@ The Quasar service owns:
 - type validation;
 - sequential graph revision numbers;
 - optimistic-concurrency checks;
-- action discovery;
-- transform invocation;
-- transform-output validation;
-- application of transform batches;
-- action cancellation where the runner supports it;
+- Quasar action discovery;
+- Quasar action invocation;
+- action-output validation;
+- application of Quasar graph batches;
+- action cancellation where the adapter supports it;
 - graph import and export;
 - live graph-change events.
 
@@ -243,7 +282,7 @@ The storage interface is deliberately narrow:
 - =append-command=
 - =load-command-history=
 
-MVP storage may be implemented with a single local transactional database or a compact graph-document file plus command log. The editor must not depend on distributed storage.
+MVP storage may use a single local transactional database or a compact graph-document file plus command log. The editor must not depend on distributed storage.
 
 A practical first implementation may store:
 
@@ -275,34 +314,61 @@ For the single-user MVP, this is enough. Collaborative conflict-free replicated 
 
 * Star-Lang Integration
 
-Star-Lang defines optional graph actions.
+Star-Lang integration is data-oriented, not transform-oriented.
 
-A graph action declares:
+Quasar may import from a Star-Lang specification library:
+
+- document type identifiers;
+- node property definitions;
+- relation or predicate identifiers;
+- allowed source and destination type constraints;
+- label templates or display hints when provided separately;
+- library identifiers, versions, and digests.
+
+Quasar may translate:
+
+#+begin_src text
+Star-Lang typed document  <-->  Quasar typed node
+Star-Lang relation        <-->  Quasar typed edge
+Star-Lang dataset subset  -->   Quasar graph import
+Quasar graph selection    -->   Star-Lang-compatible export
+#+end_src
+
+This translation is an adapter boundary. It does not turn Star-Lang into Quasar's transform language.
+
+A Quasar action may consume or emit Star-Lang-compatible typed documents, but the action remains registered and executed through the Quasar action API.
+
+* Quasar Action Extension API
+
+Quasar actions and transforms belong to Quasar extensions or external integrations.
+
+A Quasar action declaration contains:
 
 - stable action identifier;
 - version;
 - accepted selection shape;
 - parameter schema;
-- output graph-operation schema;
-- execution adapter;
+- Quasar graph-batch output contract;
+- implementation adapter;
 - optional capability requirements;
-- optional cancellation support.
+- optional progress and cancellation support.
 
-Example declaration:
+Conceptual Common Lisp registration:
 
 #+begin_src lisp
-(define-graph-action expand-domain
-  (:version 1)
-  (:accepts ((node star.core/domain@1)))
-  (:parameters ())
-  (:returns graph-batch)
-  (:run dns-expand))
+(register-quasar-action
+ 'expand-domain
+ :version 1
+ :accepts '((node star.core/domain@1))
+ :parameters '()
+ :returns 'quasar-graph-batch
+ :handler #'dns-expand)
 #+end_src
 
-The essential output is a graph batch:
+The returned value is a Quasar graph batch:
 
 #+begin_src lisp
-(graph-batch
+(quasar-graph-batch
   (add-node :id "ip-203.0.113.10"
             :type 'star.core/ip-address@1
             :label "203.0.113.10")
@@ -311,20 +377,21 @@ The essential output is a graph batch:
             :destination "ip-203.0.113.10"))
 #+end_src
 
-The graph editor validates and applies this batch. Star-Lang does not receive direct access to the Cytoscape instance.
+The graph editor validates and applies this batch. Neither the extension nor Star-Lang receives direct access to the Cytoscape instance.
 
 * Action Execution Adapters
 
-The MVP needs one execution interface and may provide several adapters:
+The MVP needs one Quasar action interface and may provide several implementation adapters:
 
 1. in-process Common Lisp function;
 2. supervised local subprocess;
 3. HTTP service;
-4. existing StarIntel actor or domain service.
+4. existing StarIntel actor or service;
+5. optional Star-Lang data or program adapter where useful.
 
-The first adapter is sufficient to ship the graph editor.
+The first adapter is sufficient to ship the editor.
 
-Domain servers remain an optional adapter for transforms that already live behind one. Quasar does not create domain servers merely to invoke an action.
+Domain servers remain optional adapters for capabilities that already live behind one. Quasar does not create a domain server merely to invoke an action.
 
 * Type Registry
 
@@ -339,9 +406,11 @@ A type definition supplies:
 - property definitions;
 - label template;
 - allowed edge endpoints when constrained;
-- optional default actions.
+- optional default Quasar actions.
 
-Star-Lang libraries may contribute these type definitions. The active graph records the library identifiers and digests it uses.
+Star-Lang libraries may contribute document and relation type definitions. Quasar-specific icons, menus, default actions, and visual behavior remain Quasar extension metadata.
+
+The active graph records the identifiers and digests of imported type libraries.
 
 Unknown types remain loadable as generic nodes or edges so a missing extension does not destroy a graph.
 
@@ -350,16 +419,16 @@ Unknown types remain loadable as generic nodes or edges so a missing extension d
 Context-menu and command-palette actions are computed from:
 
 - selected node and edge types;
-- action acceptance declarations;
+- Quasar action acceptance declarations;
 - currently available adapters;
 - user-provided parameters;
 - optional capabilities.
 
-The action registry returns a flat ranked list. It does not require a domain-server routing tree.
+The action registry returns a flat ranked list. It does not require a domain-server routing tree or Star-Lang transform registry.
 
 * Undo and Redo
 
-Manual edits and transform result batches use the same reversible graph-command representation.
+Manual edits and Quasar action result batches use the same reversible graph-command representation.
 
 A command records enough information to derive its inverse:
 
@@ -367,18 +436,19 @@ A command records enough information to derive its inverse:
 - removing a node stores the removed node and attached edges;
 - updating properties stores previous values;
 - moving nodes stores previous positions;
-- applying a transform batch is undone as one group.
+- applying an action batch is undone as one group.
 
-External side effects are not undone by graph undo. Only graph mutations are reverted. A transform that scans a host has already performed that scan; undo removes its graph output.
+External side effects are not undone by graph undo. Only graph mutations are reverted. An action that scans a host has already performed that scan; undo removes its graph output.
 
 * Import and Export
 
 MVP formats:
 
 - canonical Quasar JSON graph document;
-- canonical Star-Lang graph batch;
+- canonical Quasar graph batch;
 - GraphML import and export where type information can be preserved;
-- CSV node and edge import through explicit mappings.
+- CSV node and edge import through explicit mappings;
+- optional Star-Lang typed-document and relation adapters.
 
 Exports preserve stable identifiers, types, properties, positions, and library references.
 
@@ -404,9 +474,9 @@ This does not require a general actor-event bus.
 
 * Security Boundary
 
-Star-Lang actions and extensions do not run inside the browser.
+Quasar actions and extensions do not run inside the browser.
 
-Untrusted local actions should run in a subprocess with explicit capabilities. The graph editor validates all returned graph operations before applying them.
+Untrusted local actions should run in a subprocess with explicit capabilities. The graph editor validates every returned graph operation before applying it.
 
 Capabilities may limit:
 
@@ -418,7 +488,7 @@ Capabilities may limit:
 - runtime;
 - output size.
 
-The capability model belongs to the action runner. It does not force the graph editor into a distributed service architecture.
+The capability model belongs to the Quasar action runner. It does not force the graph editor into a distributed service architecture.
 
 * MVP Slice
 
@@ -431,12 +501,12 @@ The first executable slice is:
 5. drag and lay out nodes;
 6. save and reopen the graph;
 7. undo and redo edits;
-8. load one Star-Lang type library;
-9. invoke one in-process Star-Lang graph action;
-10. stream and apply its returned graph batch;
-11. export the graph as canonical JSON.
+8. optionally load one Star-Lang type library;
+9. invoke one in-process Quasar action;
+10. validate and apply its returned Quasar graph batch;
+11. export the graph as canonical Quasar JSON.
 
-If this slice requires domain servers, the design has failed its simplicity requirement.
+The editor is already a valid MVP after step seven. Actions and Star-Lang integration extend it; they do not define it.
 
 * Package Boundaries
 
@@ -463,17 +533,20 @@ Optional integrations remain outside the core:
 
 #+begin_src text
 quasar-integrations/
+  star-lang-types.lisp
+  star-lang-import-export.lisp
   starintel.lisp
   subprocess.lisp
   http-actions.lisp
-  domain-server-actions.lisp
+  domain-service-actions.lisp
 #+end_src
 
 * Rejected Core Complexity
 
 | Proposal | Core decision |
 |----------+---------------|
-| Domain server per transform family | rejected; optional integration only |
+| Star-Lang transform subsystem | rejected; Star-Lang does not provide Quasar transforms |
+| Domain server per action family | rejected; optional integration only |
 | Actor per graph object | rejected |
 | Distributed workflow runtime before editor | rejected |
 | Mandatory claim/evidence object for every edit | rejected |
@@ -491,7 +564,7 @@ quasar-integrations/
 - graph model;
 - command model;
 - in-memory store;
-- JSON import and export;
+- Quasar JSON import and export;
 - unit tests for add, update, remove, batch, undo, and revision checks.
 
 ** Phase 1: editor
@@ -503,22 +576,28 @@ quasar-integrations/
 - save and reopen;
 - undo and redo.
 
-** Phase 2: typed actions
+** Phase 2: typed data integration
 
-- Star-Lang type-library loading;
-- action registry;
-- one in-process action adapter;
-- graph-batch validation;
+- optional Star-Lang type-library loading;
+- Star-Lang document and relation import/export adapters;
+- unknown-type fallback;
+- library digest recording.
+
+** Phase 3: Quasar actions
+
+- Quasar action registry;
+- one in-process Common Lisp adapter;
+- Quasar graph-batch validation;
 - progress and cancellation UI.
 
-** Phase 3: useful integrations
+** Phase 4: useful integrations
 
 - subprocess action adapter;
 - StarIntel search and import adapter;
 - evidence and provenance metadata where supplied;
 - optional domain-service adapter for existing services.
 
-** Phase 4: measured scale
+** Phase 5: measured scale
 
 - paged projections only when graph sizes demand them;
 - collaboration only when simultaneous editing is required;
@@ -529,13 +608,15 @@ quasar-integrations/
 The architecture is accepted when:
 
 - a graph can be edited without StarIntel running;
+- a graph can be edited without Star-Lang running;
 - a graph can be edited without any domain server;
 - all manual graph edits pass through one command interface;
-- Star-Lang actions return graph batches rather than renderer mutations;
-- transform output can be undone as one graph mutation group;
+- Quasar actions return Quasar graph batches rather than renderer mutations;
+- Star-Lang integration is limited to compatible types, documents, relations, and explicit adapters;
+- action output can be undone as one graph mutation group;
 - unknown extension types remain visible and round-trip safely;
 - reconnect restores the current graph by revision or snapshot;
-- the first working vertical slice fits inside the client, Quasar core, and one local action runner.
+- the first working editor fits inside the client and Quasar core without an action runner.
 
 * Next Recursive Pass
 
@@ -543,11 +624,12 @@ The next Quasar pass should define =QUASAR-002 Graph Document and Command Protoc
 
 That pass should freeze:
 
-- node, edge, metadata, and graph-batch schemas;
+- node, edge, metadata, and Quasar graph-batch schemas;
 - command identifiers and revision rules;
 - batch atomicity;
 - inverse-command generation;
 - snapshot and command-log boundaries;
-- canonical JSON examples;
-- TypeScript and Common Lisp generated bindings;
+- canonical Quasar JSON examples;
+- optional Star-Lang import and export mappings;
+- TypeScript and Common Lisp bindings;
 - conformance fixtures shared by the client and backend.

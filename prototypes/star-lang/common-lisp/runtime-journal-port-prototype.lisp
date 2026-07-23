@@ -92,9 +92,11 @@
   (unless (runtime-journal-port-p port)
     (fail 'runtime-journal-error
           "Runtime journal append requires a journal port."))
-  (validate-runtime-journal-event event)
   (handler-case
-      (funcall (runtime-journal-port-append-fn port) (copy-tree event))
+      (progn
+        (validate-runtime-journal-event event)
+        (funcall (runtime-journal-port-append-fn port)
+                 (copy-tree event)))
     (runtime-journal-error (condition)
       (error condition))
     (error (condition)

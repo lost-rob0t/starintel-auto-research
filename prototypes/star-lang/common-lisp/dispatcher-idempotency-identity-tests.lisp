@@ -55,6 +55,14 @@
        handler)
       dispatcher)))
 
+(defun identity-test-redelivery (dispatcher command message-id sent-at)
+  (let ((redelivery
+          (redeliver-command
+           dispatcher command
+           :message-id message-id)))
+    (setf (getf redelivery :sent-at) sent-at)
+    redelivery))
+
 (defun identity-test-semantic-conflict (command)
   (let ((conflict (copy-tree command)))
     (setf (getf conflict :message-id) "identity-conflict-message"
@@ -76,11 +84,18 @@
 
 (defun test-command-idempotency-identity ()
   (let* ((command (identity-test-command))
+         (dispatcher
+           (identity-test-dispatcher
+            (lambda (received)
+              (declare (ignore received))
+              (identity-test-complete-result))
+            command))
          (redelivery
-           (redeliver-command
+           (identity-test-redelivery
+            dispatcher
             command
-            :message-id "identity-redelivery"
-            :sent-at "1970-01-01T00:00:01Z"))
+            "identity-redelivery"
+            "1970-01-01T00:00:01Z"))
          (conflict (identity-test-semantic-conflict command)))
     (identity-test-assert-equal
      (command-idempotency-identity command)
@@ -108,10 +123,11 @@
      "first terminal command completes")
     (let ((terminal (drain-dispatcher-emitted dispatcher)))
       (let ((redelivery
-              (redeliver-command
+              (identity-test-redelivery
+               dispatcher
                command
-               :message-id "identity-terminal-redelivery"
-               :sent-at "1970-01-01T00:00:02Z")))
+               "identity-terminal-redelivery"
+               "1970-01-01T00:00:02Z")))
         (submit-dispatch-envelope dispatcher redelivery)
         (identity-test-assert-equal
          :duplicate
@@ -213,10 +229,11 @@
     (drain-dispatcher-emitted dispatcher)
     (submit-dispatch-envelope
      dispatcher
-     (redeliver-command
+     (identity-test-redelivery
+      dispatcher
       command
-      :message-id "identity-retry-redelivery-2"
-      :sent-at "1970-01-01T00:00:03Z"))
+      "identity-retry-redelivery-2"
+      "1970-01-01T00:00:03Z"))
     (identity-test-assert-equal
      :completed
      (run-dispatcher-next dispatcher)

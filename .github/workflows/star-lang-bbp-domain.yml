@@ -50,21 +50,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes sbcl
-      - name: Install Quicklisp and pinned Sento remoting
+      - name: Verify Quicklisp bootstrap
         run: |
           curl --fail --silent --show-error --location \
             --output quicklisp.lisp \
             https://beta.quicklisp.org/quicklisp.lisp
           echo "4a7a5c2aebe0716417047854267397e24a44d0cce096127411e9ce9ccfeb2c17  quicklisp.lisp" \
             | sha256sum --check --strict
+      - name: Install Quicklisp
+        run: |
           sbcl --non-interactive \
             --load quicklisp.lisp \
             --eval '(quicklisp-quickstart:install :path #P"/home/runner/quicklisp/")'
+          test -f /home/runner/quicklisp/setup.lisp
+      - name: Checkout pinned Sento remoting
+        run: |
           git clone --no-checkout \
             https://github.com/mdbergmann/cl-gserver.git \
             /home/runner/quicklisp/local-projects/cl-gserver
           git -C /home/runner/quicklisp/local-projects/cl-gserver \
             checkout a889b8375709ca9396bba5d06b6e460689a23716
+          test -f /home/runner/quicklisp/local-projects/cl-gserver/sento-remoting.asd
+      - name: Load pinned Sento remoting
+        run: |
           sbcl --non-interactive \
             --load /home/runner/quicklisp/setup.lisp \
             --eval '(ql:register-local-projects)' \

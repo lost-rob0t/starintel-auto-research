@@ -180,7 +180,7 @@
         :executable (getf tool :executable)
         :argv-template (copy-list (getf tool :argv-template))
         :input (getf tool :input)
-        :produces (getf tool :produces)
+        :produces-message (getf tool :produces)
         :timeout-ms (getf tool :timeout-ms)
         :capabilities (copy-list (getf tool :capabilities))))
 

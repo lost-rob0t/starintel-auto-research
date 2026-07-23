@@ -11,6 +11,7 @@
 (load (merge-pathnames "domain-server-core-prototype.lisp" *load-truename*))
 (load (merge-pathnames "bbp-domain-server-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-prototype.lisp" *load-truename*))
+(load (merge-pathnames "domain-remoting-runtime-port-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-lease-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-config-prototype.lisp" *load-truename*))
 (load (merge-pathnames "sento-remoting-domain-adapter.lisp" *load-truename*))
@@ -61,10 +62,7 @@
              (make-main-domain-gateway
               :system actor-system
               :remoting-port remoting-port
-              :dispatcher dispatcher))
-           (uri
-             (domain-remoting-actor-uri
-              config "star-domain-ingress")))
+              :dispatcher dispatcher)))
       (configure-main-domain-gateway-lease
        gateway
        :timeout-ms heartbeat-timeout-ms
@@ -73,14 +71,21 @@
        remoting-port
        actor-system
        (domain-remoting-config-options config))
-      (start-main-domain-gateway gateway)
-      (%make-bbp-main-runtime
-       :system actor-system
-       :remoting-port remoting-port
-       :dispatcher dispatcher
-       :gateway gateway
-       :config config
-       :uri uri))))
+      (let* ((resolved-config
+               (resolve-domain-remoting-config
+                config
+                (remoting-runtime-port remoting-port actor-system)))
+             (uri
+               (domain-remoting-actor-uri
+                resolved-config "star-domain-ingress")))
+        (start-main-domain-gateway gateway)
+        (%make-bbp-main-runtime
+         :system actor-system
+         :remoting-port remoting-port
+         :dispatcher dispatcher
+         :gateway gateway
+         :config resolved-config
+         :uri uri)))))
 
 (defun start-bbp-tool-domain-server
     (&key main-uri
@@ -99,30 +104,34 @@
            (remoting-port (make-sento-remoting-domain-port))
            (engine
              (make-bbp-domain-engine
-              domain tools (or tool-runner (make-process-tool-runner))))
-           (actor-contract
-             (materialize-domain-actor actor config))
-           (uri (getf actor-contract :endpoint)))
+              domain tools (or tool-runner (make-process-tool-runner)))))
       (remoting-enable
        remoting-port
        actor-system
        (domain-remoting-config-options config))
-      (let ((node
-              (start-bbp-remote-node
-               :node-id node-id
-               :endpoint uri
-               :system actor-system
-               :remoting-port remoting-port
-               :engine engine
-               :main-uri main-uri
-               :tools tools
-               :dispatcher dispatcher)))
+      (let* ((resolved-config
+               (resolve-domain-remoting-config
+                config
+                (remoting-runtime-port remoting-port actor-system)))
+             (actor-contract
+               (materialize-domain-actor actor resolved-config))
+             (uri (getf actor-contract :endpoint))
+             (node
+               (start-bbp-remote-node
+                :node-id node-id
+                :endpoint uri
+                :system actor-system
+                :remoting-port remoting-port
+                :engine engine
+                :main-uri main-uri
+                :tools tools
+                :dispatcher dispatcher)))
         (%make-bbp-worker-runtime
          :system actor-system
          :remoting-port remoting-port
          :engine engine
          :node node
-         :config config
+         :config resolved-config
          :actor-contract actor-contract
          :uri uri)))))
 

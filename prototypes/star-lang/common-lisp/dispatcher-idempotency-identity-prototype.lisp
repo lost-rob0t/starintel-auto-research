@@ -4,7 +4,7 @@
           dispatcher-idempotency-conflict-error))
 
 (define-condition dispatcher-idempotency-conflict-error
-    (deterministic-dispatcher-error) ())
+    (invalid-envelope-error) ())
 
 (defun command-idempotency-identity (command)
   (list :star-version (getf command :star-version)
@@ -46,7 +46,7 @@
 
 (defun process-command (dispatcher command)
   (unless (deterministic-dispatcher-p dispatcher)
-    (fail 'deterministic-dispatcher-error
+    (fail 'invalid-envelope-error
           "process-command requires a dispatcher."))
   (validate-lifecycle-envelope
    (deterministic-dispatcher-manifest dispatcher)

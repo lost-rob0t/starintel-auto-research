@@ -2,9 +2,9 @@
 :ID:       starintel-star-lang-index-000
 :END:
 #+title: STAR-LANG-INDEX-000 Star-Lang Language Research
-#+description: Project index for Star-Lang foundations, controlled language prototypes, importable specifications, normalized compiler IR, concrete core syntax, semantic validation, canonical JSON, generated bindings, message lifecycle, runtime bindings, domain servers, shared fixtures, comparison rules, and the later implementation-design gate.
+#+description: Project index for Star-Lang foundations, controlled language prototypes, importable specifications, normalized compiler IR, concrete core syntax, semantic validation, canonical JSON, generated bindings, message lifecycle, deterministic dispatch, runtime bindings, domain servers, shared fixtures, comparison rules, and the later implementation-design gate.
 #+status: ACTIVE
-#+filetags: :starintel:index:star-lang:dsl:comparison:compiler:ir:actors:wire-protocol:bindings:delivery:org-roam:
+#+filetags: :starintel:index:star-lang:dsl:comparison:compiler:ir:actors:wire-protocol:bindings:delivery:dispatcher:org-roam:
 
 * Purpose
 
@@ -58,6 +58,12 @@ Status: review. This pass serializes the validated portable manifest and message
 
 Status: review. This pass defines commands, events, replies, acknowledgements, errors, and cooperative cancellation with explicit correlation, causation, attempts, deadlines, and idempotency. It assumes at-least-once delivery where transports redeliver and deliberately does not claim exactly-once execution.
 
+* Active Deterministic Dispatcher Loop
+
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-011-deterministic-dispatcher.org][STAR-LANG-RESEARCH-011 Deterministic Dispatcher]]
+
+Status: review. This pass executes the lifecycle model in a pure FIFO dispatcher with manifest-checked actor routing, terminal outcome replay, in-progress duplicate suppression, retry redelivery, deterministic deadlines, and cancellation. It is the conformance state machine for later cl-gserver and transport adapters.
+
 * Shared Artifacts
 
 - =prototypes/star-lang/fixtures/email-enumeration.sexp=
@@ -79,6 +85,8 @@ Status: review. This pass defines commands, events, replies, acknowledgements, e
 - =prototypes/star-lang/common-lisp/message-lifecycle-prototype.lisp=
 - =prototypes/star-lang/common-lisp/message-lifecycle-bindings-prototype.lisp=
 - =prototypes/star-lang/common-lisp/message-lifecycle-tests.lisp=
+- =prototypes/star-lang/common-lisp/deterministic-dispatcher-prototype.lisp=
+- =prototypes/star-lang/common-lisp/deterministic-dispatcher-tests.lisp=
 - =.github/workflows/star-lang-common-lisp.yml=
 
 The email-enumeration fixture is the conformance fixture[fn:conformance-fixture] for every language implementation. Later prototypes may decode it differently but may not change its workflow, fake actor outcomes, persistence expectations, or final result.
@@ -87,7 +95,7 @@ The specification/domain prototype is a parallel requirements fixture. Equivalen
 
 The normalized-IR prototype is a compiler-boundary fixture. Equivalent frontends must be able to produce the same runtime-neutral graph, while runtime bindings remain replaceable projections.
 
-The FEC core fixture is the concrete schema, wire, and lifecycle fixture. Equivalent frontends must compile the same typed library, pass the same semantic checks, emit byte-stable canonical JSON, generate compatible language bindings, and preserve the same delivery outcomes.
+The FEC core fixture is the concrete schema, wire, lifecycle, and dispatcher fixture. Equivalent frontends must compile the same typed library, pass the same semantic checks, emit byte-stable canonical JSON, generate compatible language bindings, preserve the same delivery outcomes, and suppress the same duplicate executions.
 
 * Ordered Loops
 
@@ -135,6 +143,10 @@ Serialize one validated manifest into deterministic JSON and generate Python and
 
 Define at-least-once-safe command delivery, correlation and causation, accepted versus completed acknowledgements, retryable errors, cooperative cancellation, attempts, deadlines, and idempotency scope without claiming exactly-once execution.
 
+** REVIEW Loop 011: Deterministic Dispatcher
+
+Execute the lifecycle rules in a pure state machine with manifest actor routing, FIFO delivery, typed replies, terminal result replay, retry redelivery, in-progress suppression, deadlines, and cancellation before adding real runtime effects.
+
 * Comparison Invariants
 
 Every prototype must preserve:
@@ -176,10 +188,16 @@ After a language baseline passes, its next requirements fixture must also preser
 22. explicit retryable versus terminal errors
 23. cooperative cancellation semantics
 24. no exactly-once delivery claim
+25. deterministic FIFO command execution
+26. terminal duplicate replay without handler reinvocation
+27. in-progress duplicate suppression
+28. retry redelivery with incremented attempt and stable correlation
+29. deadline failure before actor execution
+30. cancellation indexed by message and correlation
 
 * Promotion Gate
 
-No prototype enters =roam/implement/= and no Star-Lang implementation design is approved from this index. The later design gate[fn:design-gate] may open only after Loop 005 records the complete evidence and nsaspy approves a numbered design. Loops 006 through 010 add requirements but do not independently authorize promotion.
+No prototype enters =roam/implement/= and no Star-Lang implementation design is approved from this index. The later design gate[fn:design-gate] may open only after Loop 005 records the complete evidence and nsaspy approves a numbered design. Loops 006 through 011 add requirements but do not independently authorize promotion.
 
 * Related Project Indexes
 
@@ -190,7 +208,7 @@ No prototype enters =roam/implement/= and no Star-Lang implementation design is 
 
 [fn:project-index] Project index: A maintained navigation file that lists the authoritative notes, current work, dependencies, ordering, and decision gates for one project area.
 
-[fn:star-lang] Star-Lang: The proposed StarIntel language for declaring typed document flows, actor work, agent tools, persistence, recovery, importable specifications, domain servers, resumable analysis behavior, portable actor contracts, and delivery lifecycle semantics.
+[fn:star-lang] Star-Lang: The proposed StarIntel language for declaring typed document flows, actor work, agent tools, persistence, recovery, importable specifications, domain servers, resumable analysis behavior, portable actor contracts, delivery lifecycle semantics, and deterministic runtime behavior.
 
 [fn:common-lisp] Common Lisp: A standardized Lisp programming language with functions, macros, object facilities, hash tables, and a structured condition and restart system.
 

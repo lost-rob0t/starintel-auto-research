@@ -13,6 +13,7 @@
 (load (merge-pathnames "bbp-run-idempotency-prototype.lisp" *load-truename*))
 (load (merge-pathnames "runtime-journal-port-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-prototype.lisp" *load-truename*))
+(load (merge-pathnames "bbp-remote-reconnect-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-runtime-port-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-lease-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-journal-prototype.lisp" *load-truename*))

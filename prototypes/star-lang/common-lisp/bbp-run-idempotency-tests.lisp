@@ -42,7 +42,7 @@
                ("run-id" . "run:replay:1")
                ("tool" . "subfinder")
                ("target" . "api.example.com")
-               ("options" . ())))))
+               ("options" . ()))))
       (invoke-domain-operation
        engine
        "program:replay"

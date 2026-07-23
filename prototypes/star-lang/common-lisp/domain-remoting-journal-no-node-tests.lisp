@@ -20,6 +20,10 @@
     (fail 'test-error "~A expected ~S, received ~S."
           label expected actual)))
 
+(defun no-node-journal-assert-true (value label)
+  (unless value
+    (fail 'test-error "Assertion failed: ~A." label)))
+
 (defun no-node-journal-remoting-port ()
   (make-domain-remoting-port
    :enable (lambda (system options)
@@ -57,6 +61,9 @@
       (start-main-domain-gateway gateway)
       (values dispatcher gateway))))
 
+(defun no-node-journal-envelope-kinds (envelopes)
+  (mapcar (lambda (envelope) (getf envelope :kind)) envelopes))
+
 (defun test-no-node-route-retry-recovery ()
   (let* ((journal (make-memory-runtime-journal-port))
          (command
@@ -66,8 +73,7 @@
             :run-id "run:no-node:1"
             :tool 'subfinder
             :target "api.example.com"
-            :idempotency-key "journal-no-node-key"))
-         (outcomes nil))
+            :idempotency-key "journal-no-node-key")))
     (multiple-value-bind (dispatcher gateway)
         (no-node-journal-gateway journal)
       (declare (ignore gateway))
@@ -76,7 +82,11 @@
        :retry
        (run-dispatcher-next dispatcher)
        "no-node route returns retry")
-      (setf outcomes (drain-dispatcher-emitted dispatcher))
+      (no-node-journal-assert-equal
+       '(:ack :ack)
+       (no-node-journal-envelope-kinds
+        (drain-dispatcher-emitted dispatcher))
+       "no-node route emits accepted and retry acknowledgements")
       (no-node-journal-assert-equal
        '(:route-result)
        (mapcar (lambda (event) (getf event :kind))
@@ -96,11 +106,24 @@
       (no-node-journal-assert-equal
        :retry
        (run-dispatcher-next dispatcher)
-       "restored no-node command retries deterministically")
+       "restored no-node command can be attempted again")
       (no-node-journal-assert-equal
-       outcomes
-       (drain-dispatcher-emitted dispatcher)
-       "restored no-node retry replays deterministic outcomes"))))
+       '(:ack :ack)
+       (no-node-journal-envelope-kinds
+        (drain-dispatcher-emitted dispatcher))
+       "reattempt emits a fresh accepted and retry pair")
+      (let* ((events (runtime-journal-replay journal))
+             (sequences
+               (mapcar
+                (lambda (event) (getf event :dispatcher-sequence))
+                events)))
+        (no-node-journal-assert-equal
+         '(:route-result :route-result)
+         (mapcar (lambda (event) (getf event :kind)) events)
+         "each no-node attempt has a durable retry transition")
+        (no-node-journal-assert-true
+         (< (first sequences) (second sequences))
+         "reattempt advances the restored dispatcher sequence")))))
 
 (test-no-node-route-retry-recovery)
 (format t "Star-Lang BBP no-node journal tests passed.~%")

@@ -31,7 +31,7 @@ Any older transform wording in this note must be read under this boundary.
 
 * Decision Summary
 
-Quasar should use a browser-first TypeScript client served by the existing StarIntel backend.
+Quasar should use a browser-first TypeScript client served by a thin Common Lisp Quasar graph-document service. StarIntel is an optional integration, not the required backend.
 
 Selected baseline:
 
@@ -48,16 +48,16 @@ Selected baseline:
 - CodeMirror 6;
 - Radix Primitives;
 - react-resizable-panels;
-- native Fetch and WebSocket transport using generated Star-Lang TypeScript bindings;
+- native Fetch and WebSocket transport using Quasar protocol types; generated Star-Lang bindings are used only by optional interoperability adapters;
 - Vitest for unit and protocol tests;
 - Playwright for end-to-end client tests;
 - Tauri 2 as an optional later desktop shell.
 
-The backend remains Common Lisp, cl-gserver/Sento, Star-Lang domain servers, and external supervised workers. Quasar must not introduce a Node.js business-logic backend or a second schema system.
+The core backend is a thin Common Lisp Quasar service for graph documents, commands, revisions, persistence, and optional Quasar actions. cl-gserver/Sento, Star-Lang runtimes, domain servers, and external workers are optional adapters. Quasar must not introduce a Node.js business-logic backend.
 
 * Architecture Principle
 
-The client is a projection and control surface over StarIntel domain servers. It does not become the canonical object store, graph database, workflow engine, policy engine, or actor supervisor.
+The client is an interactive editor for Quasar graph documents backed by the thin Quasar service. It is not a workflow engine, policy engine, actor supervisor, or mandatory projection over StarIntel domain servers.
 
 The client owns:
 
@@ -70,23 +70,21 @@ The client owns:
 - editors and inspectors;
 - browser or desktop integration.
 
-The backend owns:
+The Quasar service owns:
 
-- canonical objects and source records;
-- claims and evidence;
-- transform and playbook execution;
-- actor lifecycle;
-- action permissions and capabilities;
-- durable workspace journal;
-- graph, table, map, and timeline projection queries;
-- direct automated result persistence;
-- cancellation, retry, checkpoints, and rollback records.
+- graph documents, typed nodes, and typed edges;
+- graph commands, batches, revisions, undo, and redo;
+- graph-document persistence, import, and export;
+- Quasar action discovery and result validation when actions are installed;
+- live graph-change events and reconnect by revision.
+
+StarIntel objects, claims, evidence, actors, playbooks, checkpoints, and domain services remain optional integration concerns.
 
 * Frontend Language and Build
 
 ** TypeScript
 
-Use TypeScript as the client language because the repository already generates TypeScript contracts from the Star-Lang portable manifest.
+Use TypeScript as the client language for strict client and protocol typing. Optional Star-Lang adapters may import generated TypeScript contracts from the Star-Lang portable manifest.
 
 Rules:
 
@@ -263,10 +261,10 @@ Examples:
 
 - workspace metadata;
 - object inspectors;
-- transform catalog queries;
+- Quasar action-catalog queries;
 - graph projection pages;
 - table result pages;
-- actor and run status;
+- optional action and external-run status;
 - evidence metadata;
 - saved queries.
 
@@ -357,7 +355,7 @@ Do not introduce Socket.IO. Native WebSocket plus the existing typed lifecycle e
 
 ** Browser-first MVP
 
-The initial Quasar client runs as a normal browser application served by the local StarIntel HTTP service.
+The initial Quasar client runs as a normal browser application served by the local Quasar HTTP service.
 
 Benefits:
 
@@ -374,7 +372,7 @@ Use Tauri 2 as the preferred desktop wrapper after the browser client is functio
 
 Tauri responsibilities:
 
-- launch or discover the local StarIntel backend;
+- launch or discover the local Quasar service;
 - manage application windows;
 - provide file pickers and drag-and-drop;
 - handle protocol links;
@@ -400,29 +398,25 @@ Qt may still host specialized native tools, but it should not define the primary
 
 * Backend Libraries and Boundaries
 
-Quasar reuses the approved StarIntel backend direction:
+The core Quasar backend is deliberately small:
 
-- Common Lisp;
-- cl-gserver/Sento managed components;
-- Star-Lang domain-server manifests;
-- generated canonical JSON bindings;
-- message lifecycle protocol;
-- deterministic dispatcher and later transport adapters;
-- supervised external workers for Python, Prolog, browser automation, and command-line tools.
+- Common Lisp graph-document model;
+- graph command and revision application;
+- graph-document storage;
+- Quasar action registry and adapters when installed;
+- HTTP request-response endpoints;
+- WebSocket graph-change and action-progress events.
 
-No Node.js API server is added.
+The core does not require cl-gserver, Sento, a Star-Lang runtime, domain-server manifests, remoting, ZeroMQ, or supervised external workers.
 
-The Quasar backend adapter should be a thin frontend domain exposing:
+Optional adapters may connect Quasar to:
 
-- static client assets;
-- workspace and projection requests;
-- action discovery and invocation;
-- run lifecycle and cancellation;
-- evidence retrieval;
-- WebSocket streams;
-- generated manifest and version endpoints.
+- Star-Lang typed documents, relations, datasets, and generated bindings;
+- Star-Lang playbook runs that invoke registered Quasar actions;
+- StarIntel search and import services;
+- existing actors, subprocesses, HTTP services, or domain servers.
 
-HTTP and WebSocket implementation libraries should be selected in the StarIntel frontend design, not hidden inside the Quasar client decision. The browser contract must remain transport-adapter neutral.
+No Node.js API server is added. The Quasar browser contract remains independent from optional execution infrastructure.
 
 * Client Persistence
 

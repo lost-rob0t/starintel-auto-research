@@ -44,11 +44,11 @@
     (let* ((calls (list 0))
            (command (validation-order-command))
            (dispatcher (make-deterministic-dispatcher manifest)))
-      (register-dispatch-handler
+      (register-dispatch-actor
        dispatcher
        (getf command :actor)
-       (lambda (received)
-         (declare (ignore received))
+       (lambda (runtime received)
+         (declare (ignore runtime received))
          (incf (car calls))
          (validation-order-complete-result)))
       (submit-dispatch-envelope dispatcher command)
@@ -62,13 +62,12 @@
               "validation-order-malformed"
               (getf malformed :message-type)
               nil)
-        (submit-dispatch-envelope dispatcher malformed)
         (handler-case
-            (run-dispatcher-next dispatcher)
-          (invalid-envelope-error ()
-            (setf invalid-signaled t))
+            (process-command dispatcher malformed)
           (dispatcher-idempotency-conflict-error ()
-            (setf identity-conflict-signaled t)))
+            (setf identity-conflict-signaled t))
+          (invalid-envelope-error ()
+            (setf invalid-signaled t)))
         (validation-order-assert-true
          invalid-signaled
          "malformed command raises invalid-envelope-error")

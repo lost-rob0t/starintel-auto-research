@@ -188,24 +188,26 @@
       (redeliver-main-domain-gateway-pending gateway))))
 
 (defun main-domain-route-command (gateway command)
-  (let ((state (main-domain-gateway-journal-state gateway)))
+  (let* ((state (main-domain-gateway-journal-state gateway))
+         (node (and state (select-domain-node gateway command))))
     (unless state
       (return-from main-domain-route-command
         (funcall *main-domain-route-command-without-journal*
                  gateway command)))
-    (unless (select-domain-node gateway command)
-      (return-from main-domain-route-command
-        (funcall *main-domain-route-command-without-journal*
-                 gateway command)))
-    (append-gateway-journal-event gateway :pending command)
+    (when node
+      (append-gateway-journal-event gateway :pending command))
     (let ((result
             (funcall *main-domain-route-command-without-journal*
                      gateway command)))
       (if (eq (getf result :outcome) :defer)
-          (setf (gethash
-                 (getf command :message-id)
-                 (main-domain-journal-state-delivered state))
-                t)
+          (progn
+            (unless node
+              (fail 'runtime-journal-error
+                    "Gateway deferred a command without a selected node."))
+            (setf (gethash
+                   (getf command :message-id)
+                   (main-domain-journal-state-delivered state))
+                  t))
           (progn
             (append-gateway-journal-event
              gateway :route-result command result)

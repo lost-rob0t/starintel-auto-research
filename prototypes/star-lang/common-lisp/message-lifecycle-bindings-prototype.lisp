@@ -45,7 +45,7 @@
   (with-output-to-string (stream)
     (format stream "export type EnvelopeKind = \"command\" | \"event\" | \"reply\" | \"ack\" | \"error\" | \"cancel\";~%")
     (format stream "export type AckStatus = \"accepted\" | \"completed\" | \"rejected\" | \"retry\";~%~%")
-    (format stream "export interface StarEnvelopeBase<TPayload extends Record<string, unknown> = Record<string, unknown>> {~%")
+    (format stream "export interface StarEnvelopeBase<TPayload extends object = Record<string, unknown>> {~%")
     (format stream "  star_version: 1;~%")
     (format stream "  kind: EnvelopeKind;~%")
     (format stream "  message_id: string;~%")

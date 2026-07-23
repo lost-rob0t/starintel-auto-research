@@ -77,6 +77,26 @@ jobs:
             python -m json.tool "$file" >/dev/null
           done
           python -m py_compile star_protocol.py
+      - name: Run deterministic dispatcher suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/deterministic-dispatcher-tests.lisp \
+            2>&1 | tee star-lang-deterministic-dispatcher.log
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          files = sorted(Path('.').glob('star-lang-dispatch-*.ndjson'))
+          if not files:
+              raise SystemExit('no deterministic dispatcher traces were produced')
+          for path in files:
+              lines = path.read_text(encoding='utf-8').splitlines()
+              if not lines:
+                  raise SystemExit(f'{path} is empty')
+              for line in lines:
+                  json.loads(line)
+          PY
       - name: Upload Common Lisp test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -90,6 +110,7 @@ jobs:
             star-lang-core-semantics.log
             star-lang-canonical-json-bindings.log
             star-lang-message-lifecycle.log
+            star-lang-deterministic-dispatcher.log
             star-lang-fec-manifest.json
             star-lang-fec-envelope.json
             star_lang_fec.py
@@ -97,4 +118,5 @@ jobs:
             star-lang-lifecycle-*.json
             star_protocol.py
             star_protocol.ts
+            star-lang-dispatch-*.ndjson
           if-no-files-found: warn

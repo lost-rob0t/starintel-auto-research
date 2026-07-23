@@ -1,0 +1,219 @@
+name: Star-Lang BBP Journal Restart
+
+on:
+  pull_request:
+    paths:
+      - "prototypes/star-lang/common-lisp/runtime-journal-port-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/domain-remoting-journal-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-remote-reconnect-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-journal-restart-*.lisp"
+      - ".github/workflows/star-lang-bbp-journal-restart.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "prototypes/star-lang/common-lisp/runtime-journal-port-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/domain-remoting-journal-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-remote-reconnect-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-journal-restart-*.lisp"
+      - ".github/workflows/star-lang-bbp-journal-restart.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install SBCL
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sbcl
+      - name: Verify Quicklisp bootstrap
+        run: |
+          curl --fail --silent --show-error --location \
+            --output quicklisp.lisp \
+            https://beta.quicklisp.org/quicklisp.lisp
+          echo "4a7a5c2aebe0716417047854267397e24a44d0cce096127411e9ce9ccfeb2c17  quicklisp.lisp" \
+            | sha256sum --check --strict
+      - name: Install Quicklisp
+        run: |
+          sbcl --non-interactive \
+            --load quicklisp.lisp \
+            --eval '(quicklisp-quickstart:install :path #P"/home/runner/quicklisp/")'
+          test -f /home/runner/quicklisp/setup.lisp
+      - name: Checkout pinned Sento remoting dependencies
+        run: |
+          git clone --no-checkout \
+            https://github.com/mdbergmann/cl-gserver.git \
+            /home/runner/quicklisp/local-projects/cl-gserver
+          git -C /home/runner/quicklisp/local-projects/cl-gserver \
+            checkout a889b8375709ca9396bba5d06b6e460689a23716
+
+          git clone --no-checkout \
+            https://github.com/Shinmera/precise-time.git \
+            /home/runner/quicklisp/local-projects/precise-time
+          git -C /home/runner/quicklisp/local-projects/precise-time \
+            checkout e0bf77d7c200913c0b7920363c26e89ab68c03ad
+
+          git clone --no-checkout \
+            https://github.com/atgreen/cl-cancel.git \
+            /home/runner/quicklisp/local-projects/cl-cancel
+          git -C /home/runner/quicklisp/local-projects/cl-cancel \
+            checkout bec34fb37fe713746bdeefaf542f578d174d9ffa
+
+          git clone --no-checkout \
+            https://github.com/atgreen/pure-tls.git \
+            /home/runner/quicklisp/local-projects/pure-tls
+          git -C /home/runner/quicklisp/local-projects/pure-tls \
+            checkout d985aeaed8336dc6f88eadef5b80741fe22f4b21
+      - name: Load pinned Sento remoting
+        run: |
+          sbcl --non-interactive \
+            --load /home/runner/quicklisp/setup.lisp \
+            --eval '(ql:register-local-projects)' \
+            --eval '(ql:quickload :sento-remoting)'
+      - name: Check restart Lisp form balance
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path('prototypes/star-lang/common-lisp')
+          paths = [
+              root / 'runtime-journal-port-prototype.lisp',
+              root / 'domain-remoting-journal-prototype.lisp',
+              root / 'bbp-remote-reconnect-prototype.lisp',
+              root / 'bbp-remoting-runtime-example.lisp',
+          ]
+          paths.extend(sorted(root.glob('bbp-journal-restart-*.lisp')))
+
+          for path in paths:
+              text = path.read_text(encoding='utf-8')
+              stack = []
+              in_string = False
+              escaped = False
+              in_comment = False
+              line = 1
+              for char in text:
+                  if char == '\n':
+                      line += 1
+                      in_comment = False
+                      continue
+                  if in_comment:
+                      continue
+                  if in_string:
+                      if escaped:
+                          escaped = False
+                      elif char == '\\':
+                          escaped = True
+                      elif char == '"':
+                          in_string = False
+                      continue
+                  if char == ';':
+                      in_comment = True
+                  elif char == '"':
+                      in_string = True
+                  elif char == '(':
+                      stack.append(line)
+                  elif char == ')':
+                      if not stack:
+                          raise SystemExit(f'{path}:{line}: unmatched closing parenthesis')
+                      stack.pop()
+              if in_string:
+                  raise SystemExit(f'{path}: unterminated string')
+              if stack:
+                  raise SystemExit(f'{path}:{stack[-1]}: unclosed parenthesis')
+              print(f'{path}: balanced')
+          PY
+      - name: Run live main-gserver journal restart
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f bbp-journal-restart.sexp \
+                bbp-journal-main-1.ready \
+                bbp-journal-main-2.ready \
+                bbp-journal-worker.ready \
+                bbp-journal-worker.reconnected \
+                bbp-journal-runner.started \
+                bbp-journal-allow-complete \
+                bbp-journal-worker.stop \
+                bbp-journal-worker.success \
+                bbp-journal-phase-1.pending \
+                bbp-journal-restart.success
+
+          phase1_pid=""
+          phase2_pid=""
+          worker_pid=""
+          cleanup() {
+            for pid in "$phase1_pid" "$phase2_pid" "$worker_pid"; do
+              if [[ -n "$pid" ]]; then
+                kill "$pid" 2>/dev/null || true
+              fi
+            done
+          }
+          trap cleanup EXIT
+
+          sbcl --load /home/runner/quicklisp/setup.lisp \
+            --script prototypes/star-lang/common-lisp/bbp-journal-restart-main-phase1.lisp \
+            > star-lang-bbp-journal-main-phase1.log 2>&1 &
+          phase1_pid=$!
+
+          for _ in $(seq 1 300); do
+            [[ -f bbp-journal-main-1.ready ]] && break
+            kill -0 "$phase1_pid" 2>/dev/null || {
+              cat star-lang-bbp-journal-main-phase1.log
+              exit 1
+            }
+            sleep 0.05
+          done
+          [[ -f bbp-journal-main-1.ready ]]
+
+          sbcl --load /home/runner/quicklisp/setup.lisp \
+            --script prototypes/star-lang/common-lisp/bbp-journal-restart-worker.lisp \
+            > star-lang-bbp-journal-worker.log 2>&1 &
+          worker_pid=$!
+
+          if ! wait "$phase1_pid"; then
+            cat star-lang-bbp-journal-main-phase1.log
+            cat star-lang-bbp-journal-worker.log
+            exit 1
+          fi
+          phase1_pid=""
+          [[ -f bbp-journal-phase-1.pending ]]
+
+          sbcl --load /home/runner/quicklisp/setup.lisp \
+            --script prototypes/star-lang/common-lisp/bbp-journal-restart-main-phase2.lisp \
+            > star-lang-bbp-journal-main-phase2.log 2>&1 &
+          phase2_pid=$!
+
+          if ! wait "$phase2_pid"; then
+            cat star-lang-bbp-journal-main-phase2.log
+            cat star-lang-bbp-journal-worker.log
+            exit 1
+          fi
+          phase2_pid=""
+
+          if ! wait "$worker_pid"; then
+            cat star-lang-bbp-journal-worker.log
+            exit 1
+          fi
+          worker_pid=""
+
+          [[ -f bbp-journal-restart.success ]]
+          [[ -f bbp-journal-worker.success ]]
+      - name: Upload journal restart artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-bbp-journal-restart
+          path: |
+            star-lang-bbp-journal-main-phase1.log
+            star-lang-bbp-journal-main-phase2.log
+            star-lang-bbp-journal-worker.log
+            bbp-journal-restart.sexp
+          if-no-files-found: warn

@@ -71,12 +71,33 @@ jobs:
           git -C /home/runner/quicklisp/local-projects/cl-gserver \
             checkout a889b8375709ca9396bba5d06b6e460689a23716
           test -f /home/runner/quicklisp/local-projects/cl-gserver/sento-remoting.asd
-      - name: Load pinned Sento remoting
+      - name: Load pinned Sento core
+        shell: bash
         run: |
+          set -o pipefail
           sbcl --non-interactive \
             --load /home/runner/quicklisp/setup.lisp \
             --eval '(ql:register-local-projects)' \
-            --eval '(ql:quickload :sento-remoting)'
+            --eval '(ql:quickload :sento)' \
+            2>&1 | tee star-lang-sento-core-load.log
+      - name: Load pure-tls dependency
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --non-interactive \
+            --load /home/runner/quicklisp/setup.lisp \
+            --eval '(ql:register-local-projects)' \
+            --eval '(ql:quickload :pure-tls)' \
+            2>&1 | tee star-lang-pure-tls-load.log
+      - name: Load pinned Sento remoting
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --non-interactive \
+            --load /home/runner/quicklisp/setup.lisp \
+            --eval '(ql:register-local-projects)' \
+            --eval '(ql:quickload :sento-remoting)' \
+            2>&1 | tee star-lang-sento-remoting-load.log
       - name: Check BBP Lisp form balance
         run: |
           python - <<'PY'
@@ -210,6 +231,9 @@ jobs:
         with:
           name: star-lang-bbp-domain-remoting
           path: |
+            star-lang-sento-core-load.log
+            star-lang-pure-tls-load.log
+            star-lang-sento-remoting-load.log
             star-lang-bbp-domain-remoting.log
             star-lang-domain-remoting-config.log
             star-lang-domain-remoting-lease.log

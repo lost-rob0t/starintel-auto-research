@@ -21,17 +21,23 @@
                           :if-does-not-exist :create)
     (write-line value stream)))
 
+(defun smoke-worker-read-marker (pathname)
+  (with-open-file (stream pathname :direction :input)
+    (or (read-line stream nil nil)
+        (error "Marker ~A is empty." pathname))))
+
 (let* ((config
          (make-domain-remoting-config
           :bind-host "127.0.0.1"
           :advertised-host "127.0.0.1"
-          :port 4912))
+          :port 0))
+       (main-uri (smoke-worker-read-marker "bbp-sento-main.ready"))
        (runtime nil))
   (unwind-protect
        (progn
          (setf runtime
                (start-bbp-tool-domain-server
-                :main-uri "sento://127.0.0.1:4911/user/star-domain-ingress"
+                :main-uri main-uri
                 :node-id "bbp-sento-smoke-worker"
                 :config config
                 :tool-runner (smoke-worker-runner)))

@@ -1,0 +1,132 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-011
+:END:
+#+title: STAR-LANG-RESEARCH-011 Deterministic Dispatcher
+#+description: Exercise Star-Lang lifecycle semantics through a pure deterministic dispatcher before binding commands, redelivery, deduplication, deadlines, and cancellation to cl-gserver or an external transport.
+#+status: REVIEW
+#+filetags: :starintel:star-lang:dispatcher:actors:idempotency:redelivery:testing:runtime:research:
+
+* Purpose
+
+Loop 010 defined message lifecycle semantics. This pass executes those semantics in a deterministic in-memory dispatcher with no threads, sockets, queues, databases, wall clock, or Common Lisp actor effects.
+
+The dispatcher is a conformance model for later adapters. RabbitMQ, HTTP, NATS, cl-gserver, and subprocess implementations must reproduce its observable lifecycle behavior.
+
+* Dispatcher State
+
+The model holds:
+
+- one portable Star-Lang manifest
+- registered deterministic actor handlers
+- a FIFO command queue
+- emitted lifecycle envelopes
+- idempotency records
+- cancellation indexes by message and correlation
+- per-actor handler invocation counts
+- a deterministic message sequence
+- an explicitly controlled ISO timestamp clock
+
+No host-global clock or random identifier source participates in tests.
+
+* Command Routing
+
+A command may execute only when:
+
+- its lifecycle envelope validates
+- its target actor exists in the portable manifest
+- the actor accepts the command message type
+- a deterministic handler is registered
+
+A handler returns one closed result:
+
+- complete, optionally with a typed reply
+- retry with a positive delay
+- fail with structured retryability
+- defer while remaining in progress
+
+* Completion
+
+A newly executed command emits:
+
+1. accepted acknowledgement
+2. optional typed reply
+3. completed acknowledgement
+
+The terminal reply and completion are retained under the command idempotency scope.
+
+* Deduplication
+
+A duplicate terminal command does not invoke its handler. The dispatcher re-emits the stored terminal reply and completion.
+
+A duplicate command whose original attempt remains in progress receives another accepted acknowledgement without reinvoking the handler.
+
+The model therefore distinguishes transport redelivery from actual side-effect execution.
+
+* Retry and Redelivery
+
+A retry outcome emits an accepted acknowledgement followed by a retry acknowledgement. A later redelivery:
+
+- receives a new message identifier
+- increments =attempt=
+- preserves the correlation identifier
+- preserves the idempotency key
+- records the previous attempt as direct causation
+
+The handler may then complete or fail the operation.
+
+* Deadlines
+
+The dispatcher compares the command deadline against its explicitly set clock before invoking a handler. An expired command emits terminal =star.deadline-exceeded= and does not execute actor code.
+
+The comparison assumes canonical UTC ISO timestamps. A production adapter must parse timestamps rather than rely on lexical comparison.
+
+* Cancellation
+
+Cancellation indexes both the target message and target correlation chain.
+
+A queued cancelled command terminates before handler invocation. An active deferred command receives terminal =star.cancelled=. A later duplicate replays that stored terminal error instead of repeating work.
+
+Cancellation remains cooperative at the protocol level. The deterministic model applies it immediately because no actor thread is actually running.
+
+* Idempotency Records
+
+Each command scope records one state:
+
+- in progress
+- retryable
+- terminal
+
+Terminal records retain observable terminal envelopes. Retryable records allow a later attempt to invoke the handler again. In-progress records suppress duplicate execution.
+
+* Test Scenarios
+
+The suite verifies:
+
+1. accepted, typed reply, and completed ordering
+2. terminal duplicate replay without handler reinvocation
+3. retry acknowledgement and successful second attempt
+4. attempt increment with stable correlation and idempotency
+5. in-progress duplicate suppression
+6. cancellation of deferred work
+7. deadline failure before handler invocation
+8. manifest actor registration checks
+9. actor input-contract enforcement
+10. deterministic NDJSON lifecycle traces
+
+* Boundary
+
+This pass does not:
+
+- start cl-gserver actors
+- connect to RabbitMQ or HTTP
+- persist idempotency records
+- execute handlers concurrently
+- parse arbitrary timestamp formats
+- implement mailbox backpressure
+- define transport acknowledgement mechanics
+- recover state after process restart
+- claim exactly-once execution
+- select the final Star-Lang host implementation
+- bypass the comparative language and promotion gates
+
+The next runtime pass should extract a dispatcher adapter interface and bind the deterministic state machine to a fake transport with explicit delivery acknowledgement and redelivery hooks. Only after that conformance layer passes should a RabbitMQ adapter be implemented.

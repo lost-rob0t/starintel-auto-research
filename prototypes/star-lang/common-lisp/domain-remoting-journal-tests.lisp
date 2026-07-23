@@ -111,6 +111,12 @@
      :generation 1
      :heartbeat 0)))
 
+(defun journal-test-domain-command-count (sent)
+  (count :star-domain-command
+         (car sent)
+         :key (lambda (message) (getf message :kind))
+         :test #'eq))
+
 (defun test-runtime-journal-ports ()
   (let* ((command (journal-test-command))
          (event (journal-test-event command))
@@ -152,7 +158,7 @@
        "initial command defers after durable journal append")
       (drain-dispatcher-emitted dispatcher-1)
       (journal-test-assert-equal
-       1 (length (car sent))
+       1 (journal-test-domain-command-count sent)
        "initial command is delivered once")
       (journal-test-assert-equal
        '(:pending)
@@ -171,7 +177,7 @@
        "restart restores dispatcher in-progress state")
       (journal-test-register-worker gateway-2)
       (journal-test-assert-equal
-       2 (length (car sent))
+       2 (journal-test-domain-command-count sent)
        "worker registration redelivers restored pending command")
       (main-domain-complete-command
        gateway-2
@@ -203,7 +209,7 @@
            "dispatcher sequence is restored through terminal replay")
           (journal-test-register-worker gateway-3)
           (journal-test-assert-equal
-           2 (length (car sent))
+           2 (journal-test-domain-command-count sent)
            "terminal command is not redelivered")
           (submit-dispatch-envelope dispatcher-3 command)
           (journal-test-assert-equal
@@ -251,7 +257,7 @@
        "route retry state is restored")
       (journal-test-register-worker gateway-2)
       (journal-test-assert-equal
-       0 (length (car sent))
+       0 (journal-test-domain-command-count sent)
        "failed route is not automatically redelivered"))))
 
 (test-runtime-journal-ports)

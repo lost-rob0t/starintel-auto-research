@@ -97,6 +97,26 @@ jobs:
               for line in lines:
                   json.loads(line)
           PY
+      - name: Run transport port suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/transport-port-tests.lisp \
+            2>&1 | tee star-lang-transport-port.log
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          files = sorted(Path('.').glob('star-lang-transport-*.ndjson'))
+          if not files:
+              raise SystemExit('no transport traces were produced')
+          for path in files:
+              lines = path.read_text(encoding='utf-8').splitlines()
+              if not lines:
+                  raise SystemExit(f'{path} is empty')
+              for line in lines:
+                  json.loads(line)
+          PY
       - name: Upload Common Lisp test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -111,6 +131,7 @@ jobs:
             star-lang-canonical-json-bindings.log
             star-lang-message-lifecycle.log
             star-lang-deterministic-dispatcher.log
+            star-lang-transport-port.log
             star-lang-fec-manifest.json
             star-lang-fec-envelope.json
             star_lang_fec.py
@@ -119,4 +140,5 @@ jobs:
             star_protocol.py
             star_protocol.ts
             star-lang-dispatch-*.ndjson
+            star-lang-transport-*.ndjson
           if-no-files-found: warn

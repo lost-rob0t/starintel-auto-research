@@ -1,0 +1,154 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-012
+:END:
+#+title: STAR-LANG-RESEARCH-012 Transport Port and Settlement
+#+description: Separate Star-Lang lifecycle acknowledgements from broker settlement and prove at-least-once delivery behavior through a deterministic transport port and fake transport.
+#+status: REVIEW
+#+filetags: :starintel:star-lang:transport:delivery:settlement:idempotency:dispatcher:common-lisp:research:
+
+* Purpose
+
+Loop 011 proved the Star-Lang delivery state machine without runtime effects. This pass adds the smallest transport boundary around that state machine.
+
+The important distinction is:
+
+- a Star-Lang acknowledgement is a lifecycle envelope visible to actors and clients
+- a transport acknowledgement settles one broker delivery
+
+These are not interchangeable. An =accepted= lifecycle acknowledgement does not imply that a RabbitMQ, HTTP, or other transport delivery should already be discarded.
+
+* Transport Port
+
+The transport-neutral port exposes six operations:
+
+1. =receive= returns one delivery with a transport tag and Star-Lang envelope
+2. =publish= emits a lifecycle outcome
+3. =ack= settles a successfully handled transport delivery
+4. =requeue= returns a delivery for later visibility
+5. =reject= terminates a poison delivery and records its reason
+6. =now= exposes the transport scheduler clock
+
+The port operates on validated envelope data. Canonical JSON remains a separate encoding adapter over the same data.
+
+* Delivery Object
+
+A delivery contains:
+
+#+begin_src lisp
+(:tag "delivery-000001"
+ :envelope <star-lifecycle-envelope>
+ :redelivery-count 0
+ :visible-at 0)
+#+end_src
+
+The delivery tag belongs to the transport. The envelope =message-id=, =correlation-id=, =causation-id=, =attempt=, and =idempotency-key= belong to Star-Lang.
+
+Broker redelivery count and Star-Lang attempt count are therefore distinct:
+
+- an unexpected broker redelivery may retain the same lifecycle attempt
+- an explicit Star-Lang retry creates a new message ID and increments =attempt=
+
+* Settlement Rules
+
+The adapter uses the following order:
+
+#+begin_src text
+receive delivery
+  -> validate and dispatch
+  -> publish lifecycle outcomes
+  -> settle transport delivery
+#+end_src
+
+The input is never acknowledged before all required lifecycle outcomes publish successfully.
+
+| Dispatcher result | Lifecycle action | Transport action |
+|---+---+---|
+| completed | publish reply and completed acknowledgement | ack |
+| terminal duplicate | replay stored terminal outcomes | ack |
+| in progress duplicate | publish accepted acknowledgement | ack duplicate delivery |
+| retry | publish retry acknowledgement | requeue generated next attempt with delay |
+| deferred | publish accepted acknowledgement | hold original delivery unsettled |
+| cancelled | publish terminal cancellation error | ack held delivery and cancel delivery |
+| deadline exceeded | publish terminal deadline error | ack |
+| invalid route or poison input | no normal lifecycle outcome | reject and dead-letter |
+| lifecycle publication failure | publish incomplete | requeue original delivery immediately |
+
+* Publication Failure Recovery
+
+The fake transport can inject a publish failure after an actor has already completed.
+
+The adapter then requeues the original input instead of acknowledging it. On redelivery, the deterministic dispatcher finds the terminal idempotency record, does not invoke the actor again, and replays the stored reply and completion acknowledgement.
+
+This proves the required ordering:
+
+#+begin_src text
+actor side effect
+  -> terminal result retained by dispatcher
+  -> lifecycle outcome publication
+  -> broker settlement
+#+end_src
+
+It does not claim atomic distributed publication. A production runtime still needs durable idempotency and outbox storage, but the failure behavior is now explicit and testable.
+
+* Retry Visibility
+
+A retry acknowledgement carries =retry-after-ms=. The transport adapter creates the next Star-Lang attempt with:
+
+- a new =message-id=
+- incremented =attempt=
+- unchanged =correlation-id=
+- unchanged =idempotency-key=
+- the previous attempt as =causation-id=
+
+The fake transport hides the redelivery until its deterministic millisecond clock reaches the scheduled visibility time.
+
+* Deferred Work and Cancellation
+
+A deferred command remains in the transport's in-flight set and is indexed by its idempotency scope.
+
+A cancellation envelope targets both message ID and correlation ID. When the deterministic dispatcher produces the terminal cancellation error, the adapter acknowledges the held command delivery and the cancellation control delivery.
+
+Cancellation remains cooperative. This transport pass does not interrupt a running host-language thread.
+
+* Fake Transport
+
+The fake at-least-once transport records:
+
+- inbound deliveries
+- in-flight deliveries
+- published lifecycle envelopes
+- ack, requeue, and reject settlements
+- dead-lettered poison deliveries
+- visibility delays
+- injected publication failures
+
+It has no threads, sockets, wall-clock reads, RabbitMQ dependency, or cl-gserver dependency.
+
+* Conformance Tests
+
+The transport suite checks:
+
+1. successful delivery publishes accepted, reply, and completed before ack
+2. broker duplicates replay terminal outcomes without actor reinvocation
+3. explicit retry schedules a delayed new lifecycle attempt
+4. retry redelivery preserves correlation and idempotency
+5. deferred work remains unsettled
+6. cancellation settles both held work and its control delivery
+7. publication failure requeues the input
+8. terminal replay repairs lost publication without rerunning the actor
+9. invalid routes are rejected and dead-lettered
+10. emitted transport traces are valid canonical lifecycle NDJSON
+
+* Boundary
+
+This pass does not:
+
+- implement RabbitMQ channels, exchanges, queues, confirms, or consumer acknowledgements
+- implement HTTP request/response delivery
+- load or start cl-gserver actors
+- persist idempotency or outbox records
+- provide concurrency or mailbox pressure
+- promise exactly-once execution
+- promote a final Star-Lang implementation
+
+The next pass may bind this port to a cl-gserver runtime facade. That adapter must preserve the same settlement ordering and must not move lifecycle semantics into cl-gserver-specific code.

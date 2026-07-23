@@ -285,7 +285,7 @@ Use XState v5 for client workflows whose legal states matter:
 - desktop-shell startup and backend discovery;
 - synchronized view orchestration.
 
-Client XState actors mirror or coordinate backend actors but do not replace them. Backend lifecycle messages drive client actor events through generated protocol bindings.
+Client XState actors model browser interaction and connection lifecycles. They do not require matching backend actors; Quasar graph and optional action events drive their transitions.
 
 Do not put ordinary fetched data into XState merely because XState uses actors. TanStack Query handles server data; XState handles behavior and lifecycle.
 
@@ -327,7 +327,7 @@ Use:
 
 - CSS custom properties for design tokens;
 - scoped CSS modules or plain colocated CSS;
-- data attributes for object, claim, run, and selection states;
+- data attributes for node, edge, optional action-run, and selection states;
 - no utility framework as a required architectural dependency.
 
 Tailwind may be used experimentally but should not define the extension API or saved view format.
@@ -336,20 +336,22 @@ Tailwind may be used experimentally but should not define the extension API or s
 
 Use native Fetch for request-response operations and native WebSocket for live lifecycle, result, projection, and log streams.
 
-The wire contract is the existing Star-Lang canonical JSON and message lifecycle protocol.
+The core wire contract is the Quasar graph-document protocol: typed graph snapshots, graph commands, graph batches, revision conflicts, reconnect events, and optional Quasar action events encoded as canonical JSON. A Star-Lang adapter may separately use Star-Lang lifecycle envelopes.
 
 Required client transport packages:
 
-- generated TypeScript domain and message types;
-- generated validators or validation tables from the Star-Lang manifest;
-- one =StarClient= transport adapter;
-- one reconnecting WebSocket actor implemented with XState;
-- correlation, causation, idempotency, cancellation, acknowledgement, reply, event, and error handling;
-- NDJSON trace import and export for debugging.
+- Quasar graph-document, command, batch, revision, and event types;
+- Quasar protocol validators;
+- one =QuasarClient= transport adapter;
+- one reconnecting WebSocket state machine implemented with XState;
+- command identifiers, expected revisions, stale-revision handling, snapshots, missed-command replay, optional action cancellation, and structured errors;
+- NDJSON Quasar trace import and export for debugging.
 
-Do not add GraphQL. It would create another schema, query, and code-generation layer beside Star-Lang without solving a missing problem.
+Optional Star-Lang interoperability lives in a separate adapter package and may import generated Star-Lang types and lifecycle envelopes there.
 
-Do not introduce Socket.IO. Native WebSocket plus the existing typed lifecycle envelopes is sufficient and keeps non-JavaScript actors first-class.
+Do not add GraphQL. It would create another schema and query layer beside the small Quasar graph protocol without solving a missing problem.
+
+Do not introduce Socket.IO. Native WebSocket plus typed Quasar graph and action events is sufficient.
 
 * Desktop Shell
 
@@ -380,7 +382,7 @@ Tauri responsibilities:
 - expose tightly scoped native commands;
 - package static client assets.
 
-Tauri must not duplicate StarIntel domain logic in Rust. Rust is the shell boundary, not a second backend.
+Tauri must not duplicate Quasar graph-document or action logic in Rust. Rust is the shell boundary, not a second backend.
 
 ** Electron
 
@@ -392,7 +394,7 @@ Electron remains a fallback if webview compatibility becomes a larger operationa
 
 Do not select Qt/QML as the first Quasar client.
 
-The strongest graph, map, timeline, table, and editor options are web libraries. Qt/QML would require embedding web views for core surfaces or rebuilding them in a second ecosystem. It also creates a harder extension boundary with TypeScript bindings generated from Star-Lang.
+The strongest graph, map, timeline, table, and editor options are web libraries. Qt/QML would require embedding web views for core surfaces or rebuilding them in a second ecosystem. It also creates a harder extension boundary with the browser-first Quasar protocol and optional integration adapters.
 
 Qt may still host specialized native tools, but it should not define the primary Quasar UI stack.
 
@@ -420,15 +422,15 @@ No Node.js API server is added. The Quasar browser contract remains independent 
 
 * Client Persistence
 
-Durable investigation data remains on the backend.
+Durable graph documents and command history remain in the Quasar service.
 
 Client-local persistence is limited to:
 
 - cached static assets;
 - reconnect information;
 - unsent editor buffers;
-- optional offline projection cache;
-- panel and window preferences not stored in a workspace;
+- optional offline graph-snapshot cache;
+- panel and window preferences not stored in a graph document;
 - temporary command history.
 
 Use IndexedDB through a small typed adapter only when offline caching is implemented. Do not allow a browser cache to become an undocumented second workspace database.
@@ -454,7 +456,7 @@ Use Playwright for:
 
 - graph interaction;
 - context menus and intermediate commands;
-- transform invocation and streaming results;
+- Quasar action invocation and streaming results;
 - cancellation and reconnect behavior;
 - table, map, and timeline selection synchronization;
 - touchscreen and pointer interactions;
@@ -463,7 +465,7 @@ Use Playwright for:
 
 ** Visual and performance tests
 
-Maintain deterministic fixture workspaces for:
+Maintain deterministic fixture graph documents for:
 
 - 100-node editable graph;
 - 10,000-node bounded projection;
@@ -496,18 +498,20 @@ quasar-client/
     commands/
     components/
     workspace/
+    integrations/
+      star-lang/
     testing/
 #+end_src
 
 Rules:
 
-- =generated/= is overwritten from Star-Lang output;
+- =generated/= contains generated Quasar protocol types when generation is used;
 - =transport/= is the only package that knows HTTP and WebSocket details;
 - =graph/= is the only package that knows the Cytoscape instance;
 - =map/= and =timeline/= expose stable adapters;
 - =actors/= owns XState machine definitions;
 - =components/= contains generic visual primitives, not domain authority;
-- domain components consume generated types and application services;
+- feature components consume Quasar protocol types and application services;
 - no circular imports between view adapters.
 
 * Initial Dependency Set
@@ -581,7 +585,7 @@ The Common Lisp backend and browser client should remain separate build outputs 
 | Monaco | deferred | heavier; reconsider if full LSP integration dominates |
 | XState v5 | selected | explicit client actor and lifecycle orchestration |
 | Redux | rejected for MVP | duplicates existing state responsibilities |
-| GraphQL | rejected | duplicates Star-Lang schema and protocol work |
+| GraphQL | rejected | duplicates the Quasar graph protocol without a demonstrated need |
 | Socket.IO | rejected | native WebSocket and typed envelopes are sufficient |
 | Electron | fallback | bundled runtime and larger package |
 | Tauri 2 | selected later shell | reuses browser client and keeps native surface narrow |
@@ -592,11 +596,11 @@ The Common Lisp backend and browser client should remain separate build outputs 
 ** Phase 0: spike
 
 - Vite, TypeScript, React shell;
-- generated Star-Lang TypeScript fixture;
-- native WebSocket lifecycle trace replay;
+- Quasar graph-protocol TypeScript fixture;
+- native WebSocket graph-revision trace replay;
 - Cytoscape graph with selection and live insertion;
 - XState connection actor;
-- TanStack Query workspace request;
+- TanStack Query graph-document request;
 - Vitest and Playwright baseline.
 
 ** Phase 1: workbench
@@ -604,17 +608,17 @@ The Common Lisp backend and browser client should remain separate build outputs 
 - resizable panels;
 - command bar and intermediate-mode keymap;
 - graph adapter and selected layouts;
-- object and claim inspector;
+- node and edge inspector;
 - Quasar action menu from the Quasar action registry;
-- live run output;
+- optional Quasar action output;
 - virtualized table.
 
-** Phase 2: investigation projections
+** Phase 2: optional projections and integrations
 
 - MapLibre map;
 - vis-timeline timeline;
-- CodeMirror Star-Lang editor;
-- evidence document viewer;
+- optional CodeMirror Star-Lang adapter/editor;
+- optional evidence document viewer;
 - synchronized selections;
 - saved view state.
 
@@ -637,7 +641,7 @@ The Common Lisp backend and browser client should remain separate build outputs 
 
 - =QUASAR-CLIENT-001 Generated TypeScript Client and Transport=
 - =QUASAR-CLIENT-002 Graph Adapter and Projection Protocol=
-- =QUASAR-CLIENT-003 Client Actor System=
+- =QUASAR-CLIENT-003 Client Interaction State Machines=
 - =QUASAR-CLIENT-004 Intermediate Mode and Keymap=
 - =QUASAR-CLIENT-005 Workbench Layout and Saved Views=
 - =QUASAR-CLIENT-006 Map and Timeline Adapters=

@@ -2,14 +2,16 @@
 
 (in-package #:star-lang.core-surface.prototype)
 
-(defun smoke-worker-runner ()
+(defun smoke-worker-runner (calls)
   (make-tool-runner-port
    :run
    (lambda (tool argv request)
      (declare (ignore request))
+     (incf (car calls))
      (list :exit-code 0
            :stdout
-           (format nil "~A completed for ~A"
+           (format nil "call ~D: ~A completed for ~A"
+                   (car calls)
                    (getf tool :name)
                    (car (last argv)))
            :stderr ""))))
@@ -32,6 +34,7 @@
           :advertised-host "127.0.0.1"
           :port 0))
        (main-uri (smoke-worker-read-marker "bbp-sento-main.ready"))
+       (calls (list 0))
        (runtime nil))
   (unwind-protect
        (progn
@@ -40,7 +43,7 @@
                 :main-uri main-uri
                 :node-id "bbp-sento-smoke-worker"
                 :config config
-                :tool-runner (smoke-worker-runner)))
+                :tool-runner (smoke-worker-runner calls)))
          (smoke-worker-write-marker
           "bbp-sento-worker.ready"
           (bbp-worker-runtime-uri runtime))
@@ -48,6 +51,8 @@
                do (send-bbp-remote-node-heartbeat
                    (bbp-worker-runtime-node runtime))
                   (sleep 0.25))
+         (unless (= 1 (car calls))
+           (error "Remote replay invoked the tool ~D times." (car calls)))
          (format t "Two-process Sento BBP worker stopped cleanly.~%"))
     (when runtime
       (stop-bbp-tool-domain-server runtime))))

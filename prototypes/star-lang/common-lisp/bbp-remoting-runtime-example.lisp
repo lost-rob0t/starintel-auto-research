@@ -10,6 +10,7 @@
 (load (merge-pathnames "deferred-dispatch-completion-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-server-core-prototype.lisp" *load-truename*))
 (load (merge-pathnames "bbp-domain-server-prototype.lisp" *load-truename*))
+(load (merge-pathnames "bbp-run-idempotency-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-runtime-port-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-lease-prototype.lisp" *load-truename*))

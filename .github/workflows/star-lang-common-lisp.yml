@@ -67,6 +67,16 @@ jobs:
           python -m json.tool star-lang-fec-manifest.json >/dev/null
           python -m json.tool star-lang-fec-envelope.json >/dev/null
           python -m py_compile star_lang_fec.py
+      - name: Run message lifecycle suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/message-lifecycle-tests.lisp \
+            2>&1 | tee star-lang-message-lifecycle.log
+          for file in star-lang-lifecycle-*.json; do
+            python -m json.tool "$file" >/dev/null
+          done
+          python -m py_compile star_protocol.py
       - name: Upload Common Lisp test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -79,8 +89,12 @@ jobs:
             star-lang-core-surface.log
             star-lang-core-semantics.log
             star-lang-canonical-json-bindings.log
+            star-lang-message-lifecycle.log
             star-lang-fec-manifest.json
             star-lang-fec-envelope.json
             star_lang_fec.py
             star_lang_fec.ts
+            star-lang-lifecycle-*.json
+            star_protocol.py
+            star_protocol.ts
           if-no-files-found: warn

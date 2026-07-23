@@ -276,15 +276,14 @@
        (declare (ignore runtime envelope))
        (complete-dispatch)))
     (let ((command (dispatcher-test-command)))
-      (setf (getf command :message-type)
-            "org.starintel/fec@1/resolve-amendments")
+      (setf (getf command :actor) "missing-actor")
       (dispatcher-assert-true
        (dispatcher-condition-signaled-p
         'invalid-actor-error
         (lambda ()
           (submit-dispatch-envelope dispatcher command)
           (run-dispatcher dispatcher)))
-       "actor input contract enforced"))))
+       "unknown command target rejected"))))
 
 (defun run-deterministic-dispatcher-tests ()
   (let ((manifest (dispatcher-test-manifest)))

@@ -2,9 +2,9 @@
 :ID:       starintel-star-lang-index-000
 :END:
 #+title: STAR-LANG-INDEX-000 Star-Lang Language Research
-#+description: Project index for Star-Lang foundations, controlled language prototypes, importable specifications, normalized compiler IR, concrete core syntax, semantic validation, canonical JSON, generated bindings, message lifecycle, deterministic dispatch, transport settlement, publication outboxes, runtime bindings, domain servers, shared fixtures, comparison rules, and the later implementation-design gate.
+#+description: Project index for Star-Lang foundations, controlled language prototypes, importable specifications, normalized compiler IR, concrete core syntax, semantic validation, canonical JSON, generated bindings, message lifecycle, deterministic dispatch, standalone execution, optional runtime adapters, actor directories, transport settlement, publication outboxes, domain servers, shared fixtures, comparison rules, and the later implementation-design gate.
 #+status: ACTIVE
-#+filetags: :starintel:index:star-lang:dsl:comparison:compiler:ir:actors:wire-protocol:bindings:delivery:dispatcher:transport:settlement:outbox:org-roam:
+#+filetags: :starintel:index:star-lang:dsl:comparison:compiler:ir:actors:wire-protocol:bindings:delivery:dispatcher:standalone:runtime:directory:liveness:transport:settlement:outbox:org-roam:
 
 * Purpose
 
@@ -38,13 +38,13 @@ Status: review. This requirements loop defines digest-locked data-only specifica
 
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-007-normalized-ir-and-cl-gserver-binding.org][STAR-LANG-RESEARCH-007 Normalized IR and cl-gserver Binding]]
 
-Status: review. This pass separates comparative Common Lisp surface declarations from a closed normalized IR and a declarative cl-gserver adapter. Core IR retains runtime-neutral =:send= nodes; only the cl-gserver binding lowers them to =:tell= and records =:actor-of= construction. It preserves the immutable local specification graph and keyed domain-server requirements from Loop 006.
+Status: review. This pass separates comparative Common Lisp surface declarations from a closed normalized IR and a declarative cl-gserver adapter. Core IR retains runtime-neutral =:send= nodes; only the optional cl-gserver binding lowers them to =:tell= and records =:actor-of= construction. It preserves the immutable local specification graph and keyed domain-server requirements from Loop 006.
 
 * Active Core Surface and Wire Loop
 
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-008-core-surface-and-wire-protocol.org][STAR-LANG-RESEARCH-008 Core Surface and Wire Protocol]]
 
-Status: review. This pass makes =spec-library=, =scalar=, =enum=, =document=, =predicate=, and =message= the concrete source surface, qualifies local types into normalized schema IR, validates inheritance and actor contracts, and defines matching native and external actor contracts. A portable =star-message-v1= manifest and envelope expose the same contracts to non-Common-Lisp actors without making compiler lock structures user-facing syntax.
+Status: review. This pass makes =spec-library=, =scalar=, =enum=, =document=, =predicate=, and =message= the concrete source surface, qualifies local types into normalized schema IR, validates inheritance and actor contracts, and defines matching native and external actor contracts. A portable =star-message-v1= manifest exposes the same contracts to non-Common-Lisp actors.
 
 * Active Canonical JSON and Binding Loop
 
@@ -62,13 +62,19 @@ Status: review. This pass defines commands, events, replies, acknowledgements, e
 
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-011-deterministic-dispatcher.org][STAR-LANG-RESEARCH-011 Deterministic Dispatcher]]
 
-Status: review. This pass executes the lifecycle model in a pure FIFO dispatcher with manifest-checked actor routing, terminal outcome replay, in-progress duplicate suppression, retry redelivery, deterministic deadlines, and cancellation. It is the conformance state machine for later cl-gserver and transport adapters.
+Status: review. This pass executes the lifecycle model in a pure FIFO dispatcher with manifest-checked actor routing, terminal outcome replay, in-progress duplicate suppression, retry redelivery, deterministic deadlines, and cancellation. It is also the standalone execution baseline.
 
 * Active Transport Settlement Loop
 
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-012-transport-port-and-settlement.org][STAR-LANG-RESEARCH-012 Transport Port and Settlement]]
 
 Status: review. This pass separates actor-visible lifecycle acknowledgements from broker settlement, defines a transport-neutral port, models delayed at-least-once redelivery and dead-letter rejection, and adds a resumable publication outbox so outputs complete before the source delivery is settled.
+
+* Active Optional Runtime Adapter Loop
+
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-013-cl-gserver-runtime-facade.org][STAR-LANG-RESEARCH-013 Optional cl-gserver Runtime Adapter]]
+
+Status: review. This pass proves native Star-Lang actors still execute directly with ordinary handler functions and no actor system. It separately binds selected native actors to asynchronous cl-gserver =actor-of= and =tell= operations and defines an optional runtime-directory port for actor existence and liveness data.
 
 * Shared Artifacts
 
@@ -97,6 +103,11 @@ Status: review. This pass separates actor-visible lifecycle acknowledgements fro
 - =prototypes/star-lang/common-lisp/dispatcher-transport-adapter-prototype.lisp=
 - =prototypes/star-lang/common-lisp/transport-port-tests.lisp=
 - =prototypes/star-lang/common-lisp/transport-outbox-tests.lisp=
+- =prototypes/star-lang/common-lisp/deferred-dispatch-completion-prototype.lisp=
+- =prototypes/star-lang/common-lisp/runtime-directory-prototype.lisp=
+- =prototypes/star-lang/common-lisp/execution-mode-tests.lisp=
+- =prototypes/star-lang/common-lisp/cl-gserver-runtime-facade-prototype.lisp=
+- =prototypes/star-lang/common-lisp/cl-gserver-runtime-tests.lisp=
 - =.github/workflows/star-lang-common-lisp.yml=
 
 The email-enumeration fixture is the conformance fixture[fn:conformance-fixture] for every language implementation. Later prototypes may decode it differently but may not change its workflow, fake actor outcomes, persistence expectations, or final result.
@@ -105,7 +116,7 @@ The specification/domain prototype is a parallel requirements fixture. Equivalen
 
 The normalized-IR prototype is a compiler-boundary fixture. Equivalent frontends must be able to produce the same runtime-neutral graph, while runtime bindings remain replaceable projections.
 
-The FEC core fixture is the concrete schema, wire, lifecycle, dispatcher, and transport fixture. Equivalent frontends must compile the same typed library, pass the same semantic checks, emit byte-stable canonical JSON, generate compatible language bindings, preserve the same delivery outcomes, suppress the same duplicate executions, and retain the same publication-before-settlement ordering.
+The FEC core fixture is the concrete schema, wire, lifecycle, dispatcher, standalone-execution, transport, and optional-runtime fixture. Equivalent frontends must preserve the same contracts and lifecycle outcomes regardless of whether handlers execute directly, through cl-gserver, or through an external actor adapter.
 
 * Ordered Loops
 
@@ -135,31 +146,35 @@ Run equivalent tests and controlled benchmarks, score each required category, re
 
 ** REVIEW Loop 006: Specification Libraries and Domain Servers
 
-Define immutable import resolution, lock graphs, additive document extension, canonical relation traversal, typed actor contracts, and keyed domain-server manifests. This loop elaborates requirements in parallel and does not change the order or decision authority of Loops 002 through 005.
+Define immutable import resolution, lock graphs, additive document extension, canonical relation traversal, typed actor contracts, and keyed domain-server manifests.
 
 ** REVIEW Loop 007: Normalized IR and cl-gserver Binding
 
-Separate the Common Lisp surface experiment from normalized compiler output and runtime-specific actor binding. Keep =send= in core IR, bind it to cl-gserver =tell= only after compilation, and represent domain servers as keyed aggregate authorities. This parallel loop does not change the comparison order or authorize implementation promotion.
+Separate normalized compiler output from runtime-specific binding. Keep =send= in core IR and lower it to =tell= only in the optional cl-gserver adapter.
 
 ** REVIEW Loop 008: Core Surface and Wire Protocol
 
-Compile the concrete specification syntax into qualified schema IR, validate schema and actor semantics, emit portable message and actor contracts, and distinguish native cl-gserver actors from external protocol actors.
+Compile concrete specification syntax into qualified schema IR, validate schema and actor semantics, and emit portable native and external actor contracts.
 
 ** REVIEW Loop 009: Canonical JSON and Generated Bindings
 
-Serialize one validated manifest into deterministic JSON and generate Python and TypeScript bindings. Preserve qualified identifiers, exact source keys, inheritance, actor contracts, and decimal precision across languages.
+Serialize one validated manifest into deterministic JSON and generate Python and TypeScript bindings while preserving exact field names and precision.
 
 ** REVIEW Loop 010: Message Lifecycle and Delivery Semantics
 
-Define at-least-once-safe command delivery, correlation and causation, accepted versus completed acknowledgements, retryable errors, cooperative cancellation, attempts, deadlines, and idempotency scope without claiming exactly-once execution.
+Define correlation, causation, accepted versus completed acknowledgements, retryable errors, cooperative cancellation, attempts, deadlines, and idempotency without claiming exactly-once execution.
 
 ** REVIEW Loop 011: Deterministic Dispatcher
 
-Execute the lifecycle rules in a pure state machine with manifest actor routing, FIFO delivery, typed replies, terminal result replay, retry redelivery, in-progress suppression, deadlines, and cancellation before adding real runtime effects.
+Execute lifecycle rules in a pure state machine and provide the standalone native-handler execution baseline.
 
 ** REVIEW Loop 012: Transport Port and Settlement
 
-Separate lifecycle outcomes from broker settlement, publish required outcomes before settling their source delivery, preserve broker and Star-Lang retry identities independently, and resume interrupted output publication without repeating actor work.
+Separate lifecycle outcomes from broker settlement and resume interrupted output publication without repeating actor work.
+
+** REVIEW Loop 013: Optional cl-gserver Runtime Adapter
+
+Preserve standalone execution, optionally delegate selected native handlers to asynchronous cl-gserver actors, and expose actor topology and liveness through a separate optional runtime directory.
 
 * Comparison Invariants
 
@@ -214,10 +229,16 @@ After a language baseline passes, its next requirements fixture must also preser
 34. held commands remain unsettled until cancellation outcomes publish
 35. poison inputs terminate through reject and dead-letter behavior
 36. broker redelivery count remains distinct from Star-Lang attempt count
+37. native Star-Lang execution remains valid without cl-gserver
+38. runtime adapters remain replaceable and optional
+39. direct and adapted native execution preserve the same lifecycle contracts
+40. runtime actor discovery and liveness remain separate from language execution
+41. cl-gserver actor existence may inform routing but cannot define program validity
+42. late adapted actor results cannot reopen terminal commands
 
 * Promotion Gate
 
-No prototype enters =roam/implement/= and no Star-Lang implementation design is approved from this index. The later design gate[fn:design-gate] may open only after Loop 005 records the complete evidence and nsaspy approves a numbered design. Loops 006 through 012 add requirements but do not independently authorize promotion.
+No prototype enters =roam/implement/= and no Star-Lang implementation design is approved from this index. The later design gate[fn:design-gate] may open only after Loop 005 records the complete evidence and nsaspy approves a numbered design. Loops 006 through 013 add requirements but do not independently authorize promotion.
 
 * Related Project Indexes
 
@@ -228,7 +249,7 @@ No prototype enters =roam/implement/= and no Star-Lang implementation design is 
 
 [fn:project-index] Project index: A maintained navigation file that lists the authoritative notes, current work, dependencies, ordering, and decision gates for one project area.
 
-[fn:star-lang] Star-Lang: The proposed StarIntel language for declaring typed document flows, actor work, agent tools, persistence, recovery, importable specifications, domain servers, resumable analysis behavior, portable actor contracts, delivery lifecycle semantics, deterministic runtime behavior, and transport settlement.
+[fn:star-lang] Star-Lang: The proposed StarIntel language for declaring typed document flows, actor work, agent tools, persistence, recovery, importable specifications, domain servers, resumable analysis behavior, portable actor contracts, lifecycle semantics, deterministic standalone execution, optional runtime adapters, and transport settlement.
 
 [fn:common-lisp] Common Lisp: A standardized Lisp programming language with functions, macros, object facilities, hash tables, and a structured condition and restart system.
 

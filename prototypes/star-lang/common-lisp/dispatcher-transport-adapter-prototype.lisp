@@ -1,6 +1,8 @@
 (in-package #:star-lang.core-surface.prototype)
 
-(export '(make-transport-dispatch-adapter
+(export '(finish-held-transport-dispatch
+          held-transport-delivery
+          make-transport-dispatch-adapter
           run-transport-adapter
           run-transport-adapter-next
           transport-dispatch-adapter-held-count
@@ -87,6 +89,14 @@
 
 (defun held-delivery-key (command)
   (idempotency-scope-key command))
+
+(defun held-transport-delivery (adapter command)
+  (gethash (held-delivery-key command)
+           (transport-dispatch-adapter-held adapter)))
+
+(defun remove-held-transport-delivery (adapter command)
+  (remhash (held-delivery-key command)
+           (transport-dispatch-adapter-held adapter)))
 
 (defun hold-transport-delivery (adapter delivery)
   (let* ((command (transport-delivery-envelope delivery))
@@ -200,6 +210,32 @@
    delivery
    (princ-to-string condition))
   :rejected)
+
+(defun finish-held-transport-dispatch (adapter command result)
+  (let ((delivery (held-transport-delivery adapter command)))
+    (unless delivery
+      (if (eq (deferred-dispatch-status
+               (transport-dispatch-adapter-dispatcher adapter)
+               command)
+              :terminal)
+          (return-from finish-held-transport-dispatch :late-terminal)
+          (fail 'transport-port-error
+                "No held transport delivery exists for command ~A."
+                (getf command :message-id))))
+    (let* ((dispatcher (transport-dispatch-adapter-dispatcher adapter))
+           (dispatch-result (finish-deferred-dispatch dispatcher command result)))
+      (when (eq dispatch-result :late-terminal)
+        (return-from finish-held-transport-dispatch :late-terminal))
+      (let* ((outcomes (drain-dispatcher-emitted dispatcher))
+             (record
+               (store-pending-publication
+                adapter delivery :command dispatch-result outcomes)))
+        (handler-case
+            (prog1 (complete-pending-publication adapter delivery record)
+              (remove-held-transport-delivery adapter command))
+          (transport-port-error ()
+            (remove-held-transport-delivery adapter command)
+            (recover-after-transport-failure adapter delivery)))))))
 
 (defun resume-or-process-delivery (adapter delivery)
   (let ((pending (pending-publication-record adapter delivery)))

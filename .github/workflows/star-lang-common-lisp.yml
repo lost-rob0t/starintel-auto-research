@@ -28,6 +28,57 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes sbcl
+      - name: Check runtime Lisp form balance
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path('prototypes/star-lang/common-lisp/deferred-dispatch-completion-prototype.lisp'),
+              Path('prototypes/star-lang/common-lisp/runtime-directory-prototype.lisp'),
+              Path('prototypes/star-lang/common-lisp/execution-mode-tests.lisp'),
+              Path('prototypes/star-lang/common-lisp/cl-gserver-runtime-facade-prototype.lisp'),
+              Path('prototypes/star-lang/common-lisp/cl-gserver-runtime-tests.lisp'),
+          ]
+
+          for path in paths:
+              text = path.read_text(encoding='utf-8')
+              stack = []
+              in_string = False
+              escaped = False
+              in_comment = False
+              line = 1
+              for char in text:
+                  if char == '\n':
+                      line += 1
+                      in_comment = False
+                      continue
+                  if in_comment:
+                      continue
+                  if in_string:
+                      if escaped:
+                          escaped = False
+                      elif char == '\\':
+                          escaped = True
+                      elif char == '"':
+                          in_string = False
+                      continue
+                  if char == ';':
+                      in_comment = True
+                  elif char == '"':
+                      in_string = True
+                  elif char == '(':
+                      stack.append(line)
+                  elif char == ')':
+                      if not stack:
+                          raise SystemExit(f'{path}:{line}: unmatched closing parenthesis')
+                      stack.pop()
+              if in_string:
+                  raise SystemExit(f'{path}: unterminated string')
+              if stack:
+                  raise SystemExit(f'{path}:{stack[-1]}: unclosed parenthesis')
+              print(f'{path}: balanced')
+          PY
       - name: Run existing Common Lisp baseline
         shell: bash
         run: |
@@ -97,6 +148,12 @@ jobs:
               for line in lines:
                   json.loads(line)
           PY
+      - name: Run standalone execution and runtime directory suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/execution-mode-tests.lisp \
+            2>&1 | tee star-lang-execution-modes.log
       - name: Run transport port and publication outbox suite
         shell: bash
         run: |
@@ -117,6 +174,12 @@ jobs:
               for line in lines:
                   json.loads(line)
           PY
+      - name: Run optional cl-gserver runtime adapter suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/cl-gserver-runtime-tests.lisp \
+            2>&1 | tee star-lang-cl-gserver-runtime.log
       - name: Upload Common Lisp test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -131,7 +194,9 @@ jobs:
             star-lang-canonical-json-bindings.log
             star-lang-message-lifecycle.log
             star-lang-deterministic-dispatcher.log
+            star-lang-execution-modes.log
             star-lang-transport-port.log
+            star-lang-cl-gserver-runtime.log
             star-lang-fec-manifest.json
             star-lang-fec-envelope.json
             star_lang_fec.py

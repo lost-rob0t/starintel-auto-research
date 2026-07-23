@@ -1,0 +1,114 @@
+name: One-shot Quasar client protocol correction
+
+on:
+  push:
+    branches:
+      - research/quasar-product-architecture
+    paths:
+      - .github/workflows/quasar-client-protocol-correction.yml
+
+permissions:
+  contents: write
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: research/quasar-product-architecture
+          fetch-depth: 0
+
+      - name: Remove Star-Lang from the core Quasar client protocol
+        shell: python
+        run: |
+          from pathlib import Path
+
+          q000 = Path("roam/research/star-server/QUASAR-RESEARCH-000-investigation-workspace-architecture.org")
+          q002 = Path("roam/research/star-server/QUASAR-RESEARCH-002-client-library-stack.org")
+
+          text = q000.read_text()
+          text = text.replace("* Required Follow-up Designs", "* Optional Advanced Follow-up Designs")
+          text = text.replace("** MVP-1: automated graph workbench", "** Optional advanced phase: automated graph workbench")
+          text = text.replace("** MVP-2: investigation operations", "** Optional advanced phase: investigation operations")
+          text = text.replace("** MVP-3: geotemporal and collaboration", "** Optional advanced phase: geotemporal and collaboration")
+          text = text.replace("** MVP-4: playbooks and alerts", "** Optional advanced phase: playbooks and alerts")
+          q000.write_text(text)
+
+          text = q002.read_text()
+          text = text.replace(
+              "The wire contract is the existing Star-Lang canonical JSON and message lifecycle protocol.",
+              "The core wire contract is the Quasar graph-document protocol: typed graph snapshots, graph commands, graph batches, revision conflicts, reconnect events, and optional Quasar action events encoded as canonical JSON. A Star-Lang adapter may separately use Star-Lang lifecycle envelopes."
+          )
+          old_transport = """Required client transport packages:
+
+          - generated TypeScript domain and message types;
+          - generated validators or validation tables from the Star-Lang manifest;
+          - one =StarClient= transport adapter;
+          - one reconnecting WebSocket actor implemented with XState;
+          - correlation, causation, idempotency, cancellation, acknowledgement, reply, event, and error handling;
+          - NDJSON trace import and export for debugging."""
+          new_transport = """Required client transport packages:
+
+          - Quasar graph-document, command, batch, revision, and event types;
+          - Quasar protocol validators;
+          - one =QuasarClient= transport adapter;
+          - one reconnecting WebSocket state machine implemented with XState;
+          - command identifiers, expected revisions, stale-revision handling, snapshots, missed-command replay, optional action cancellation, and structured errors;
+          - NDJSON Quasar trace import and export for debugging.
+
+          Optional Star-Lang interoperability lives in a separate adapter package and may import generated Star-Lang types and lifecycle envelopes there."""
+          text = text.replace(old_transport, new_transport)
+          text = text.replace(
+              "Do not add GraphQL. It would create another schema, query, and code-generation layer beside Star-Lang without solving a missing problem.",
+              "Do not add GraphQL. It would create another schema and query layer beside the small Quasar graph protocol without solving a missing problem."
+          )
+          text = text.replace(
+              "Do not introduce Socket.IO. Native WebSocket plus the existing typed lifecycle envelopes is sufficient and keeps non-JavaScript actors first-class.",
+              "Do not introduce Socket.IO. Native WebSocket plus typed Quasar graph and action events is sufficient."
+          )
+          text = text.replace(
+              "Tauri must not duplicate StarIntel domain logic in Rust. Rust is the shell boundary, not a second backend.",
+              "Tauri must not duplicate Quasar graph-document or action logic in Rust. Rust is the shell boundary, not a second backend."
+          )
+          text = text.replace(
+              "It also creates a harder extension boundary with TypeScript bindings generated from Star-Lang.",
+              "It also creates a harder extension boundary with the browser-first Quasar protocol and optional integration adapters."
+          )
+          text = text.replace("Durable investigation data remains on the backend.", "Durable graph documents and command history remain in the Quasar service.")
+          text = text.replace("- optional offline projection cache;", "- optional offline graph-snapshot cache;")
+          text = text.replace("- panel and window preferences not stored in a workspace;", "- panel and window preferences not stored in a graph document;")
+          text = text.replace("- transform invocation and streaming results;", "- Quasar action invocation and streaming results;")
+          text = text.replace("Maintain deterministic fixture workspaces for:", "Maintain deterministic fixture graph documents for:")
+          text = text.replace("- =generated/= is overwritten from Star-Lang output;", "- =generated/= contains generated Quasar protocol types when generation is used;")
+          text = text.replace("- domain components consume generated types and application services;", "- feature components consume Quasar protocol types and application services;")
+          text = text.replace(
+              "    workspace/\n    testing/",
+              "    workspace/\n    integrations/\n      star-lang/\n    testing/"
+          )
+          text = text.replace("| GraphQL | rejected | duplicates Star-Lang schema and protocol work |", "| GraphQL | rejected | duplicates the Quasar graph protocol without a demonstrated need |")
+          text = text.replace("- generated Star-Lang TypeScript fixture;", "- Quasar graph-protocol TypeScript fixture;")
+          text = text.replace("- native WebSocket lifecycle trace replay;", "- native WebSocket graph-revision trace replay;")
+          text = text.replace("- TanStack Query workspace request;", "- TanStack Query graph-document request;")
+          text = text.replace("- object and claim inspector;", "- node and edge inspector;")
+          text = text.replace("- live run output;", "- optional Quasar action output;")
+          text = text.replace("** Phase 2: investigation projections", "** Phase 2: optional projections and integrations")
+          text = text.replace("- CodeMirror Star-Lang editor;", "- optional CodeMirror Star-Lang adapter/editor;")
+          text = text.replace("- evidence document viewer;", "- optional evidence document viewer;")
+          text = text.replace("- =QUASAR-CLIENT-003 Client Actor System=", "- =QUASAR-CLIENT-003 Client Interaction State Machines=")
+          text = text.replace(
+              "Client XState actors mirror or coordinate backend actors but do not replace them. Backend lifecycle messages drive client actor events through generated protocol bindings.",
+              "Client XState actors model browser interaction and connection lifecycles. They do not require matching backend actors; Quasar graph and optional action events drive their transitions."
+          )
+          text = text.replace("- data attributes for object, claim, run, and selection states;", "- data attributes for node, edge, optional action-run, and selection states;")
+          q002.write_text(text)
+
+          Path(".github/workflows/quasar-client-protocol-correction.yml").unlink()
+
+      - name: Commit corrected client protocol
+        run: |
+          git config user.name "quasar-correction-bot"
+          git config user.email "quasar-correction-bot@users.noreply.github.com"
+          git add -A
+          git commit -m "Decouple the Quasar client protocol from Star-Lang"
+          git push origin HEAD:research/quasar-product-architecture

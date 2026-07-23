@@ -1,0 +1,92 @@
+#+title: STAR-LANG-RESEARCH-018 Dispatcher Idempotency Identity
+#+date: 2026-07-23
+#+status: implemented-prototype
+
+* Problem
+
+The deterministic dispatcher stores records under:
+
+#+begin_src text
+actor + idempotency-key
+#+end_src
+
+Before this slice, record status controlled replay behavior, but the dispatcher did not bind the key to a stable semantic command identity. A caller could therefore reuse one idempotency key for a changed command after retry. Terminal and in-progress records also needed an explicit compatibility rule rather than relying on the key alone.
+
+* Command identity
+
+The semantic identity includes:
+
+- Star wire version
+- lifecycle kind
+- message type
+- actor
+- sender
+- correlation ID
+- idempotency key
+- dataset
+- reply-to target
+- deadline
+- payload
+
+The identity excludes delivery metadata:
+
+- message ID
+- causation ID
+- attempt
+- sent-at timestamp
+
+A redelivery may change delivery metadata while remaining the same semantic command. Changing payload or routing semantics under the same actor and idempotency key is a conflict.
+
+* Dispatcher rule
+
+Before processing any existing idempotency record, compare the incoming command identity with the command stored in the record.
+
+#+begin_src text
+same identity + terminal record
+  -> replay stored terminal outcomes
+
+same identity + in-progress record
+  -> return duplicate-in-progress acknowledgement
+
+same identity + retry record
+  -> execute another attempt
+
+changed identity + any existing record
+  -> signal dispatcher-idempotency-conflict-error
+  -> do not invoke the handler
+#+end_src
+
+This check occurs before the original dispatcher state machine. It therefore applies uniformly to terminal, in-progress, retry, cancelled, and future record statuses.
+
+* Recovery interaction
+
+The BBP runtime journal restores the original command into dispatcher idempotency records. A recovered pending command and a later redelivery share semantic identity even though their message IDs, causation links, attempt numbers, or timestamps may differ.
+
+A changed payload under the restored idempotency key is rejected before remote routing. This prevents recovery state from being used as authority for different work.
+
+Worker-side run-id and registration identity remain separate safeguards:
+
+- dispatcher identity protects command submission
+- worker run-id identity protects external tool execution
+- worker registration identity protects aggregate metadata
+
+All three layers are required because each controls a different replay boundary.
+
+* Verification
+
+The focused suite verifies:
+
+- delivery-only metadata changes preserve identity
+- payload changes alter identity
+- compatible terminal redelivery replays byte-identical outcomes
+- terminal conflict does not invoke the handler
+- in-progress conflict does not invoke the handler
+- retry conflict does not invoke the handler
+- compatible retry redelivery executes another attempt and may complete
+
+* Remaining work
+
+- define canonical identity for map-like payloads where entry order is not semantic
+- include imported specification digest in identity when one dispatcher can host multiple locked contract graphs
+- expose a structured conflict result at external submission boundaries instead of only an internal condition
+- integrate the layer into additional Star-Lang runtime assemblies as they become executable

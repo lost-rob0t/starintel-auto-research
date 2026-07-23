@@ -10,6 +10,7 @@ Continue Star-Lang and the BBP tool domain server as coordinated but separate la
 - Runtime configuration owns bind coordinates, advertised coordinates, serialization, TLS material, and message-size limits.
 - The BBP worker consumes the compiled external actor contract and materializes its dynamic endpoint when the worker starts.
 - The main gserver receives its ingress URI from the same validated configuration model.
+- The main gserver owns heartbeat leases and removes expired workers from routing eligibility.
 
 * Decision
 
@@ -37,6 +38,16 @@ The Common Lisp prototype adds =domain-remoting-config-prototype.lisp= with:
 
 The BBP runtime now requires an explicit configuration object. The fixed ports 4711 and 4712 are removed from the runtime entry points.
 
+The prototype also adds =domain-remoting-lease-prototype.lisp= with:
+
+- monotonic heartbeat lease time
+- configurable positive lease timeout
+- an injectable clock for deterministic tests
+- last-seen tracking on registration and heartbeat
+- automatic expiry before node selection
+- revival when a valid heartbeat arrives
+- live-node metrics independent of total registrations
+
 * Runtime entry points
 
 #+begin_src lisp
@@ -50,7 +61,8 @@ The BBP runtime now requires an explicit configuration object. The fixed ports 4
           :port 4912))
        (main
          (start-bbp-main-gserver
-          :config main-config))
+          :config main-config
+          :heartbeat-timeout-ms 15000))
        (worker
          (start-bbp-tool-domain-server
           :main-uri (bbp-main-runtime-uri main)
@@ -61,17 +73,27 @@ The BBP runtime now requires an explicit configuration object. The fixed ports 4
 
 * Verification
 
-The added test suite verifies:
+The configuration and lease test suites verify:
 
 - valid Sento option emission
 - advertised URI construction
 - preservation of the runtime-neutral compiled actor
 - materialization of the BBP worker endpoint
+- expiry at the exact lease boundary
+- exclusion of expired nodes from routing
+- heartbeat revival of expired nodes
+- validation of positive lease timeouts
+
+The live smoke test launches two separate SBCL processes:
+
+1. main gserver on one Sento endpoint
+2. BBP worker on a second Sento endpoint
+
+It verifies registration, registration acknowledgement, heartbeats, a remote program command, a remote tool command, result return, deterministic tool output, and clean shutdown over actual TCP remoting.
 
 * Next
 
-- run a live two-process Sento TCP smoke test in CI
-- resolve actual bound ports when port zero support is available
+- persist pending commands and terminal results through a runtime journal port
 - add mTLS configuration loading and certificate identity checks
-- expire nodes when heartbeats exceed the configured lease
-- persist pending commands and terminal results
+- resolve actual bound ports when port zero support is available
+- add multi-worker deterministic routing and failover tests

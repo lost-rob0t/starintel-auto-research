@@ -49,10 +49,12 @@
       (compile-bbp-domain-program)
     (declare (ignore library tools domain actor))
     (let ((dispatcher (make-deterministic-dispatcher manifest)))
-      (register-dispatch-handler
+      (register-dispatch-actor
        dispatcher
        (getf command :actor)
-       handler)
+       (lambda (runtime received)
+         (declare (ignore runtime))
+         (funcall handler received)))
       dispatcher)))
 
 (defun identity-test-redelivery (dispatcher command message-id sent-at)

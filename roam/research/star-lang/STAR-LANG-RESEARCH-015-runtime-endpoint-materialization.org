@@ -1,0 +1,77 @@
+#+title: STAR-LANG-RESEARCH-015 Runtime Endpoint Materialization
+#+date: 2026-07-23
+#+status: implemented-prototype
+
+* Scope
+
+Continue Star-Lang and the BBP tool domain server as coordinated but separate layers.
+
+- Star-Lang owns portable actor contracts and runtime-neutral endpoints.
+- Runtime configuration owns bind coordinates, advertised coordinates, serialization, TLS material, and message-size limits.
+- The BBP worker consumes the compiled external actor contract and materializes its dynamic endpoint when the worker starts.
+- The main gserver receives its ingress URI from the same validated configuration model.
+
+* Decision
+
+The compiled BBP actor keeps this endpoint:
+
+#+begin_src lisp
+sento://dynamic/user/bbp-domain
+#+end_src
+
+The runtime replaces only the dynamic authority. The actor path remains part of the compiled contract. This prevents the language manifest from embedding deployment-specific hosts or ports while preserving a deterministic actor identity.
+
+* Prototype
+
+The Common Lisp prototype adds =domain-remoting-config-prototype.lisp= with:
+
+- validated bind host
+- validated advertised host
+- required TCP port
+- optional TLS configuration
+- optional serializer
+- bounded maximum message length
+- Sento option emission
+- base URI and actor URI construction
+- compiled external actor endpoint materialization
+
+The BBP runtime now requires an explicit configuration object. The fixed ports 4711 and 4712 are removed from the runtime entry points.
+
+* Runtime entry points
+
+#+begin_src lisp
+(let* ((main-config
+         (make-domain-remoting-config
+          :advertised-host "main.internal"
+          :port 4911))
+       (worker-config
+         (make-domain-remoting-config
+          :advertised-host "worker.internal"
+          :port 4912))
+       (main
+         (start-bbp-main-gserver
+          :config main-config))
+       (worker
+         (start-bbp-tool-domain-server
+          :main-uri (bbp-main-runtime-uri main)
+          :node-id "bbp-worker-1"
+          :config worker-config)))
+  (values main worker))
+#+end_src
+
+* Verification
+
+The added test suite verifies:
+
+- valid Sento option emission
+- advertised URI construction
+- preservation of the runtime-neutral compiled actor
+- materialization of the BBP worker endpoint
+
+* Next
+
+- run a live two-process Sento TCP smoke test in CI
+- resolve actual bound ports when port zero support is available
+- add mTLS configuration loading and certificate identity checks
+- expire nodes when heartbeats exceed the configured lease
+- persist pending commands and terminal results

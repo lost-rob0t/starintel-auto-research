@@ -2,9 +2,9 @@
 :ID:       starintel-star-lang-index-000
 :END:
 #+title: STAR-LANG-INDEX-000 Star-Lang Language Research
-#+description: Project index for Star-Lang foundations, controlled language prototypes, importable specifications, normalized compiler IR, concrete core syntax, semantic validation, canonical JSON, generated bindings, message lifecycle, deterministic dispatch, runtime bindings, domain servers, shared fixtures, comparison rules, and the later implementation-design gate.
+#+description: Project index for Star-Lang foundations, controlled language prototypes, importable specifications, normalized compiler IR, concrete core syntax, semantic validation, canonical JSON, generated bindings, message lifecycle, deterministic dispatch, transport settlement, publication outboxes, runtime bindings, domain servers, shared fixtures, comparison rules, and the later implementation-design gate.
 #+status: ACTIVE
-#+filetags: :starintel:index:star-lang:dsl:comparison:compiler:ir:actors:wire-protocol:bindings:delivery:dispatcher:org-roam:
+#+filetags: :starintel:index:star-lang:dsl:comparison:compiler:ir:actors:wire-protocol:bindings:delivery:dispatcher:transport:settlement:outbox:org-roam:
 
 * Purpose
 
@@ -64,6 +64,12 @@ Status: review. This pass defines commands, events, replies, acknowledgements, e
 
 Status: review. This pass executes the lifecycle model in a pure FIFO dispatcher with manifest-checked actor routing, terminal outcome replay, in-progress duplicate suppression, retry redelivery, deterministic deadlines, and cancellation. It is the conformance state machine for later cl-gserver and transport adapters.
 
+* Active Transport Settlement Loop
+
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-012-transport-port-and-settlement.org][STAR-LANG-RESEARCH-012 Transport Port and Settlement]]
+
+Status: review. This pass separates actor-visible lifecycle acknowledgements from broker settlement, defines a transport-neutral port, models delayed at-least-once redelivery and dead-letter rejection, and adds a resumable publication outbox so outputs complete before the source delivery is settled.
+
 * Shared Artifacts
 
 - =prototypes/star-lang/fixtures/email-enumeration.sexp=
@@ -87,6 +93,10 @@ Status: review. This pass executes the lifecycle model in a pure FIFO dispatcher
 - =prototypes/star-lang/common-lisp/message-lifecycle-tests.lisp=
 - =prototypes/star-lang/common-lisp/deterministic-dispatcher-prototype.lisp=
 - =prototypes/star-lang/common-lisp/deterministic-dispatcher-tests.lisp=
+- =prototypes/star-lang/common-lisp/transport-port-prototype.lisp=
+- =prototypes/star-lang/common-lisp/dispatcher-transport-adapter-prototype.lisp=
+- =prototypes/star-lang/common-lisp/transport-port-tests.lisp=
+- =prototypes/star-lang/common-lisp/transport-outbox-tests.lisp=
 - =.github/workflows/star-lang-common-lisp.yml=
 
 The email-enumeration fixture is the conformance fixture[fn:conformance-fixture] for every language implementation. Later prototypes may decode it differently but may not change its workflow, fake actor outcomes, persistence expectations, or final result.
@@ -95,7 +105,7 @@ The specification/domain prototype is a parallel requirements fixture. Equivalen
 
 The normalized-IR prototype is a compiler-boundary fixture. Equivalent frontends must be able to produce the same runtime-neutral graph, while runtime bindings remain replaceable projections.
 
-The FEC core fixture is the concrete schema, wire, lifecycle, and dispatcher fixture. Equivalent frontends must compile the same typed library, pass the same semantic checks, emit byte-stable canonical JSON, generate compatible language bindings, preserve the same delivery outcomes, and suppress the same duplicate executions.
+The FEC core fixture is the concrete schema, wire, lifecycle, dispatcher, and transport fixture. Equivalent frontends must compile the same typed library, pass the same semantic checks, emit byte-stable canonical JSON, generate compatible language bindings, preserve the same delivery outcomes, suppress the same duplicate executions, and retain the same publication-before-settlement ordering.
 
 * Ordered Loops
 
@@ -147,6 +157,10 @@ Define at-least-once-safe command delivery, correlation and causation, accepted 
 
 Execute the lifecycle rules in a pure state machine with manifest actor routing, FIFO delivery, typed replies, terminal result replay, retry redelivery, in-progress suppression, deadlines, and cancellation before adding real runtime effects.
 
+** REVIEW Loop 012: Transport Port and Settlement
+
+Separate lifecycle outcomes from broker settlement, publish required outcomes before settling their source delivery, preserve broker and Star-Lang retry identities independently, and resume interrupted output publication without repeating actor work.
+
 * Comparison Invariants
 
 Every prototype must preserve:
@@ -194,10 +208,16 @@ After a language baseline passes, its next requirements fixture must also preser
 28. retry redelivery with incremented attempt and stable correlation
 29. deadline failure before actor execution
 30. cancellation indexed by message and correlation
+31. actor-visible lifecycle acknowledgements separated from transport settlement
+32. all required lifecycle outcomes published before source delivery settlement
+33. resumable ordered publication records for interrupted output delivery
+34. held commands remain unsettled until cancellation outcomes publish
+35. poison inputs terminate through reject and dead-letter behavior
+36. broker redelivery count remains distinct from Star-Lang attempt count
 
 * Promotion Gate
 
-No prototype enters =roam/implement/= and no Star-Lang implementation design is approved from this index. The later design gate[fn:design-gate] may open only after Loop 005 records the complete evidence and nsaspy approves a numbered design. Loops 006 through 011 add requirements but do not independently authorize promotion.
+No prototype enters =roam/implement/= and no Star-Lang implementation design is approved from this index. The later design gate[fn:design-gate] may open only after Loop 005 records the complete evidence and nsaspy approves a numbered design. Loops 006 through 012 add requirements but do not independently authorize promotion.
 
 * Related Project Indexes
 
@@ -208,7 +228,7 @@ No prototype enters =roam/implement/= and no Star-Lang implementation design is 
 
 [fn:project-index] Project index: A maintained navigation file that lists the authoritative notes, current work, dependencies, ordering, and decision gates for one project area.
 
-[fn:star-lang] Star-Lang: The proposed StarIntel language for declaring typed document flows, actor work, agent tools, persistence, recovery, importable specifications, domain servers, resumable analysis behavior, portable actor contracts, delivery lifecycle semantics, and deterministic runtime behavior.
+[fn:star-lang] Star-Lang: The proposed StarIntel language for declaring typed document flows, actor work, agent tools, persistence, recovery, importable specifications, domain servers, resumable analysis behavior, portable actor contracts, delivery lifecycle semantics, deterministic runtime behavior, and transport settlement.
 
 [fn:common-lisp] Common Lisp: A standardized Lisp programming language with functions, macros, object facilities, hash tables, and a structured condition and restart system.
 

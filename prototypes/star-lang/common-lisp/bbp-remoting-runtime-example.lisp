@@ -11,9 +11,11 @@
 (load (merge-pathnames "domain-server-core-prototype.lisp" *load-truename*))
 (load (merge-pathnames "bbp-domain-server-prototype.lisp" *load-truename*))
 (load (merge-pathnames "bbp-run-idempotency-prototype.lisp" *load-truename*))
+(load (merge-pathnames "runtime-journal-port-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-runtime-port-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-lease-prototype.lisp" *load-truename*))
+(load (merge-pathnames "domain-remoting-journal-prototype.lisp" *load-truename*))
 (load (merge-pathnames "domain-remoting-config-prototype.lisp" *load-truename*))
 (load (merge-pathnames "sento-remoting-domain-adapter.lisp" *load-truename*))
 
@@ -49,9 +51,14 @@
 (defun start-bbp-main-gserver
     (&key system
           config
+          journal-port
           (heartbeat-timeout-ms 15000)
           heartbeat-clock)
   (require-domain-remoting-config config)
+  (when journal-port
+    (unless (runtime-journal-port-p journal-port)
+      (fail 'runtime-journal-error
+            "BBP main runtime journal-port must be a runtime journal port.")))
   (multiple-value-bind (library tools domain actor manifest)
       (compile-bbp-domain-program)
     (declare (ignore library tools domain actor))
@@ -68,6 +75,9 @@
        gateway
        :timeout-ms heartbeat-timeout-ms
        :clock heartbeat-clock)
+      (when journal-port
+        (configure-main-domain-gateway-journal gateway journal-port)
+        (restore-main-domain-gateway-journal gateway))
       (remoting-enable
        remoting-port
        actor-system

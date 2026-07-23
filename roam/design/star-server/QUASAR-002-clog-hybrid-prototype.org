@@ -1,0 +1,824 @@
+:PROPERTIES:
+:ID:       quasar-clog-hybrid-prototype-002
+:END:
+#+title: QUASAR-002 CLOG Hybrid Prototype Architecture
+#+description: Define the first Quasar prototype as a Common Lisp and CLOG application with Cytoscape as a browser-side composite renderer, simple CLOS action dispatch, and a renderer-independent graph core.
+#+status: DRAFT
+#+filetags: :starintel:quasar:design:prototype:common-lisp:clog:cytoscape:local-first:
+#+todo: TODO REVIEW BLOCKED | DONE REJECTED
+#+created: [2026-07-23 Thu]
+#+last_modified: [2026-07-23 Thu]
+
+| Version | Date       | Description of change                                                        | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-23 | Select a CLOG hybrid prototype while preserving an independent graph core.   | No                    |
+
+* Related Nodes
+
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:QUASAR-001-basic-typed-graph-editor.org][QUASAR-001 Basic Typed Graph Editor Architecture]]
+- [[file:../../research/star-server/QUASAR-RESEARCH-000-investigation-workspace-architecture.org][QUASAR-RESEARCH-000 Quasar Investigation Workspace Architecture]]
+- [[file:../../research/star-server/QUASAR-RESEARCH-001-transform-automation-catalog.org][QUASAR-RESEARCH-001 Transform Automation Catalog]]
+- [[file:../../research/star-server/QUASAR-RESEARCH-002-client-library-stack.org][QUASAR-RESEARCH-002 Client Library Stack]]
+
+* Decision
+
+The first executable Quasar prototype will use:
+
+- SBCL and Common Lisp for the canonical graph model, graph operations, action discovery, action execution, persistence, and application state;
+- CLOG for browser bootstrap, the application shell, ordinary controls, inspector forms, menus, dialogs, event registration, and REPL-driven UI development;
+- Cytoscape.js as one browser-side composite component for graph rendering and high-frequency graph interaction;
+- a deliberately small JavaScript adapter between Cytoscape and Common Lisp;
+- no React requirement;
+- no TypeScript requirement;
+- no standalone Quasar network protocol requirement before the prototype proves the interaction model.
+
+This decision changes the immediate implementation path described by =QUASAR-001=. It does not change the Quasar product boundary established there.
+
+The protocol-first TypeScript client remains a possible extraction path after the prototype. It is no longer the prerequisite for discovering the editor.
+
+* Why This Prototype Path
+
+The current design had begun optimizing for a permanent split client before the graph editor itself had been exercised.
+
+That created design drift in four areas:
+
+1. the frontend stack became larger than the first editor slice;
+2. a formal network protocol was being frozen before actual UI operations exposed the useful command boundary;
+3. action execution was described as an extension platform before one direct Common Lisp action had been exercised;
+4. development convenience at the Common Lisp REPL was being traded away before its value had been measured.
+
+The CLOG prototype corrects that drift by collapsing browser lifecycle and ordinary UI dispatch into the existing Common Lisp process.
+
+The prototype is intended to answer concrete product questions:
+
+- What is the smallest useful typed graph document?
+- Which user gestures should become durable graph operations?
+- Which state belongs to the graph document and which state belongs only to the active UI session?
+- What context is required to discover applicable actions?
+- What result shape makes action output validate, apply, and undo cleanly?
+- How much JavaScript is actually required around Cytoscape?
+- Does CLOG remain comfortable once the inspector, menus, and action dispatch exist?
+
+* CLOG Basis
+
+CLOG uses HTTP for initial browser bootstrap and WebSockets for continued communication. Its documented model allows an initial HTML application, a UI constructed through CLOG calls, or a hybrid composite component delivered in a bulk HTML and JavaScript write.
+
+The hybrid method is selected for Quasar.
+
+The CLOG project documentation notes that building an entire initial interface incrementally through individual CLOG operations is slower than serving initial HTML or using hybrid composite components. Quasar therefore will not represent every Cytoscape node and edge as an independent CLOG element.
+
+Official upstream references:
+
+- https://github.com/rabbibotton/clog/blob/main/README.md
+- https://github.com/rabbibotton/clog/blob/main/CONCEPT.md
+- https://github.com/rabbibotton/clog/blob/main/clog.asd
+
+* Architectural Shape
+
+#+begin_src text
+SBCL process
+|
++-- quasar-core
+|   +-- graph document
+|   +-- graph operations and batches
+|   +-- validation
+|   +-- undo and redo
+|   +-- type registry
+|   +-- storage interface
+|
++-- quasar-actions
+|   +-- action definitions
+|   +-- applicability dispatch
+|   +-- invocation dispatch
+|   +-- result validation
+|
++-- quasar-clog
+|   +-- application lifecycle
+|   +-- toolbar and menus
+|   +-- inspector
+|   +-- dialogs and notifications
+|   +-- active UI session
+|
++-- quasar-cytoscape
+    +-- composite graph component
+    +-- browser-side renderer state
+    +-- small JavaScript adapter
+    +-- committed event bridge
+#+end_src
+
+The dependency direction is strict:
+
+#+begin_src text
+quasar-core        <- quasar-actions
+      ^                    ^
+      |                    |
+quasar-cytoscape <- quasar-clog
+#+end_src
+
+=quasar-core= must not depend on CLOG, browser objects, JavaScript identifiers, Cytoscape element objects, or an active WebSocket connection.
+
+* Prototype Boundary
+
+** In scope
+
+- one local user;
+- one active graph document per browser window;
+- typed nodes and edges;
+- add, update, remove, connect, and move operations;
+- graph batch application;
+- an inspector for labels, types, and properties;
+- save and reopen;
+- bounded undo and redo;
+- one in-process Common Lisp action;
+- context-menu or command-surface action discovery;
+- canonical JSON export;
+- development from SLIME or SLY without restarting the browser for ordinary Lisp changes where practical.
+
+** Out of scope
+
+- React;
+- a TypeScript application architecture;
+- generated client bindings;
+- a public remote API;
+- multi-user collaboration;
+- distributed actions;
+- remote workers;
+- domain-server requirements;
+- Star-Lang runtime requirements;
+- a graph database requirement;
+- full crash-safe event sourcing;
+- a plugin marketplace;
+- complex desktop packaging;
+- large-graph virtualization;
+- evidence or case-management workflows.
+
+* Core Invariants
+
+The prototype may simplify transport and UI structure, but it must preserve the following invariants.
+
+1. The Common Lisp graph document is canonical.
+2. Cytoscape is a projection and interaction surface, not the durable database.
+3. CLOG objects represent UI controls and sessions, not canonical graph entities.
+4. Manual edits and action results enter the graph through the same graph-operation interface.
+5. Actions return data describing graph mutations; they do not mutate Cytoscape directly.
+6. Undo reverses graph mutations, not external side effects.
+7. Quasar remains usable without Star-Lang, StarIntel, actors, or domain servers.
+8. Quasar-specific actions remain owned by Quasar.
+9. Renderer-specific code remains outside =quasar-core=.
+10. Unknown node and edge types must remain round-trippable.
+
+* Canonical Graph Model
+
+The prototype should retain the graph concepts from =QUASAR-001= without prematurely freezing a public JSON protocol.
+
+A graph document contains:
+
+- graph identifier;
+- title and optional description;
+- format version;
+- monotonically increasing local revision;
+- node table keyed by stable node identifier;
+- edge table keyed by stable edge identifier;
+- graph-level metadata;
+- persisted layout and viewport state;
+- optional type-library references;
+- bounded undo and redo stacks or equivalent transaction records.
+
+A node contains:
+
+- stable identifier;
+- type identifier;
+- label;
+- property map;
+- position;
+- optional visual overrides;
+- optional source and provenance metadata.
+
+An edge contains:
+
+- stable identifier;
+- type or predicate identifier;
+- source node identifier;
+- destination node identifier;
+- property map;
+- optional visual overrides;
+- optional source and provenance metadata.
+
+CLOS classes are acceptable for the prototype. Serialized graph data must not depend on unreadable implementation-specific object representations.
+
+* Graph Operation Model
+
+The prototype operation vocabulary is:
+
+1. =add-node=
+2. =update-node=
+3. =remove-node=
+4. =add-edge=
+5. =update-edge=
+6. =remove-edge=
+7. =move-nodes=
+8. =set-view=
+9. =apply-batch=
+10. =undo=
+11. =redo=
+
+A graph operation is a domain value. It is not a CLOG callback and not a JavaScript string.
+
+Conceptual interface:
+
+#+begin_src lisp
+(defgeneric validate-graph-operation (document operation))
+(defgeneric apply-graph-operation (document operation))
+(defgeneric inverse-graph-operation (document operation result))
+#+end_src
+
+The exact class hierarchy may change during the prototype. The semantic boundary must remain stable: validate, apply, record, project.
+
+* Mutation Pipeline
+
+Every durable mutation follows one path:
+
+#+begin_src text
+browser gesture or Lisp command
+        |
+        v
+translate to graph operation
+        |
+        v
+validate against document and type registry
+        |
+        v
+apply to canonical graph document
+        |
+        +--> record inverse or transaction
+        +--> advance local revision
+        +--> mark document dirty
+        |
+        v
+project accepted change to Cytoscape and inspectors
+#+end_src
+
+The UI must not optimistically change the durable graph and later attempt to infer the corresponding Lisp mutation.
+
+For high-frequency interactions, Cytoscape may display temporary local state. Only the committed result enters the mutation pipeline.
+
+Examples:
+
+- node dragging is local while the pointer moves;
+- drag completion emits one =move-nodes= operation;
+- edge preview is local;
+- completed edge creation emits one =add-edge= operation;
+- inspector typing is local until commit or controlled debounce;
+- layout animation is local;
+- accepted final positions may be committed as one =move-nodes= operation.
+
+* CLOG Responsibilities
+
+CLOG owns the prototype application shell and connection-local UI objects.
+
+CLOG responsibilities include:
+
+- initialize the browser application;
+- create the main workbench layout;
+- create toolbars, buttons, menus, dialogs, status areas, and inspector controls;
+- load Cytoscape and the Quasar browser adapter;
+- register browser event callbacks;
+- maintain the association between a browser connection and a Quasar UI session;
+- render action choices and parameter forms;
+- display validation errors and conditions;
+- trigger save, open, export, undo, and redo commands;
+- refresh controls when the selected graph entity changes.
+
+CLOG does not own:
+
+- graph identity;
+- graph mutation semantics;
+- action applicability semantics;
+- type validation;
+- undo transaction semantics;
+- persistent graph storage;
+- the renderer's high-frequency interaction state.
+
+* Cytoscape Composite Component
+
+Cytoscape is treated as one composite browser component mounted inside a CLOG-created container.
+
+The browser adapter exposes a small command surface from Lisp to JavaScript:
+
+- =loadGraph(snapshot)=
+- =addElements(elements)=
+- =updateElements(elements)=
+- =removeElements(ids)=
+- =setPositions(positions)=
+- =setSelection(ids)=
+- =runLayout(name, options)=
+- =setStylesheet(stylesheet)=
+- =fit(ids)=
+- =exportViewport()=
+
+The adapter emits a small event surface from JavaScript to Lisp:
+
+- =selectionChanged=
+- =nodeMoveCommitted=
+- =edgeCreateCommitted=
+- =elementDeleteRequested=
+- =contextMenuRequested=
+- =viewportCommitted=
+- =layoutCommitted=
+- =rendererReady=
+- =rendererError=
+
+The first prototype should prefer one event payload containing structured JSON over many element-specific CLOG callbacks.
+
+* High-Frequency Event Rule
+
+The following remain entirely browser-local unless a final committed value is required:
+
+- pointer movement;
+- hover;
+- pan frames;
+- zoom frames;
+- drag frames;
+- box-selection frames;
+- edge-handle previews;
+- layout animation frames;
+- renderer paint events.
+
+The following may cross to Common Lisp:
+
+- final selection state;
+- drag completion;
+- completed edge creation;
+- final viewport state after a quiet period;
+- layout completion with final positions;
+- explicit context-menu request;
+- explicit delete request;
+- renderer initialization or failure.
+
+This rule is the main control on CLOG and WebSocket overhead.
+
+* UI Session Model
+
+Each connected browser window receives a =quasar-ui-session=.
+
+A UI session may contain:
+
+- connection identifier;
+- active graph identifier;
+- active graph object reference or graph repository handle;
+- selected node and edge identifiers;
+- inspector edit buffer;
+- open dialog state;
+- active context menu state;
+- current renderer readiness state;
+- last projected graph revision;
+- transient notifications;
+- active action invocation handles.
+
+The UI session is disposable.
+
+Closing a browser window must not destroy a saved graph document. Reopening a graph constructs a new UI session and projects the current graph snapshot into a new Cytoscape component.
+
+* Action Model
+
+The prototype uses direct Common Lisp dispatch before introducing manifests or external adapters.
+
+An action has:
+
+- stable identifier;
+- display label;
+- version;
+- accepted selection shape;
+- optional parameter specification;
+- applicability method;
+- invocation method;
+- graph-batch result contract.
+
+Conceptual classes and generic functions:
+
+#+begin_src lisp
+(defclass quasar-action ()
+  ((id :initarg :id :reader action-id)
+   (label :initarg :label :reader action-label)
+   (version :initarg :version :reader action-version)))
+
+(defgeneric action-applicable-p (action context selection))
+(defgeneric action-parameters (action context selection))
+(defgeneric invoke-action (action context selection parameters))
+#+end_src
+
+Selection values should be explicit domain objects rather than lists of CLOG or Cytoscape objects.
+
+Conceptual selection classes may include:
+
+- empty selection;
+- single node selection;
+- multiple node selection;
+- single edge selection;
+- mixed selection.
+
+Methods may specialize on both the action and selection class.
+
+#+begin_src lisp
+(defmethod action-applicable-p
+    ((action resolve-domain-action)
+     context
+     (selection single-node-selection))
+  (node-type-p (selected-node selection) 'star.core/domain@1))
+#+end_src
+
+The registry is simple:
+
+- register an action instance by identifier;
+- list registered actions;
+- find an action by identifier;
+- compute applicable actions for a context and selection;
+- invoke an applicable action;
+- validate its result;
+- apply the result as one undo group.
+
+No declarative extension language is required for the first action.
+
+* Action Context
+
+An action context should provide only explicit capabilities and references.
+
+The initial context may contain:
+
+- graph identifier;
+- read-only graph access;
+- type registry;
+- current user configuration;
+- logger;
+- cancellation token;
+- optional permitted service handles.
+
+The initial in-process action may receive direct Common Lisp objects. That convenience must not permit it to mutate the graph outside the returned graph batch.
+
+During development, assertions or defensive copying may be used to detect direct mutation.
+
+* Action Result
+
+The successful action result contains:
+
+- action identifier and version;
+- invocation identifier;
+- graph batch;
+- optional summary message;
+- optional structured diagnostics;
+- optional provenance records.
+
+Failure should use Common Lisp conditions internally and a UI-safe error representation at the CLOG boundary.
+
+An action that produces no graph mutations may return an empty batch plus a message.
+
+* Conditions and Restarts
+
+The prototype should use Common Lisp conditions for development and controlled UI recovery.
+
+Useful condition families include:
+
+- invalid graph operation;
+- unknown graph entity;
+- type constraint violation;
+- stale UI projection;
+- action not applicable;
+- action invocation failure;
+- invalid action result;
+- graph storage failure;
+- renderer bridge failure.
+
+Potential development restarts include:
+
+- skip invalid operation;
+- replace unknown type with generic type;
+- reload renderer snapshot;
+- retry save;
+- discard inspector edit;
+- cancel action invocation.
+
+User-facing production behavior should select safe restarts explicitly rather than exposing the Lisp debugger through the browser.
+
+* Undo and Redo
+
+The prototype uses transaction-level undo.
+
+A transaction contains one or more accepted graph operations and the data needed to reverse them.
+
+Examples:
+
+- adding one node is one transaction;
+- editing several properties in one committed inspector save is one transaction;
+- a layout commit moving many nodes is one transaction;
+- an action result containing many nodes and edges is one transaction.
+
+The renderer is updated from the accepted inverse transaction after the canonical graph is changed.
+
+External side effects performed by an action are never represented as reversible merely because its graph output is reversible.
+
+* Persistence
+
+The initial persistence target should minimize infrastructure.
+
+Preferred prototype order:
+
+1. canonical graph snapshot saved to a local file;
+2. atomic replacement using a temporary file and rename;
+3. bounded in-memory undo history;
+4. optional sidecar metadata or command journal only if crash recovery proves necessary;
+5. SQLite only when graph listing, indexing, or transactional needs justify it.
+
+CLOG already depends on SQLite and CL-DBI, but Quasar should not select SQLite merely because it is transitively available.
+
+The storage interface remains:
+
+- =create-graph=
+- =load-graph=
+- =save-graph=
+- =delete-graph=
+- =list-graphs=
+
+Command-history persistence is deferred until the prototype demonstrates its value.
+
+* Serialization
+
+The prototype needs stable canonical JSON for save and export, but not a public remote protocol.
+
+The serialized form should preserve:
+
+- graph metadata;
+- nodes;
+- edges;
+- positions;
+- viewport;
+- type identifiers;
+- property values;
+- optional type-library references;
+- unknown fields where safe round-tripping requires them.
+
+The first serializer may be written directly in Common Lisp.
+
+=QUASAR-003= should freeze the external graph document and command protocol after the prototype has exercised actual mutations, action batches, and reconnect behavior.
+
+* Browser Adapter Language
+
+The first browser adapter should be plain JavaScript unless TypeScript provides an immediate measurable advantage.
+
+Reasons:
+
+- the adapter surface is intentionally small;
+- CLOG can load and invoke JavaScript directly;
+- avoiding a build pipeline keeps the first prototype REPL-oriented;
+- TypeScript can be introduced without changing the core when adapter complexity grows.
+
+TypeScript becomes justified when one or more of the following occur:
+
+- the adapter gains multiple modules;
+- event payloads become difficult to maintain manually;
+- frontend tests require a structured build;
+- renderer plugins create a substantial browser-side codebase;
+- a separate Quasar client is extracted.
+
+* Package Plan
+
+#+begin_src text
+quasar/
+  quasar.asd
+  packages.lisp
+
+  core/
+    graph-model.lisp
+    graph-operations.lisp
+    graph-batches.lisp
+    graph-validation.lisp
+    graph-undo.lisp
+    type-registry.lisp
+    serialization.lisp
+    graph-store.lisp
+
+  actions/
+    action-model.lisp
+    action-registry.lisp
+    action-dispatch.lisp
+    action-results.lisp
+    built-in-actions.lisp
+
+  ui/
+    clog-application.lisp
+    clog-session.lisp
+    clog-workbench.lisp
+    clog-inspector.lisp
+    clog-actions.lisp
+    cytoscape-component.lisp
+
+  static/
+    quasar.css
+    quasar-cytoscape.js
+#+end_src
+
+Possible ASDF systems:
+
+- =quasar/core=
+- =quasar/actions=
+- =quasar/ui-clog=
+- =quasar/tests=
+
+The base =quasar/core= system must load without CLOG.
+
+* REPL Development Model
+
+The prototype should optimize for live Common Lisp development.
+
+Expected loop:
+
+1. start Quasar from SLIME or SLY;
+2. open one browser window;
+3. redefine graph, action, or UI methods;
+4. invoke an explicit UI refresh or reload the current graph projection when required;
+5. test an action from both the REPL and the context menu;
+6. inspect graph objects directly;
+7. save a canonical graph fixture when behavior stabilizes.
+
+UI objects from an old class definition may require session reconstruction after incompatible redefinition. The design should provide a =rebuild-workbench= or equivalent development command rather than pretending every redefinition is transparent.
+
+* CLOG Overhead Budget
+
+The prototype does not assume CLOG overhead is zero. It defines where overhead is acceptable and what must be measured.
+
+Potential costs:
+
+- a substantial Common Lisp dependency graph;
+- one or more server-side objects for ordinary UI elements;
+- WebSocket round trips for server-handled events;
+- JavaScript serialization and evaluation;
+- browser and server state synchronization;
+- connection-local session cleanup;
+- embedded browser packaging later.
+
+Controls:
+
+- use CLOG core, not =clog/tools=, at runtime;
+- use one Cytoscape composite component rather than one CLOG object per graph element;
+- keep high-frequency events in JavaScript;
+- send committed structured events only;
+- batch renderer updates;
+- send a full snapshot when incremental recovery is more complex than useful;
+- keep single-user local operation as the prototype target.
+
+* Measurements Required During Prototype
+
+Record at least:
+
+- cold start time from loading the Quasar systems to an interactive browser;
+- resident SBCL memory before and after opening the workbench;
+- browser memory with empty, 100-node, 1,000-node, and 5,000-node fixtures;
+- time to project a full graph snapshot;
+- time to apply batches of 1, 10, 100, and 1,000 graph operations;
+- drag-completion round-trip latency;
+- inspector commit latency;
+- context-menu discovery latency with 10, 100, and 1,000 registered actions if that scale is relevant;
+- behavior after browser refresh, sleep, and WebSocket reconnect;
+- cleanup after closing repeated browser sessions.
+
+These are prototype diagnostics, not release benchmarks.
+
+* CLOG Retention Criteria
+
+CLOG may remain the production UI framework if the prototype demonstrates:
+
+- comfortable REPL-driven development;
+- acceptable local interaction latency;
+- reliable session reconstruction;
+- manageable browser adapter complexity;
+- straightforward packaging;
+- no need to duplicate substantial client state;
+- clean separation between =quasar-core= and =quasar-ui-clog=.
+
+* CLOG Exit Criteria
+
+Extract an independent client if measured problems include:
+
+- browser-side behavior grows into a large application that CLOG only indirectly controls;
+- reconnect recovery requires a stable public protocol anyway;
+- multiple simultaneous clients become a requirement;
+- offline editing without the Lisp process becomes important;
+- frontend-specific testing and component tooling outweigh CLOG simplicity;
+- CLOG DOM and event abstractions obstruct Cytoscape plugins;
+- packaging or security constraints require a separately versioned client;
+- the same graph core needs non-CLOG clients.
+
+If extraction occurs, =quasar-core= and =quasar-actions= remain. Only the CLOG UI adapter is replaced or supplemented.
+
+* Prototype Milestones
+
+** Milestone 0: loadable systems
+
+- =quasar/core= loads independently;
+- =quasar/ui-clog= starts CLOG and opens a browser;
+- a static Cytoscape component reports =rendererReady=;
+- no graph editing yet.
+
+** Milestone 1: canonical in-memory graph
+
+- create a blank graph document;
+- add two typed nodes from the REPL;
+- add one typed edge;
+- project the snapshot to Cytoscape;
+- select an element and display its identity.
+
+** Milestone 2: manual editing
+
+- add a node from the UI;
+- edit label, type, and properties;
+- create an edge;
+- commit node movement;
+- delete selected elements;
+- all changes enter through graph operations.
+
+** Milestone 3: persistence and undo
+
+- save canonical JSON;
+- reopen the graph;
+- undo and redo manual operations;
+- restore persisted positions and viewport;
+- survive browser refresh by rebuilding the UI session.
+
+** Milestone 4: direct action dispatch
+
+- register one Common Lisp action;
+- discover it for a compatible selection;
+- invoke it from a context menu or command surface;
+- validate its graph batch;
+- apply the batch as one undo transaction;
+- display success or failure.
+
+** Milestone 5: prototype evaluation
+
+- run the overhead measurements;
+- document CLOG friction and useful shortcuts;
+- decide whether to retain CLOG, extend the hybrid adapter, or extract a separate client;
+- identify the actual protocol boundary for =QUASAR-003=.
+
+* First Action Candidate
+
+The first action should be deterministic and avoid network dependencies so action dispatch can be tested independently.
+
+Recommended example:
+
+#+begin_quote
+Create a derived node from the selected node and connect it with a typed relation.
+#+end_quote
+
+For example, selecting a domain node could create a normalized-domain node or a placeholder related artifact without performing DNS resolution.
+
+A real DNS action may follow after the action pipeline works.
+
+* Prototype Acceptance Tests
+
+The CLOG prototype design is accepted when:
+
+- =quasar/core= loads and tests without CLOG;
+- CLOG can create and rebuild the workbench;
+- Cytoscape is represented as one composite component;
+- graph nodes and edges are not mirrored as independent CLOG objects;
+- high-frequency renderer events remain browser-local;
+- every committed manual edit becomes a graph operation;
+- the canonical graph can be inspected and changed from the Lisp REPL;
+- save and reopen preserve graph identity, types, properties, positions, and viewport;
+- undo and redo operate on graph transactions;
+- one CLOS-dispatched action returns a graph batch;
+- action output is validated and undoable as one transaction;
+- no React, TypeScript, Star-Lang runtime, StarIntel server, actor, or domain server is needed;
+- the design records measured reasons before retaining or replacing CLOG.
+
+* Decisions Deferred Until Prototype Evidence
+
+- exact CLOS class hierarchy for graph operations;
+- exact canonical JSON field naming;
+- whether command identifiers are needed for the local-only prototype;
+- whether every accepted operation advances a persisted revision;
+- file snapshots versus SQLite;
+- event log persistence;
+- TypeScript adoption;
+- React adoption;
+- Tauri or another desktop shell;
+- public HTTP and WebSocket protocol;
+- remote action adapters;
+- action manifests;
+- collaborative editing.
+
+* Next Work Item
+
+After review of this design, implement only Milestone 0 and the smallest part of Milestone 1:
+
+1. create the ASDF systems and package boundaries;
+2. load CLOG without =clog/tools=;
+3. open a browser workbench;
+4. mount an empty Cytoscape component;
+5. receive a =rendererReady= event;
+6. construct one in-memory graph from the REPL;
+7. project two nodes and one edge;
+8. stop and review the architecture before adding editing gestures.
+
+The prototype must not begin by implementing Star-Lang integration, remote services, distributed actions, or a formal public protocol.

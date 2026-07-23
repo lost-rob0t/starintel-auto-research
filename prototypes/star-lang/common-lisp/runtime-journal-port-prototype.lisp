@@ -28,6 +28,22 @@
 (defun runtime-journal-event-kind-p (kind)
   (member kind '(:pending :route-result :remote-result) :test #'eq))
 
+(defun validate-runtime-journal-result (event)
+  (unless (plist-has-key-p event :result)
+    (fail 'runtime-journal-error
+          "Settled runtime journal event requires a dispatch result."))
+  (let ((result (getf event :result)))
+    (ensure-plist
+     result
+     "runtime journal dispatch result"
+     'runtime-journal-error)
+    (unless (member (getf result :outcome)
+                    '(:complete :retry :fail)
+                    :test #'eq)
+      (fail 'runtime-journal-error
+            "Runtime journal result requires complete, retry, or fail outcome."))
+    result))
+
 (defun validate-runtime-journal-event (event)
   (ensure-plist event "runtime journal event" 'runtime-journal-error)
   (let ((kind (getf event :kind))
@@ -41,16 +57,36 @@
       (fail 'runtime-journal-error
             "Runtime journal dispatcher sequence must be a nonnegative integer."))
     (required-nonempty-string now "runtime journal dispatcher clock")
-    (ensure-plist command "runtime journal command" 'runtime-journal-error)
+    (validate-lifecycle-envelope nil command :validate-payload nil)
     (unless (eq (getf command :kind) :command)
       (fail 'runtime-journal-error
             "Runtime journal command must be a lifecycle command envelope."))
-    (when (member kind '(:route-result :remote-result) :test #'eq)
-      (ensure-plist
-       (getf event :result)
-       "runtime journal dispatch result"
-       'runtime-journal-error))
+    (if (eq kind :pending)
+        (when (plist-has-key-p event :result)
+          (fail 'runtime-journal-error
+                "Pending runtime journal event may not carry a result."))
+        (validate-runtime-journal-result event))
     event))
+
+(defun validate-runtime-journal-order (events)
+  (loop with previous-sequence = nil
+        with previous-now = nil
+        for event in events
+        for sequence = (getf event :dispatcher-sequence)
+        for now = (getf event :dispatcher-now)
+        do
+           (when (and previous-sequence
+                      (< sequence previous-sequence))
+             (fail 'runtime-journal-error
+                   "Runtime journal dispatcher sequence moved backward from ~D to ~D."
+                   previous-sequence sequence))
+           (when (and previous-now (string< now previous-now))
+             (fail 'runtime-journal-error
+                   "Runtime journal dispatcher clock moved backward from ~A to ~A."
+                   previous-now now))
+           (setf previous-sequence sequence
+                 previous-now now))
+  events)
 
 (defun runtime-journal-append (port event)
   (unless (runtime-journal-port-p port)
@@ -75,11 +111,14 @@
         (unless (listp events)
           (fail 'runtime-journal-error
                 "Runtime journal replay must return a list."))
-        (mapcar
-         (lambda (event)
-           (validate-runtime-journal-event event)
-           (copy-tree event))
-         events))
+        (let ((validated
+                (mapcar
+                 (lambda (event)
+                   (validate-runtime-journal-event event)
+                   (copy-tree event))
+                 events)))
+          (validate-runtime-journal-order validated)
+          validated))
     (runtime-journal-error (condition)
       (error condition))
     (error (condition)

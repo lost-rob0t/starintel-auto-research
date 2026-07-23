@@ -1,0 +1,269 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-014
+:END:
+#+title: STAR-LANG-RESEARCH-014 BBP Tool Domain Remoting
+#+description: Implement a keyed bug-bounty-program tool domain server that runs standalone or as a remote Sento node connected to the main gserver.
+#+status: REVIEW
+#+filetags: :starintel:star-lang:bbp:bug-bounty:domain-server:tools:remoting:sento:cl-gserver:common-lisp:research:
+
+* Purpose
+
+Create one executable vertical slice proving that a Star-Lang domain server can:
+
+1. own keyed program state independently of cl-gserver;
+2. expose a fixed registry of bug-bounty tools;
+3. execute tools without shell interpolation;
+4. run as a remote process;
+5. register with the main gserver;
+6. receive commands through Sento remoting;
+7. return typed Star-Lang lifecycle results to the main dispatcher.
+
+The domain key is =program-id=. A program aggregate owns its scope and tool-run history. The runtime does not create one authority per document.
+
+* Source Surface
+
+The BBP specification fixture defines:
+
+- =program-id= and =run-id= scalar identifiers;
+- =program=, =target=, =tool-run=, and =tool-observation= documents;
+- =register-program=, =run-tool=, and =get-program-state= commands;
+- =program-registered=, =tool-run-completed=, and =program-state= replies;
+- =subfinder=, =httpx=, =katana=, and =nmap= as the initial tool enum.
+
+The domain declaration compiles from:
+
+#+begin_src lisp
+(domain-server bbp
+  (:key-type program-id
+   :owns (program target tool-run tool-observation)
+   :accepts (register-program run-tool get-program-state)
+   :tools (subfinder httpx katana nmap)
+   :restart permanent
+   :mailbox (bounded 1024)
+   :dispatcher bbp-tools
+   :capabilities (run-tools emit-documents remote-export)))
+#+end_src
+
+* Runtime-Neutral Domain Core
+
+The core compiler emits domain-server IR with:
+
+- name;
+- keyed-aggregate authority;
+- key type;
+- owned document contracts;
+- accepted message contracts;
+- available tools;
+- restart policy;
+- mailbox policy;
+- dispatcher name;
+- capabilities.
+
+A standalone =domain-server-engine= stores instances in a keyed table. =invoke-domain-operation= lazily creates the requested aggregate and calls the handler for the qualified message type.
+
+No actor system is required for this path.
+
+* Tool Registry
+
+A tool declaration contains a fixed executable and fixed argument template. Only these placeholders are accepted:
+
+- =:target=
+- =:program-id=
+- =:run-id=
+
+The BBP registry compiles these commands:
+
+#+begin_src text
+subfinder -silent -d <target>
+httpx -silent -json -u <target>
+katana -silent -jsonl -u <target>
+nmap -sV -oX - <target>
+#+end_src
+
+The process runner passes an argv list to =uiop:run-program= with =:force-shell nil=. It wraps execution with the Coreutils =timeout= executable using the timeout declared by the tool contract. User values occupy individual argv elements and are never concatenated into a shell command.
+
+* Program Scope
+
+=register-program= installs the program's declared scope in the keyed aggregate.
+
+Before tool execution, the domain server extracts the target host and requires it to be either:
+
+- an exact declared root; or
+- a subdomain of a declared root.
+
+A rejected target returns the terminal code =star.bbp.out-of-scope= and the tool runner is not invoked.
+
+* Remote Topology
+
+#+begin_src text
+main gserver
+└── /user/star-domain-ingress
+      ├── remote node registry
+      ├── pending command table
+      └── Star-Lang dispatcher completion
+
+BBP worker process
+└── /user/bbp-domain
+      ├── registration and heartbeat control
+      └── keyed program actors
+          ├── program:acme
+          ├── program:example
+          └── ...
+#+end_src
+
+The remote =bbp-domain= actor is a fast ingress. It does not run tools directly. It resolves =program-id=, lazily creates one program actor for the key, and tells that actor to execute the command. Different program aggregates may therefore execute independently while operations for one program remain serialized by its mailbox.
+
+* Registration
+
+At startup, the worker enables remoting, creates =/user/bbp-domain=, creates a remote reference to the main ingress, and sends:
+
+#+begin_src lisp
+(:kind :star-domain-register
+ :node-id "bbp-node-1"
+ :domain "bbp"
+ :endpoint "sento://worker:4712/user/bbp-domain"
+ :tools ("subfinder" "httpx" "katana" "nmap")
+ :generation 1
+ :heartbeat 0)
+#+end_src
+
+The main gserver creates a remote actor reference to the advertised endpoint, records the node, and sends =:star-domain-registered= back to the worker. This acknowledgement proves bidirectional remoting before work is accepted.
+
+Heartbeats update node generation and liveness observations. A later pass must add heartbeat deadlines and transport-monitor integration.
+
+* Command Routing
+
+The main dispatcher registers =bbp-domain= as the logical Star-Lang target.
+
+When a BBP command arrives:
+
+1. normal Star-Lang envelope and actor-contract validation runs;
+2. the main gateway selects a live BBP node exporting the requested tool;
+3. it records the command in the pending table;
+4. it tells the remote =bbp-domain= reference;
+5. the dispatcher returns =defer= and emits =accepted=;
+6. the worker routes the command to the keyed program actor;
+7. the program actor invokes the BBP domain engine and tool runner;
+8. the worker tells =:star-domain-result= back to the main ingress;
+9. the main gateway calls =finish-deferred-dispatch=;
+10. the main dispatcher emits reply and completion or a structured error.
+
+A main runtime using the transport outbox may inject =finish-held-transport-dispatch= as the completion operation without changing the remoting protocol.
+
+* Delivery and Failure Rules
+
+- A command with no live compatible node returns a retry acknowledgement.
+- A remote tell failure before worker acceptance returns a retry acknowledgement.
+- Tool and domain failures return typed terminal errors.
+- Main-side idempotency suppresses duplicate remote tool execution.
+- Duplicate remote results are recognized after the pending command is cleared.
+- Registration, heartbeat, and remote-result messages are internal runtime control messages, not user-facing domain documents.
+- This slice does not claim exactly-once network delivery.
+
+* Sento Binding
+
+The concrete adapter maps the runtime-neutral port to current Sento remoting operations:
+
+#+begin_src lisp
+(rem:enable-remoting system ...)
+(ac:actor-of system :name name :receive receive ...)
+(rem:make-remote-ref system "sento://host:port/user/actor" ...)
+(act:tell remote-ref message sender)
+#+end_src
+
+Sento actors remain local to their actor system. A remote reference is the proxy used by the other process.
+
+Sources:
+
+- https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/specs/remoting.md
+- https://github.com/mdbergmann/cl-gserver/blob/a889b8375709ca9396bba5d06b6e460689a23716/src/remoting/remoting.lisp
+- https://asdf.common-lisp.dev/uiop.html
+
+* Runnable Two-Process Example
+
+Main process:
+
+#+begin_src lisp
+(load "prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp")
+
+(defparameter *main*
+  (start-bbp-main-gserver
+   :host "0.0.0.0"
+   :hostname "main-gserver"
+   :port 4711))
+
+(bbp-main-runtime-uri *main*)
+;; => "sento://main-gserver:4711/user/star-domain-ingress"
+#+end_src
+
+Worker process:
+
+#+begin_src lisp
+(load "prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp")
+
+(defparameter *worker*
+  (start-bbp-tool-domain-server
+   :main-uri "sento://main-gserver:4711/user/star-domain-ingress"
+   :node-id "bbp-node-1"
+   :host "0.0.0.0"
+   :hostname "bbp-worker"
+   :port 4712))
+#+end_src
+
+Main command submission:
+
+#+begin_src lisp
+(submit-bbp-main-command
+ *main*
+ (make-bbp-register-program-command
+  :message-id "register-acme"
+  :program-id "program:acme"
+  :name "Acme BBP"
+  :scope '("example.com")))
+
+(submit-bbp-main-command
+ *main*
+ (make-bbp-run-tool-command
+  :message-id "subfinder-acme-1"
+  :program-id "program:acme"
+  :run-id "run:subfinder:1"
+  :tool 'subfinder
+  :target "example.com"))
+
+(drain-bbp-main-results *main*)
+#+end_src
+
+* Conformance Tests
+
+The deterministic remoting network proves:
+
+1. compilation of the tool and domain declarations;
+2. standalone keyed execution;
+3. fixed argv construction without a shell;
+4. remote worker registration and acknowledgement;
+5. main-to-worker command delivery;
+6. lazy actor creation per program key;
+7. worker-to-main result delivery;
+8. main-side terminal completion;
+9. duplicate suppression without rerunning the tool;
+10. heartbeat delivery;
+11. out-of-scope rejection before execution;
+12. retry when no worker is available;
+13. presence of the concrete Sento remoting calls;
+14. canonical manifest JSON and lifecycle NDJSON output.
+
+* Boundary
+
+This pass does not yet:
+
+- install the tool binaries in a Nix module;
+- parse every tool's output into final StarIntel documents;
+- persist program state, run output, idempotency, or pending remoting commands;
+- implement heartbeat expiry or automatic node eviction;
+- configure mTLS certificates;
+- add per-tool concurrency quotas or process-resource limits beyond wall time;
+- implement remote cancellation of a running operating-system process;
+- run the live TCP smoke test in continuous integration;
+- promote this research prototype into the final Star-Lang implementation.
+
+The next pass should add durable BBP run records, tool-output parsers, heartbeat expiry, and a Nix runnable environment containing Sento remoting and the selected tools.

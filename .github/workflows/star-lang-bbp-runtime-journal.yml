@@ -1,0 +1,97 @@
+name: Star-Lang BBP Runtime Journal
+
+on:
+  pull_request:
+    paths:
+      - "prototypes/star-lang/common-lisp/runtime-journal-port-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/domain-remoting-journal-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/domain-remoting-journal-tests.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp"
+      - ".github/workflows/star-lang-bbp-runtime-journal.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "prototypes/star-lang/common-lisp/runtime-journal-port-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/domain-remoting-journal-prototype.lisp"
+      - "prototypes/star-lang/common-lisp/domain-remoting-journal-tests.lisp"
+      - "prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp"
+      - ".github/workflows/star-lang-bbp-runtime-journal.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install SBCL
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sbcl
+      - name: Check journal Lisp form balance
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              Path('prototypes/star-lang/common-lisp/runtime-journal-port-prototype.lisp'),
+              Path('prototypes/star-lang/common-lisp/domain-remoting-journal-prototype.lisp'),
+              Path('prototypes/star-lang/common-lisp/domain-remoting-journal-tests.lisp'),
+              Path('prototypes/star-lang/common-lisp/bbp-remoting-runtime-example.lisp'),
+          ]
+
+          for path in paths:
+              text = path.read_text(encoding='utf-8')
+              stack = []
+              in_string = False
+              escaped = False
+              in_comment = False
+              line = 1
+              for char in text:
+                  if char == '\n':
+                      line += 1
+                      in_comment = False
+                      continue
+                  if in_comment:
+                      continue
+                  if in_string:
+                      if escaped:
+                          escaped = False
+                      elif char == '\\':
+                          escaped = True
+                      elif char == '"':
+                          in_string = False
+                      continue
+                  if char == ';':
+                      in_comment = True
+                  elif char == '"':
+                      in_string = True
+                  elif char == '(':
+                      stack.append(line)
+                  elif char == ')':
+                      if not stack:
+                          raise SystemExit(f'{path}:{line}: unmatched closing parenthesis')
+                      stack.pop()
+              if in_string:
+                  raise SystemExit(f'{path}: unterminated string')
+              if stack:
+                  raise SystemExit(f'{path}:{stack[-1]}: unclosed parenthesis')
+              print(f'{path}: balanced')
+          PY
+      - name: Run BBP runtime journal suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/domain-remoting-journal-tests.lisp \
+            2>&1 | tee star-lang-bbp-runtime-journal.log
+      - name: Upload journal test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-bbp-runtime-journal
+          path: star-lang-bbp-runtime-journal.log
+          if-no-files-found: warn

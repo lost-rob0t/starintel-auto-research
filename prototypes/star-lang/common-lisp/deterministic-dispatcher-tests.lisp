@@ -184,7 +184,8 @@
          (command
            (dispatcher-test-command
             :message-id "deferred-command"
-            :idempotency-key "fec:candidates:2026:deferred")))
+            :idempotency-key "fec:candidates:2026:deferred"))
+         (duplicate-outcomes '()))
     (register-dispatch-actor
      dispatcher "fec-importer"
      (lambda (runtime envelope)
@@ -200,14 +201,14 @@
       (submit-dispatch-envelope dispatcher duplicate)
       (dispatcher-assert-equal '(:in-progress) (run-dispatcher dispatcher)
                                "in-progress duplicate is not rerun")
-      (let ((duplicate-outcomes (drain-dispatcher-emitted dispatcher)))
-        (dispatcher-assert-equal '(:ack) (envelope-kinds duplicate-outcomes)
-                                 "in-progress duplicate receives accepted ack")
-        (dispatcher-assert-equal
-         1
-         (gethash "fec-importer"
-                  (deterministic-dispatcher-handler-count dispatcher))
-         "deferred duplicate does not rerun handler")))
+      (setf duplicate-outcomes (drain-dispatcher-emitted dispatcher))
+      (dispatcher-assert-equal '(:ack) (envelope-kinds duplicate-outcomes)
+                               "in-progress duplicate receives accepted ack")
+      (dispatcher-assert-equal
+       1
+       (gethash "fec-importer"
+                (deterministic-dispatcher-handler-count dispatcher))
+       "deferred duplicate does not rerun handler"))
     (let ((cancel
             (make-cancel-envelope
              command

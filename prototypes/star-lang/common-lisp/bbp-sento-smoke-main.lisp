@@ -45,7 +45,7 @@
 
 (defun smoke-assert-error-code (envelopes expected)
   (let ((error-envelope (smoke-envelope-of-kind envelopes :error)))
-    (unless (string= (getf error-envelope :code) expected)
+    (unless (string= (getf (getf error-envelope :payload) :code) expected)
       (error "Expected error code ~A, received ~S."
              expected error-envelope))
     error-envelope))

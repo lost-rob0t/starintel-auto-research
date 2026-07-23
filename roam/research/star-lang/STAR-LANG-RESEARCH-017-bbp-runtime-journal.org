@@ -1,0 +1,152 @@
+#+title: STAR-LANG-RESEARCH-017 BBP Runtime Journal
+#+date: 2026-07-23
+#+status: implemented-prototype
+
+* Scope
+
+Add durable main-gserver recovery without replacing the existing deterministic dispatcher, domain gateway, or actor model.
+
+The runtime journal is an append-only port beneath gateway transition boundaries. It records enough dispatcher position and command state to reconstruct pending delivery, retry state, terminal replay, and deterministic lifecycle envelope identifiers after restart.
+
+* Event model
+
+** Pending
+
+#+begin_src text
+:pending
+  command
+  dispatcher-sequence
+  dispatcher-now
+#+end_src
+
+The pending event is appended before the remote tell. A crash after this append may cause redelivery, so the worker-side recovery idempotency contract in STAR-LANG-RESEARCH-016 is mandatory.
+
+** Route result
+
+#+begin_src text
+:route-result
+  command
+  result
+  dispatcher-sequence
+  dispatcher-now
+#+end_src
+
+This records a retry or terminal failure before the dispatcher mutates its in-memory idempotency record. It covers both remote tell failure and absence of a compatible live worker. It is not restored as pending and is not automatically redelivered.
+
+** Remote result
+
+#+begin_src text
+:remote-result
+  command
+  result
+  dispatcher-sequence
+  dispatcher-now
+#+end_src
+
+This event is appended before terminal or retry completion is applied in memory. A crash after append but before mutation reconstructs the same completion on startup.
+
+* Crash ordering
+
+#+begin_src text
+append :pending
+  -> put command in gateway pending map
+  -> remote tell
+  -> mark delivered in volatile state
+
+worker result received
+  -> append :remote-result
+  -> apply deterministic dispatcher completion
+  -> remove pending command
+#+end_src
+
+The journal is the authority after restart. The delivered marker remains volatile because a crash after remote delivery must redeliver. Worker run-id and registration replay protection make that redelivery safe.
+
+* Restoration
+
+Startup restoration requires fresh dispatcher and gateway state.
+
+For each event in append order:
+
+1. validate lifecycle command shape
+2. validate event kind and dispatch outcome
+3. enforce nondecreasing dispatcher sequence
+4. enforce nondecreasing dispatcher clock
+5. advance the dispatcher to the recorded transition boundary
+6. restore an in-progress idempotency record for pending delivery
+7. apply settled route or remote results through the existing deferred-completion path
+8. drain reconstructed envelopes so startup does not publish historical outcomes again
+
+Terminal idempotency records retain the reconstructed outcomes. A later duplicate command therefore returns the same reply, error, and completion acknowledgement envelope identifiers and timestamps.
+
+* Worker registration and redelivery
+
+Recovered pending commands remain inert until a compatible node registers. Registration executes the normal node validation and lease path, then scans pending message IDs in lexical order.
+
+For each pending command:
+
+- select one live compatible worker
+- send the original lifecycle command
+- mark it delivered only in volatile state
+- leave it pending until a worker result is durably appended
+
+No-node retries are journaled as route results. They are not pending deliveries and may be attempted again through normal dispatcher submission.
+
+* Reconnect capability
+
+A persistent BBP worker can reconnect to a new main URI without rebuilding its domain engine or per-program actors.
+
+Reconnect performs:
+
+- replace main remote reference
+- increment worker generation
+- clear registration acknowledgement state
+- resend node registration and tool inventory
+- preserve program aggregates and completed run cache
+
+A blocked program actor sends its eventual result through the updated main reference because the node object is shared by the actor receive closures.
+
+* Implementations
+
+** Memory journal
+
+Used for deterministic conformance tests. Appends and replays defensive copies.
+
+** File journal
+
+Writes one readable Common Lisp event form per line. Replay disables reader evaluation. The prototype calls =finish-output= after each append.
+
+The file adapter is not yet a production durability guarantee because it does not explicitly call operating-system =fsync=, checksum records, repair a torn final record, compact settled history, or coordinate multiple writers.
+
+* Verification
+
+Focused tests cover:
+
+- memory defensive-copy behavior
+- file round-trip with reader evaluation disabled
+- pending restoration after simulated restart
+- registration-triggered redelivery
+- terminal restoration and byte-identical duplicate replay
+- failed remote tell recovery as retry
+- durable no-node retry state
+- retry re-attempt with monotonic dispatcher sequence
+- malformed pending and settled records
+- rejected deferred settled outcomes
+- rejected non-command envelopes
+- backward sequence and clock corruption
+
+The live restart workflow uses three real processes:
+
+1. phase-one main gserver with a file journal
+2. persistent BBP worker with a blocked external runner
+3. phase-two main gserver restored from the same file
+
+The phase-one main stops after the worker begins one tool execution but before completion. The phase-two main restores the pending command. The same worker reconnects without losing its program actor, registration is acknowledged, the pending command is redelivered, and the blocked execution is released. The worker processes the redelivery through run-id replay and asserts that the external runner was called exactly once.
+
+* Remaining work
+
+- define dispatcher command replay identity for all idempotency record states
+- add fsync-capable journal storage
+- add record checksums and torn-tail recovery
+- add compacted snapshots and append-log truncation
+- add storage ownership or locking for single-writer enforcement
+- add mTLS worker identity before trusting reconnect registration

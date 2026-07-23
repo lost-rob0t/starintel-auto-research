@@ -132,6 +132,79 @@
          1 (car calls)
          "run-id conflict does not execute another tool")))))
 
+(defun test-bbp-registration-replay-preserves-runs ()
+  (multiple-value-bind (library tools domain actor manifest)
+      (compile-bbp-domain-program)
+    (declare (ignore library actor manifest))
+    (let* ((calls (list 0))
+           (engine
+             (make-bbp-domain-engine
+              domain tools (run-id-test-runner calls))))
+      (run-id-test-assert-equal
+       :complete
+       (getf
+        (bbp-invoke-command
+         engine
+         (make-bbp-register-program-command
+          :message-id "register-initial"
+          :program-id "program:registration-replay"
+          :name "Registration Replay"
+          :scope '("example.com")))
+        :outcome)
+       "initial registration completes")
+      (bbp-invoke-command
+       engine
+       (make-bbp-run-tool-command
+        :message-id "registration-run"
+        :program-id "program:registration-replay"
+        :run-id "run:registration-replay:1"
+        :tool 'subfinder
+        :target "api.example.com"))
+      (run-id-test-assert-equal
+       :complete
+       (getf
+        (bbp-invoke-command
+         engine
+         (make-bbp-register-program-command
+          :message-id "register-replay"
+          :program-id "program:registration-replay"
+          :name "Registration Replay"
+          :scope '("example.com")))
+        :outcome)
+       "identical registration replay completes")
+      (run-id-test-assert-equal
+       1
+       (bbp-program-run-count engine "program:registration-replay")
+       "registration replay preserves completed runs")
+      (run-id-test-assert-equal
+       1 (car calls)
+       "registration replay does not rerun tools")
+      (let ((conflict
+              (bbp-invoke-command
+               engine
+               (make-bbp-register-program-command
+                :message-id "register-conflict"
+                :program-id "program:registration-replay"
+                :name "Registration Replay"
+                :scope '("other.example.com")))))
+        (run-id-test-assert-equal
+         :fail
+         (getf conflict :outcome)
+         "changed registration is terminal")
+        (run-id-test-assert-equal
+         "star.bbp.program-registration-conflict"
+         (getf conflict :code)
+         "registration conflict has a stable error code")
+        (run-id-test-assert-equal
+         nil
+         (getf conflict :retryable)
+         "registration conflict is not retryable")
+        (run-id-test-assert-equal
+         1
+         (bbp-program-run-count engine "program:registration-replay")
+         "registration conflict preserves existing runs")))))
+
 (test-bbp-run-id-replay)
 (test-bbp-run-id-conflict)
+(test-bbp-registration-replay-preserves-runs)
 (format t "Star-Lang BBP run-id idempotency tests passed.~%")

@@ -136,9 +136,9 @@
          (run-dispatcher-next dispatcher)
          "compatible terminal redelivery replays")
         (identity-test-assert-equal
-         terminal
+         (rest terminal)
          (drain-dispatcher-emitted dispatcher)
-         "terminal redelivery replays deterministic outcomes"))
+         "terminal redelivery replays stored terminal outcomes"))
       (identity-test-assert-true
        (identity-test-conflict-signaled-p
         dispatcher

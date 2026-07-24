@@ -1,0 +1,591 @@
+:PROPERTIES:
+:ID:       fa451205-2d9f-43ae-972d-68af1a731145
+:END:
+#+title: QUASAR-RESEARCH-003 Situational Awareness Dashboard Shell
+#+description: Architecture for a composable operational dashboard beside the Quasar typed graph workbench.
+#+status: REVIEW
+#+filetags: :starintel:quasar:research:dashboard:situational-awareness:map:panels:projections:ui:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+#+created: [2026-07-23 Thu]
+#+last_modified: [2026-07-23 Thu]
+
+| Version | Date       | Description of change                                                    | Did nsaspy approve it |
+|---------+------------+--------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-23 | Define the initial operational-dashboard architecture.                   | No                    |
+| 0.1.1   | 2026-07-23 | Remove external product references and retain only architecture.         | No                    |
+
+* Related Nodes
+
+- [[file:QUASAR-RESEARCH-000-investigation-workspace-architecture.org][QUASAR-RESEARCH-000 Quasar Investigation Workspace Architecture]]
+- [[file:QUASAR-RESEARCH-001-transform-automation-catalog.org][QUASAR-RESEARCH-001 Transform Automation Catalog]]
+- [[file:QUASAR-RESEARCH-002-client-library-stack.org][QUASAR-RESEARCH-002 Client Library Stack]]
+- [[file:../../design/star-server/QUASAR-001-basic-typed-graph-editor.org][QUASAR-001 Basic Typed Graph Editor Architecture]]
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:../star-lang/STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org][STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers]]
+
+* Research Question
+
+How should Quasar add a situational-awareness dashboard[fn:situational-dashboard] without turning the dashboard into the canonical data model, weakening the typed graph editor, duplicating StarIntel domain authority, or coupling every panel directly to a data source?
+
+* Decision Summary
+
+Quasar needs two coupled primary surfaces:
+
+1. an *investigation workbench* for graph editing, object inspection, actions, tables, evidence, timelines, and detailed analysis;
+2. an *operations dashboard* for continuous situational awareness, maps, live panels, alerts, source health, summaries, and rapid navigation into the workbench.
+
+The dashboard is not a second database and not a second object model. It is a saved set of bounded projections[fn:projection] over Quasar graph documents and optional StarIntel datasets.
+
+The core rule is:
+
+#+begin_quote
+Every dashboard panel, map layer, alert, summary, and indicator must resolve back to stable object, claim, evidence, activity, run, dataset, or source identifiers when those identifiers exist.
+#+end_quote
+
+The dashboard may display aggregate and derived operational state, but it must never become the only place where that state exists.
+
+* Product Boundary
+
+** Investigation workbench
+
+The workbench remains optimized for:
+
+- creating and editing typed nodes and edges;
+- selecting graph neighborhoods;
+- invoking Quasar actions;
+- inspecting properties, claims, evidence, and activity;
+- comparing source records;
+- arranging and saving graph layouts;
+- running exact queries;
+- editing Star-Lang playbooks and typed specifications;
+- reviewing long-running action and playbook output.
+
+** Operations dashboard
+
+The dashboard is optimized for:
+
+- rapid visual orientation;
+- live maps and layer toggles;
+- compact domain panels;
+- cross-source signal summaries;
+- source freshness and coverage;
+- saved operational layouts;
+- continuous refresh;
+- alerts and breaking-event banners;
+- drill-down into graph, table, map, timeline, evidence, or run views;
+- switching between domain-specific dashboard variants.
+
+** Shared model
+
+Both surfaces share:
+
+- workspace identity;
+- stable selection identifiers;
+- saved queries;
+- projection definitions;
+- action and playbook runs;
+- object and claim identifiers;
+- evidence references;
+- time range;
+- map viewport;
+- filters;
+- permissions and policy decisions;
+- revision and reconnect information.
+
+A panel click may open or focus the graph workbench. A graph selection may filter dashboard panels. Neither surface directly mutates the other renderer.
+
+* Operational Dashboard Patterns
+
+** Phased startup
+
+Quasar should use a visible startup state machine[fn:state-machine] with at least:
+
+1. protocol discovery;
+2. local service connection;
+3. workspace metadata;
+4. cached dashboard manifest;
+5. shell layout;
+6. fast projection hydration;
+7. visible-panel hydration;
+8. background projection hydration;
+9. live event and refresh scheduling.
+
+The shell should appear before all panel data is ready. Slow panels must not block the graph, map, command bar, or already-hydrated panels.
+
+** Stable shell footprint
+
+Quasar should persist a panel footprint declaration containing:
+
+- minimum width and height;
+- default row and column span;
+- allowed span range;
+- whether the panel may occupy the main viewport;
+- whether it may be deferred;
+- mobile and touchscreen behavior;
+- skeleton or empty-state renderer.
+
+The initial shell should reserve those footprints so data arrival does not continuously move the interface.
+
+** Panel contract
+
+A Quasar dashboard panel[fn:panel] should be registered through a declarative contract rather than mounted through ad hoc application code.
+
+Each panel definition should contain:
+
+- stable qualified identifier and version;
+- title, description, tags, and icon;
+- accepted projection types;
+- required input identifiers;
+- query or projection request;
+- refresh policy;
+- freshness sources;
+- minimum, default, and maximum footprint;
+- supported variants;
+- supported client form factors;
+- permission and capability requirements;
+- drill-down destinations;
+- selection behavior;
+- loading, cached, partial, empty, stale, error, and disabled states;
+- cleanup and cancellation behavior;
+- optional local controls;
+- optional action bindings.
+
+Panel instances own presentation lifecycle only. Domain data ownership remains in Quasar or StarIntel services.
+
+** Resizable, collapsible, reorderable layout
+
+Quasar should save dashboard layout separately from panel definitions. A saved layout records:
+
+- panel instance identifier;
+- panel definition identifier and version;
+- tab or workspace region;
+- row and column position;
+- row and column span;
+- collapsed state;
+- local panel parameters;
+- synchronization group;
+- last focused time;
+- optional pinned status.
+
+Layouts must survive panel upgrades by stable identifiers and explicit migration rules.
+
+** Variant manifests
+
+Quasar should define dashboard variants[fn:variant] as data manifests rather than separate applications.
+
+Examples include:
+
+- general investigation;
+- geopolitical monitoring;
+- cyber and infrastructure;
+- organization and corporate intelligence;
+- bug-bounty surface monitoring;
+- media and narrative monitoring;
+- finance and sanctions;
+- evidence-review operations.
+
+A variant selects defaults. It does not hide the underlying registries or fork the protocol.
+
+** Layer registry
+
+Quasar should use one map-layer registry containing:
+
+- layer identifier and version;
+- geometry kinds;
+- renderer support;
+- source projection;
+- styling function;
+- clustering and aggregation behavior;
+- temporal behavior;
+- freshness sources;
+- confidence representation;
+- limitations and methodology text;
+- selection and drill-down behavior;
+- required permissions and capabilities;
+- compatible variants;
+- maximum feature budget.
+
+Map layers must not be scattered across renderer-specific conditionals.
+
+** Renderer capability declarations
+
+Quasar should declare renderer capability explicitly. Unsupported layers are disabled with an explanation rather than silently omitted.
+
+The first map implementation should use a browser-based vector renderer behind a stable adapter. An optional globe renderer is a later projection adapter, not an initial dependency.
+
+** Shareable state
+
+Quasar should support bounded deep links[fn:deep-link] for:
+
+- workspace;
+- dashboard variant and saved layout;
+- active tab and primary view;
+- selected stable identifiers;
+- map center, zoom, layers, and time range;
+- graph saved view or projection identifier;
+- saved query;
+- run or alert identifier;
+- object-inspector target.
+
+Sensitive identifiers or private query contents must not be serialized into public links by default. The service may issue opaque share tokens under explicit policy.
+
+** Freshness and intelligence gaps
+
+Quasar must treat data freshness and coverage as first-class records.
+
+Each panel and aggregate signal should be able to report:
+
+- contributing sources;
+- latest successful collection time;
+- source-specific expected cadence;
+- observed content age;
+- current status;
+- last error;
+- record count;
+- disabled reason;
+- required-source coverage;
+- whether the result is complete, partial, cached, degraded, or unavailable.
+
+A panel must distinguish:
+
+- no matching events;
+- no data collected;
+- data source disabled;
+- data stale;
+- query failed;
+- permission denied;
+- projection budget exceeded.
+
+** Viewport-aware hydration
+
+Quasar should prioritize data in this order:
+
+1. shell and current selection;
+2. primary map or graph;
+3. visible panels;
+4. panels near the viewport;
+5. background tabs;
+6. optional expensive summaries.
+
+Panel hydration requests must be cancellable and deduplicated by projection identity, parameters, revision, and user scope.
+
+** Smart refresh scheduling
+
+Quasar needs a central refresh scheduler[fn:refresh-scheduler]. Individual panels declare policy but do not create unmanaged timers.
+
+A refresh registration should include:
+
+- stable name;
+- projection request;
+- base interval;
+- visibility condition;
+- workspace and permission condition;
+- maximum backoff;
+- jitter or stagger class;
+- immediate-run behavior;
+- cancellation key;
+- freshness source mapping.
+
+Live event subscriptions should replace polling where the service supports revision streams. Polling pauses while hidden, duplicate in-flight work is rejected, failures back off, and recovery is staggered.
+
+** Bootstrap hydration and stale fallback
+
+Quasar should support:
+
+- a fast shell bundle;
+- a visible-view projection bundle;
+- background panel bundles;
+- cached saved-layout state;
+- last-known projection snapshots;
+- explicit cached and mixed-state labels;
+- revision guards that prevent old requests from overwriting a newer workspace state.
+
+Cached data must retain its source revision and collection time. A stale usable result is preferable to a blank screen, but its age must be explicit.
+
+** Cross-source correlation
+
+Quasar should represent correlation as a derived result with inspectable inputs rather than a colored user-interface-only score.
+
+A correlation result should name:
+
+- rule or model identifier and version;
+- time and geographic window;
+- contributing claims, events, and sources;
+- absent expected sources;
+- weighting and threshold method;
+- confidence;
+- generated activity and run;
+- expiration or invalidation conditions;
+- drill-down query.
+
+** Interface parity
+
+Quasar should expose the same typed operations used by the user interface through its protocol and action registry. The dashboard is a client of those operations, not a privileged implementation path.
+
+* Proposed Quasar Dashboard Architecture
+
+#+begin_src text
+                    Quasar dashboard shell
+        +------------------+-------------------------+
+        |                  |                         |
+  panel registry      map-layer registry       variant registry
+        |                  |                         |
+        +------------------+-------------------------+
+                           |
+                    saved dashboard manifest
+                           |
+                    projection coordinator
+             +-------------+-------------+
+             |             |             |
+       Quasar service   StarIntel adapter  local cache
+             |             |             |
+     graph documents   domain datasets   snapshots
+     actions/revisions actors/playbooks  view state
+#+end_src
+
+The projection coordinator[fn:projection-coordinator] is the key boundary. It:
+
+- resolves panel and layer definitions;
+- builds typed projection requests;
+- deduplicates identical requests;
+- applies workspace revision guards;
+- chooses cached, snapshot, request, or live-stream sources;
+- normalizes loading and error states;
+- publishes selection and freshness metadata;
+- cancels obsolete work;
+- never directly edits the canonical graph.
+
+* Package Boundary
+
+The selected package direction should become:
+
+- =quasar-core=: graph-document model, commands, batches, revisions, undo, persistence, import, export, and action registry;
+- =quasar-protocol=: typed request, event, projection, dashboard, freshness, and error contracts;
+- =quasar-client=: transport, generated protocol types, caches, selection model, and shared user-interface primitives;
+- =quasar-workbench=: investigation workbench around the graph renderer, tables, inspectors, evidence, timeline, and editors;
+- =quasar-dashboard=: operational shell, panel registry, map-layer registry, variants, layouts, freshness, alerts, and projection coordination;
+- =quasar-desktop=: optional desktop host, service discovery, local process lifecycle, filesystem integration, and desktop permissions;
+- =starintel-quasar-adapter=: optional mapping between Quasar projections and actions and StarIntel objects, claims, datasets, actors, and Star-Lang runs.
+
+The dashboard package may be deployed without StarIntel when only local Quasar graph documents and external Quasar actions are installed.
+
+* Dashboard Manifest
+
+A conceptual saved dashboard manifest is:
+
+#+begin_src json
+{
+  "dashboard_id": "dashboard:geo-main",
+  "version": 3,
+  "workspace_id": "workspace:example",
+  "variant": "geopolitical",
+  "layout_id": "layout:primary",
+  "primary_view": "map",
+  "time_range": { "kind": "rolling", "duration": "24h" },
+  "selection_group": "workspace-primary",
+  "panels": [
+    {
+      "instance_id": "panel:breaking-events:1",
+      "definition": "quasar.panel.breaking-events@1",
+      "region": "main-grid",
+      "row": 1,
+      "column": 1,
+      "row_span": 2,
+      "column_span": 2,
+      "parameters": { "severity": ["high", "critical"] },
+      "sync_group": "workspace-primary"
+    }
+  ],
+  "map": {
+    "renderer": "flat",
+    "center": [0.0, 20.0],
+    "zoom": 2.0,
+    "layers": ["conflicts", "events", "infrastructure"],
+    "sync_group": "workspace-primary"
+  },
+  "refresh_profile": "operational",
+  "revision": 19
+}
+#+end_src
+
+The manifest contains presentation and projection configuration. It does not contain canonical objects, claims, or evidence.
+
+* Shared Selection Model
+
+Quasar needs a typed selection message that can synchronize graph, table, map, timeline, inspector, and dashboard panels.
+
+A selection message should include:
+
+- selection group;
+- stable selected identifiers;
+- identifier kinds;
+- originating view and component;
+- workspace revision;
+- optional geographic extent;
+- optional time extent;
+- selection mode: replace, add, remove, intersect, or preview;
+- correlation identifier to prevent event loops.
+
+Selection synchronization must be explicit. A panel decides whether it publishes, consumes, or ignores each selection group.
+
+* Operational User Interface
+
+The default dashboard layout should contain:
+
+- a global command and search bar at the top;
+- workspace, variant, time-window, freshness, and connection controls beside it;
+- dashboard and workbench tabs;
+- a large map or graph region;
+- a resizable panel grid;
+- a compact alert and live-run strip;
+- a right-side drill-down inspector when an item is selected;
+- a source-health and intelligence-gap drawer;
+- saved layouts and saved queries in a collapsible navigation region.
+
+Every panel needs one obvious drill-down operation. Examples:
+
+- open supporting objects in graph;
+- open rows in table;
+- focus map and timeline;
+- inspect evidence;
+- open action or playbook run;
+- explain score or correlation;
+- show missing sources.
+
+* Initial Panel Families
+
+The first reusable panel families should be generic rather than domain-coded:
+
+- event stream;
+- aggregate metric;
+- ranked entities;
+- source freshness;
+- alert list;
+- map summary;
+- timeline summary;
+- saved-query result;
+- action or playbook run status;
+- correlation summary;
+- evidence queue;
+- graph-neighborhood summary;
+- document and media stream;
+- actor and service health.
+
+Domain packages provide projection definitions, labels, renderers, and actions for those families.
+
+* Initial Map Layer Families
+
+The first layer families should support:
+
+- object points;
+- event points;
+- uncertain point regions;
+- lines and paths;
+- polygons and administrative regions;
+- relationship arcs;
+- density and heat layers;
+- clustered points;
+- time-filtered tracks;
+- choropleths;
+- alert zones;
+- live actor or sensor status where authorized.
+
+Every rendered feature should carry stable projection and source identifiers sufficient for inspection.
+
+* Performance Rules
+
+- Render only visible dashboard panels.
+- Hydrate visible and near-visible panels before background tabs.
+- Use server-side filtering, aggregation, clustering, and pagination for large datasets.
+- Use stable projection keys for request deduplication.
+- Maintain one central refresh scheduler.
+- Cancel requests when workspace, revision, query, panel parameters, or permissions change.
+- Preserve cached data with explicit age and revision metadata.
+- Batch live updates before rendering while preserving event order.
+- Keep map and graph renderer state outside component trees.
+- Virtualize long tables and streams.
+- Set explicit per-panel record, byte, time, and memory budgets.
+- Degrade to summary or table views before freezing the client.
+- Pause animation and nonessential refresh while hidden.
+
+* Failure-State Contract
+
+Every projection response should map into one of these client states:
+
+- =loading=: no usable result yet;
+- =live=: current complete result;
+- =partial=: current result with missing sources or truncated budget;
+- =cached=: usable prior result with no current confirmation;
+- =mixed=: live and cached sources combined;
+- =stale=: result exceeds its expected freshness window;
+- =empty=: successful complete query with no matches;
+- =disabled=: definition or source intentionally disabled;
+- =denied=: policy or permission rejected the request;
+- =error=: request failed without usable fallback;
+- =offline=: service unavailable and no cached result exists.
+
+Panels should never infer =empty= from a failed or missing request.
+
+* Minimum Implementation Slice
+
+The first dashboard slice should prove the architecture without implementing a full intelligence suite.
+
+1. Add dashboard protocol records and a saved dashboard manifest.
+2. Add a dashboard route beside the graph workbench.
+3. Add a panel registry and three generic panel families:
+   - saved-query result;
+   - source freshness;
+   - action-run status.
+4. Add one map with a registered object and event point layer.
+5. Add shared selection synchronization between map, graph, and inspector.
+6. Add one central projection coordinator with request deduplication and cancellation.
+7. Add one central visibility-aware refresh scheduler.
+8. Persist layout, panel parameters, map state, and active variant.
+9. Implement live, cached, stale, empty, denied, and error states.
+10. Add deep links for dashboard, layout, time range, map state, and selection.
+11. Add end-to-end tests for restore, selection synchronization, stale display, hidden-tab refresh, and panel resize.
+
+This slice can operate entirely against the thin Quasar service and a fixture dataset. StarIntel integration follows through an adapter.
+
+* Design Constraints
+
+- The graph document remains canonical for Quasar graph editing.
+- The dashboard stores manifests and snapshots, not duplicate canonical intelligence records.
+- Panels never call graph or map renderer internals outside their adapters.
+- Panels never own unmanaged refresh timers.
+- Variant manifests select defaults rather than fork the application.
+- Source-health state is visible and inspectable.
+- A missing source cannot be rendered as an all-clear state.
+- Derived scores and correlations retain inspectable inputs and versions.
+- Dashboard actions use the same Quasar action registry as the workbench.
+- Star-Lang may orchestrate registered Quasar actions through an adapter but does not define dashboard panels or Quasar transforms.
+- Desktop packaging remains optional and follows the browser-first implementation.
+
+* Recommended Follow-up Designs
+
+- =QUASAR-013 Dashboard Manifest and Layout Protocol=
+- =QUASAR-014 Panel Registry and Projection Coordinator=
+- =QUASAR-015 Map-Layer Registry and Selection Synchronization=
+- =QUASAR-016 Freshness, Coverage, and Intelligence-Gap Model=
+- =QUASAR-017 Variant Manifest and Operational Shell=
+- =QUASAR-018 Dashboard Bootstrap, Cache, and Refresh Scheduler=
+
+The next design should be =QUASAR-013 Dashboard Manifest and Layout Protocol=. It freezes the saved-dashboard format without committing to domain-specific panels.
+
+* Footnotes and Glossary
+
+[fn:situational-dashboard] Situational-awareness dashboard: A continuously refreshed interface that summarizes events, objects, risks, source status, maps, alerts, and operational activity so a user can rapidly understand what is happening and drill into supporting records.
+
+[fn:projection] Projection: A bounded result prepared from canonical data for one view. A projection may contain only the objects, relationships, aggregates, geometry, and view metadata required by a panel, map, graph, table, or timeline.
+
+[fn:state-machine] State machine: A model that lists the legal states of a process and the events that move it from one state to another. For example, startup may move from connecting to hydrating to ready or degraded.
+
+[fn:panel] Panel: A bounded dashboard component that renders one projection or operational control, has a declared lifecycle and footprint, and can report loading, freshness, permission, and error state.
+
+[fn:variant] Variant: A named set of default panels, map layers, refresh policies, theme choices, and labels assembled from shared registries. A variant changes product emphasis without creating a separate protocol or application fork.
+
+[fn:deep-link] Deep link: A link that restores a specific application state, such as one workspace, layout, selected object, map location, time range, or saved query rather than opening only the application home page.
+
+[fn:refresh-scheduler] Refresh scheduler: A central component that decides when projections should be requested again, prevents duplicate requests, pauses unnecessary work, applies backoff after errors, and staggers recovery after inactivity.
+
+[fn:projection-coordinator] Projection coordinator: A client component that translates panel and map requirements into typed projection requests, deduplicates and cancels requests, guards against stale revisions, and distributes normalized results to views.

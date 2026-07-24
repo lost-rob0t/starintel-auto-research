@@ -33,7 +33,7 @@ Any older transform wording in this note must be read under this boundary. QUASA
 
 * Research Question
 
-How should Quasar become the graphical investigation workspace[fn:workspace] for StarIntel[fn:starintel] while preserving the original fast, transform-driven graph workflow, supporting public or otherwise authorized open-source intelligence (OSINT)[fn:osint], integrating Star-Lang[fn:star-lang] and supervised actors[fn:actor], allowing automation to execute end-to-end, and preserving evidence[fn:evidence], provenance[fn:provenance], reproducibility, and human control without mandatory review gates?
+How should Quasar become the graphical investigation workspace[fn:workspace] for StarIntel[fn:starintel] while preserving the original fast, transform-driven graph workflow, supporting multi-source intelligence (OSINT)[fn:osint], integrating Star-Lang[fn:star-lang] and supervised actors[fn:actor], allowing automation to execute end-to-end, and preserving evidence[fn:evidence], provenance[fn:provenance], reproducibility, and human control without mandatory review gates?
 
 * Scope and Method
 
@@ -48,7 +48,7 @@ The original 2023 Quasar note established these requirements:
 - Quasar is a graphical interface to StarIntel and related tools.
 - The primary interaction is a Maltego-like graph where nodes can be added and expanded.
 - Common Lisp extensions provide new data types and operations.
-- A host may expose a port-scan transform that creates port children from an authorized Nmap run.
+- A host may expose a port-scan transform that creates port children from an Nmap run.
 - Multi-step machines may run additional tools, such as HTTP discovery.
 - StarIntel supplies normalized OSINT data.
 - A lightweight Lisp shell extends and queries the graph.
@@ -90,7 +90,7 @@ The core decisions are:
 |--------+------------------+----------------+------------------|
 | Maltego | typed entities, transforms, local execution, machines, manual links | typed actions, extension manifests, direct transform output, automation and manual edges | loss of provenance, uncontrolled result fan-out, and long unstructured transform menus |
 | Palantir Foundry | ontology, object explorer, shared selections, map/time views, actions, permissioned objects | one typed object model projected into graph, table, map, timeline, and object views | closed platform coupling and opaque operational scoring |
-| Flock Safety | partial-description search, unified evidence review, saved alerts, audit history | incomplete-observation search over authorized datasets with candidate evidence and automated alerting | silently converting a fuzzy match into identity or guilt |
+| Flock Safety | partial-description search, unified evidence review, saved alerts, activity history | incomplete-observation search over configured datasets with candidate evidence and automated alerting | silently converting a fuzzy match into identity or guilt |
 | Aleph and FollowTheMoney | investigations, cross-referencing, network diagrams, atomic statements, source entities | workspace model, list cross-reference, property-level provenance, source/canonical separation | flattening conflicting source values into one unexplained property |
 | OpenCTI | graph-native model, connectors, cases, pivoting, application programming interface parity | connector lifecycle, case objects, shared action/query service | forcing every OSINT domain into threat-intelligence semantics |
 | Timesketch | collaborative timelines, saved searches, analyzers, stories | timeline projection, event annotations, saved query collections, findings narrative | treating time analysis as a separate data silo |
@@ -141,7 +141,7 @@ An optional advanced investigation workspace may contain:
 - saved structured queries and alert definitions;
 - action runs, playbook runs, checkpoints, logs, and outputs;
 - tasks, leads, hypotheses, findings, comments, and assignments;
-- an append-only audit journal;
+- an optional activity journal;
 - export manifests and signed or hashed evidence packages.
 
 The basic editor only needs to restore graph contents, layout, selection, filters, and view state. Advanced workspaces may additionally restore queries, jobs, run output, evidence, and external integration state.
@@ -216,13 +216,13 @@ The original type-to-function map becomes a declared action registry. Each actio
 - required capabilities[fn:capability] and permissions;
 - implementation kind: local actor, remote actor, domain server, external tool, query, or playbook;
 - side-effect declaration;
-- scope, time, concurrency, memory, and monetary limits;
+- optional scope, time, concurrency, memory, and monetary policies;
 - cancellation and retry policy;
 - provenance and evidence behavior;
 - result persistence, merge, conflict, and rollback behavior;
 - optional pause or intervention points.
 
-Action discovery returns allowed, disabled, and hidden actions with reasons. The client never determines authorization only from a menu predicate.
+Action discovery returns allowed, disabled, and hidden actions with reasons. The client may defer action availability to an optional policy adapter.
 
 An invocation produces an immutable request and a durable run. Results stream into the workspace and run-output view as they are produced. The user can inspect provenance and logs, filter or group results, cancel work, rerun it, or revert the run where supported. None of those controls require a mandatory acceptance step.
 
@@ -258,7 +258,7 @@ graph editor validation and application
 
 ** Graph workbench
 
-The graph displays a bounded projection, never the entire global graph. It supports:
+The graph displays a projection, never the entire global graph. It supports:
 
 - expand by relationship, action, source, time, or saved query;
 - collapse, pin, group, annotate, hide, and compare;
@@ -280,7 +280,7 @@ The inspector separates:
 4. supporting and contradicting evidence;
 5. relationships;
 6. available actions;
-7. activity, run, and audit history.
+7. activity, run, and activity history.
 
 A single flattened property panel would conceal conflicts and provenance.
 
@@ -309,7 +309,7 @@ Natural-language input is a query-authoring and execution interface. The system 
 1. compile text into a bounded Star-Lang or query intermediate representation;
 2. expose the structured query, datasets, joins, limits, and uncertainty;
 3. validate it against type and capability contracts;
-4. execute it under configured policy and resource checks without requiring a separate human confirmation step;
+4. execute it directly, while allowing deployments to add optional policy and resource adapters;
 5. return matches with evidence and match explanations;
 6. permit direct reuse, editing, scheduling, and composition of the structured form.
 
@@ -325,17 +325,17 @@ Configured resolvers may automatically merge, keep separate, defer, or split ide
 
 Derived graph projections update from the resolution history rather than destructively rewriting source data.
 
-* Collaboration, Permissions, and Governance
+* Collaboration and Optional Governance
 
-Permissions may apply to workspace, dataset, object, claim, evidence, action, source, export, or individual sensitive properties. Derived material inherits policy according to declared propagation rules.
+Optional access rules may apply to workspace, dataset, object, claim, evidence, action, source, export, or individual sensitive properties. Deployments that enable access rules may define propagation for derived material.
 
 The user interface must show why a resource or action is hidden, disabled, redacted, or export-blocked without leaking protected values.
 
 Collaboration includes tasks, assignments, comments, mentions, hypotheses, leads, findings, and optional review requests. A finding references the claims, evidence, queries, runs, and activity versions supporting it. Comments are not evidence unless deliberately promoted into a sourced claim.
 
-The append-only audit journal records searches, object reads where required, action invocations, query compilation, automated and manual mutations, resolution operations, sharing, exports, permission changes, and administrative overrides.
+The optional activity journal records searches, object reads where required, action invocations, query compilation, automated and manual mutations, resolution operations, sharing, exports, permission changes, and administrative overrides.
 
-* Extension System and Trust Boundaries
+* Extension System and Optional Isolation
 
 An extension package may contribute:
 
@@ -350,14 +350,14 @@ An extension package may contribute:
 
 Each package has a manifest containing identifier, version, digest, publisher, compatible protocol versions, dependencies, declared capabilities, network and filesystem access, executable entry points, and signature metadata.
 
-Default execution boundaries are:
+Optional isolation profiles include:
 
 - data-only specifications load into the normal compiler path;
 - trusted built-in user-interface modules run in the client;
 - third-party Common Lisp code runs in a supervised worker process;
 - external tools run through bounded actors with explicit arguments and scope;
 - web user-interface extensions run in a restricted frame or worker;
-- no extension receives ambient database, filesystem, credential, network, or shell access.
+- deployments may restrict ambient database, filesystem, credential, network, or shell access.
 
 Extension results use the same direct action-run, evidence, claim, persistence, provenance, rollback, and audit protocols as built-in actions.
 
@@ -371,11 +371,11 @@ Logical services are:
 - =evidence-server=: artifact metadata, hashes, locators, capture chains, and exports;
 - =action-server=: action discovery, validation, invocation, cancellation, direct result persistence, and rollback;
 - =playbook-server=: Star-Lang run plans, checkpoints, branches, restarts, optional pause points, and replay;
-- =projection-server=: bounded graph, table, map, and timeline projections;
+- =projection-server=: graph, table, map, and timeline projections;
 - =resolution-server=: automated entity resolution, candidates, thresholds, and operation history;
 - =search-server=: exact, text, graph, temporal, geospatial, and similarity queries;
 - =alert-server=: schedules, continuous matches, deduplication, and downstream actions;
-- =policy-server=: capability, permission, marking, retention, and export decisions;
+- =policy-adapter=: optional capability, permission, marking, retention, and export decisions;
 - =extension-server=: package registry, digest locks, compatibility, and worker supervision.
 
 These are domain authorities, not a requirement for one operating-system process per service. Star-Lang domain-server declarations can map them onto supervised Common Lisp actors and external workers.
@@ -412,7 +412,7 @@ Performance rules:
 - page and stream large result sets;
 - use server-side filtering and aggregation;
 - summarize high-degree nodes before expansion;
-- impose explicit node, edge, time, and memory budgets;
+- impose configurable node, edge, time, and memory profiles;
 - keep layout state separate from identity and claim data;
 - cancel stale projection and action requests;
 - preserve selection by stable identifiers across view refreshes;
@@ -434,7 +434,7 @@ Performance rules:
 - Search and add existing objects.
 - Create manual objects and relationships.
 - Inspect source records, claims, and evidence.
-- Run one local typed action against an authorized target.
+- Run one local typed action against an target.
 - Stream results directly into the workspace and graph.
 - Inspect, filter, rerun, cancel, and revert supported runs.
 - Save query, filters, layout, and view state.
@@ -451,7 +451,7 @@ Performance rules:
 
 - Map and timeline projections.
 - Shared workspaces, comments, assignments, and optional review requests.
-- Granular permissions and audit viewer.
+- Granular optional permissions and activity viewer.
 
 ** Optional advanced phase: playbooks and alerts
 
@@ -490,13 +490,13 @@ Performance rules:
 
 [fn:workspace] Investigation workspace: A bounded project containing selected objects, source material, views, searches, automation, jobs, tasks, hypotheses, findings, permissions, and history. It is not merely a saved graph layout.
 
-[fn:starintel] StarIntel: The local-first intelligence platform designed in this repository to collect, normalize, connect, search, analyze, and export public or otherwise authorized data through document and actor-based components.
+[fn:starintel] StarIntel: The local-first intelligence platform designed in this repository to collect, normalize, connect, search, analyze, and export heterogeneous source data through document and actor-based components.
 
-[fn:osint] Open-source intelligence (OSINT): Information collected and analyzed from legally accessible public sources. The term describes the source and method, not permission to bypass access controls or collect restricted data.
+[fn:osint] Open-source intelligence (OSINT): Information collected and analyzed from openly available sources. The term describes the source and method, not permission to bypass access controls or collect restricted data.
 
 [fn:star-lang] Star-Lang: The bounded declarative language being designed in this repository for typed specifications, actor workflows, durable analysis jobs, checkpoints, direct result persistence, restart handling, and reproducible transformations.
 
-[fn:actor] Actor: A small independent software component that owns its state and processes messages through a mailbox. In StarIntel, actors perform bounded collection, enrichment, indexing, reasoning, automation, or storage work under supervision.
+[fn:actor] Actor: A small independent software component that owns its state and processes messages through a mailbox. In StarIntel, actors perform collection, enrichment, indexing, reasoning, automation, or storage work under supervision.
 
 [fn:evidence] Evidence: A preserved source artifact or observation used to support or challenge a claim, together with acquisition and integrity metadata.
 

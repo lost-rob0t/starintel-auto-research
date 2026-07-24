@@ -1,0 +1,66 @@
+name: Quasar prototype
+
+on:
+  push:
+    branches:
+      - "agent/quasar-clog-prototype-design"
+    paths:
+      - "prototypes/quasar/common-lisp/**"
+      - ".github/workflows/quasar-prototype.yml"
+  pull_request:
+    paths:
+      - "prototypes/quasar/common-lisp/**"
+      - ".github/workflows/quasar-prototype.yml"
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SBCL
+        run: |
+          sudo apt-get update --quiet
+          sudo apt-get install --yes --quiet sbcl curl git >/dev/null
+
+      - name: Install Quicklisp and CLOG
+        run: |
+          curl --fail --silent --show-error --output quicklisp.lisp \
+            https://beta.quicklisp.org/quicklisp.lisp
+          sbcl --non-interactive \
+            --load quicklisp.lisp \
+            --eval '(quicklisp-quickstart:install :path #p"/home/runner/quicklisp/")' \
+            >/tmp/quasar-quicklisp.log 2>&1
+          git clone --quiet --depth 1 https://github.com/rabbibotton/clog.git \
+            /home/runner/quicklisp/local-projects/clog
+
+      - name: Load systems and run core tests
+        working-directory: prototypes/quasar/common-lisp
+        run: |
+          set +e
+          sbcl --non-interactive \
+            --load /home/runner/quicklisp/setup.lisp \
+            --eval '(asdf:load-asd (truename "quasar.asd"))' \
+            --eval '(ql:quickload "quasar/tests")' \
+            --eval '(unless (quasar.tests:run-core-tests) (uiop:quit 1))' \
+            --eval '(ql:quickload "quasar/ui-clog")' \
+            >/tmp/quasar-sbcl.log 2>&1
+          status=$?
+          tail --lines=140 /tmp/quasar-sbcl.log
+          exit "$status"
+
+      - name: Upload SBCL log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quasar-sbcl-log
+          path: /tmp/quasar-sbcl.log
+
+      - name: Validate browser adapter
+        working-directory: prototypes/quasar/common-lisp
+        run: |
+          node --check static/quasar-cytoscape.js
+          node tests/renderer-harness.js static/quasar-cytoscape.js

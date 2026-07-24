@@ -8,7 +8,6 @@ Build Starintel as a local-first, professional intelligence platform: a document
 
 Product line: **the world's most dangerous search engine**—dangerous because it can preserve, normalize, connect, search, and analyze fragmented data across public, private, commercial, supplied, acquired, platform, sensor, and archival sources while supporting evidence and provenance.
 
-
 ## Capability-First Principle
 
 Starintel is an anti-technofeudalist intelligence tool. Its core must maximize collection breadth, source interoperability, entity resolution, relationship discovery, graph analysis, automation, replay, search, and operator-controlled execution. It must not be reduced to a public-record viewer or preemptively narrowed around the operating assumptions of a future company.

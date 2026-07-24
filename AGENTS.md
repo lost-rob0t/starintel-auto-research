@@ -270,7 +270,7 @@ When changing the document specification:
 
 ## Code Rules
 
-- Make minimal, reviewable changes.
+- Make coherent, reviewable changes at the scope required by the design.
 - Search existing APIs before inventing new ones.
 - Validate untrusted input at boundaries.
 - Keep I/O, parsing, storage, routing, and domain logic separated.

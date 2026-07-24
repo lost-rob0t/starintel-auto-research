@@ -1,0 +1,41 @@
+name: One-shot Runtime Fix
+
+on:
+  push:
+    branches:
+      - agent/star-loader-url-import-star-cl-port
+    paths:
+      - ".github/workflows/one-shot-runtime-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/star-loader-url-import-star-cl-port
+      - name: Fix document runtime form balance
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('prototypes/star-lang/common-lisp/document-runtime.lisp')
+          text = path.read_text(encoding='utf-8')
+          old = '''            (t nil))))))
+    (t nil)))'''
+          new = '''            (t nil)))))))
+    (t nil)))'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one validator tail, found {text.count(old)}')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add prototypes/star-lang/common-lisp/document-runtime.lisp
+          git commit -m "Fix document runtime form balance"
+          git push origin HEAD:agent/star-loader-url-import-star-cl-port

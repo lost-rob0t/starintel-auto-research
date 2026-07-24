@@ -53,7 +53,7 @@ Local imports use the same version and digest lock:
 
 ## Generated constructors
 
-Constructor signatures are declared in Star-Lang library metadata and installed as real Common Lisp functions:
+Constructor signatures are declared in Star-Lang library metadata and installed as real Common Lisp functions. The compatibility metadata currently lives in a digest-locked overlay that imports `star-cl.star`; the document schema remains the canonical `org.starintel/star-cl@1` library.
 
 ```lisp
 (defparameter *star-cl*

@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
@@ -26,43 +26,51 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-      - name: Apply exact validator balance correction
-        if: github.event_name == 'pull_request'
+      - name: Install SBCL
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sbcl coreutils
+      - name: Check document runtime Lisp form balance
         run: |
           python - <<'PY'
           from pathlib import Path
 
           path = Path('prototypes/star-lang/common-lisp/document-runtime.lisp')
           text = path.read_text(encoding='utf-8')
-          old = '''         (otherwise
-          nil))))))
-
-(defun validate-document'''
-          new = '''         (otherwise
-          nil)))))))
-
-(defun validate-document'''
-          count = text.count(old)
-          if count == 1:
-              path.write_text(text.replace(old, new), encoding='utf-8')
-          elif count == 0 and new in text:
-              print('runtime already balanced')
-          else:
-              raise SystemExit(f'unexpected validator tail count: {count}')
+          stack = []
+          in_string = False
+          escaped = False
+          in_comment = False
+          line = 1
+          for char in text:
+              if char == '\n':
+                  line += 1
+                  in_comment = False
+                  continue
+              if in_comment:
+                  continue
+              if in_string:
+                  if escaped:
+                      escaped = False
+                  elif char == '\\':
+                      escaped = True
+                  elif char == '"':
+                      in_string = False
+                  continue
+              if char == ';':
+                  in_comment = True
+              elif char == '"':
+                  in_string = True
+              elif char == '(':
+                  stack.append(line)
+              elif char == ')':
+                  if not stack:
+                      raise SystemExit(f'{path}:{line}: unmatched closing parenthesis')
+                  stack.pop()
+          if stack:
+              raise SystemExit(f'{path}:{stack[-1]}: unclosed parenthesis')
+          print(f'{path}: balanced')
           PY
-          if ! git diff --quiet; then
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add prototypes/star-lang/common-lisp/document-runtime.lisp
-            git commit -m "Fix document runtime validator balance"
-            git push origin HEAD:${{ github.head_ref }}
-          fi
-      - name: Install SBCL
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes sbcl coreutils
       - name: Run document runtime and ID API suite
         shell: bash
         run: |

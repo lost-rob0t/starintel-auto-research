@@ -65,7 +65,7 @@
     (assert-true (valid-ulid-p (generate-id :ulid)) "generic ULID API")
     (assert-true (valid-uuidv4-p (generate-id :uuidv4))
                  "generic UUIDv4 API")
-    (assert-equal (make-digest-id :md5 '((b . 2) (a . 1)))
+    (assert-equal (make-digest-id :md5 '(("b" . 2) ("a" . 1)))
                   (make-digest-id :md5 '(("a" . 1) ("b" . 2)))
                   "canonical map digest ordering")))
 

@@ -23,8 +23,8 @@ jobs:
 
       - name: Install SBCL
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes sbcl curl git
+          sudo apt-get update --quiet
+          sudo apt-get install --yes --quiet sbcl curl git >/dev/null
 
       - name: Install Quicklisp and CLOG
         run: |
@@ -32,19 +32,25 @@ jobs:
             https://beta.quicklisp.org/quicklisp.lisp
           sbcl --non-interactive \
             --load quicklisp.lisp \
-            --eval '(quicklisp-quickstart:install :path #p"/home/runner/quicklisp/")'
-          git clone --depth 1 https://github.com/rabbibotton/clog.git \
+            --eval '(quicklisp-quickstart:install :path #p"/home/runner/quicklisp/")' \
+            >/tmp/quasar-quicklisp.log 2>&1
+          git clone --quiet --depth 1 https://github.com/rabbibotton/clog.git \
             /home/runner/quicklisp/local-projects/clog
 
       - name: Load systems and run core tests
         working-directory: prototypes/quasar/common-lisp
         run: |
+          set +e
           sbcl --non-interactive \
             --load /home/runner/quicklisp/setup.lisp \
             --eval '(asdf:load-asd (truename "quasar.asd"))' \
             --eval '(ql:quickload "quasar/tests")' \
             --eval '(unless (quasar.tests:run-core-tests) (uiop:quit 1))' \
-            --eval '(ql:quickload "quasar/ui-clog")'
+            --eval '(ql:quickload "quasar/ui-clog")' \
+            >/tmp/quasar-sbcl.log 2>&1
+          status=$?
+          tail --lines=140 /tmp/quasar-sbcl.log
+          exit "$status"
 
       - name: Validate browser adapter
         working-directory: prototypes/quasar/common-lisp

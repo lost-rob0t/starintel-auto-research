@@ -1,6 +1,6 @@
 (require :asdf)
 
-(load (merge-pathnames "star-loader.lisp" *load-truename*))
+(load (merge-pathnames "star-lang-api.lisp" *load-truename*))
 
 (in-package #:cl-user)
 
@@ -82,7 +82,7 @@
             (merge-pathnames #P".cache/star-lang/specs/"
                              (user-homedir-pathname))))
          (graph
-           (star-lang.loader:load-star-file
+           (star-lang.api:load-star-file
             source
             :allow-network (getf options :allow-network)
             :cache-directory cache)))
@@ -101,7 +101,7 @@
             (merge-pathnames #P".cache/star-lang/specs/"
                              (user-homedir-pathname))))
          (graph
-           (star-lang.loader:load-star-url
+           (star-lang.api:load-star-url
             source
             :name (getf options :name)
             :version (getf options :version)

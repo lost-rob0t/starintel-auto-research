@@ -558,8 +558,8 @@
 
 (defun decoded-field-name (contract external-key key-style couchdb)
   (cond
-    ((and couchdb (string= external-key "_id")) "id")
-    ((and couchdb (string= external-key "_rev")) "rev")
+    ((and couchdb (string-equal external-key "_id")) "id")
+    ((and couchdb (string-equal external-key "_rev")) "rev")
     (t
      (let ((field
              (find external-key
@@ -567,7 +567,7 @@
                    :key (lambda (item)
                           (encoded-key (getf item :name)
                                        key-style couchdb))
-                   :test #'string=)))
+                   :test #'string-equal)))
        (and field (getf field :name))))))
 
 (defun decode-document (graph document-type encoded

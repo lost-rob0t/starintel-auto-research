@@ -1,0 +1,57 @@
+name: Star-Lang Document Runtime
+
+on:
+  pull_request:
+    paths:
+      - "prototypes/star-lang/common-lisp/document-runtime.lisp"
+      - "prototypes/star-lang/common-lisp/document-runtime-tests.lisp"
+      - "prototypes/star-lang/fixtures/star-cl.star"
+      - ".github/workflows/star-lang-document-runtime.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "prototypes/star-lang/common-lisp/document-runtime.lisp"
+      - "prototypes/star-lang/common-lisp/document-runtime-tests.lisp"
+      - "prototypes/star-lang/fixtures/star-cl.star"
+      - ".github/workflows/star-lang-document-runtime.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install SBCL
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sbcl coreutils
+      - name: Run document runtime and ID API suite
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/document-runtime-tests.lisp \
+            2>&1 | tee star-lang-document-runtime.log
+      - name: Verify star-cl.star loads through the command
+        shell: bash
+        run: |
+          set -o pipefail
+          prototypes/star-lang/bin/star load \
+            prototypes/star-lang/fixtures/star-cl.star \
+            --cache-dir "$RUNNER_TEMP/star-lang-cache" \
+            --manifest "$RUNNER_TEMP/star-cl-manifest.sexp" \
+            2>&1 | tee star-lang-star-cl-load.log
+          grep -q 'org.starintel/star-cl@1' "$RUNNER_TEMP/star-cl-manifest.sexp"
+      - name: Upload runtime logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-document-runtime-logs
+          path: |
+            star-lang-document-runtime.log
+            star-lang-star-cl-load.log
+          if-no-files-found: warn

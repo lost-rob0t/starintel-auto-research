@@ -1,3 +1,10 @@
+(asdf:defsystem "quasar"
+  :description "Primary system for the Quasar prototype."
+  :author "lost-rob0t"
+  :license "MIT"
+  :version "0.0.1"
+  :depends-on ("quasar/core"))
+
 (asdf:defsystem "quasar/core"
   :description "Renderer-independent graph core for the Quasar prototype."
   :author "lost-rob0t"

@@ -96,8 +96,14 @@
     (validate-predicate-endpoints library table))
   library)
 
-(defun compile-core-library (form)
-  (validate-library-semantics (compile-spec-library form)))
+(defun compile-core-library (source)
+  (validate-library-semantics
+   (if (and (listp source)
+            (eq (first source) :ir-version)
+            (eql (getf source :ir-version) 1)
+            (eq (getf source :kind) :spec-library))
+       source
+       (compile-spec-library source))))
 
 (defun actor-contract-declaration (library table type context allowed-kinds)
   (let ((declaration (local-declaration library table type context)))

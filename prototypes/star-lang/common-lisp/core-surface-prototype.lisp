@@ -7,16 +7,50 @@
    #:emit-portable-manifest
    #:load-star-form
    #:make-wire-envelope
+   #:star-lang-core-error-column
+   #:star-lang-core-error-line
+   #:star-lang-core-error-pathname
+   #:star-lang-source-error
    #:run-tests
    #:validate-wire-envelope))
 
 (in-package #:star-lang.core-surface.prototype)
 
-(define-condition star-lang-core-error (error)
-  ((message :initarg :message :reader star-lang-core-error-message))
-  (:report (lambda (condition stream)
-             (write-string (star-lang-core-error-message condition) stream))))
+(defvar *star-source-pathname* nil)
+(defvar *star-source-line* nil)
+(defvar *star-source-column* nil)
+(defvar *star-source-positions* nil)
 
+(define-condition star-lang-core-error (error)
+  ((message :initarg :message :reader star-lang-core-error-message)
+   (pathname
+    :initarg :pathname
+    :initform *star-source-pathname*
+    :reader star-lang-core-error-pathname)
+   (line
+    :initarg :line
+    :initform *star-source-line*
+    :reader star-lang-core-error-line)
+   (column
+    :initarg :column
+    :initform *star-source-column*
+    :reader star-lang-core-error-column))
+  (:report (lambda (condition stream)
+             (let ((pathname (star-lang-core-error-pathname condition))
+                   (line (star-lang-core-error-line condition))
+                   (column (star-lang-core-error-column condition)))
+               (when pathname
+                 (format stream "~A" pathname)
+                 (when line
+                   (format stream ":~D" line)
+                   (when column
+                     (format stream ":~D" column)))
+                 (write-string ": " stream))
+               (write-string
+                (star-lang-core-error-message condition)
+                stream)))))
+
+(define-condition star-lang-source-error (star-lang-core-error) ())
 (define-condition invalid-library-error (star-lang-core-error) ())
 (define-condition invalid-declaration-error (star-lang-core-error) ())
 (define-condition invalid-field-error (star-lang-core-error) ())
@@ -27,6 +61,228 @@
 
 (defun fail (condition-type control &rest arguments)
   (error condition-type :message (apply #'format nil control arguments)))
+
+(defmacro with-star-source-position ((value) &body body)
+  `(let ((position
+           (and *star-source-positions*
+                (gethash ,value *star-source-positions*))))
+     (let ((*star-source-line*
+             (if position (first position) *star-source-line*))
+           (*star-source-column*
+             (if position (second position) *star-source-column*)))
+       ,@body)))
+
+(defstruct (star-source-parser
+             (:constructor make-star-source-parser
+                 (source pathname)))
+  source
+  pathname
+  (index 0 :type fixnum)
+  (line 1 :type fixnum)
+  (column 1 :type fixnum)
+  (positions (make-hash-table :test #'eq)))
+
+(defparameter *star-source-keywords*
+  '(("algorithm" . :algorithm)
+    ("base" . :base)
+    ("bindings" . :bindings)
+    ("constructors" . :constructors)
+    ("dataset" . :dataset)
+    ("default" . :default)
+    ("destination" . :destination)
+    ("digest" . :digest)
+    ("extends" . :extends)
+    ("fields" . :fields)
+    ("format" . :format)
+    ("generate-default-constructors" . :generate-default-constructors)
+    ("id-policy" . :id-policy)
+    ("lambda-list" . :lambda-list)
+    ("maximum" . :maximum)
+    ("minimum" . :minimum)
+    ("optional" . :optional)
+    ("path" . :path)
+    ("pattern" . :pattern)
+    ("persistence" . :persistence)
+    ("required" . :required)
+    ("rest-keywords" . :rest-keywords)
+    ("scale" . :scale)
+    ("source" . :source)
+    ("url" . :url)
+    ("validate" . :validate)
+    ("validator" . :validator)
+    ("version" . :version)))
+
+(defun star-source-end-p (parser)
+  (>= (star-source-parser-index parser)
+      (length (star-source-parser-source parser))))
+
+(defun star-source-character (parser)
+  (unless (star-source-end-p parser)
+    (char (star-source-parser-source parser)
+          (star-source-parser-index parser))))
+
+(defun advance-star-source (parser)
+  (let ((character (star-source-character parser)))
+    (when character
+      (incf (star-source-parser-index parser))
+      (if (char= character #\Newline)
+          (progn
+            (incf (star-source-parser-line parser))
+            (setf (star-source-parser-column parser) 1))
+          (incf (star-source-parser-column parser))))
+    character))
+
+(defun fail-star-source (parser control &rest arguments)
+  (error 'star-lang-source-error
+         :message (apply #'format nil control arguments)
+         :pathname (star-source-parser-pathname parser)
+         :line (star-source-parser-line parser)
+         :column (star-source-parser-column parser)))
+
+(defun star-source-whitespace-p (character)
+  (and character
+       (find character '(#\Space #\Tab #\Newline #\Return #\Page))))
+
+(defun skip-star-source-trivia (parser)
+  (loop
+    (cond
+      ((star-source-whitespace-p (star-source-character parser))
+       (advance-star-source parser))
+      ((eql (star-source-character parser) #\;)
+       (loop for character = (star-source-character parser)
+             while (and character (not (char= character #\Newline)))
+             do (advance-star-source parser)))
+      (t
+       (return parser)))))
+
+(defun star-source-delimiter-p (character)
+  (or (null character)
+      (star-source-whitespace-p character)
+      (find character '(#\( #\) #\" #\;))))
+
+(defun parse-star-source-string (parser)
+  (advance-star-source parser)
+  (let ((value (make-array 32
+                           :element-type 'character
+                           :adjustable t
+                           :fill-pointer 0)))
+    (loop
+      (when (star-source-end-p parser)
+        (fail-star-source parser "Unterminated string literal."))
+      (let ((character (advance-star-source parser)))
+        (cond
+          ((char= character #\")
+           (return value))
+          ((char= character #\\)
+           (when (star-source-end-p parser)
+             (fail-star-source parser "Unterminated string escape."))
+           (let ((escaped (advance-star-source parser)))
+             (vector-push-extend
+              (case escaped
+                (#\n #\Newline)
+                (#\r #\Return)
+                (#\t #\Tab)
+                (otherwise escaped))
+              value)))
+          (t
+           (vector-push-extend character value)))))))
+
+(defun star-source-integer (token)
+  (when (and (> (length token) 0)
+             (or (every #'digit-char-p token)
+                 (and (> (length token) 1)
+                      (find (char token 0) '(#\+ #\-))
+                      (every #'digit-char-p (subseq token 1)))))
+    (parse-integer token)))
+
+(defun parse-star-source-atom (parser)
+  (let ((start (star-source-parser-index parser)))
+    (loop for character = (star-source-character parser)
+          until (star-source-delimiter-p character)
+          do
+             (when (find character '(#\# #\' #\` #\,))
+               (fail-star-source
+                parser
+                "Reader syntax beginning with ~C is not part of Star-Lang."
+                character))
+             (advance-star-source parser))
+    (let* ((token
+             (subseq (star-source-parser-source parser)
+                     start
+                     (star-source-parser-index parser)))
+           (integer (star-source-integer token)))
+      (when (zerop (length token))
+        (fail-star-source parser "Expected a Star-Lang token."))
+      (when (string= token ".")
+        (fail-star-source parser "Dotted-list syntax is not part of Star-Lang."))
+      (cond
+        ((char= (char token 0) #\:)
+         (when (or (= (length token) 1)
+                   (position #\: token :start 1))
+           (fail-star-source parser "Invalid Star-Lang keyword ~A." token))
+         (let ((keyword
+                 (cdr (assoc (string-downcase (subseq token 1))
+                             *star-source-keywords*
+                             :test #'string=))))
+           (unless keyword
+             (fail-star-source parser "Unknown Star-Lang keyword ~A." token))
+           keyword))
+        ((position #\: token)
+         (fail-star-source
+          parser
+          "Package-qualified symbols are not part of Star-Lang: ~A."
+          token))
+        ((string-equal token "nil") nil)
+        ((string-equal token "t") t)
+        (integer integer)
+        (t
+         (string-downcase token))))))
+
+(defun parse-star-source-value (parser)
+  (skip-star-source-trivia parser)
+  (let ((character (star-source-character parser)))
+    (cond
+      ((null character)
+       (fail-star-source parser "Unexpected end of Star-Lang source."))
+      ((char= character #\()
+       (let ((line (star-source-parser-line parser))
+             (column (star-source-parser-column parser)))
+         (advance-star-source parser)
+         (let ((values '()))
+         (loop
+           (skip-star-source-trivia parser)
+           (let ((next (star-source-character parser)))
+             (cond
+               ((null next)
+                (fail-star-source parser "Unterminated list."))
+               ((char= next #\))
+                (advance-star-source parser)
+                (let ((result (nreverse values)))
+                  (setf (gethash result
+                                 (star-source-parser-positions parser))
+                        (list line column))
+                  (return result)))
+               (t
+                (push (parse-star-source-value parser) values))))))))
+      ((char= character #\))
+       (fail-star-source parser "Unexpected closing parenthesis."))
+      ((char= character #\")
+       (parse-star-source-string parser))
+      (t
+       (parse-star-source-atom parser)))))
+
+(defun parse-star-source (source pathname)
+  (let ((parser (make-star-source-parser source pathname)))
+    (skip-star-source-trivia parser)
+    (when (star-source-end-p parser)
+      (fail-star-source parser "Star file is empty."))
+    (let ((form (parse-star-source-value parser)))
+      (skip-star-source-trivia parser)
+      (unless (star-source-end-p parser)
+        (fail-star-source
+         parser
+         "Star file must contain exactly one top-level form."))
+      (values form (star-source-parser-positions parser)))))
 
 (defun identifier-string (value)
   (string-downcase
@@ -136,7 +392,10 @@
      (fail 'invalid-type-error "Invalid type expression ~S." value))))
 
 (defun declaration-kind (declaration)
-  (unless (and (listp declaration) declaration (symbolp (first declaration)))
+  (unless (and (listp declaration)
+               declaration
+               (or (symbolp (first declaration))
+                   (stringp (first declaration))))
     (fail 'invalid-declaration-error "Invalid declaration ~S." declaration))
   (identifier-string (first declaration)))
 
@@ -148,14 +407,15 @@
 (defun ensure-unique-declarations (declarations)
   (let ((seen (make-hash-table :test #'equal)))
     (dolist (declaration declarations)
-      (let* ((kind (declaration-kind declaration))
-             (name (declaration-name declaration))
-             (key (cons kind name)))
-        (when (gethash key seen)
-          (fail 'invalid-declaration-error
-                "Duplicate ~A declaration named ~A."
-                kind name))
-        (setf (gethash key seen) t)))))
+      (with-star-source-position (declaration)
+        (let* ((kind (declaration-kind declaration))
+               (name (declaration-name declaration))
+               (key (cons kind name)))
+          (when (gethash key seen)
+            (fail 'invalid-declaration-error
+                  "Duplicate ~A declaration named ~A."
+                  kind name))
+          (setf (gethash key seen) t))))))
 
 (defun declared-local-types (declarations)
   (loop for declaration in declarations
@@ -254,20 +514,21 @@
     (values (not (null required-p)) default default-p)))
 
 (defun compile-field (field library-name local-types)
-  (unless (and (listp field) (>= (length field) 3))
-    (fail 'invalid-field-error "Invalid field declaration ~S." field))
-  (destructuring-bind (name type &rest options) field
-    (multiple-value-bind (required-p default default-p)
-        (parse-field-markers options name)
-      (when (and required-p default-p)
-        (fail 'invalid-field-error
-              "Required field ~A cannot declare a default."
-              name))
-      (list :name (identifier-string name)
-            :type (normalize-type-expression type library-name local-types)
-            :required required-p
-            :default-p default-p
-            :default default))))
+  (with-star-source-position (field)
+    (unless (and (listp field) (>= (length field) 3))
+      (fail 'invalid-field-error "Invalid field declaration ~S." field))
+    (destructuring-bind (name type &rest options) field
+      (multiple-value-bind (required-p default default-p)
+          (parse-field-markers options name)
+        (when (and required-p default-p)
+          (fail 'invalid-field-error
+                "Required field ~A cannot declare a default."
+                name))
+        (list :name (identifier-string name)
+              :type (normalize-type-expression type library-name local-types)
+              :required required-p
+              :default-p default-p
+              :default default)))))
 
 (defun compile-document (declaration library-name local-types)
   (destructuring-bind (operator name options &rest fields) declaration
@@ -320,61 +581,95 @@
               :fields compiled-fields)))))
 
 (defun compile-library-declaration (declaration library-name local-types)
-  (let ((kind (declaration-kind declaration)))
-    (cond
-      ((string= kind "import") (compile-import declaration))
-      ((string= kind "scalar") (compile-scalar declaration library-name local-types))
-      ((string= kind "enum") (compile-enum declaration library-name))
-      ((string= kind "document") (compile-document declaration library-name local-types))
-      ((string= kind "predicate") (compile-predicate declaration library-name local-types))
-      ((string= kind "message") (compile-message declaration library-name local-types))
-      (t
-       (fail 'invalid-declaration-error
-             "Unknown specification declaration ~S."
-             (first declaration))))))
+  (with-star-source-position (declaration)
+    (let ((kind (declaration-kind declaration)))
+      (cond
+        ((string= kind "import") (compile-import declaration))
+        ((string= kind "scalar")
+         (compile-scalar declaration library-name local-types))
+        ((string= kind "enum") (compile-enum declaration library-name))
+        ((string= kind "document")
+         (compile-document declaration library-name local-types))
+        ((string= kind "predicate")
+         (compile-predicate declaration library-name local-types))
+        ((string= kind "message")
+         (compile-message declaration library-name local-types))
+        (t
+         (fail 'invalid-declaration-error
+               "Unknown specification declaration ~S."
+               (first declaration)))))))
 
 (defun compile-spec-library (form)
-  (unless (and (listp form)
-               (>= (length form) 3)
-               (string= (declaration-kind form) "spec-library"))
-    (fail 'invalid-library-error "Expected one spec-library form."))
-  (destructuring-bind (operator name options &rest declarations) form
-    (declare (ignore operator))
-    (unless (stringp name)
-      (fail 'invalid-library-error "Specification library name must be a string."))
-    (ensure-plist options "spec-library" 'invalid-library-error)
-    (ensure-unique-declarations declarations)
-    (ensure-unique-local-types declarations)
-    (ensure-unique-library-names declarations)
-    (let* ((version (required-option options :version "spec-library" 'invalid-library-error))
-           (digest (getf options :digest))
-           (local-types (declared-local-types declarations))
-           (compiled
-             (mapcar (lambda (declaration)
-                       (compile-library-declaration declaration name local-types))
-                     declarations)))
-      (unless (stringp version)
-        (fail 'invalid-library-error "Specification library version must be a string."))
-      (when (and digest (not (digest-p digest)))
-        (fail 'invalid-library-error "Specification library digest must use sha256:."))
-      (list :ir-version 1
-            :kind :spec-library
-            :name name
-            :version version
-            :digest digest
-            :imports (remove-if-not
-                      (lambda (item) (eq (getf item :kind) :import))
-                      compiled)
-            :declarations (remove-if
-                           (lambda (item) (eq (getf item :kind) :import))
-                           compiled)))))
+  (with-star-source-position (form)
+    (unless (and (listp form)
+                 (>= (length form) 3)
+                 (string= (declaration-kind form) "spec-library"))
+      (fail 'invalid-library-error "Expected one spec-library form."))
+    (destructuring-bind (operator name options &rest declarations) form
+      (declare (ignore operator))
+      (unless (stringp name)
+        (fail 'invalid-library-error
+              "Specification library name must be a string."))
+      (ensure-plist options "spec-library" 'invalid-library-error)
+      (ensure-unique-declarations declarations)
+      (ensure-unique-local-types declarations)
+      (ensure-unique-library-names declarations)
+      (let* ((version
+               (required-option
+                options :version "spec-library" 'invalid-library-error))
+             (digest (getf options :digest))
+             (local-types (declared-local-types declarations))
+             (compiled
+               (mapcar (lambda (declaration)
+                         (compile-library-declaration
+                          declaration name local-types))
+                       declarations)))
+        (unless (stringp version)
+          (fail 'invalid-library-error
+                "Specification library version must be a string."))
+        (when (and digest (not (digest-p digest)))
+          (fail 'invalid-library-error
+                "Specification library digest must use sha256:."))
+        (list :ir-version 1
+              :kind :spec-library
+              :name name
+              :version version
+              :digest digest
+              :imports (remove-if-not
+                        (lambda (item) (eq (getf item :kind) :import))
+                        compiled)
+              :declarations (remove-if
+                             (lambda (item) (eq (getf item :kind) :import))
+                             compiled))))))
 
 (defun load-star-form (pathname)
-  (with-open-file (stream pathname :direction :input)
-    (let ((*read-eval* nil))
-      (let ((form (read stream nil :eof)))
-        (when (eq form :eof)
-          (fail 'invalid-library-error "Star file ~A is empty." pathname))
-        (unless (eq (read stream nil :eof) :eof)
-          (fail 'invalid-library-error "Star file ~A must contain exactly one top-level form." pathname))
-        form))))
+  (let* ((candidate (pathname pathname))
+         (path
+           (handler-case
+               (truename candidate)
+             (file-error ()
+               candidate))))
+    (let ((*star-source-pathname* path)
+          (*star-source-line* 1)
+          (*star-source-column* 1))
+      (unless (and (pathname-type path)
+                   (string-equal (pathname-type path) "star"))
+        (fail 'star-lang-source-error
+              "Star source pathname must use the .star extension."))
+      (handler-case
+          (let ((source
+                  (with-open-file (stream path :direction :input)
+                    (with-output-to-string (output)
+                      (loop for character = (read-char stream nil nil)
+                            while character
+                            do (write-char character output))))))
+            (multiple-value-bind (form positions)
+                (parse-star-source source path)
+              (let ((*star-source-positions* positions))
+                (compile-spec-library form))))
+        (star-lang-core-error (condition)
+          (error condition))
+        (file-error (condition)
+          (fail 'star-lang-source-error
+                "Could not read Star source ~A: ~A."
+                path condition))))))

@@ -1,0 +1,183 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-design-001
+:END:
+#+title: STAR-LANG-001 Common Lisp Host and Portable Manifest
+#+description: Freeze Common Lisp as the Star-Lang host while keeping the parser closed, normalized IR runtime-neutral, and generated manifests and actor messages portable.
+#+status: APPROVED
+#+filetags: :starintel:design:star-lang:common-lisp:compiler:ir:manifest:actors:runtime:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+#+created: [2026-07-26 Sun]
+#+last_modified: [2026-07-26 Sun]
+
+| Version | Date       | Description of change                                        | Did nsaspy approve it |
+|---------+------------+--------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-26 | Select the host, freeze boundaries, and open implementation | Yes                   |
+
+* Related Nodes
+
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-018-comparative-gate-and-language-selection.org][STAR-LANG-RESEARCH-018 Comparative Gate and Host Language Selection]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-008-core-surface-and-wire-protocol.org][STAR-LANG-RESEARCH-008 Core Surface and Wire Protocol]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-009-canonical-json-and-generated-bindings.org][STAR-LANG-RESEARCH-009 Canonical JSON and Generated Bindings]]
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-001-implementation.org][STAR-LANG-INDEX-001 Implementation]]
+
+* APPROVED Decision
+
+Star-Lang is a closed declarative language implemented in Common Lisp.
+
+Common Lisp owns parsing, source locations, origin chains, semantic validation, normalized IR, canonical manifest generation, standalone execution, conditions, operator restarts, and adapter construction.
+
+Common Lisp does not own the external representation. Portable consumers receive canonical JSON manifests, generated bindings, versioned envelopes, and explicit actor contracts.
+
+* APPROVED Layers
+
+#+begin_src text
+source bytes
+  -> closed parsed tree with spans and string identifiers
+  -> validated declarations
+  -> qualified runtime-neutral IR
+  -> canonical portable manifest
+  -> standalone or adapter-specific runtime binding
+#+end_src
+
+No adapter may parse source independently. Every adapter consumes validated IR or a canonical manifest.
+
+* APPROVED Parser Boundary
+
+The parser must:
+
+1. accept exactly one top-level unit;
+2. recognize only Star-Lang grammar;
+3. reject reader evaluation, unrelated dispatch syntax, dotted lists, and package-qualified names;
+4. avoid interning attacker-controlled identifiers;
+5. attach pathname, line, column, byte offset, and span length;
+6. preserve origin chains through imports;
+7. emit structured conditions;
+8. perform no network access;
+9. pass parsed declarations through semantic validation before binding.
+
+Import resolution is separate and injected. It verifies exact identity, version, and digest before compilation.
+
+* APPROVED Core Semantics
+
+- documents are typed and versioned;
+- relations have explicit source, predicate, and destination;
+- inheritance is additive;
+- field access is explicit rather than dot syntax;
+- actor contracts declare accepted and produced types;
+- agent tools are declared capabilities;
+- dataflows compile into named deterministic stages;
+- persistence is explicit and transient values cannot be stored without conversion;
+- commands carry correlation, causation, attempt, deadline, and idempotency identity;
+- delivery is at least once and never claims exactly once;
+- lifecycle completion and broker settlement remain separate;
+- cancellation is cooperative and durable;
+- actor existence and readiness are routing facts, not language truth.
+
+* APPROVED Runtime Shape
+
+The baseline runtime is standalone and deterministic. Actor frameworks are optional adapters.
+
+#+begin_src text
+normalized command
+       |
+       v
+deterministic dispatcher
+       +--> direct registered handler
+       +--> cl-gserver actor-of/tell adapter
+       +--> external transport adapter
+#+end_src
+
+The dispatcher owns lifecycle, idempotency, deadlines, retries, cancellation, output publication, and terminal replay.
+
+* APPROVED Recovery Model
+
+Typed conditions expose allowed operator decisions such as retry, delayed retry, alternate compatible actor, verified cache use, offline continuation, optional-stage skip, branch abort, and correlation cancellation.
+
+A restart is not durable by itself. Selecting one appends a serializable run decision before execution continues.
+
+* APPROVED Package Boundary
+
+- =star-lang.source= — source nodes and spans;
+- =star-lang.parser= — closed parser;
+- =star-lang.resolver= — import resolution;
+- =star-lang.semantic= — declaration and type validation;
+- =star-lang.ir= — normalized runtime-neutral IR;
+- =star-lang.manifest= — canonical JSON and hashes;
+- =star-lang.bindings= — generated bindings;
+- =star-lang.lifecycle= — envelopes and lifecycle validation;
+- =star-lang.dispatch= — deterministic dispatcher;
+- =star-lang.transport= — settlement and outbox ports;
+- =star-lang.runtime= — direct handlers;
+- =star-lang.runtime.cl-gserver= — optional adapter;
+- =star-lang.document= — document contracts and values;
+- =star-lang.api= — stable public entry points.
+
+Dependencies point downward. Runtime adapters cannot be imported by parser, semantic, IR, or manifest packages.
+
+* APPROVED API Direction
+
+#+begin_src lisp
+(load-star-file pathname &key resolver cache offline)
+(load-star-url url &key resolver cache offline)
+(compile-star source &key origin resolver)
+(validate-manifest manifest)
+(write-canonical-manifest manifest stream)
+(generate-bindings manifest language stream)
+(create-document graph type values &key validate)
+(dispatch-command runtime envelope)
+#+end_src
+
+Existing prototype entry points remain compatibility shims until the package split is complete.
+
+* APPROVED Cross-Language Contract
+
+Racket, Scheme, Python, JavaScript, Nim, and later runtimes consume canonical manifests, generated type bindings, =star-message-v1= envelopes, deterministic fixtures, and trace artifacts. They do not reinterpret =.star= source.
+
+Racket remains a CI conformance and tooling oracle. Scheme remains a minimal portability witness.
+
+* APPROVED Exclusions
+
+- no research-node object type, predicate, or schema field;
+- no arbitrary host-language escape;
+- no dot syntax;
+- no implicit parser network access;
+- no actor framework requirement for standalone execution;
+- no cl-gserver types in normalized IR;
+- no runtime liveness facts in program validity;
+- no auto-dig or Quasar-specific language semantics;
+- no unversioned wire messages.
+
+* APPROVED Implementation Order
+
+1. keep cross-language comparison green;
+2. make source spans and origin chains first-class;
+3. package existing Common Lisp code as explicit systems;
+4. replace shell digest and URL calls with injected ports;
+5. freeze canonical manifest hashes and fixtures;
+6. generate bindings from manifests only;
+7. expose deterministic standalone execution;
+8. bind optional cl-gserver execution;
+9. add end-to-end compile, manifest, execute, replay tests.
+
+* APPROVED Acceptance Criteria
+
+- one command runs all conformance suites;
+- malformed source never interns package symbols;
+- every semantic error reports an exact span;
+- imported declarations retain an origin chain;
+- identical input produces byte-identical manifests;
+- generated Python and TypeScript compile;
+- direct and cl-gserver execution produce equivalent lifecycle traces;
+- redelivery does not reinvoke terminal work;
+- publication resumes after injected failure;
+- restarted runtimes reconstruct pending and terminal state;
+- no consumer requires original =.star= source;
+- no research/application type leaks into the StarIntel schema.
+
+* APPROVED Rejected Alternatives
+
+Racket is rejected as the production host because language tooling does not offset duplicating the existing runtime and integration stack. Scheme is rejected because portability collapses at diagnostics, networking, recovery, packaging, and actor integration. The Common Lisp reader is rejected for untrusted source. Actor frameworks are rejected as the semantic core.
+
+* APPROVED Change Rule
+
+Changes to source grammar, normalized IR, canonical manifest, lifecycle identity, or public API require a numbered design or versioned additive revision. Application needs cannot silently mutate these contracts.

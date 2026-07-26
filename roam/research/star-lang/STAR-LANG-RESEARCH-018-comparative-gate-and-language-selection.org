@@ -1,0 +1,132 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-018
+:END:
+#+title: STAR-LANG-RESEARCH-018 Comparative Gate and Host Language Selection
+#+description: Complete the missing Racket and Scheme conformance baselines, compare them with Common Lisp, and select the Star-Lang host without changing the portable manifest boundary.
+#+status: DONE
+#+filetags: :starintel:research:star-lang:common-lisp:racket:scheme:comparison:compiler:runtime:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+#+created: [2026-07-26 Sun]
+#+last_modified: [2026-07-26 Sun]
+
+| Version | Date       | Description of change                                             | Did nsaspy approve it |
+|---------+------------+-------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-26 | Complete the comparative gate and select the implementation host | Yes                   |
+
+* Related Nodes
+
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Language Research]]
+- [[file:STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations]]
+- [[file:STAR-LANG-RESEARCH-001-common-lisp-comparative-baseline.org][STAR-LANG-RESEARCH-001 Common Lisp Comparative Baseline]]
+- [[file:STAR-LANG-RESEARCH-008-core-surface-and-wire-protocol.org][STAR-LANG-RESEARCH-008 Core Surface and Wire Protocol]]
+- [[file:../../design/star-lang/STAR-LANG-001-common-lisp-host-portable-manifest.org][STAR-LANG-001 Common Lisp Host and Portable Manifest]]
+
+* Question
+
+Which host should own parsing, compilation, diagnostics, local execution, and recovery while generated manifests, actors, messages, documents, and bindings stay language-neutral?
+
+Every candidate must preserve the same email-enumeration fixture, typed documents, persistent/transient distinction, actor/tool/agent boundaries, named stages, normalized plan, three candidates, two found addresses, one persisted final review, inspectable expansion, and benchmark entry point.
+
+* Implemented Evidence
+
+** Common Lisp
+
+The existing Common Lisp prototype already covers the shared fixture plus the closed =.star= parser, normalized IR, semantic checks, canonical JSON, generated bindings, lifecycle envelopes, deterministic dispatch, transport settlement, standalone execution, optional cl-gserver binding, remoting, durable journals, and document constructors.
+
+** Embedded Racket
+
+This pass adds an equivalent Racket runtime and test suite under =prototypes/star-lang/racket/embedded/=. It preserves document validation, registries, normalized plans, deterministic execution, persistence rejection, expected output, and a smoke benchmark.
+
+** Dedicated Racket Language
+
+This pass adds an installable =#lang starintel= collection, an example module, tests, and =raco expand= evidence. The dedicated language reuses the embedded runtime so the experiment isolates reader/module packaging rather than creating a second execution engine.
+
+** Guile Scheme
+
+This pass adds a Scheme baseline using =syntax-rules=, vectors, and association lists. It preserves the same normalized plan and final output while showing where portability becomes implementation-specific.
+
+** Continuous Integration
+
+=.github/workflows/star-lang-comparison.yml= installs Racket and Guile, checks form balance, runs both Racket modes, captures language expansion, and runs the Scheme suite. Smoke timing remains diagnostic only; hosted CI does not justify performance claims.
+
+* Findings
+
+** Common Lisp
+
+Strengths:
+
+- complete existing runtime evidence rather than a fixture-only prototype;
+- conditions and restarts match resumable operator workflows;
+- closed parser already prevents Common Lisp reader leakage;
+- direct integration with existing StarIntel Common Lisp components;
+- runtime-neutral IR and standalone execution already exist.
+
+Costs:
+
+- source tooling must be built;
+- current files need normal ASDF packaging;
+- some digest and URL adapters still shell out;
+- the closed surface needs generated grammar and language-server support.
+
+** Racket
+
+Racket has the strongest language construction, module, expansion, and editor-tooling path. It is the best conformance and syntax oracle. It is not selected as the production host because it would duplicate the existing StarIntel runtime, actor integration, lifecycle machinery, and recovery implementation.
+
+** Scheme
+
+Scheme proves the declarative core can remain small. It loses its portability advantage at structured diagnostics, modules, networking, clocks, recovery, and actor integration. A production implementation would become Guile-specific or require a larger portability layer than the language core.
+
+* Evaluation
+
+| Category                         | Common Lisp | Racket embedded | Racket =#lang= | Guile Scheme |
+|----------------------------------+-------------+-----------------+----------------+--------------|
+| Fixture parity                   | Pass        | Pass            | Pass           | Pass         |
+| Declaration inspection           | Pass        | Pass            | Strongest      | Pass         |
+| Closed source boundary           | Pass        | Partial         | Strongest      | Weak         |
+| Structured recovery              | Strongest   | Moderate        | Moderate       | Weak         |
+| Existing StarIntel integration   | Strongest   | Weak            | Weak           | Weak         |
+| Runtime implementation evidence  | Strongest   | Fixture only    | Boundary only  | Fixture only |
+| Deployment delta                 | Lowest      | High            | High           | High         |
+| Overall implementation fit       | Selected    | Rejected host   | Retained oracle| Rejected host|
+
+* Decision
+
+Select Common Lisp as the Star-Lang implementation host.
+
+Retain Racket as a conformance implementation, syntax/expander oracle, and possible language-service frontend. Retain Scheme as a minimal portability witness.
+
+Common Lisp is the host, not the wire format. Normalized IR, canonical JSON manifests, generated bindings, and =star-message-v1= remain portable contracts.
+
+#+begin_src text
+closed .star parser
+        |
+        v
+validated normalized IR
+        |
+        +--> canonical portable manifest
+        +--> generated bindings
+        +--> standalone Common Lisp runtime
+        +--> optional cl-gserver adapter
+        +--> external actor transports
+#+end_src
+
+* Hard Boundaries
+
+1. Star-Lang source is not arbitrary Common Lisp.
+2. No unrestricted =EVAL= or reader evaluation enters the source path.
+3. Source identifiers remain strings until validated.
+4. Core IR retains runtime-neutral operations.
+5. =send= becomes =tell= only in the cl-gserver adapter.
+6. Research nodes never become StarIntel object types, predicates, fields, or schema extensions.
+7. Field access remains explicit; dot syntax is not introduced.
+8. Auto-dig and Quasar consume Star-Lang contracts; neither defines them.
+9. Actor liveness affects routing, not program validity.
+10. The portable manifest remains the cross-language source of truth.
+
+* Falsifiers
+
+Reopen host selection if Common Lisp cannot preserve exact source spans and origin chains, cannot become a normal testable system, leaks host values into portable artifacts, or if Racket demonstrates at least a 30 percent reduction in maintained compiler/runtime code while preserving the same execution, recovery, adapters, and artifacts.
+
+* Result
+
+Loops 002, 003, 004, and 005 are complete for the shared comparison fixture. The comparative gate is closed and =STAR-LANG-001= may own the implementation slot.

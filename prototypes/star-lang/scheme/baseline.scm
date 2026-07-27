@@ -165,6 +165,7 @@
         ((eq? type 'boolean) (boolean? value))
         ((eq? type 'symbol) (symbol? value))
         ((eq? type 'email) (email? value))
+        ((eq? type 'map) (map-value? value))
         ((and (pair? type) (eq? (car type) 'list-of))
          (and (list? value)
               (every (lambda (item) (type-valid? rt (cadr type) item)) value)))

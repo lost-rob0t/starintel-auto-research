@@ -5,6 +5,10 @@ on:
     paths:
       - "prototypes/star-lang/common-lisp/**"
       - "prototypes/star-lang/fixtures/**"
+      - "roam/design/star-lang/**"
+      - "roam/implement/star-lang/**"
+      - "roam/indexes/star-lang/**"
+      - "roam/research/star-lang/**"
       - ".github/workflows/star-lang-common-lisp.yml"
   push:
     branches:
@@ -12,6 +16,10 @@ on:
     paths:
       - "prototypes/star-lang/common-lisp/**"
       - "prototypes/star-lang/fixtures/**"
+      - "roam/design/star-lang/**"
+      - "roam/implement/star-lang/**"
+      - "roam/indexes/star-lang/**"
+      - "roam/research/star-lang/**"
       - ".github/workflows/star-lang-common-lisp.yml"
   workflow_dispatch:
 
@@ -24,6 +32,45 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      - name: Enforce Common Lisp-only implementation boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          forbidden_dirs=(
+            prototypes/star-lang/racket
+            prototypes/star-lang/scheme
+            prototypes/star-lang/guile
+          )
+
+          for path in "${forbidden_dirs[@]}"; do
+            if [[ -e "$path" ]]; then
+              echo "forbidden alternate Star-Lang implementation path: $path" >&2
+              exit 1
+            fi
+          done
+
+          mapfile -t forbidden_sources < <(
+            find prototypes/star-lang -type f \
+              \( -name '*.rkt' -o -name '*.scm' -o -name '*.ss' \) \
+              -print
+          )
+
+          if ((${#forbidden_sources[@]})); then
+            printf 'forbidden alternate Star-Lang source: %s\n' "${forbidden_sources[@]}" >&2
+            exit 1
+          fi
+
+          mapfile -t forbidden_workflows < <(
+            find .github/workflows -maxdepth 1 -type f \
+              \( -iname '*racket*' -o -iname '*scheme*' -o -iname '*guile*' -o -iname '*cross-language*' \) \
+              -print
+          )
+
+          if ((${#forbidden_workflows[@]})); then
+            printf 'forbidden alternate Star-Lang workflow: %s\n' "${forbidden_workflows[@]}" >&2
+            exit 1
+          fi
       - name: Install SBCL
         run: |
           sudo apt-get update

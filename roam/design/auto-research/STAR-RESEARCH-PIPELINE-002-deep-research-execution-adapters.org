@@ -1,0 +1,523 @@
+:PROPERTIES:
+:ID:       starintel-auto-research-pipeline-002
+:END:
+#+title: STAR-RESEARCH-PIPELINE-002 Deep Research Execution Adapters
+#+description: Add versioned deep-research worker adapters behind ADARD while preserving its run supervisor, ledgers, validation, review, and promotion authority.
+#+status: REVIEW
+#+filetags: :starintel:design:auto-research:adard:deep-research:adapters:actors:browser:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                   | Did nsaspy approve it |
+|---------+------------+---------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-27 | Define deep-research adapter and browser-worker boundary | Pending               |
+
+* Related Nodes
+
+- [[file:../../research/auto-research/STAR-RESEARCH-002-deep-research-execution-adapter-analysis.org][STAR-RESEARCH-002 Deep Research Execution Adapter Analysis]]
+- [[file:STAR-RESEARCH-PIPELINE-001-adaptive-research-dag-evaluation-harness.org][STAR-RESEARCH-PIPELINE-001 Adaptive Research DAG and Evaluation Harness]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/45][GitHub issue 45]]
+
+* REVIEW Objective
+
+Add deep-research execution to the Adaptive Design, Analysis, Research, and Development loop[fn:adard] through bounded adapters[fn:adapter]. ADARD remains the control plane[fn:control-plane]. External research engines and browser JavaScript actors[fn:browser-worker] remain workers.
+
+The design must allow several research engines to execute behind one stable request, event, and result contract while preserving:
+
+- ADARD run and candidate identity
+- fixed budgets and stop conditions
+- append-only state replay
+- claim-level evidence and contrary evidence
+- deterministic validation
+- independent review
+- one promotion gate
+- zero or one active implementation design
+
+* REVIEW Scope
+
+** Included
+
+- adapter registry and capability routing
+- versioned request envelope
+- versioned event envelope
+- versioned normalized result envelope
+- supervised process and service execution
+- exact cancellation and timeout behavior
+- raw artifact references and hashes
+- source, evidence, and claim normalization
+- fixed initial engine-selection policy
+- Open Deep Research adapter profile
+- GPT Researcher adapter profile
+- STORM and Co-STORM adapter profile
+- PaperQA2 adapter profile
+- browser JavaScript worker port
+- deterministic fake adapters
+- cross-adapter evaluation fixtures
+- replay, diagnostics, and failure records
+
+** Deferred
+
+- automatic model-provider optimization
+- unrestricted dynamic tool installation
+- generalized distributed scheduling
+- semantic retrieval over the complete Org-roam graph
+- direct writes to canonical research or design files
+- automatic architecture promotion
+- production dashboard
+- Quasar-specific implementation
+- complete browser crawler implementation
+
+* REVIEW Invariants
+
+1. ADARD owns the run, candidate, budget, state machine, evaluation, and promotion decision.
+2. An adapter owns only one bounded execution attempt.
+3. Adapter workers never write canonical Org-roam files or ADARD ledgers.
+4. Upstream engine state is transient and cannot replace replayable ADARD events.
+5. Engine-specific objects are normalized before they enter ADARD evaluation.
+6. Every material claim links to normalized supporting evidence, contradicting evidence, or an explicit inference label.
+7. Raw retrieved content is untrusted data and never becomes an instruction merely because a worker returned it.
+8. Every request declares allowed capabilities, source scope, and resource limits.
+9. Cancellation has one stable identifier and one terminal result.
+10. A run may use several adapters without changing the candidate contract.
+11. Quasar may invoke and display runs but does not define deep-research semantics.
+12. Browser JavaScript actors use the same portable envelopes as process and service workers.
+
+* REVIEW Architecture
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+component "ADARD Research Run Supervisor" as Run
+component "Branch Supervisor" as Branch
+component "Deep Research Adapter Registry" as Registry
+component "Process/Service Runner" as Runner
+component "Browser Worker Host" as Browser
+component "Open Deep Research Adapter" as ODR
+component "GPT Researcher Adapter" as GPTR
+component "STORM Adapter" as STORM
+component "PaperQA2 Adapter" as PQA
+component "Normalizer and Validator" as Normalize
+component "ADARD Review and Promotion" as Review
+component "Append-Only Ledgers" as Ledger
+
+Run --> Branch
+Branch --> Registry
+Registry --> Runner
+Registry --> Browser
+Runner --> ODR
+Runner --> GPTR
+Runner --> STORM
+Runner --> PQA
+Browser --> Normalize
+ODR --> Normalize
+GPTR --> Normalize
+STORM --> Normalize
+PQA --> Normalize
+Normalize --> Review
+Run --> Ledger
+Branch --> Ledger
+Normalize --> Ledger
+Review --> Ledger
+@enduml
+#+end_src
+
+The adapter registry resolves a declared research capability[fn:capability-route] to a versioned adapter profile. It does not let a worker choose its own authority or expand its own limits.
+
+* REVIEW Capability Routes
+
+Initial routes:
+
+| Route | Primary adapter | Fallback | Intended workload |
+|-------+-----------------+----------+-------------------|
+| =general-web= | Open Deep Research | GPT Researcher | Broad multi-source web and tool research |
+| =recursive-web= | GPT Researcher | Open Deep Research | Bounded depth and breadth expansion |
+| =perspective-plan= | STORM | Open Deep Research | Perspective enumeration and outline generation |
+| =collaborative-curation= | Co-STORM | STORM | Operator-steered knowledge curation |
+| =scientific-literature= | PaperQA2 | STORM | Scientific papers and page-level cited evidence |
+| =local-document-rag= | PaperQA2 | GPT Researcher | Local document collections and indexed retrieval |
+| =browser-session= | Browser JavaScript worker | Process adapter | Operator-authorized browser and local-page work |
+
+Routing is configuration, not model judgment. A later measured planner may choose routes adaptively only after fixed-route ablation evidence exists.
+
+* REVIEW Adapter Registry Contract
+
+Each registry record contains:
+
+#+begin_src lisp
+(:deep-research-adapter
+ (:id "open-deep-research-process-v1")
+ (:version 1)
+ (:engine "open-deep-research")
+ (:engine-version "pinned-commit-or-release")
+ (:runtime :process)
+ (:protocol "star.deep-research.v1")
+ (:capabilities (:general-web :recursive-web :mcp))
+ (:input-schema "star.deep-research.request.v1")
+ (:event-schema "star.deep-research.event.v1")
+ (:result-schema "star.deep-research.result.v1")
+ (:command ("python" "-m" "star_adapters.open_deep_research"))
+ (:default-limits (:wall-clock-seconds 900
+                   :max-requests 100
+                   :max-depth 3
+                   :max-branches 4
+                   :max-output-bytes 16777216))
+ (:configuration-hash "sha256"))
+#+end_src
+
+The registry rejects duplicate identifiers, unsupported protocol versions, missing schemas, undeclared capabilities, unbounded defaults, and mutable engine references.
+
+* REVIEW Request Envelope
+
+#+begin_src lisp
+(:deep-research-request
+ (:protocol "star.deep-research.v1")
+ (:request-id "uuid")
+ (:run-id "adard-run-id")
+ (:candidate-id "adard-candidate-id")
+ (:attempt 1)
+ (:capability :general-web)
+ (:question "bounded research question")
+ (:input-packet (:id "packet-id" :sha256 "digest"))
+ (:source-scope (:allowed-domains ()
+                 :allowed-repositories ()
+                 :local-artifact-ids ()
+                 :network-policy :declared-retrievers))
+ (:retrievers (:web-search :mcp))
+ (:models (:research "declared-model-route"
+           :summarization "declared-model-route"
+           :final "declared-model-route"))
+ (:limits (:wall-clock-seconds 900
+           :max-requests 100
+           :max-depth 3
+           :max-branches 4
+           :max-input-tokens 250000
+           :max-output-tokens 50000
+           :max-output-bytes 16777216
+           :max-cost nil))
+ (:output (:schema "star.deep-research.result.v1"
+           :require-claims t
+           :require-evidence t
+           :require-contrary-evidence t))
+ (:cancel-id "cancel-id")
+ (:configuration-hash "sha256"))
+#+end_src
+
+The request is immutable after acceptance. A revision creates a new request identifier and attempt record.
+
+* REVIEW Event Envelope
+
+Workers emit newline-delimited JSON[fn:ndjson] events:
+
+#+begin_src lisp
+(:deep-research-event
+ (:protocol "star.deep-research.v1")
+ (:event-id "uuid")
+ (:request-id "uuid")
+ (:sequence 17)
+ (:kind :source-retrieved)
+ (:timestamp "RFC3339")
+ (:engine "open-deep-research")
+ (:payload (:source-temp-id "source-12"
+            :locator "https://example.org/record"
+            :content-sha256 "digest")))
+#+end_src
+
+Allowed event kinds:
+
+- =accepted=
+- =planning=
+- =query-issued=
+- =source-discovered=
+- =source-retrieved=
+- =evidence-extracted=
+- =branch-started=
+- =branch-completed=
+- =progress=
+- =warning=
+- =completed=
+- =failed=
+- =cancelled=
+
+Sequence numbers are strictly increasing per request. Duplicate event identifiers are ignored. Backward sequence movement or a second terminal event is rejected.
+
+* REVIEW Result Envelope
+
+#+begin_src lisp
+(:deep-research-result
+ (:protocol "star.deep-research.v1")
+ (:request-id "uuid")
+ (:run-id "adard-run-id")
+ (:candidate-id "adard-candidate-id")
+ (:status :completed)
+ (:engine (:name "open-deep-research"
+           :version "pinned"
+           :adapter-version 1
+           :configuration-hash "sha256"))
+ (:timing (:started-at "RFC3339"
+           :completed-at "RFC3339"
+           :wall-clock-ms 420000))
+ (:sources ())
+ (:evidence ())
+ (:claims ())
+ (:unanswered-questions ())
+ (:artifacts (:report nil
+              :outline nil
+              :mind-map nil
+              :branch-tree nil
+              :raw-event-log nil))
+ (:metrics (:requests 0
+            :input-tokens 0
+            :output-tokens 0
+            :bytes-retrieved 0
+            :cost nil))
+ (:fallback nil)
+ (:truncated nil)
+ (:unsupported ())
+ (:input-sha256 "digest")
+ (:output-sha256 "digest"))
+#+end_src
+
+A successful engine exit is not a successful ADARD adapter result until this envelope passes deterministic validation.
+
+* REVIEW Normalized Source, Evidence, and Claim Records
+
+A source record contains:
+
+- stable adapter-local identifier
+- original locator
+- retrieved timestamp
+- retrieval method
+- title, publisher, and author when available
+- content, capture, or artifact hash
+- media type and language
+- retained artifact reference
+- discovery query and upstream engine
+
+An evidence record contains:
+
+- source identifier
+- exact excerpt, page, section, timestamp, or structured locator
+- content hash
+- extraction method
+- claim relevance
+- support, contradiction, or context role
+
+A claim record contains:
+
+- stable identifier
+- normalized statement
+- supporting evidence identifiers
+- contradicting evidence identifiers
+- inference flag
+- confidence reported by the engine, if any
+- validator status
+- unresolved questions
+
+Engine confidence never substitutes for evidence coverage.
+
+* REVIEW Process and Service Runner
+
+The first runner launches one adapter attempt in an isolated subprocess[fn:subprocess]. Standard input carries one request envelope. Standard output carries only protocol events and one terminal result. Standard error is retained as a diagnostic artifact.
+
+The runner:
+
+- constructs an argument vector without shell interpolation
+- supplies only declared environment variables
+- applies wall-clock and output-size limits
+- records process identifier and start time
+- parses events incrementally
+- rejects malformed protocol output
+- sends cooperative cancellation first
+- kills the complete process group after the cancellation grace period
+- records exit status, signal, timeout, and truncation
+- never imports several upstream engines into the supervisor process
+
+A service adapter uses the same envelopes over a versioned local or remote transport and must preserve identical cancellation and terminal semantics.
+
+* REVIEW Browser JavaScript Worker Port
+
+The browser worker port is an Auto Research execution port, not a Quasar research model.
+
+The host creates one dedicated Web Worker[fn:web-worker] per attempt. The worker receives a cloned request and an explicit capability object. Supported initial capabilities:
+
+- selected-document read
+- operator-authorized page fetch through the host
+- browser-page content extraction
+- event emission
+- temporary artifact creation
+- cooperative cancellation
+
+The worker cannot directly access:
+
+- ADARD ledgers
+- canonical Org-roam files
+- Quasar graph or persistence internals
+- arbitrary credentials
+- undeclared network destinations
+- another worker's memory
+
+Browser workers emit the same protocol events and result envelope. The first implementation uses a deterministic fake worker and protocol conformance tests. Full browser crawling is deferred.
+
+* REVIEW Adapter Profiles
+
+** Open Deep Research
+
+- routes: =general-web=, optional =recursive-web=
+- maps ADARD limits to research iterations, search calls, and concurrent researchers
+- disables or filters undeclared Model Context Protocol servers
+- returns compressed findings, report, source records, and event traces
+- upstream LangGraph checkpoints remain transient artifacts
+
+** GPT Researcher
+
+- routes: =recursive-web=, =local-document-rag=
+- clamps internal breadth and depth to ADARD limits
+- maps planner questions and tree branches to optional branch-tree artifacts
+- does not create ADARD candidates for every internal branch
+- returns source tracking and final report through the normalized contract
+
+** STORM and Co-STORM
+
+- routes: =perspective-plan=, =collaborative-curation=
+- exports perspectives, questions, outline, cited article, and optional mind map
+- simulated conversations remain artifacts
+- human steering events are recorded as adapter input events
+- generated prose is decomposed into claims and evidence before evaluation
+
+** PaperQA2
+
+- routes: =scientific-literature=, =local-document-rag=
+- records index and document-manifest hashes
+- retains page-level locators
+- normalizes paper metadata providers and disagreements
+- returns contradiction and no-answer results without forcing a report
+
+* REVIEW Deterministic Validation
+
+The validator rejects:
+
+- unknown protocol, adapter, engine, capability, or schema version
+- request/result identity mismatch
+- missing terminal event
+- duplicate or backward event sequence
+- result after cancellation without a declared race outcome
+- output beyond the declared byte limit
+- unresolved source identifiers
+- claims without support or inference labels
+- evidence without source locators and hashes
+- citations that cannot be resolved to evidence
+- unreported truncation
+- undeclared fallback adapter
+- mutable or missing engine version
+- canonical-file writes or ledger mutation attempts
+- assertions that tests passed without attached test evidence
+
+* REVIEW Evaluation Harness
+
+Required fixtures:
+
+1. general multi-source web research
+2. recursive two-level subtopic expansion
+3. disputed claim with contrary evidence
+4. local-document-only answer
+5. scientific literature with page-level citations
+6. unresolved no-answer case
+7. prompt-injection source content
+8. cancellation during retrieval
+9. branch and request budget exhaustion
+10. deterministic fake-adapter replay
+
+Required measurements:
+
+- protocol-valid completion rate
+- claim-to-evidence coverage
+- citation resolvability
+- contrary-evidence capture
+- unsupported central claims
+- source diversity and duplicate rate
+- unanswered-question usefulness
+- time, requests, tokens, bytes, and cost
+- cancellation latency
+- repeated-run stability
+- normalization information loss
+
+The first ablation compares:
+
+- serial repository research
+- ADARD with one generic deep-research adapter
+- ADARD capability routing across at least two adapters
+
+* REVIEW Failure Handling
+
+- adapter unavailable: record =BLOCKED= with exact dependency and permit declared fallback
+- startup failure: fail attempt without creating engine state
+- malformed event: terminate adapter and retain raw diagnostics
+- timeout: send cancellation, then kill after grace period
+- cancellation race: accept only one terminal result and record the race
+- worker crash: retry once only when the request is immutable and no terminal result exists
+- normalizer failure: stop promotion; retain raw artifacts
+- source retrieval failure: preserve partial source diagnostics
+- cost or request limit: stop new work and return a truncated bounded result
+- ledger failure: stop ADARD state transitions; do not continue adapter execution silently
+
+* REVIEW Implementation Sequence
+
+1. Define protocol schemas and deterministic fake adapter.
+2. Implement adapter registry and fixed capability routing.
+3. Implement supervised NDJSON process runner.
+4. Implement result normalizer and deterministic validator.
+5. Implement Open Deep Research process adapter.
+6. Implement GPT Researcher process adapter.
+7. Run shared fixtures and routing ablation.
+8. Implement browser JavaScript fake worker and protocol conformance.
+9. Add STORM adapter.
+10. Add PaperQA2 adapter.
+11. Add Co-STORM human-steering events.
+12. Review evidence before any adaptive routing or production activation.
+
+This design does not enter =roam/implement/= until it is approved and the existing implementation slot is free.
+
+* REVIEW Acceptance Criteria
+
+- one stable protocol covers process, service, and browser workers
+- Open Deep Research and GPT Researcher pass the same request/event/result fixtures
+- all engine versions and configurations are pinned and hashed
+- cancellation produces one bounded terminal result
+- malformed output cannot reach ADARD reviewers
+- every material claim is attributable to normalized evidence or labeled inference
+- contrary evidence survives normalization
+- upstream internal branches do not create undeclared ADARD candidates
+- browser worker conformance passes without Quasar internals
+- no adapter writes canonical Org files or ledgers
+- fixed routing and fallback behavior are replayable
+- the serial-versus-adapter ablation records quality, time, and resource use
+- rejected engines and failed attempts remain retrievable
+- no automatic promotion is introduced
+
+* REVIEW Unresolved Questions
+
+- exact schema language for the portable envelopes
+- whether raw source captures belong in repository-local cache, StarIntel artifact storage, or both
+- minimum reproducibility requirements for search APIs whose results change over time
+- how local-only model routes report token and cost equivalents
+- whether browser workers require a separate origin before handling untrusted actor packages
+- which two fixed fixtures should become the long-term regression benchmark
+
+* Footnotes and Glossary
+
+[fn:adard] Adaptive Design, Analysis, Research, and Development loop, or ADARD: The bounded StarIntel control plane that generates research candidates, evaluates them, records state, and promotes at most one reviewed design proposal.
+
+[fn:adapter] Adapter: A component that converts requests, events, errors, and results between an external engine and a stable StarIntel contract.
+
+[fn:control-plane] Control plane: The part of a system that decides which work runs, applies limits and policy, records state, and coordinates workers rather than performing the research itself.
+
+[fn:browser-worker] Browser JavaScript actor: A bounded JavaScript worker running in a browser context that receives explicit input and capabilities and returns messages rather than directly mutating application state.
+
+[fn:capability-route] Capability route: A declared research need such as general web research or scientific-literature analysis that the registry maps to a suitable adapter.
+
+[fn:ndjson] Newline-delimited JSON, or NDJSON: A stream where each line is one complete JavaScript Object Notation value, allowing events to be validated incrementally.
+
+[fn:subprocess] Subprocess: A separate operating-system process launched and supervised by another process, allowing dependencies, crashes, cancellation, and resource use to be isolated.
+
+[fn:web-worker] Web Worker: A browser mechanism that runs JavaScript on a background thread and communicates with the page by sending cloned messages.

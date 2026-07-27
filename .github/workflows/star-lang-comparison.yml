@@ -1,0 +1,147 @@
+name: Star-Lang Cross-Language Comparison
+
+on:
+  pull_request:
+    paths:
+      - "prototypes/star-lang/common-lisp/prototype.lisp"
+      - "prototypes/star-lang/common-lisp/tests.lisp"
+      - "prototypes/star-lang/racket/**"
+      - "prototypes/star-lang/scheme/**"
+      - "prototypes/star-lang/fixtures/**"
+      - ".github/workflows/star-lang-comparison.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "prototypes/star-lang/common-lisp/prototype.lisp"
+      - "prototypes/star-lang/common-lisp/tests.lisp"
+      - "prototypes/star-lang/racket/**"
+      - "prototypes/star-lang/scheme/**"
+      - "prototypes/star-lang/fixtures/**"
+      - ".github/workflows/star-lang-comparison.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  comparison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install language runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes sbcl racket guile-3.0
+
+      - name: Check form balance
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          paths = [
+              *Path("prototypes/star-lang/racket").rglob("*.rkt"),
+              *Path("prototypes/star-lang/scheme").rglob("*.scm"),
+          ]
+
+          pairs = {")": "(", "]": "[", "}": "{"}
+          for path in paths:
+              stack = []
+              in_string = False
+              escaped = False
+              in_comment = False
+              for line_number, line in enumerate(
+                  path.read_text(encoding="utf-8").splitlines(), 1
+              ):
+                  in_comment = False
+                  for char in line:
+                      if in_comment:
+                          continue
+                      if in_string:
+                          if escaped:
+                              escaped = False
+                          elif char == "\\":
+                              escaped = True
+                          elif char == '"':
+                              in_string = False
+                          continue
+                      if char == ";":
+                          in_comment = True
+                      elif char == '"':
+                          in_string = True
+                      elif char in "([{":
+                          stack.append((char, line_number))
+                      elif char in ")]}":
+                          if not stack or stack[-1][0] != pairs[char]:
+                              raise SystemExit(
+                                  f"{path}:{line_number}: mismatched {char}"
+                              )
+                          stack.pop()
+              if in_string:
+                  raise SystemExit(f"{path}: unterminated string")
+              if stack:
+                  char, line_number = stack[-1]
+                  raise SystemExit(
+                      f"{path}:{line_number}: unclosed {char}"
+                  )
+              print(f"{path}: balanced")
+          PY
+
+      - name: Run Common Lisp baseline
+        shell: bash
+        run: |
+          set -o pipefail
+          sbcl --script prototypes/star-lang/common-lisp/tests.lisp \
+            2>&1 | tee star-lang-common-lisp-comparison.log
+
+      - name: Run embedded Racket baseline
+        shell: bash
+        run: |
+          set -o pipefail
+          racket prototypes/star-lang/racket/embedded/tests.rkt \
+            2>&1 | tee star-lang-racket-embedded.log
+
+      - name: Install Star-Lang Racket collection
+        run: |
+          raco pkg install \
+            --auto \
+            --batch \
+            --name starintel \
+            prototypes/star-lang/racket
+
+      - name: Run dedicated language baseline
+        shell: bash
+        run: |
+          set -o pipefail
+          racket prototypes/star-lang/racket/lang-tests.rkt \
+            2>&1 | tee star-lang-racket-language.log
+
+      - name: Capture dedicated language expansion
+        run: |
+          raco expand \
+            prototypes/star-lang/racket/examples/email-enumeration.rkt \
+            > star-lang-racket-expand.txt
+          test -s star-lang-racket-expand.txt
+
+      - name: Run Guile Scheme baseline
+        shell: bash
+        run: |
+          set -o pipefail
+          guile --no-auto-compile \
+            prototypes/star-lang/scheme/tests.scm \
+            2>&1 | tee star-lang-scheme.log
+
+      - name: Upload comparison evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: star-lang-cross-language-comparison
+          path: |
+            star-lang-common-lisp-comparison.log
+            star-lang-racket-embedded.log
+            star-lang-racket-language.log
+            star-lang-racket-expand.txt
+            star-lang-scheme.log
+          if-no-files-found: warn

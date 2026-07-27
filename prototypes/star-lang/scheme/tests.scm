@@ -1,4 +1,4 @@
-(load "prototypes/star-lang/scheme/baseline.scm")
+(load (string-append (getcwd) "/prototypes/star-lang/scheme/baseline.scm"))
 
 (define fixture-path
   "prototypes/star-lang/fixtures/email-enumeration.sexp")

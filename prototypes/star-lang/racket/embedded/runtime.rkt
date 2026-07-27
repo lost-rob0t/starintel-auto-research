@@ -1,6 +1,6 @@
 #lang racket/base
 
-(require racket/list racket/match racket/port racket/string)
+(require racket/file racket/list racket/match racket/port racket/string)
 (provide (all-defined-out))
 
 (struct exn:fail:star exn:fail (kind) #:transparent)

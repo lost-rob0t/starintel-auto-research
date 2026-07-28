@@ -7,10 +7,11 @@
 #+filetags: :starintel:design:government-data:ohio:coverage:source-catalog:actors:
 #+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
 
-| Version | Date       | Description of change                                             | Did nsaspy approve it |
-|---------+------------+-------------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-28 | Define Ohio state and county source-catalog execution            | Pending               |
-| 0.2.0   | 2026-07-28 | Resolve pilot, applicability, history, and completion review gaps | Pending               |
+| Version | Date       | Description of change                                                      | Did nsaspy approve it |
+|---------+------------+----------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define Ohio state and county source-catalog execution                      | Pending               |
+| 0.2.0   | 2026-07-28 | Resolve pilot, applicability, history, and completion review gaps           | Pending               |
+| 0.3.0   | 2026-07-28 | Bind waves to revisioned decisions, adapter manifests, and parent protocol  | Pending               |
 
 * Related Nodes
 
@@ -24,405 +25,266 @@
 
 Make Ohio the first state executed from the generated jurisdiction catalog.
 
-The program produces reviewed source profiles and append-only route-assessment revisions for the State of Ohio and all 88 counties. It identifies official domains, delegated vendor systems, source families, acquisition methods, temporal and jurisdictional scope, refresh behavior, provenance requirements, explicit gaps, applicability decisions, and historical source identity.
+The program produces reviewed revisioned source profiles, deployments, search plans, subfamily decisions, gaps, and route assessments for the State of Ohio and all 88 counties. It records authority, source identity, acquisition methods, temporal and jurisdictional scope, refresh behavior, provenance, explicit gaps, applicability, and historical source relationships.
 
-This is a bounded execution design. It does not claim Ohio coverage is complete and does not implement the production actor runtime.
+This is a bounded execution design. It does not claim Ohio coverage is complete and does not implement the production runtime.
 
 * REVIEW Architecture Decision
 
-Ohio is a state-scoped run over reusable government-data authorities, actors, and adapters.
+Ohio is one state-scoped run over reusable government-data actors and adapters. Government units and components are durable records and bounded job keys, not permanent actors.
 
-There is no permanently running Ohio actor and no permanent actor per county. Government units and components are durable records and bounded job keys. The run coordinator carries state code =OH=, state FIPS =39=, county GEOIDs, policy bounds, contract versions, and checkpoint identifiers.
-
-#+begin_example
-/user/domains/government-data/runs/ohio-<run-id>
-#+end_example
-
-The run requires these durable authorities before any live wave:
+The following durable capabilities must exist before any live wave:
 
 - Government Identity Authority
-- Source Profile Authority
-- Route Assessment Authority
-- Raw Artifact Authority
+- Source Profile and Deployment Authority
+- Route Assessment Authority or equivalent serialized owner
+- immutable Search Plan, Subfamily Decision, and Gap stores
+- Raw Artifact Authority and retrieval-event ledger
 - Provenance Validator
 - Coverage Ledger
-- Official Domain Resolver Pool
-- Platform Fingerprint Pool
-- Adapter Registry
-- bounded adapter workers
+- Official Domain Resolver and Platform Fingerprint pools
+- Adapter Registry and bounded workers
+- Rate and Lease Authority with generation/fencing
 - independent review authority
 
-A live wave cannot begin until the durable records and authorities needed by its exit gate exist and pass deterministic replay fixtures.
+A live wave cannot begin until its exact contract versions, policy snapshot, manifest set, durable authorities, and deterministic replay fixtures are ready.
+
+* REVIEW Parent Protocol Blocker
+
+The current parent =STAR-RESEARCH-PIPELINE-003= protocol is not yet revision-aware enough for this program. Before implementation it must define exact revision fields, route-assessment and review ownership, applicability/policy bindings, lease fencing, and revision-aware routing/checkpoints/results. Ohio review may continue, but implementation is blocked until that parent amendment is reviewed.
 
 * REVIEW Scope
 
-** Included
+Included:
 
-- State of Ohio identity and official-domain spine
-- all 88 Ohio county GEOIDs
-- state systems used directly by the state or shared with local governments
-- official and delegated county and component systems
-- the shared sixteen-route catalog contract
-- source discovery, verification, fingerprinting, bounded probing, and profile review
-- Franklin County as the first complete county pilot
+- State of Ohio and all 88 county GEOIDs
+- official and delegated state, county, and component systems
+- the full sixteen-route contract in =STAR-GOVDATA-DESIGN-002=
+- Franklin County as the first complete pilot
 - fingerprint-driven diverse-county validation
-- current-source identity plus immediately visible predecessor, successor, and archive relationships
-- explicit unsupported, inaccessible, retired, ambiguous, records-request-required, and not-applicable states
+- current source identity and immediately visible predecessor, successor, migration, archive, and temporal relationships
+- explicit positive, partial, negative, restricted, retired, and not-applicable decisions
 
-** Deferred
+Deferred:
 
-- exhaustive municipality, village, township, school district, and special-district coverage
-- production crawling
-- automatic public-records request sending
-- account creation or credential enrollment
-- bypass of access controls or CAPTCHAs
-- acquisition of protected personal information
-- production normalization into final StarIntel document schemas
+- exhaustive municipality, township, school, and special-district coverage
+- production crawling and normalization
+- automatic records-request sending
+- credential creation, terms acceptance, payments, or access-control bypass
+- unauthorized protected-data acquisition
+- exhaustive historical crawling beyond bounded policy
 - continuous scheduling before pilot acceptance
-- exhaustive historical acquisition beyond the minimal historical identity required in every wave
 
 * REVIEW Ohio Identity Set
 
-The initial state set is:
+The initial set contains the State of Ohio, 88 counties, and discovered components such as auditors, recorders, clerks, boards of elections, prosecutors, sheriffs, engineers, treasurers, courts, commissions, health districts, and planning bodies.
 
-- State of Ohio
-- 88 counties with state FIPS =39=
-- county components discovered during source profiling, including auditors, recorders, clerks, boards of elections, prosecutors, sheriffs, engineers, treasurers, courts, commissions, health districts, and planning bodies
-
-A component is not automatically an independent government. Each component record declares its parent, function, legal or administrative authority, service geography, source authority, identity confidence, and whether the function is county-owned, independently elected, shared, regional, municipal, state-provided, or not applicable to the county.
+Each component records parent, function, authority, service geography, evidence, confidence, and whether the function is county-owned, independently elected, shared, regional, municipal, state-provided, delegated, or not applicable.
 
 * REVIEW Initial State Source Families
 
-The following are candidates that must be verified and profiled. A locator is a design seed, not proof of a stable API or complete coverage.
+| Source family | Candidate locator or authority | Required assessment |
+|---------------+--------------------------------+---------------------|
+| Ohio portal identity | =https://ohio.gov/= | agency/domain/delegation relationships |
+| Ohio Laws | =https://codes.ohio.gov/= | current, prior, future-effective, authenticated versions |
+| Ohio Legislature | =https://www.legislature.ohio.gov/= | bills, sponsors, committees, calendars, votes, journals, documents |
+| OhioBuys | =https://ohiobuys.ohio.gov/= and =https://procure.ohio.gov/= | public solicitations, awards, contracts, attachments, capability boundaries |
+| Ohio Checkbook | =https://checkbook.ohio.gov/= | participation scope, reporting periods, exports, reconciliation gaps |
+| OGRIP/OSIP/LBRS | official state GIS surfaces | imagery, elevation, county files, services, archives |
+| Secretary of State | =https://www.ohiosos.gov/= | elections, campaign finance, county-board links, results states |
+| Ohio courts | =https://www.supremecourt.ohio.gov/= | Supreme Court systems, statistics, and local-court directory |
+| Auditor of State | official Auditor surfaces | county audits, reports, findings, filing periods |
+| State archives/retention | official archival and retention surfaces | schedules, transferred records, historical indexes |
+| Public-records/open-meetings law | Ohio Laws | current and effective versions, exemptions, covered bodies |
 
-| Source family | Candidate locator | Required assessment | Preferred adapter direction |
-|---------------+-------------------+---------------------+-----------------------------|
-| Ohio portal identity | =https://ohio.gov/= | official domains, agency directory, redirects, delegated domains | official-domain resolver plus HTML metadata |
-| Ohio Laws | =https://codes.ohio.gov/= | Revised Code, Administrative Code, authenticated documents, versions | Ohio Laws plus HTML/PDF |
-| Ohio Legislature | =https://www.legislature.ohio.gov/= | bills, sponsors, committees, calendars, votes, journals, documents | Ohio Legislature |
-| OhioBuys | =https://ohiobuys.ohio.gov/= and =https://procure.ohio.gov/= | public solicitations, awards, contracts, attachments, capability boundaries | OhioBuys |
-| Ohio Checkbook | =https://checkbook.ohio.gov/= | state and participating-local expenditure data, reporting periods, gaps | Ohio Checkbook |
-| OGRIP and OSIP | =https://gis1.oit.ohio.gov/= | imagery, elevation, LBRS, county files, services, archives | static-directory, GIS, bulk-file |
-| Secretary of State | =https://www.ohiosos.gov/= | elections, historical results, campaign finance, county-board links | Ohio SOS plus file/dashboard probes |
-| Ohio courts | =https://www.supremecourt.ohio.gov/= | Supreme Court systems, statistics, local-court directory | Ohio Courts plus bounded form workers |
-| Auditor of State | official Auditor of State surfaces | county audits, financial reports, findings, filing periods | HTML, PDF, CSV/XLSX |
-| State archives and retention | official state archival and retention surfaces | retention schedules, transferred records, historical indexes | HTML, PDF, archive resolver |
-| Ohio public-records law | =https://codes.ohio.gov/ohio-revised-code/section-149.43= | current and future-effective versions, exemptions | Ohio Laws |
-| Ohio open-meetings law | =https://codes.ohio.gov/ohio-revised-code/section-121.22= | covered bodies, exceptions, effective versions | Ohio Laws |
+Every promoted source requires authority evidence. Ohio Checkbook participation is discovery and reconciliation evidence only; it never proves complete county finance coverage.
 
-Every promoted source must link to official ownership or documented delegation evidence.
+* REVIEW Route Contract
 
-Ohio Checkbook participation is discovery and reconciliation evidence only. It never proves complete county finance coverage, completeness of submitted rows, or absence of additional county finance systems.
+All route and subfamily semantics come from one pinned applicability-contract version. The complete sixteen-route inventory is defined in =STAR-GOVDATA-DESIGN-002=, including the operational-metadata cross-cutting route.
 
-* REVIEW Route Matrix
-
-The Ohio run evaluates each unit against the versioned route-subfamily and applicability contract in =STAR-GOVDATA-DESIGN-002=. State sources may satisfy or enrich a county subfamily only when the contract explicitly permits it and jurisdictional scope is proven.
-
-| Route | State-level seed | County-level requirement |
-|-------+------------------+--------------------------|
-| identity | Ohio portal, Census, official directories | official county and component identities, authority and hosting |
-| open data | agency catalogs and dashboards | county catalogs, exports, or reviewed negative finding |
-| GIS | OGRIP, OSIP, LBRS | auditor, engineer, parcel, GIS, or reviewed applicability result |
-| law | Ohio Laws and Legislature | county resolutions, charter, code, policy repositories, applicability |
-| meetings | state boards and legislature | commissioners, boards, agendas, minutes, recordings |
-| finance | Ohio Checkbook, Auditor of State | budget, audit, payroll, checkbook, debt, grants, scope gaps |
-| procurement | OhioBuys | solicitations, awards, contracts, purchase orders, applicability |
-| property | state enrichment where present | auditor, recorder, treasurer, parcel, deed, tax systems |
-| courts | Supreme Court and statistics | county and local court component profiles or linked court subprogram results |
-| elections | Secretary of State | board of elections, local results, campaign finance |
-| public safety | state reports where public | sheriff, jail, incident, inspection, enforcement, applicability |
-| permits | state licensing and environmental systems | building, zoning, planning, health, code systems or service-provider mapping |
-| public records | state law and guidance | policy, request portal, contacts, fees, retention |
-| feeds | state feeds and alerts | RSS, calendars, alerts, sitemaps, APIs, exports |
-| archives | state archives and historical systems | predecessor locators, retired domains, archived records, exports |
-| operational metadata | statewide platform facts | host, vendor, tenant, auth, limits, scope, refresh, gaps |
+State sources may satisfy a county subfamily only when the rule explicitly permits substitution and the source coverage scope proves that county/component/period.
 
 * REVIEW Cross-Wave Historical Identity
 
-Every discovery and profiling wave records the minimal historical identity visible during bounded work:
+Every wave records bounded visible history:
 
-- first-seen and last-seen observations
-- predecessor and successor locators
-- redirects and documented vendor migrations
-- archive candidates and retired-domain evidence
-- immediately visible earliest and latest coverage dates
-- current, prior, and future-effective distinctions when exposed
+- first/last observed times
+- predecessor/successor locators and redirects
+- documented migrations and retired-domain evidence
+- archive candidates
+- earliest/latest visible coverage
+- current/prior/future-effective distinctions
 
-This requirement does not authorize exhaustive archive crawling. It prevents current ownership and source identity from being reconstructed later from scratch.
+Wave 5 expands historical acquisition; it does not introduce historical identity for the first time.
 
 * REVIEW Execution Waves
 
 ** Wave 0: Identity, legal baseline, and fingerprint census
 
-1. load Ohio and all county GEOIDs
-2. verify state identity and authoritative domain relationships
-3. capture current public-records, open-meetings, retention, and archival authorities
-4. create unresolved county and component domain candidates without promotion
-5. collect bounded platform, vendor, delegation, shared-service, court, and health-system fingerprints
-6. record minimal historical identity for every observed locator
+1. Load Ohio and all county GEOIDs.
+2. Verify state identity and authoritative domains.
+3. Capture public-records, open-meetings, retention, and archival authorities.
+4. Create unresolved county/component candidates without promotion.
+5. Collect bounded platform, vendor, delegation, shared-service, court, and health fingerprints.
+6. Record minimal historical identity.
 
 Exit gate:
 
-- State of Ohio identity is verified
-- all 88 county records exist with stable GEOIDs
-- legal and policy sources have content hashes and effective-date metadata
-- a preliminary platform and organizational variation matrix exists
-- every observed active locator has minimal historical identity fields
+- state identity is verified
+- all 88 county records have stable GEOIDs
+- legal/policy sources have hashes and effective dates
+- a platform/organizational variation matrix exists
+- every observed locator has minimal history
 - no county is marked complete
 
 ** Wave 1: State source systems
 
-Profile Ohio Laws, Legislature, OhioBuys, Ohio Checkbook, OGRIP/OSIP/LBRS, Secretary of State, Supreme Court, Auditor of State, and state archival/retention systems.
+Profile Ohio Laws, Legislature, OhioBuys, Ohio Checkbook, OGRIP/OSIP/LBRS, Secretary of State, Supreme Court, Auditor of State, and archival/retention systems.
 
 Exit gate:
 
-- each source family has a reviewed profile revision or explicit reviewed blocked/unsupported result
-- acquisition methods are ranked by stability
-- rate, pagination, file-size, browser, authentication, and scope requirements are recorded
-- raw evidence exists for every promoted profile revision
-- county-indexed discovery seeds and participating-unit crosswalks are stored where exposed
-- Checkbook participation remains a discovery/reconciliation signal rather than a finance completion decision
+- every family has a reviewed profile revision or reviewed blocked/unsupported decision
+- methods are ranked and bound to adapter versions/manifest hashes
+- rate, pagination, file, browser, auth, scope, and artifact policies are recorded
+- every promoted revision has raw evidence
+- county-indexed discovery crosswalks exist where exposed
+- Checkbook is not used as a finance-completion decision
 - minimal historical identity is recorded
 
 ** Wave 2: Franklin County pilot
 
 Franklin County GEOID =39049= is the first complete end-to-end county pilot.
 
-The pilot enumerates at least:
-
-- county and component identities and domains
-- commissioners and meeting systems
-- auditor, parcel, property, GIS, recorder, deed, treasurer, and tax systems
-- court and clerk components where public
-- board of elections and local election data
-- sheriff, jail, public-safety, and inspection sources where applicable and lawfully public
-- procurement and vendor-payment sources
-- budget, audit, payroll, debt, and grant sources
-- zoning, planning, permit, health, and code-service providers
-- public-records policy, portal, contacts, fees, and retention
-- current and minimal historical source identity
-
 Franklin exit gate:
 
-- all sixteen routes have reviewed route-assessment revisions under one pinned applicability-contract version
-- every required subfamily has a reviewed result
-- each route ends in =:verified=, =:verified-partial=, =:not-published=, =:records-request-required=, =:authentication-required=, =:paywalled=, =:blocked=, =:retired=, or =:not-applicable=
-- =:candidate-found=, =:ambiguous=, and =:unassessed= cannot pass the pilot gate
-- every =:not-applicable= result identifies the responsible function or service provider and includes applicability evidence
-- every negative terminal result binds a completed search-plan revision and a gap with =reassess-after=
-- the pilot decision pins exact source-profile revision IDs, search-plan revisions, evidence IDs, and gap IDs
-- every promoted profile resolves to official ownership or delegation evidence
-- deterministic replay reproduces the same assessment basis and state
-- unresolved manual-review work is zero for required subfamilies
+- all sixteen routes have reviewed route-assessment revisions under one applicability contract and policy snapshot
+- every required/triggered subfamily has a reviewed decision revision
+- nonterminal states cannot pass
+- every not-applicable result has positive authority/service evidence
+- every negative result binds a completed search-plan revision and current reviewed gap revision
+- exact profile, deployment, decision, search-plan, gap, evidence, artifact, policy, and contract revisions are pinned
+- every adapter result pins version, manifest hash, runtime hash, and lease fence
+- deterministic replay reproduces the same decision basis and normalized state
+- unexplained truncation is zero
+- unresolved required manual review is zero
+
+Allowed reviewed terminal states remain contract-dependent: verified, verified-partial, not-published, records-request-required, authentication-required, paywalled, blocked, retired, or not-applicable.
 
 ** Wave 3: Fingerprint-driven diverse-county pilot
 
-The Wave 3 set is provisional until Wave 0 fingerprinting is reviewed. Initial candidates are:
+Initial candidates:
 
-- Cuyahoga County =39035= — large metro
-- Hamilton County =39061= — large metro and legacy-system candidate
-- Lucas County =39095= — northwest urban candidate
-- Delaware County =39041= — fast-growing suburban candidate
-- Athens County =39009= — Appalachian and university-centered candidate
-- Vinton County =39163= — low-population rural candidate
-- Hancock County =39063= — mid-sized northwest agricultural and industrial candidate
+- Cuyahoga =39035=
+- Hamilton =39061=
+- Lucas =39095=
+- Delaware =39041=
+- Athens =39009=
+- Vinton =39163=
+- Hancock =39063=
 
-Final selection maximizes observed variation across:
-
-- vendor and platform families
-- official-domain versus delegated hosting
-- publication maturity and negative-finding burden
-- independent-office fragmentation
-- shared or regional services
-- court and health-service topology
-- geography, population, and urbanicity
-- archive and migration patterns
-
-A candidate may be replaced only by a recorded selection decision showing that another county increases variation. The final set must include a mid-sized non-large-metro or western/northwestern agricultural case unless the fingerprint matrix proves equivalent coverage elsewhere.
+Final selection maximizes vendor/platform family, hosting authority, publication maturity, independent-office fragmentation, shared services, court/health topology, geography/size, and archive/migration patterns. The final set includes a mid-sized non-large-metro or western/northwestern agricultural case unless evidence proves equivalent coverage elsewhere.
 
 Wave 3 exit gate:
 
-- all selected counties pass the Franklin terminal-state and immutable-binding rules
-- the contract requires no county-specific schema fork
-- every selected variation dimension is backed by fingerprint evidence
-- reusable platform families cover at least 70 percent of successful acquisition endpoints, excluding deliberately unsupported sources
-- every one-off adapter proposal identifies stable reusable semantics and a fixture
-- deterministic replay succeeds for every promoted profile and assessment revision
-- unexplained adapter truncation is zero
-- duplicate logical source deployments are reconciled before statewide scheduling
-- manual-review time and unresolved-route rates are measured per route and county
-- all negative findings have a route-volatility reassessment date
+- all selected counties pass Franklin rules
+- no county-specific schema fork is required
+- selection dimensions are evidence-backed
+- reusable platform families cover at least 70% of supported successful endpoints
+- one-off adapter proposals include reusable semantics and fixtures
+- deterministic replay succeeds for every promoted revision
+- unexplained truncation and stale-lease acceptance are zero
+- duplicate deployments are reconciled
+- manual-review time and unresolved-route rates are measured against a predeclared policy ceiling
+- all negative results have current reassessment deadlines
 
 ** Wave 4: All 88 counties
 
-Schedule counties in bounded batches of no more than eight active county runs. Batch ordering is a versioned run policy selected from geographic, population, risk, or detected-platform strategies. It must respect host, vendor, tenant, API-key, credential, and browser-pool leases.
+Use bounded batches of at most eight active county runs. Batch order is a versioned policy and must respect host, vendor, deployment, tenant, key, credential, and browser-pool leases.
 
-Each county produces:
-
-- identity and component assessment
-- route-assessment revisions pinned to the applicability contract
-- verified source-profile revisions
-- unverified candidates
-- negative findings and completed search plans
-- gaps, blockers, reassessment dates, and review state
-- minimal historical identity
-
-A county cannot be marked complete while any required subfamily is unassessed, candidate-only, ambiguous, missing applicability evidence, or bound only to mutable logical profile IDs.
+A county cannot be complete while a required subfamily is unassessed, candidate-only, ambiguous, stale, missing applicability evidence, bound to mutable IDs, or dependent on unresolved required manual review.
 
 ** Wave 5: Historical acquisition and change reconciliation
 
-After current profiles are reviewed:
-
-- expand archive and historical-export inventories
-- reconcile predecessor and successor relationships captured in earlier waves
-- establish refresh and retirement schedules
-- define source replacement and tombstone rules
-- reconcile state-level datasets, prior captures, and current profiles
-- acquire historical content only within declared policy bounds
-
-Wave 5 expands history; it does not introduce historical identity for the first time.
+Expand archive inventories, reconcile predecessor/successor relationships, establish refresh/retirement schedules, define tombstones/replacements, reconcile state/current/prior captures, and acquire historical content within policy bounds.
 
 * REVIEW County Court Scope
 
-County coverage includes county courts, clerks, and publicly exposed local-court systems that serve the county or are linked from an authoritative county or state directory.
-
-Each court is modeled as a component or linked government unit with its own profile revisions. A linked court subprogram may execute the work, but the county courts route cannot be marked complete until the linked assessment revisions are reviewed and bound into the county route decision. Absence of a unified statewide local-case API does not make the route not applicable.
+County coverage includes county courts, clerks, and publicly exposed local-court systems serving the county or linked from authoritative directories. Each court has its own profile revisions. A linked subprogram may perform work, but the county route cannot complete until linked assessment revisions are reviewed and bound. No statewide local-case API does not imply not-applicable.
 
 * REVIEW Negative-Finding Freshness
 
-Every negative terminal result sets =reassess-after= from the assessment date unless a stronger source-specific policy applies:
-
-| Volatility class | Default maximum age | Typical routes |
-|------------------+---------------------+----------------|
+| Class | Default maximum age | Typical routes |
+|-------+---------------------+----------------|
 | high | 30 days | feeds, meetings, procurement, permits, operational metadata |
 | medium | 90 days | open data, finance, elections, public safety, public records |
 | low | 180 days | identity, GIS, property, courts, archives |
-| legal-versioned | next effective date or 180 days, whichever comes first | law and legal policy |
+| legal-versioned | next effective date or 180 days | law and legal policy |
 
-A stale negative finding cannot satisfy a pilot or county completion gate. Reassessment creates a new append-only assessment revision; it does not mutate the old result.
+A stale result cannot satisfy completion. Reassessment creates new search-plan, gap, decision, and assessment revisions.
 
 * REVIEW Ohio Run State
 
 #+begin_src lisp
 (defstruct ohio-coverage-run
-  run-id
-  census-vintage
-  state-code
-  state-fips
-  county-geoids
-  active-wave
+  run-id census-vintage state-code state-fips county-geoids active-wave
   policy-snapshot-id
-  applicability-contract-version
   source-contract-version
-  adapter-manifest-version
-  checkpoint-id
-  started-at
-  last-event-id
-  status)
+  applicability-contract-id applicability-contract-version
+  adapter-manifest-set-hash runtime-environment-set-hash
+  checkpoint-id started-at last-event-id status)
 #+end_src
-
-The durable run record is not stored in an actor mailbox.
 
 * REVIEW Command Flow
 
 #+begin_src lisp
 (:government-data/start-state-run
- :schema-version "1.0"
+ :schema-version "1.2"
  :run-id "ohio-2026-001"
  :state-code "OH"
  :state-fips "39"
  :waves (:identity :state-systems :franklin-pilot)
- :source-contract "jurisdiction-source-profile-v1"
- :applicability-contract "ohio-route-applicability-v1"
+ :source-contract-version "1.2"
+ :applicability-contract (:id "ohio-route-applicability" :version "1.0.0")
+ :policy-snapshot-id "policy-ohio-001"
+ :adapter-manifest-set-hash "sha256:..."
+ :runtime-environment-set-hash "sha256:..."
  :bounds (:max-active-counties 1
           :max-requests-per-host 2
           :max-bytes-per-source 50000000
           :max-wall-seconds-per-job 900))
 #+end_src
 
-A later command advances the run only after the previous wave has a reviewed immutable gate decision.
-
-* REVIEW Coverage States
-
-Route states are:
-
-- =:unassessed=
-- =:candidate-found=
-- =:verified=
-- =:verified-partial=
-- =:not-published=
-- =:records-request-required=
-- =:authentication-required=
-- =:paywalled=
-- =:blocked=
-- =:retired=
-- =:ambiguous=
-- =:not-applicable=
-
-=:not-found= is not a completion state. A negative result requires the versioned applicability contract, completed search-plan revision, dated evidence, gap, reviewer, and reassessment deadline.
+A wave advances only after a reviewed immutable gate revision.
 
 * REVIEW Acceptance Criteria
 
-Ohio design acceptance requires:
-
-1. all 88 county GEOIDs are in scope
-2. every route uses a versioned subfamily and applicability contract
-3. route decisions pin immutable profile, search-plan, evidence, and gap revisions
-4. state-system candidates are separated from verified profiles
-5. no permanent actor is created per county
-6. Franklin passes the strengthened terminal-state and replay gate
-7. the diverse-county set is selected from fingerprint evidence and includes required organizational variation
-8. historical identity is captured in every wave
-9. Checkbook participation is not treated as county finance completeness
-10. county court coverage is linked into the county route decision
-11. negative findings use route-volatility reassessment defaults
-12. rate, replay, cancellation, and checkpoint behavior follows =STAR-RESEARCH-PIPELINE-003=
-13. source profiles use =STAR-GOVDATA-DESIGN-002=
-14. adapters use =STAR-GOVDATA-DESIGN-003=
-15. production implementation remains blocked until parent designs are approved
+1. All 88 county GEOIDs are in scope.
+2. All sixteen routes use one versioned machine-readable applicability contract.
+3. Route decisions pin immutable profile, deployment, decision, search-plan, gap, policy, evidence, artifact, adapter, and runtime revisions.
+4. Franklin and Wave 3 pass deterministic terminal-state gates.
+5. Historical identity is captured in every wave.
+6. Checkbook does not imply finance completeness.
+7. Court results bind linked local-court assessments.
+8. Negative findings expire by route volatility.
+9. Adapter success cannot hide truncation, stale leases, or missing artifacts.
+10. No permanent actor exists per county.
+11. The parent actor protocol is amended before implementation.
 
 * REVIEW Deterministic Fixtures
 
-Required fixtures include:
-
-- state portal redirecting to a delegated subdomain
-- one official domain serving multiple agencies
-- one county department using a vendor domain
-- one shared or regional service provider
-- county function that is legitimately not applicable with authority evidence
-- stale negative finding that must be reassessed
-- OGRIP directory with multi-gigabyte files
-- ArcGIS viewer with discoverable REST service
-- current, prior, and future-effective legislation
-- public procurement search with login-only supplier actions
-- court form with no unified local-case API
-- campaign-finance search and file-transfer export
-- source migration with predecessor, successor, and archive evidence
-- partial current-year statistics
-- replay of a county gate decision after a later profile revision
-
-* REVIEW Failure and Recovery
-
-- one county failure cannot stop another county
-- timeouts create typed failures and checkpoints
-- browser-required sources route only to declared browser workers
-- oversized files are recorded without silent truncation
-- profiles cannot be promoted without raw and authority evidence
-- restarts replay from durable checkpoints without resetting route state
-- migrations create successor relationships and tombstones
-- stale negative findings reopen assessment without mutating prior revisions
-- a changed source reopens review before it can satisfy a current gate
+Required fixtures include all sixteen route definitions, shared/regional providers, legitimate/rejected not-applicable decisions, stale negative results, oversized files, ArcGIS viewer/REST preference, effective-dated law, public-read/login-write procurement, linked court systems, source migration, partial current-year data, browser capture bundles, OCR-required documents, stale lease fences, artifact-before-checkpoint crash recovery, and replay after later source revisions.
 
 * REVIEW Open Decision
 
-- statewide batch order after the pilots: geographic, population, risk, detected platform family, or a documented hybrid policy
+- Statewide batch ordering after pilots: geographic, population, risk, platform family, or documented hybrid.
 
-This is an operational policy choice and does not alter completion semantics.
+This operational policy does not alter completion semantics.
 
 * REVIEW Next Design Actions
 
-1. review the revised coverage program
-2. review the revised source-profile and applicability contract
-3. review the adapter pack against the revised evidence requirements
-4. design the Franklin County pilot runbook and gate-decision fixture
-5. only after approval, implement deterministic records, authorities, and fake adapters in dependency order
+1. Amend and review the parent actor protocol.
+2. Review the revisioned Ohio contracts and adapter pack.
+3. Generate the machine-readable sixteen-route rule fixture.
+4. Design the Franklin runbook and gate-decision fixture.
+5. Implement only after parent approval and dependency-order readiness.

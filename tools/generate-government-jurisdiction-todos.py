@@ -24,6 +24,7 @@ SOURCE_MEMBER = "2025_Gaz_counties_national.txt"
 EXPECTED_ROWS = 3_222
 EXPECTED_GROUPS = 52
 DEFAULT_OUTPUT = Path("roam/todos/government-data")
+MASTER_NAME = "STAR-GOVDATA-TODO-000-jurisdiction-source-catalog.org"
 
 STATE_NAMES = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
@@ -44,7 +45,7 @@ STATE_NAMES = {
     "WI": "Wisconsin", "WY": "Wyoming", "PR": "Puerto Rico",
 }
 
-# Stable Org-roam shards. Do not regroup based on file size: that would create noisy moves.
+# Stable Org-roam shards. Do not regroup based on file size.
 SHARD_GROUPS = (
     ("AL", "AK", "AZ", "AR"),
     ("CA", "CO", "CT", "DE", "DC", "FL"),
@@ -65,37 +66,40 @@ SHARD_GROUPS = (
 )
 
 SOURCE_ROUTES = (
-    "Official identity, home page, canonical domain, aliases, and delegated vendor domains.",
-    "Open-data catalogs, data.json, DCAT, CKAN, Socrata, ArcGIS Hub, Huwise/OpenDataSoft, and downloadable bulk files.",
-    "GIS, parcel maps, ArcGIS services, OGC services, geospatial downloads, and map viewers.",
-    "Legislation, charter, code, ordinances, resolutions, and legal publishing systems.",
-    "Meetings, calendars, agendas, packets, minutes, votes, transcripts, recordings, and video archives.",
-    "Budgets, annual financial reports, audits, checkbooks, payroll, debt, grants, and revenue records.",
-    "Procurement, bids, solicitations, awards, contracts, purchase orders, and vendor-payment systems.",
-    "Property, assessment, tax, recorder, deed, parcel, and land-record systems where publicly available.",
-    "Courts, dockets, case indexes, and clerk systems where public access is authorized.",
-    "Elections, candidates, campaign finance, precincts, results, and voter-information systems.",
-    "Public safety, incident, dispatch, jail, inspection, and enforcement datasets where lawfully public.",
-    "Permits, licenses, planning, zoning, development, environmental, and code-enforcement systems.",
-    "Public-records or FOIA portal, request policy, retention schedules, contacts, and fee rules.",
-    "RSS/Atom feeds, alerts, newsletters, sitemaps, robots directives, APIs, exports, and change feeds.",
-    "Web archives, retired domains, historical portals, document repositories, and source migrations.",
-    "For every route, record platform family, vendor, endpoints, authentication, rate limits, pagination, refresh behavior, coverage dates, raw-artifact policy, provenance locators, and known gaps.",
+    "Official identity, domains, aliases, components, delegated hosting, and service-provider topology.",
+    "Open-data catalogs/platforms/exports and reviewed absence.",
+    "GIS, parcels, ArcGIS/OGC, downloads, viewers, and provider mapping.",
+    "Charter, code, ordinances, resolutions, laws, policies, and version relationships.",
+    "Meetings, calendars, agendas, packets, minutes, votes, transcripts, recordings, and archives.",
+    "Budgets, financial reports, audits, checkbooks, payroll, debt, grants, revenue, and scope gaps.",
+    "Procurement, bids, awards, contracts, purchase orders, attachments, and vendor payments.",
+    "Property, assessment, tax, recorder, deed, parcel, and land-record systems/providers.",
+    "Court/clerk topology, dockets, indexes, documents, restrictions, and linked local-court assessments.",
+    "Elections, candidates, campaign finance, precincts, result states, and voter-information products.",
+    "Sheriff, jail, incident, dispatch, inspection, enforcement, and lawfully public safety systems.",
+    "Building, zoning, planning, development, health, environmental, licensing, and code providers/systems.",
+    "Public-records method, policy, retention, contacts, fees, and escalation instructions.",
+    "Sitemaps, feeds, alerts, newsletters, APIs, exports, and change feeds or reviewed absence.",
+    "Archives, retired domains, repositories, migrations, predecessor/successor links, and date bounds.",
+    "Cross-cutting operational metadata for every source, decision, review, gap, artifact, and acquisition path.",
 )
 
 OUTPUT_FIELDS = (
-    "official status and verification evidence",
-    "source-profile identifier",
-    "data family and jurisdiction component",
-    "platform and vendor fingerprints",
-    "acquisition method and preferred adapter",
-    "stable locator and discovery path",
-    "access, credential, rate, and legal constraints",
-    "earliest and latest observed coverage",
-    "raw capture and content hash policy",
-    "incremental cursor or reconciliation method",
-    "unsupported, missing, inaccessible, or records-request-required state",
-    "reviewer and review timestamp",
+    "jurisdiction-completion gate and gate-review revision IDs",
+    "gate basis hash and decision timestamp",
+    "applicability-contract review and policy snapshot",
+    "route-assessment and route-review revision IDs",
+    "subfamily-decision, profile, deployment, search-plan, gap, and subject-review revision IDs",
+    "authority/status evidence, component, data family, and service geography",
+    "platform/vendor/tenant, adapter version, manifest/runtime hashes",
+    "locator, discovery, predecessor/successor, and archive evidence",
+    "access, credential, lease fence, legal, privacy, and browser constraints",
+    "temporal/jurisdictional completeness scope",
+    "artifact, retrieval-event, evidence, and content hashes",
+    "cursor/checkpoint/reconciliation method",
+    "negative/access/partial/retired/OCR/manual-review state",
+    "freshness and reassessment deadline",
+    "reviewer identity/generation and independence-policy result",
 )
 
 
@@ -124,7 +128,8 @@ def parse_args() -> argparse.Namespace:
 
 def fetch_source(url: str) -> bytes:
     request = urllib.request.Request(
-        url, headers={"User-Agent": "starintel-auto-research/1"}
+        url,
+        headers={"User-Agent": "starintel-auto-research/1"},
     )
     with urllib.request.urlopen(request, timeout=120) as response:
         return response.read()
@@ -150,7 +155,9 @@ def parse_rows(text: str) -> list[Jurisdiction]:
         raise ValueError("Census source is empty")
     has_header = lines[0].split("|")[:2] == ["USPS", "GEOID"]
     rows: list[Jurisdiction] = []
-    for line_number, line in enumerate(lines[1:] if has_header else lines, start=2 if has_header else 1):
+    source_lines = lines[1:] if has_header else lines
+    start = 2 if has_header else 1
+    for line_number, line in enumerate(source_lines, start=start):
         fields = next(csv.reader([line], delimiter="|"))
         if len(fields) >= 5:
             usps, geoid, name = fields[0], fields[1], fields[4]
@@ -186,24 +193,21 @@ def validate(rows: Iterable[Jurisdiction]) -> list[Jurisdiction]:
 
 
 def jurisdiction_type(name: str) -> str:
-    if name.endswith(" Municipio"):
-        return "municipio"
-    if name.endswith(" Planning Region"):
-        return "planning_region"
-    if name.endswith(" Census Area"):
-        return "census_area"
-    if name.endswith(" City and Borough"):
-        return "city_and_borough"
-    if name.endswith(" Borough"):
-        return "borough"
-    if name.endswith(" Parish"):
-        return "parish"
+    suffixes = (
+        (" Municipio", "municipio"),
+        (" Planning Region", "planning_region"),
+        (" Census Area", "census_area"),
+        (" City and Borough", "city_and_borough"),
+        (" Borough", "borough"),
+        (" Parish", "parish"),
+        (" District", "district"),
+        (" Municipality", "municipality"),
+    )
+    for suffix, kind in suffixes:
+        if name.endswith(suffix):
+            return kind
     if name.lower().endswith(" city"):
         return "independent_city"
-    if name.endswith(" District"):
-        return "district"
-    if name.endswith(" Municipality"):
-        return "municipality"
     return "county"
 
 
@@ -237,7 +241,11 @@ def render_state(usps: str, rows: list[Jurisdiction]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_shard(number: int, state_codes: tuple[str, ...], groups: dict[str, list[Jurisdiction]]) -> str:
+def render_shard(
+    number: int,
+    state_codes: tuple[str, ...],
+    groups: dict[str, list[Jurisdiction]],
+) -> str:
     first = STATE_NAMES[state_codes[0]]
     last = STATE_NAMES[state_codes[-1]]
     lines = [
@@ -270,40 +278,72 @@ def render_master() -> str:
         "#+title: STAR-GOVDATA-TODO-000 State and County Source Catalog",
         "#+description: Generated Org TODO queue for every 2025 Census state group and county or county-equivalent, with stable GEOIDs and a shared source-catalog completion contract.",
         "#+status: ACTIVE",
-        "#+filetags: :starintel:todo:government-data:states:counties:catalog:",
+        "#+filetags: :starintel:todo:government-data:states:counties:catalog:gates:",
         "#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED",
         "",
-        "| Version | Date       | Description of change                                      | Did nsaspy approve it |",
-        "|---------+------------+------------------------------------------------------------+-----------------------|",
-        "| 0.1.0   | 2026-07-28 | Seed state and county-equivalent source-catalog TODO queue | Pending               |",
+        "| Version | Date       | Description of change                                                    | Did nsaspy approve it |",
+        "|---------+------------+--------------------------------------------------------------------------+-----------------------|",
+        "| 0.1.0   | 2026-07-28 | Seed state and county-equivalent source-catalog TODO queue                | Pending               |",
+        "| 0.2.0   | 2026-07-28 | Require immutable reviewed route decisions before completion             | Pending               |",
+        "| 0.3.0   | 2026-07-28 | Require a separately reviewed atomic jurisdiction-completion gate        | Pending               |",
         "",
         "* Related Nodes",
         "",
         "- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]",
         "- [[file:../../research/auto-research/STAR-RESEARCH-003-us-government-data-acquisition-landscape.org][STAR-RESEARCH-003 U.S. Government Data Acquisition Landscape]]",
         "- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]",
+        "- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-004-government-data-revision-protocol-amendment.org][STAR-RESEARCH-PIPELINE-004 Government Data Revision Protocol Amendment]]",
+        "- [[file:../../design/government-data/STAR-GOVDATA-DESIGN-001-ohio-coverage-program.org][STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program]]",
+        "- [[file:../../design/government-data/STAR-GOVDATA-DESIGN-002-ohio-source-profile-contract.org][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]]",
+        "- [[file:../../design/government-data/STAR-GOVDATA-DESIGN-003-ohio-adapter-pack.org][STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack]]",
         "",
         "* Source and Generation",
         "",
         "- Source vintage: 2025 Census Gazetteer county and county-equivalent national file.",
         f"- Source locator: ={SOURCE_URL}=.",
-        "- Generated state-level queues: 52 (50 states, District of Columbia, and Puerto Rico).",
-        "- Generated county and county-equivalent TODOs: 3,222.",
-        "- Regenerate with =tools/generate-government-jurisdiction-todos.py=; do not hand-edit generated jurisdiction shards.",
+        "- Generated state-level queues: 52.",
+        "- Generated county/county-equivalent TODOs: 3,222.",
+        "- Regenerate with =tools/generate-government-jurisdiction-todos.py=; do not hand-edit generated shards.",
+        "",
+        "* Active State Designs",
+        "",
+        "** REVIEW Ohio",
+        "",
+        "Ohio is the first state design. Generated Ohio/county headings remain =TODO=. Design work, candidate discovery, source profiles, route assessments, or unreviewed gates do not count as completion.",
         "",
         "* Completion Contract",
         "",
-        "A jurisdiction TODO reaches =DONE= only after a reviewed source profile records all discovered routes, negative findings, and unresolved gaps. Search results are candidates until official ownership or delegation is verified.",
+        "A jurisdiction reaches =DONE= only when the Coverage Gate Authority has committed one =:jurisdiction-completion= gate revision with =status :passed= and the Independent Review Authority has committed a separate =:reviewed= review-decision revision for that exact gate revision.",
         "",
-        "** Required source routes",
+        "The gate must bind atomically:",
+        "",
+        "- one independently reviewed applicability-contract revision",
+        "- one policy snapshot and adapter manifest/runtime set",
+        "- exact route-assessment revisions for all sixteen routes",
+        "- exact independent review-decision revisions for every route assessment and required subject",
+        "- exact subfamily-decision, source-profile, deployment, search-plan, and gap revisions",
+        "- immutable evidence, retrieval-event, and raw-artifact references",
+        "- current freshness/reassessment basis for every negative result",
+        "- an ordered =basis-hash= over the complete revision set",
+        "",
+        "The gate decider and gate reviewer must satisfy the independence policy.",
+        "",
+        "=:candidate-found=, =:ambiguous=, =:unassessed=, stale evidence, mutable logical IDs, unresolved required manual review, missing applicability evidence, a blocked/expired gate, a basis-hash mismatch, or an invalidated gate review blocks =DONE=.",
+        "",
+        "Changes after a passed gate never mutate it. They may expire current completion and require a new route/subject/review/gate revision chain.",
+        "",
+        "The operational-metadata route is cross-cutting and passes only when every bound subject contains platform, access, rate/lease, pagination/cursor, refresh, scope, provenance, truncation, and reassessment metadata.",
+        "",
+        "* Required Source Routes",
         "",
     ]
     lines.extend(f"{number}. {route}" for number, route in enumerate(SOURCE_ROUTES, 1))
-    lines.extend(["", "** Required output fields", ""])
+    lines.extend(["", "* Required Output Bindings", ""])
     lines.extend(f"- {field}" for field in OUTPUT_FIELDS)
     lines.extend(["", "* Generated Jurisdiction Shards", ""])
     for number, codes in enumerate(SHARD_GROUPS, 1):
-        first, last = STATE_NAMES[codes[0]], STATE_NAMES[codes[-1]]
+        first = STATE_NAMES[codes[0]]
+        last = STATE_NAMES[codes[-1]]
         lines.append(
             f"- [[file:STAR-GOVDATA-TODO-{number:03d}-jurisdictions.org]"
             f"[STAR-GOVDATA-TODO-{number:03d} Jurisdictions {first} through {last}]]"
@@ -314,14 +354,15 @@ def render_master() -> str:
 def write_catalog(rows: list[Jurisdiction], output_dir: Path) -> None:
     groups = group_rows(rows)
     output_dir.mkdir(parents=True, exist_ok=True)
-    expected = {"STAR-GOVDATA-TODO-000-jurisdiction-source-catalog.org"}
-    (output_dir / "STAR-GOVDATA-TODO-000-jurisdiction-source-catalog.org").write_text(
-        render_master(), encoding="utf-8"
-    )
+    expected = {MASTER_NAME}
+    (output_dir / MASTER_NAME).write_text(render_master(), encoding="utf-8")
     for number, codes in enumerate(SHARD_GROUPS, 1):
         name = f"STAR-GOVDATA-TODO-{number:03d}-jurisdictions.org"
         expected.add(name)
-        (output_dir / name).write_text(render_shard(number, codes, groups), encoding="utf-8")
+        (output_dir / name).write_text(
+            render_shard(number, codes, groups),
+            encoding="utf-8",
+        )
     for stale in output_dir.glob("STAR-GOVDATA-TODO-*-jurisdictions.org"):
         if stale.name not in expected:
             stale.unlink()
@@ -331,7 +372,11 @@ def validate_output(output_dir: Path) -> None:
     documents = sorted(output_dir.glob("STAR-GOVDATA-TODO-*.org"))
     text = "".join(path.read_text(encoding="utf-8") for path in documents)
     state_count = len(
-        re.findall(r"^\* TODO \[[A-Z]{2}/\d{2}\] .* state source catalog ", text, re.MULTILINE)
+        re.findall(
+            r"^\* TODO \[[A-Z]{2}/\d{2}\] .* state source catalog ",
+            text,
+            re.MULTILINE,
+        )
     )
     geoids = re.findall(r"^\*\*\* TODO \[(\d{5})\] ", text, re.MULTILINE)
     if len(documents) != len(SHARD_GROUPS) + 1:
@@ -340,6 +385,9 @@ def validate_output(output_dir: Path) -> None:
         raise ValueError(f"Generated {state_count} state TODOs, expected {EXPECTED_GROUPS}")
     if len(geoids) != EXPECTED_ROWS or len(set(geoids)) != EXPECTED_ROWS:
         raise ValueError("Generated county TODO or unique GEOID count is incorrect")
+    master = (output_dir / MASTER_NAME).read_text(encoding="utf-8")
+    if "| 0.3.0" not in master or "=:jurisdiction-completion=" not in master:
+        raise ValueError("Generated master completion contract is stale")
 
 
 def main() -> int:

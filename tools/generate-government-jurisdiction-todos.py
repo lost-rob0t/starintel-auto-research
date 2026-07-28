@@ -23,9 +23,7 @@ SOURCE_URL = (
 SOURCE_MEMBER = "2025_Gaz_counties_national.txt"
 EXPECTED_ROWS = 3_222
 EXPECTED_GROUPS = 52
-GENERATED_DATE = "2026-07-28"
 DEFAULT_OUTPUT = Path("roam/todos/government-data")
-MAX_SHARD_BYTES = 48_000
 
 STATE_NAMES = {
     "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
@@ -45,6 +43,26 @@ STATE_NAMES = {
     "VA": "Virginia", "WA": "Washington", "WV": "West Virginia",
     "WI": "Wisconsin", "WY": "Wyoming", "PR": "Puerto Rico",
 }
+
+# Stable Org-roam shards. Do not regroup based on file size: that would create noisy moves.
+SHARD_GROUPS = (
+    ("AL", "AK", "AZ", "AR"),
+    ("CA", "CO", "CT", "DE", "DC", "FL"),
+    ("GA", "HI", "ID"),
+    ("IL", "IN"),
+    ("IA", "KS"),
+    ("KY", "LA", "ME", "MD", "MA"),
+    ("MI", "MN"),
+    ("MS", "MO"),
+    ("MT", "NE", "NV", "NH", "NJ", "NM"),
+    ("NY", "NC", "ND"),
+    ("OH", "OK", "OR"),
+    ("PA", "RI", "SC", "SD"),
+    ("TN",),
+    ("TX",),
+    ("UT", "VT", "VA", "WA"),
+    ("WV", "WI", "WY", "PR"),
+)
 
 SOURCE_ROUTES = (
     "Official identity, home page, canonical domain, aliases, and delegated vendor domains.",
@@ -101,29 +119,28 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--source-url", default=SOURCE_URL)
-    parser.add_argument("--max-shard-bytes", type=int, default=MAX_SHARD_BYTES)
     return parser.parse_args()
 
 
 def fetch_source(url: str) -> bytes:
-    request = urllib.request.Request(url, headers={"User-Agent": "starintel-auto-research/1"})
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "starintel-auto-research/1"}
+    )
     with urllib.request.urlopen(request, timeout=120) as response:
         return response.read()
 
 
 def read_source(path: Path | None, url: str) -> str:
     data = path.read_bytes() if path else fetch_source(url)
-    is_zip = (path and path.suffix.lower() == ".zip") or data.startswith(b"PK\x03\x04")
-    if is_zip:
+    if (path and path.suffix.lower() == ".zip") or data.startswith(b"PK\x03\x04"):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            names = archive.namelist()
-            member = SOURCE_MEMBER if SOURCE_MEMBER in names else names[0]
+            member = SOURCE_MEMBER if SOURCE_MEMBER in archive.namelist() else archive.namelist()[0]
             data = archive.read(member)
     for encoding in ("utf-8-sig", "latin-1"):
         try:
             return data.decode(encoding)
         except UnicodeDecodeError:
-            pass
+            continue
     raise ValueError("Unable to decode Census source")
 
 
@@ -131,11 +148,9 @@ def parse_rows(text: str) -> list[Jurisdiction]:
     lines = [line.strip() for line in text.replace("\r", "").splitlines() if line.strip()]
     if not lines:
         raise ValueError("Census source is empty")
-    first = lines[0].split("|")
-    has_header = first[:2] == ["USPS", "GEOID"]
-    data_lines = lines[1:] if has_header else lines
+    has_header = lines[0].split("|")[:2] == ["USPS", "GEOID"]
     rows: list[Jurisdiction] = []
-    for line_number, line in enumerate(data_lines, start=2 if has_header else 1):
+    for line_number, line in enumerate(lines[1:] if has_header else lines, start=2 if has_header else 1):
         fields = next(csv.reader([line], delimiter="|"))
         if len(fields) >= 5:
             usps, geoid, name = fields[0], fields[1], fields[4]
@@ -152,18 +167,21 @@ def validate(rows: Iterable[Jurisdiction]) -> list[Jurisdiction]:
     if len(result) != EXPECTED_ROWS:
         raise ValueError(f"Expected {EXPECTED_ROWS} rows, found {len(result)}")
     geoids = [row.geoid for row in result]
-    if len(set(geoids)) != len(geoids):
+    if len(set(geoids)) != EXPECTED_ROWS:
         raise ValueError("Duplicate county-equivalent GEOIDs")
     for row in result:
         if row.usps not in STATE_NAMES:
             raise ValueError(f"Unknown USPS group: {row.usps}")
-        if len(row.geoid) != 5 or not row.geoid.isdigit():
+        if not re.fullmatch(r"\d{5}", row.geoid):
             raise ValueError(f"Invalid GEOID: {row.geoid}")
         if not row.name:
             raise ValueError(f"Missing name for GEOID {row.geoid}")
     groups = {row.usps for row in result}
-    if len(groups) != EXPECTED_GROUPS or groups != set(STATE_NAMES):
+    if groups != set(STATE_NAMES):
         raise ValueError("State/territory group set does not match the expected 52 groups")
+    flattened = [code for shard in SHARD_GROUPS for code in shard]
+    if len(flattened) != EXPECTED_GROUPS or set(flattened) != groups:
+        raise ValueError("Shard groups must contain each state/territory exactly once")
     return result
 
 
@@ -171,17 +189,17 @@ def jurisdiction_type(name: str) -> str:
     if name.endswith(" Municipio"):
         return "municipio"
     if name.endswith(" Planning Region"):
-        return "planning-region"
+        return "planning_region"
     if name.endswith(" Census Area"):
-        return "census-area"
+        return "census_area"
     if name.endswith(" City and Borough"):
-        return "city-and-borough"
+        return "city_and_borough"
     if name.endswith(" Borough"):
         return "borough"
     if name.endswith(" Parish"):
         return "parish"
     if name.lower().endswith(" city"):
-        return "independent-city"
+        return "independent_city"
     if name.endswith(" District"):
         return "district"
     if name.endswith(" Municipality"):
@@ -189,81 +207,45 @@ def jurisdiction_type(name: str) -> str:
     return "county"
 
 
-def group_rows(rows: list[Jurisdiction]) -> tuple[list[str], dict[str, list[Jurisdiction]]]:
+def group_rows(rows: list[Jurisdiction]) -> dict[str, list[Jurisdiction]]:
     groups: dict[str, list[Jurisdiction]] = defaultdict(list)
     for row in rows:
         groups[row.usps].append(row)
     for state_rows in groups.values():
         state_rows.sort(key=lambda row: row.geoid)
-    order = sorted(groups, key=lambda usps: int(groups[usps][0].state_fips))
-    return order, groups
+    return groups
 
 
-def render_state_block(usps: str, rows: list[Jurisdiction]) -> str:
+def render_state(usps: str, rows: list[Jurisdiction]) -> str:
     state_fips = rows[0].state_fips
-    out = [
-        f"* TODO {STATE_NAMES[usps]} state source catalog",
+    lines = [
+        f"* TODO [{usps}/{state_fips}] {STATE_NAMES[usps]} state source catalog :state:{usps}:",
         ":PROPERTIES:",
-        f":USPS:      {usps}",
-        f":STATE_FIPS: {state_fips}",
-        ":SCOPE:     state",
         f":COUNTY_EQUIVALENTS: {len(rows)}",
         ":CHECKLIST: jurisdiction-source-profile-v1",
         ":END:",
-        "- [ ] Verify the state or territory identity spine and official domains.",
-        "- [ ] Catalog statewide portals, shared services, and state-mandated local systems.",
-        "- [ ] Record state-specific public-records law, retention, and access constraints.",
+        "- [ ] Verify the identity spine, official domains, statewide portals, shared services, public-records law, retention rules, and access constraints.",
         "- [ ] Review every county or county-equivalent TODO below.",
         "",
         "** County and county-equivalent TODOs",
         "",
     ]
-    for row in rows:
-        out.extend(
-            [
-                f"*** TODO {row.name}",
-                ":PROPERTIES:",
-                f":GEOID:     {row.geoid}",
-                f":USPS:      {row.usps}",
-                f":STATE_FIPS: {row.state_fips}",
-                ":SCOPE:     county-equivalent",
-                f":TYPE:      {jurisdiction_type(row.name)}",
-                ":CHECKLIST: jurisdiction-source-profile-v1",
-                ":END:",
-                "",
-            ]
-        )
-    return "\n".join(out).rstrip() + "\n"
+    lines.extend(
+        f"*** TODO [{row.geoid}] {row.name} :{usps}:{jurisdiction_type(row.name)}:"
+        for row in rows
+    )
+    return "\n".join(lines).rstrip() + "\n"
 
 
-def partition_blocks(order: list[str], groups: dict[str, list[Jurisdiction]], limit: int) -> list[list[str]]:
-    shards: list[list[str]] = []
-    current: list[str] = []
-    size = 0
-    for usps in order:
-        block = render_state_block(usps, groups[usps])
-        block_size = len(block.encode("utf-8"))
-        if current and size + block_size > limit:
-            shards.append(current)
-            current = []
-            size = 0
-        current.append(usps)
-        size += block_size
-    if current:
-        shards.append(current)
-    return shards
-
-
-def render_shard(number: int, state_codes: list[str], groups: dict[str, list[Jurisdiction]]) -> str:
-    slug = f"{number:03d}"
+def render_shard(number: int, state_codes: tuple[str, ...], groups: dict[str, list[Jurisdiction]]) -> str:
     first = STATE_NAMES[state_codes[0]]
     last = STATE_NAMES[state_codes[-1]]
-    header = [
+    lines = [
         ":PROPERTIES:",
-        f":ID:       starintel-government-data-jurisdiction-todos-{slug}",
+        f":ID:       starintel-government-data-jurisdiction-todos-{number:03d}",
         ":END:",
-        f"#+title: STAR-GOVDATA-TODO-{slug} Jurisdictions {first} through {last}",
-        "#+description: Generated state and county-equivalent TODO shard from the 2025 Census Gazetteer roster.",
+        f"#+title: STAR-GOVDATA-TODO-{number:03d} Jurisdictions {first} through {last}",
+        "#+description: Generated GEOID-keyed TODO shard from the 2025 Census Gazetteer county-equivalent roster.",
         "#+status: ACTIVE",
         "#+filetags: :starintel:todo:government-data:states:counties:generated:",
         "#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED",
@@ -275,11 +257,13 @@ def render_shard(number: int, state_codes: list[str], groups: dict[str, list[Jur
         "- Complete each heading under the contract in =STAR-GOVDATA-TODO-000=.",
         "",
     ]
-    return "\n".join(header) + "\n".join(render_state_block(code, groups[code]) for code in state_codes)
+    header = "\n".join(lines).rstrip() + "\n\n"
+    body = "\n\n".join(render_state(code, groups[code]).rstrip() for code in state_codes)
+    return header + body + "\n"
 
 
-def render_master(shards: list[list[str]]) -> str:
-    out = [
+def render_master() -> str:
+    lines = [
         ":PROPERTIES:",
         ":ID:       starintel-government-data-jurisdiction-todos-000",
         ":END:",
@@ -291,7 +275,7 @@ def render_master(shards: list[list[str]]) -> str:
         "",
         "| Version | Date       | Description of change                                      | Did nsaspy approve it |",
         "|---------+------------+------------------------------------------------------------+-----------------------|",
-        f"| 0.1.0   | {GENERATED_DATE} | Seed state and county-equivalent source-catalog TODO queue | Pending               |",
+        "| 0.1.0   | 2026-07-28 | Seed state and county-equivalent source-catalog TODO queue | Pending               |",
         "",
         "* Related Nodes",
         "",
@@ -314,48 +298,47 @@ def render_master(shards: list[list[str]]) -> str:
         "** Required source routes",
         "",
     ]
-    out.extend(f"{number}. {route}" for number, route in enumerate(SOURCE_ROUTES, 1))
-    out.extend(["", "** Required output fields", ""])
-    out.extend(f"- {field}" for field in OUTPUT_FIELDS)
-    out.extend(["", "* Generated Jurisdiction Shards", ""])
-    for number, state_codes in enumerate(shards, 1):
-        slug = f"{number:03d}"
-        first = STATE_NAMES[state_codes[0]]
-        last = STATE_NAMES[state_codes[-1]]
-        out.append(
-            f"- [[file:STAR-GOVDATA-TODO-{slug}-jurisdictions.org]"
-            f"[STAR-GOVDATA-TODO-{slug} Jurisdictions {first} through {last}]]"
+    lines.extend(f"{number}. {route}" for number, route in enumerate(SOURCE_ROUTES, 1))
+    lines.extend(["", "** Required output fields", ""])
+    lines.extend(f"- {field}" for field in OUTPUT_FIELDS)
+    lines.extend(["", "* Generated Jurisdiction Shards", ""])
+    for number, codes in enumerate(SHARD_GROUPS, 1):
+        first, last = STATE_NAMES[codes[0]], STATE_NAMES[codes[-1]]
+        lines.append(
+            f"- [[file:STAR-GOVDATA-TODO-{number:03d}-jurisdictions.org]"
+            f"[STAR-GOVDATA-TODO-{number:03d} Jurisdictions {first} through {last}]]"
         )
-    return "\n".join(out).rstrip() + "\n"
+    return "\n".join(lines).rstrip() + "\n"
 
 
-def write_catalog(rows: list[Jurisdiction], output_dir: Path, max_shard_bytes: int) -> None:
-    order, groups = group_rows(rows)
-    shards = partition_blocks(order, groups, max_shard_bytes)
+def write_catalog(rows: list[Jurisdiction], output_dir: Path) -> None:
+    groups = group_rows(rows)
     output_dir.mkdir(parents=True, exist_ok=True)
-    expected_names = set()
-    for number, state_codes in enumerate(shards, 1):
+    expected = {"STAR-GOVDATA-TODO-000-jurisdiction-source-catalog.org"}
+    (output_dir / "STAR-GOVDATA-TODO-000-jurisdiction-source-catalog.org").write_text(
+        render_master(), encoding="utf-8"
+    )
+    for number, codes in enumerate(SHARD_GROUPS, 1):
         name = f"STAR-GOVDATA-TODO-{number:03d}-jurisdictions.org"
-        expected_names.add(name)
-        (output_dir / name).write_text(render_shard(number, state_codes, groups), encoding="utf-8")
-    master_name = "STAR-GOVDATA-TODO-000-jurisdiction-source-catalog.org"
-    expected_names.add(master_name)
-    (output_dir / master_name).write_text(render_master(shards), encoding="utf-8")
+        expected.add(name)
+        (output_dir / name).write_text(render_shard(number, codes, groups), encoding="utf-8")
     for stale in output_dir.glob("STAR-GOVDATA-TODO-*-jurisdictions.org"):
-        if stale.name not in expected_names:
+        if stale.name not in expected:
             stale.unlink()
 
 
 def validate_output(output_dir: Path) -> None:
-    documents = [output_dir / "STAR-GOVDATA-TODO-000-jurisdiction-source-catalog.org"]
-    documents.extend(sorted(output_dir.glob("STAR-GOVDATA-TODO-???-jurisdictions.org")))
+    documents = sorted(output_dir.glob("STAR-GOVDATA-TODO-*.org"))
     text = "".join(path.read_text(encoding="utf-8") for path in documents)
-    state_count = len(re.findall(r"^\* TODO .* state source catalog$", text, re.MULTILINE))
-    county_count = len(re.findall(r"^\*\*\* TODO ", text, re.MULTILINE))
-    geoids = re.findall(r"^:GEOID:\s+(\d{5})$", text, re.MULTILINE)
+    state_count = len(
+        re.findall(r"^\* TODO \[[A-Z]{2}/\d{2}\] .* state source catalog ", text, re.MULTILINE)
+    )
+    geoids = re.findall(r"^\*\*\* TODO \[(\d{5})\] ", text, re.MULTILINE)
+    if len(documents) != len(SHARD_GROUPS) + 1:
+        raise ValueError(f"Expected 17 Org files, found {len(documents)}")
     if state_count != EXPECTED_GROUPS:
         raise ValueError(f"Generated {state_count} state TODOs, expected {EXPECTED_GROUPS}")
-    if county_count != EXPECTED_ROWS or len(set(geoids)) != EXPECTED_ROWS:
+    if len(geoids) != EXPECTED_ROWS or len(set(geoids)) != EXPECTED_ROWS:
         raise ValueError("Generated county TODO or unique GEOID count is incorrect")
 
 
@@ -363,7 +346,7 @@ def main() -> int:
     args = parse_args()
     try:
         rows = validate(parse_rows(read_source(args.input, args.source_url)))
-        write_catalog(rows, args.output_dir, args.max_shard_bytes)
+        write_catalog(rows, args.output_dir)
         validate_output(args.output_dir)
     except (OSError, ValueError, urllib.error.URLError, zipfile.BadZipFile) as error:
         print(f"error: {error}", file=sys.stderr)

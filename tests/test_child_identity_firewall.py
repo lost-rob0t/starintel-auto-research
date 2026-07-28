@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 import unittest
 from pathlib import Path
 
@@ -10,6 +11,7 @@ MODULE_PATH = ROOT / "scripts" / "child_identity_firewall.py"
 SPEC = importlib.util.spec_from_file_location("child_identity_firewall", MODULE_PATH)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 ChildIdentityFirewall = MODULE.ChildIdentityFirewall
@@ -48,7 +50,10 @@ class ChildIdentityFirewallTests(unittest.TestCase):
             result.sanitized["id"],
             "starintel:child-case-local:synthetic-case-001:01",
         )
-        self.assertEqual(result.sanitized["evidence"]["text"], f"{REDACTED_CHILD} was identified in the source.")
+        self.assertEqual(
+            result.sanitized["evidence"]["text"],
+            f"{REDACTED_CHILD} was identified in the source.",
+        )
         self.assertIn(REDACTED_CHILD, result.sanitized["evidence"]["url"])
         self.assertNotIn("Synthetic Minor Alpha", json.dumps(result.as_dict()))
 
@@ -84,6 +89,7 @@ class ChildIdentityFirewallTests(unittest.TestCase):
         self.assertFalse(result.allowed)
         self.assertNotIn("name", result.sanitized)
         self.assertIn("adult-status-unverified", {item.code for item in result.violations})
+        self.assertIn("unverified-target-identifier", {item.code for item in result.violations})
 
     def test_verified_adult_charged_target_is_allowed(self) -> None:
         payload = {
@@ -157,6 +163,22 @@ class ChildIdentityFirewallTests(unittest.TestCase):
         self.assertFalse(result.allowed)
         self.assertIn(
             "export-known-child-identifier",
+            {item.code for item in result.violations},
+        )
+
+    def test_export_scanner_blocks_unverified_named_target(self) -> None:
+        export = {
+            "identity_target": True,
+            "target_type": "adult-defendant",
+            "name": "Synthetic Unknown Person",
+            "legal_status": "charged",
+        }
+
+        result = self.firewall().scan_export(export)
+
+        self.assertFalse(result.allowed)
+        self.assertIn(
+            "export-unverified-target-identifier",
             {item.code for item in result.violations},
         )
 

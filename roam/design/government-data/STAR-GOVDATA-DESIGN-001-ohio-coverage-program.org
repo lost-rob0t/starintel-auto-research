@@ -1,0 +1,340 @@
+:PROPERTIES:
+:ID:       starintel-government-data-ohio-coverage-program-001
+:END:
+#+title: STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program
+#+description: Define the first state-level execution program for cataloging Ohio public data systems, validating source profiles, piloting Franklin County, and expanding across all 88 counties.
+#+status: REVIEW
+#+filetags: :starintel:design:government-data:ohio:coverage:source-catalog:actors:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                  | Did nsaspy approve it |
+|---------+------------+--------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define Ohio state and county source-catalog execution | Pending               |
+
+* Related Nodes
+
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:../../todos/government-data/STAR-GOVDATA-TODO-000-jurisdiction-source-catalog.org][STAR-GOVDATA-TODO-000 State and County Source Catalog]]
+- [[file:../auto-research/STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+- [[file:STAR-GOVDATA-DESIGN-002-ohio-source-profile-contract.org][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]]
+- [[file:STAR-GOVDATA-DESIGN-003-ohio-adapter-pack.org][STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack]]
+
+* REVIEW Objective
+
+Make Ohio the first state executed from the generated jurisdiction catalog.
+
+The program must produce reviewed source profiles for the State of Ohio and every one of its 88 counties. It must identify official domains, delegated vendor systems, source families, acquisition methods, temporal coverage, refresh behavior, provenance requirements, and explicit gaps.
+
+The program is a bounded execution plan. It does not claim Ohio coverage is complete and does not implement the production actor runtime.
+
+* REVIEW Architecture Decision
+
+Ohio is a state-scoped run over reusable government-data actors and adapters.
+
+There is no permanently running Ohio actor and no permanently running actor per county. The Ohio run coordinator carries state code =OH=, state FIPS =39=, county GEOIDs, policy bounds, source-family requirements, and checkpoint identifiers through the existing government-data actor contracts.
+
+#+begin_example
+/user/domains/government-data/runs/ohio-<run-id>
+#+end_example
+
+The run uses:
+
+- Government Identity Authority for canonical unit records
+- Official Domain Resolver Pool for state and county domains
+- Source Profile Authority for reviewed profile state
+- Platform Fingerprint Pool for platform-family candidates
+- Adapter Registry for capability routing
+- bounded adapter workers for retrieval probes
+- Raw Artifact Authority for evidence captures
+- Provenance Validator before profile promotion
+- Coverage Ledger for route-level results and gaps
+
+* REVIEW Scope
+
+** Included
+
+- State of Ohio identity and official-domain spine
+- all 88 Ohio county GEOIDs from the generated catalog
+- state-level public systems used directly by the state or shared with local governments
+- official and delegated county systems
+- all sixteen source routes in the catalog completion contract
+- source discovery, verification, fingerprinting, bounded probing, and profile review
+- Franklin County as the first county pilot
+- diverse-county validation before statewide expansion
+- explicit unsupported, inaccessible, retired, ambiguous, and records-request-required states
+
+** Deferred
+
+- every Ohio municipality, village, township, school district, and special district
+- production crawling
+- automatic public-records request sending
+- account creation or credential enrollment
+- bypass of access controls or CAPTCHAs
+- acquisition of protected personal information
+- production normalization into final StarIntel document schemas
+- continuous scheduling before pilot acceptance
+
+* REVIEW Ohio Identity Set
+
+The initial state set is:
+
+- State of Ohio
+- 88 counties with state FIPS =39=
+- county components discovered during source profiling, including auditors, recorders, clerks, boards of elections, prosecutors, sheriffs, engineers, treasurers, courts, and commissions
+
+A component is not automatically treated as an independent government. Each component record declares its parent, function, source authority, and identity confidence.
+
+* REVIEW Initial State Source Families
+
+The following are candidate state systems that must be verified and profiled. The table is a design seed, not a claim that each source has a stable public API.
+
+| Source family | Candidate locator | Required assessment | Preferred adapter direction |
+|---------------+-------------------+---------------------+-----------------------------|
+| Ohio portal identity | =https://ohio.gov/= | official domains, agency directory, redirects, delegated domains | official-domain resolver plus HTML metadata |
+| Ohio Laws | =https://codes.ohio.gov/= | Revised Code, Administrative Code, authenticated documents, version history | Ohio Laws adapter plus HTML/PDF capture |
+| Ohio Legislature | =https://www.legislature.ohio.gov/= | bills, resolutions, sponsors, committees, calendars, votes, journals, documents | Ohio Legislature adapter |
+| OhioBuys | =https://ohiobuys.ohio.gov/= and =https://procure.ohio.gov/= | public solicitations, awards, contracts, supplier resources, pagination, attachments | OhioBuys adapter |
+| Ohio Checkbook | =https://checkbook.ohio.gov/= and Treasurer transparency pages | state and participating local expenditure data, exports, update cadence, coverage gaps | Ohio Checkbook adapter |
+| OGRIP and OSIP | =https://gis1.oit.ohio.gov/= | imagery, elevation, LBRS, county downloads, directory listings, service endpoints | static-directory, GIS, and bulk-file adapters |
+| Secretary of State | =https://www.ohiosos.gov/= | elections, historical results, campaign finance, business data, county board links | Ohio SOS adapter plus file and dashboard probes |
+| Ohio courts | =https://www.supremecourt.ohio.gov/= | Supreme Court docket, opinions, announcements, clerk journal, court statistics, local court directory | Ohio Courts adapter plus bounded form workers |
+| Ohio public-records law | =https://codes.ohio.gov/ohio-revised-code/section-149.43= | current effective version, exemptions, future versions, retention relationships | Ohio Laws adapter |
+| Ohio open-meetings law | =https://codes.ohio.gov/ohio-revised-code/section-121.22= | current effective version, covered bodies, exceptions, virtual-meeting rules | Ohio Laws adapter |
+
+Every candidate must be linked to an official government domain or documented delegation before promotion to verified source status.
+
+* REVIEW Route Matrix
+
+The Ohio run evaluates each unit against the shared sixteen-route contract. State-level sources may satisfy or enrich a county route, but they do not automatically prove county completeness.
+
+| Route | State-level seed | County-level requirement |
+|-------+------------------+--------------------------|
+| identity | Ohio portal, Census, official agency pages | official county and component domains |
+| open data | agency catalogs and dashboards | county catalogs, exports, or explicit absence |
+| GIS | OGRIP, OSIP, LBRS | county auditor, engineer, parcel, and GIS systems |
+| law | Ohio Laws and Legislature | county resolutions, charter, code, and policy repositories |
+| meetings | state boards and legislature | commissioners, boards, agendas, minutes, recordings |
+| finance | Ohio Checkbook and state reports | county budget, audit, payroll, checkbook, debt, grants |
+| procurement | OhioBuys | county solicitations, awards, contracts, purchase orders |
+| property | state enrichment where present | auditor, recorder, treasurer, parcel, deed, tax systems |
+| courts | Supreme Court and court statistics | local court dockets and clerk systems where public |
+| elections | Secretary of State | county board of elections, local results, local campaign finance |
+| public safety | state reports where public | sheriff, jail, incident, inspection, and enforcement sources |
+| permits | state licensing and environmental systems | county building, zoning, planning, health, and code systems |
+| public records | state law and records guidance | county policy, request portal, contacts, fees, retention |
+| feeds | state feeds and alerts | county RSS, calendars, alerts, sitemaps, APIs, exports |
+| archives | state archives and historical systems | retired domains, archived meetings, documents, historical exports |
+| operational metadata | statewide platform facts | host, vendor, tenant, auth, limits, coverage, refresh, gaps |
+
+* REVIEW Execution Waves
+
+** Wave 0: Identity and legal baseline
+
+1. load Ohio and all county GEOIDs
+2. verify state identity and authoritative domain relationships
+3. capture current public-records, open-meetings, and records-retention legal sources
+4. create unresolved county domain candidates without promoting them
+5. establish state-specific search vocabulary and platform signatures
+
+Exit gate:
+
+- State of Ohio identity is verified
+- all 88 county records exist with stable GEOIDs
+- legal and policy sources have content hashes and effective-date metadata
+- no county is marked complete
+
+** Wave 1: State source systems
+
+Profile Ohio Laws, Legislature, OhioBuys, Ohio Checkbook, OGRIP/OSIP/LBRS, Secretary of State systems, and Supreme Court systems.
+
+Exit gate:
+
+- each state source family has a reviewed source profile or explicit blocked/unsupported state
+- acquisition method is ranked by stability
+- rate, pagination, file-size, and browser requirements are recorded
+- raw evidence exists for every promoted profile
+
+** Wave 2: Franklin County pilot
+
+Franklin County GEOID =39049= is the first end-to-end county.
+
+The pilot must enumerate and assess at least:
+
+- county home and department domains
+- commissioners and meeting systems
+- auditor, parcel, property, and GIS systems
+- recorder and deed systems
+- treasurer and tax systems
+- clerk and court systems where public
+- board of elections and local election data
+- sheriff and jail sources where lawfully public
+- procurement and vendor-payment sources
+- budget, audit, payroll, debt, and grants
+- zoning, planning, permits, health, and code systems
+- public-records policy, portal, contacts, and retention
+
+Exit gate:
+
+- sixteen routes are assessed
+- every promoted source resolves to official ownership or delegation evidence
+- gaps are explicit
+- a reviewer can replay the discovery path from stored evidence
+
+** Wave 3: Diverse county pilot
+
+Run the same contract against:
+
+- Cuyahoga County =39035= — large metro
+- Hamilton County =39061= — large metro and mixed legacy systems
+- Lucas County =39095= — northwest urban county
+- Delaware County =39041= — fast-growing suburban county
+- Athens County =39009= — Appalachian and university-centered county
+- Vinton County =39163= — low-population rural county
+
+The purpose is to expose platform and organizational variation before national-scale assumptions harden.
+
+Exit gate:
+
+- source-profile contract survives all pilot counties without county-specific schema forks
+- reusable platform families cover the majority of successful routes
+- one-off adapters are justified by stable source semantics, not convenience
+- unresolved routes and manual review costs are measured
+
+** Wave 4: All 88 counties
+
+Schedule counties in bounded batches. A batch may contain no more than eight active county runs and must respect host, vendor, tenant, and credential leases.
+
+Each county produces:
+
+- identity assessment
+- route coverage matrix
+- verified source profiles
+- unverified candidates
+- negative findings
+- gaps and blockers
+- review state
+
+** Wave 5: Historical and change coverage
+
+After current source profiles are reviewed:
+
+- resolve retired domains and migrations
+- inventory historical exports and archives
+- establish refresh schedules
+- define source retirement and replacement rules
+- run reconciliation against state-level datasets and prior captures
+
+* REVIEW Ohio Run State
+
+#+begin_src lisp
+(defstruct ohio-coverage-run
+  run-id
+  census-vintage
+  state-code
+  state-fips
+  county-geoids
+  active-wave
+  policy-snapshot-id
+  source-contract-version
+  adapter-manifest-version
+  checkpoint-id
+  started-at
+  last-event-id
+  status)
+#+end_src
+
+The durable run record is not stored in an actor mailbox.
+
+* REVIEW Command Flow
+
+#+begin_src lisp
+(:government-data/start-state-run
+ :schema-version "1.0"
+ :run-id "ohio-2026-001"
+ :state-code "OH"
+ :state-fips "39"
+ :waves (:identity :state-systems :franklin-pilot)
+ :source-contract "jurisdiction-source-profile-v1"
+ :bounds (:max-active-counties 1
+          :max-requests-per-host 2
+          :max-bytes-per-source 50000000
+          :max-wall-seconds-per-job 900))
+#+end_src
+
+A later command advances the run only after the previous wave has passed review.
+
+* REVIEW Coverage States
+
+Each route has one state:
+
+- =:unassessed=
+- =:candidate-found=
+- =:verified=
+- =:verified-partial=
+- =:not-published=
+- =:records-request-required=
+- =:authentication-required=
+- =:paywalled=
+- =:blocked=
+- =:retired=
+- =:ambiguous=
+- =:not-applicable=
+
+=:not-found= is not a completion state. A negative finding must record the search path, date, and evidence.
+
+* REVIEW Acceptance Criteria
+
+Ohio state design acceptance requires:
+
+1. all 88 county GEOIDs are in scope
+2. every route has a defined evidence and review requirement
+3. state-system candidates are separated from verified profiles
+4. no permanent actor is created per county
+5. Franklin County is the first complete pilot
+6. diverse-county pilot selection is explicit
+7. rate, replay, cancellation, and checkpoint behavior follow =STAR-RESEARCH-PIPELINE-003=
+8. source profiles use =STAR-GOVDATA-DESIGN-002=
+9. adapters use =STAR-GOVDATA-DESIGN-003=
+10. production implementation remains blocked until the parent actor design is approved
+
+* REVIEW Deterministic Fixtures
+
+Required design fixtures:
+
+- state portal redirects to a delegated subdomain
+- one official domain serves multiple agencies
+- one county department uses a vendor domain
+- OGRIP static directory contains multi-gigabyte files
+- county GIS exposes ArcGIS REST while the public site is a JavaScript viewer
+- legislation source has current, prior, and future-effective versions
+- procurement source exposes public searches but requires login for supplier actions
+- court source uses search forms and has no unified local-case API
+- campaign-finance source offers search plus file-transfer exports
+- county route has no published source and requires a negative finding
+- source migrates between vendors
+- source returns partial current-year statistics
+
+* REVIEW Failure and Recovery
+
+- a failed county job cannot stop another county
+- a source timeout records a typed failure and checkpoint
+- a browser-required source is routed only to a declared browser worker
+- a file larger than policy limits is recorded with metadata and not silently truncated
+- a profile cannot be promoted without raw evidence and official/delegated ownership evidence
+- a run restart replays from the durable checkpoint and does not reset route state
+- source migrations create successor links and tombstones
+
+* REVIEW Open Decisions
+
+- whether Ohio county batches should be ordered geographically, by population, or by detected platform family after the pilot
+- whether local-government Ohio Checkbook participation is a discovery seed or a validation source only
+- how long negative findings remain fresh before mandatory reassessment
+- whether county court systems should be a separate subprogram after the Supreme Court baseline is profiled
+
+* REVIEW Next Design Actions
+
+1. review this coverage program
+2. review the Ohio source-profile contract
+3. review the Ohio adapter pack
+4. design the Franklin County pilot runbook
+5. only after approval, create deterministic fake profiles and fixture captures

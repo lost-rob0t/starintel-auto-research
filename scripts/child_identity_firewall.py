@@ -222,9 +222,14 @@ class ChildIdentityFirewall:
         direct_child = self._is_child(normalized)
         child_context = inherited_child or direct_child
         identity_target = self._is_identity_target(normalized)
+        verified_adult: bool | None = None
 
         if identity_target:
-            self._enforce_identity_target(normalized, path=path, is_child=direct_child)
+            verified_adult = self._enforce_identity_target(
+                normalized,
+                path=path,
+                is_child=direct_child,
+            )
 
         pseudonym = self._new_child_id() if direct_child else None
         output: dict[str, Any] = {}
@@ -256,6 +261,16 @@ class ChildIdentityFirewall:
                     self._redactions["query"] += 1
                 else:
                     output[key] = self._walk(item, path=item_path, inherited_child=False)
+                continue
+
+            if identity_target and verified_adult is False and lower in NAME_KEYS:
+                self._record(
+                    "unverified-target-identifier",
+                    item_path,
+                    "removed name until adult status is verified",
+                    blocking=True,
+                )
+                self._redactions["unverified-target-name"] += 1
                 continue
 
             if child_context and lower in CHILD_IDENTIFIER_KEYS:
@@ -325,7 +340,7 @@ class ChildIdentityFirewall:
         *,
         path: str,
         is_child: bool,
-    ) -> None:
+    ) -> bool:
         if is_child:
             self._record(
                 "named-child-target",
@@ -333,15 +348,9 @@ class ChildIdentityFirewall:
                 "blocked child or minor identity target",
                 blocking=True,
             )
-            return
+            return False
 
-        age = value.get("age_at_event", value.get("age"))
-        adult_status = str(value.get("adult_status", "")).lower()
-        verified_adult = (
-            isinstance(age, (int, float))
-            and not isinstance(age, bool)
-            and age >= 18
-        ) or adult_status in {"verified", "authoritative-verified"}
+        verified_adult = self._adult_is_verified(value)
         if not verified_adult:
             self._record(
                 "adult-status-unverified",
@@ -358,14 +367,31 @@ class ChildIdentityFirewall:
                 "blocked named target below approved legal-status threshold",
                 blocking=True,
             )
+        return verified_adult
 
     def _scan_export(self, value: Any, *, path: str, inherited_child: bool) -> None:
         if isinstance(value, Mapping):
             direct_child = self._is_child(value)
             child_context = inherited_child or direct_child
+            identity_target = self._is_identity_target(value)
+            verified_adult: bool | None = None
+            if identity_target:
+                verified_adult = self._enforce_identity_target(
+                    value,
+                    path=path,
+                    is_child=direct_child,
+                )
+
             for key, item in value.items():
                 lower = str(key).lower()
                 item_path = f"{path}.{key}"
+                if identity_target and verified_adult is False and lower in NAME_KEYS:
+                    self._record(
+                        "export-unverified-target-identifier",
+                        item_path,
+                        "blocked export containing name without verified adult status",
+                        blocking=True,
+                    )
                 if child_context and lower in CHILD_IDENTIFIER_KEYS:
                     self._record(
                         "export-child-identifier-key",
@@ -448,6 +474,16 @@ class ChildIdentityFirewall:
             "adult-defendant",
             "adult-offender",
         }
+
+    @staticmethod
+    def _adult_is_verified(value: Mapping[str, Any]) -> bool:
+        age = value.get("age_at_event", value.get("age"))
+        adult_status = str(value.get("adult_status", "")).lower()
+        return (
+            isinstance(age, (int, float))
+            and not isinstance(age, bool)
+            and age >= 18
+        ) or adult_status in {"verified", "authoritative-verified"}
 
     def _redact_known(self, text: str, *, path: str) -> str:
         result = text

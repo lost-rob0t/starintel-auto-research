@@ -2,34 +2,34 @@
 :ID:       starintel-government-data-ohio-adapter-pack-003
 :END:
 #+title: STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack
-#+description: Define the Ohio-specific and reusable platform adapters needed to profile state systems, execute the Franklin County pilot, and expand across all 88 counties.
+#+description: Define reusable and Ohio-specific adapters with self-describing jobs, lease-fenced attempts, replayable artifacts, and proposal-only outputs.
 #+status: REVIEW
 #+filetags: :starintel:design:government-data:ohio:adapters:actors:common-lisp:
 #+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
 
-| Version | Date       | Description of change                                                     | Did nsaspy approve it |
-|---------+------------+---------------------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-28 | Define Ohio source adapters and worker bounds                              | Pending               |
-| 0.2.0   | 2026-07-28 | Pin adapter jobs to immutable contracts, manifests, evidence, and policies | Pending               |
-| 0.2.1   | 2026-07-28 | Separate durable jobs from lease-bound retry attempts                      | Pending               |
+| Version | Date       | Description of change                                                | Did nsaspy approve it |
+|---------+------------+----------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define Ohio adapters and bounds                                     | Pending               |
+| 0.2.0   | 2026-07-28 | Pin jobs to contracts, manifests, evidence, and policies            | Pending               |
+| 0.2.1   | 2026-07-28 | Separate durable jobs from lease-bound attempts                     | Pending               |
+| 0.3.0   | 2026-07-28 | Pin explicit source-contract identity in manifests, jobs, and results | Pending             |
 
 * Related Nodes
 
 - [[file:STAR-GOVDATA-DESIGN-001-ohio-coverage-program.org][STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program]]
 - [[file:STAR-GOVDATA-DESIGN-002-ohio-source-profile-contract.org][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]]
 - [[file:../auto-research/STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+- [[file:../auto-research/STAR-RESEARCH-PIPELINE-004-government-data-revision-protocol-amendment.org][STAR-RESEARCH-PIPELINE-004 Government Data Revision Protocol Amendment]]
 
 * REVIEW Objective
 
-Define the smallest adapter set that can profile Ohio state systems and county source variation without writing one scraper per jurisdiction.
+Define the smallest adapter set that profiles Ohio without one scraper per jurisdiction. Ohio-specific adapters are allowed only for stable Ohio semantics; generic platform/format adapters remain preferred.
 
-Ohio-specific adapters are allowed only where a source has stable Ohio semantics or unique protocol. Generic platform and format adapters remain preferred.
+* REVIEW Boundary
 
-* REVIEW Adapter Boundary
+Adapters are short-lived stateless/checkpoint-bounded workers. They receive one immutable lease-bound attempt and return retrieval events, evidence, artifacts, checkpoints, typed failures, and proposals.
 
-An adapter is a short-lived, stateless or checkpoint-bounded actor/process. It receives one immutable lease-bound attempt and returns immutable retrieval events, evidence, artifact references, checkpoints, typed failures, and proposals.
-
-An adapter may not write canonical identities, deployments, profiles, decisions, gaps, or route assessments; choose an applicability contract; approve its own evidence; infer capabilities from retrieved content; exceed bounds or leases; create credentials; accept terms; bypass controls; or retain unauthorized protected data.
+They may not write canonical identities, deployments, profiles, decisions, gaps, assessments, reviews, or gates; choose contracts; self-review; exceed bounds/leases; create credentials; accept terms; bypass controls; or retain unauthorized protected data.
 
 * REVIEW Capability Manifest
 
@@ -39,6 +39,7 @@ An adapter may not write canonical identities, deployments, profiles, decisions,
   adapter-protocol-version
   input-schema-version result-schema-version event-schema-version
   checkpoint-schema-version artifact-bundle-version
+  supported-source-contract-ids
   source-contract-min-version source-contract-max-version
   applicability-contract-min-version applicability-contract-max-version
   platform-families source-families operations input-formats output-formats
@@ -47,18 +48,15 @@ An adapter may not write canonical identities, deployments, profiles, decisions,
   deterministic-p default-bounds retry-policy fixture-ids)
 #+end_src
 
-Required operations include =:probe=, =:inventory=, =:fetch-page=, =:fetch-document=, =:fetch-bulk=, =:extract-links=, =:fingerprint=, and =:checkpoint=. No adapter supports every operation.
+Registry rejects mutable versions, unsupported source contracts, schema-range gaps, undeclared methods, missing bounds, unsupported result protocols, or missing deterministic fixtures.
 
-The Adapter Registry rejects mutable versions, missing schema ranges, undeclared methods, missing bounds, unsupported result protocols, and manifests without deterministic fixtures.
-
-* REVIEW Durable Job and Execution Attempt
-
-A durable job describes logical work and survives retries. It does not contain a lease that has not yet been issued.
+* REVIEW Durable Job
 
 #+begin_src lisp
 (defstruct adapter-job-revision
   job-id job-revision-id prior-job-revision-id
   run-id command-id parent-command-id
+  source-contract-id source-contract-version
   unit-ref component-ref route subfamily data-family
   source-profile-revision-id candidate-proposal-id
   deployment-revision-id search-plan-revision-id
@@ -72,24 +70,26 @@ A durable job describes logical work and survives retries. It does not contain a
   artifact-policy idempotency-key input-hash)
 #+end_src
 
-Discovery before profile creation binds a candidate proposal or search-plan revision. Profile-backed acquisition requires an exact source-profile revision. Resume creates a new job revision only when logical scope, contracts, policy, adapter, bounds, or cursor changes.
+The runtime source contract is =star.govdata.source-profile@1.0.0= for this design. Discovery binds a proposal or search-plan revision. Profile-backed work binds an exact profile revision. Contract/policy/adapter/bounds/cursor changes create a new job revision.
 
-After validation, the dispatcher obtains a lease and creates an immutable execution attempt:
+A job contains no future lease.
+
+* REVIEW Lease-Bound Attempt
 
 #+begin_src lisp
 (defstruct adapter-attempt
   attempt-id attempt-number job-revision-id prior-attempt-id
   rate-lease-id rate-lease-generation rate-lease-fence rate-lease-key-hash
-  started-at attempt-deadline worker-generation
-  attempt-input-hash)
+  started-at attempt-deadline worker-generation attempt-input-hash)
 #+end_src
 
-Retrying the same logical job creates a new attempt with a new lease/fence; it does not mutate the job revision. Every request checks the current fence. A stale attempt must stop even if its local deadline has not expired.
+Dispatcher validates job and source-contract compatibility, acquires a lease, then creates the attempt. Retry creates a new attempt/fence; it does not mutate the job. Every request validates the current fence.
 
-* REVIEW Adapter Result
+* REVIEW Result
 
 #+begin_src lisp
 (defstruct adapter-result
+  source-contract-id source-contract-version
   job-id job-revision-id attempt-id
   adapter-id adapter-version adapter-manifest-hash runtime-environment-hash
   status input-hash output-hash
@@ -100,80 +100,59 @@ Retrying the same logical job creates a new attempt with a new lease/fence; it d
   started-at finished-at warnings failure)
 #+end_src
 
-Statuses are =:success=, =:partial=, =:no-change=, =:blocked=, =:unsupported=, =:ocr-required=, =:manual-review-required=, =:failed=, and =:cancelled=.
+Statuses: success, partial, no-change, blocked, unsupported, OCR-required, manual-review-required, failed, cancelled.
 
-=:success= is invalid with truncation, missing required artifacts, unreconciled counts, or an expired lease. =:partial= requires explicit truncation and a resumable checkpoint or reviewed non-resumable explanation. Adapters return proposal IDs, never canonical profile IDs.
+Success is invalid with source-contract mismatch, truncation, missing artifacts, unreconciled counts, or expired lease. Partial requires explicit truncation and checkpoint or reviewed non-resumable explanation. Results return proposals, never canonical IDs.
 
-* REVIEW Determinism and Commit Ordering
+* REVIEW Determinism and Commit Order
 
-For the same job revision, retained input artifacts, adapter manifest, runtime hash, and policy snapshot, normalized evidence and proposals must be deterministic. Transport timestamps are explicit observations or excluded from normalized output hashes.
+For identical job revision, retained inputs, source contract, manifest/runtime, and policy, normalized evidence/proposals are deterministic.
 
-Commit order:
-
-1. validate immutable job and referenced contracts
-2. acquire lease and fencing token
-3. create immutable adapter attempt
-4. issue bounded request after fence validation
-5. reserve and stream raw artifact
-6. verify bytes and content hash
-7. commit retrieval event and artifact metadata
-8. emit evidence and proposals
+1. validate protocol/payload/source/applicability contracts and immutable job
+2. acquire lease/fence
+3. create attempt
+4. issue bounded request after fence check
+5. reserve/stream artifact
+6. verify bytes/hash
+7. commit retrieval/artifact
+8. emit evidence/proposals
 9. commit checkpoint
 10. close lease
-11. emit one terminal result
+11. terminal result
 
-A checkpoint cannot advance past uncommitted artifacts/evidence. A crash after artifact commit resumes from the artifact. A retry uses the same job revision but a new attempt and lease unless logical scope changed.
+Checkpoint cannot outrun committed artifacts/evidence. Crash after artifact commit resumes from artifact.
 
-* REVIEW Generic Adapters First
+* REVIEW Generic Adapters
 
-| Adapter | Platforms or formats | Ohio use |
-|---------+----------------------+----------|
-| =http-metadata= | HTTP, redirects, headers, DNS/TLS | authority and locator evidence |
-| =html-structured= | semantic HTML, tables, pagination, JSON-LD | directories, reports, landing pages |
-| =sitemap-feed= | sitemap XML, RSS, Atom, iCalendar | meetings, alerts, publications, changes |
-| =static-directory= | directory indexes and deterministic paths | OGRIP/OSIP and legacy archives |
-| =csv-xlsx= | CSV, TSV, XLS, XLSX | election, finance, reporting exports |
-| =pdf-text= | text-bearing PDF and authenticated documents | law, reports, agendas, audits, contracts |
-| =arcgis-rest= | ArcGIS REST services and item metadata | state and county GIS |
-| =ogc-service= | WMS, WFS, WMTS and capabilities | geospatial services |
-| =aspnet-form= | bounded public ASP.NET forms | dockets and legacy searches |
-| =embedded-json= | page configuration and public JSON endpoints | dashboards and JavaScript systems |
-| =browser-public= | allowlisted JavaScript-only interfaces | last structured option before manual review |
-| =archive-resolver= | redirects, archive candidates, retired links | migration and historical identity |
+| Adapter | Platforms/formats | Ohio use |
+|---------+-------------------+----------|
+| =http-metadata= | HTTP, redirects, headers, DNS/TLS | authority/locator evidence |
+| =html-structured= | HTML, tables, pagination, JSON-LD | directories/reports |
+| =sitemap-feed= | sitemap, RSS, Atom, iCalendar | meetings/alerts/changes |
+| =static-directory= | directory indexes/static paths | OGRIP/archives |
+| =csv-xlsx= | CSV/TSV/XLS/XLSX | elections/finance |
+| =pdf-text= | text PDF/authenticated documents | law/reports/agendas/audits/contracts |
+| =arcgis-rest= | ArcGIS REST/items | GIS |
+| =ogc-service= | WMS/WFS/WMTS | GIS |
+| =aspnet-form= | bounded public forms | dockets/legacy search |
+| =embedded-json= | public configuration/endpoints | dashboards |
+| =browser-public= | allowlisted JavaScript systems | last structured option |
+| =archive-resolver= | redirects/archives/retired links | migration/history |
 
-=pdf-text= classifies image-only documents but does not perform OCR. It returns =:ocr-required= with page artifacts.
+Image-only PDF returns OCR-required; it does not silently OCR.
 
-* REVIEW Browser Evidence Boundary
+* REVIEW Browser Boundary
 
-A browser job additionally pins engine/version, runtime hash, viewport/locale when material, initial locator, navigation sequence, public form parameters, allowed origins/download types, and network-capture policy.
-
-The result must produce the browser capture bundle required by =STAR-GOVDATA-DESIGN-002=. Screenshot-only evidence is rejected. Browser output cannot add hosts, credentials, or capabilities.
+Browser jobs pin engine/version, runtime, viewport/locale when material, locator, navigation, public form parameters, origins/download types, and network-capture policy. Results produce the full capture bundle required by =DESIGN-002=. Screenshot-only evidence is invalid.
 
 * REVIEW Ohio-Specific Adapters
 
-** =ohio-laws=
-
-Inventories Ohio Revised and Administrative Code; resolves current, prior, and future-effective versions; captures authenticated documents; emits relationships. Future-effective law never replaces current law before its effective date.
-
-** =ohio-legislature=
-
-Inventories bills, resolutions, sponsors, committees, actions, votes, documents, calendars, journals, and acts by General Assembly. It distinguishes informational bill text from authenticated enacted law.
-
-** =ohio-buys=
-
-Inventories public solicitations, awards, contracts, amendments, and attachments. Public read/download, supplier login, and response submission are separate capabilities. Only public read/download are authorized.
-
-** =ohio-checkbook=
-
-Identifies exports/endpoints, records participating-unit scope and reporting periods, distinguishes state/local submissions, and reconciles totals when possible. Participation is discovery/reconciliation evidence, never complete county finance validation.
-
-** =ohio-sos=
-
-Inventories results, campaign-finance search/transfers, county-board links, precinct/candidate products, and public business data when in scope. It distinguishes unofficial, official, canvassed, and historical states. Voter-record acquisition requires separate privacy review.
-
-** =ohio-courts=
-
-Profiles Supreme Court dockets, opinions, journals, statistics, and authoritative local-court directories. Local systems remain separate profiles using generic or reusable vendor adapters. Partial-current-year state propagates into evidence and gaps.
+- =ohio-laws=: current/prior/future-effective laws and authenticated documents
+- =ohio-legislature=: bills, sponsors, committees, actions, votes, calendars, journals, acts
+- =ohio-buys=: public solicitations/awards/contracts/attachments; login/write separated
+- =ohio-checkbook=: exports, participation scope, periods, reconciliation; never finance completeness
+- =ohio-sos=: election/result states, campaign finance, boards, public products; voter records need privacy review
+- =ohio-courts=: Supreme Court systems/statistics/directories; local courts remain separate profiles
 
 * REVIEW OGRIP Composition
 
@@ -185,109 +164,39 @@ http-metadata
   -> archive-resolver
 #+end_example
 
-The composition inventories LBRS, imagery, elevation, mosaics, endpoints, update dates, and archives. Oversized files produce metadata plus =:file-too-large=; they are not partially downloaded or silently skipped.
+Oversized files produce metadata plus file-too-large, never silent partial download.
 
 * REVIEW Default Bounds
 
-| Worker kind | Requests | Bytes | Objects | Wall time | Concurrency |
-|-------------+----------+-------+---------+-----------+-------------|
-| metadata probe | 10 | 5 MB | 100 | 120 s | 2 per host |
-| HTML inventory | 50 | 25 MB | 2,000 | 300 s | 2 per host |
-| API inventory | 100 | 50 MB | 10,000 | 600 s | lease-controlled |
-| document capture | 25 | 100 MB | 250 | 600 s | 2 per host |
-| static directory | 100 | 25 MB metadata-only | 25,000 | 600 s | 2 per host |
-| browser probe | 20 navigations | 50 MB | 1,000 | 600 s | 1 per host |
+| Worker | Requests | Bytes | Objects | Wall time | Concurrency |
+|--------+----------+-------+---------+-----------+-------------|
+| metadata | 10 | 5 MB | 100 | 120 s | 2/host |
+| HTML | 50 | 25 MB | 2,000 | 300 s | 2/host |
+| API | 100 | 50 MB | 10,000 | 600 s | lease-controlled |
+| document | 25 | 100 MB | 250 | 600 s | 2/host |
+| static directory | 100 | 25 MB metadata | 25,000 | 600 s | 2/host |
+| browser | 20 navigations | 50 MB | 1,000 | 600 s | 1/host |
 
-Raising bounds creates a new policy snapshot and job revision.
+Raising bounds creates new policy/job revisions.
 
-* REVIEW Rate and Lease Keys
+* REVIEW Rate and Fingerprint Rules
 
-Lease dimensions include host, vendor, deployment/tenant, API key, source profile, adapter, government unit, and browser pool. Host aliases belonging to one deployment share limits.
+Lease dimensions include host, vendor, deployment/tenant, key, profile, adapter, government, and browser pool. Host aliases share deployment limits. Attempts carry lease ID/generation/fence; jobs do not.
 
-A lease record exposes ID, generation, fence, key hash, issue time, expiry, and close state. Attempts carry the lease; durable jobs do not.
+Fingerprints are probabilistic evidence. They never prove authority, scope, or completeness.
 
-* REVIEW Fingerprint Pipeline
+* REVIEW Franklin Order
 
-#+begin_example
-official-domain evidence
-  -> HTTP/redirect observations
-  -> HTML metadata/assets
-  -> known path probes
-  -> JavaScript/configuration fingerprints
-  -> API-shape probes
-  -> platform candidate
-  -> source/deployment proposals
-  -> independent review
-#+end_example
+For each subfamily: load pinned source/applicability contracts and search plan; verify authority; inventory structured paths; probe platform signatures/APIs/vendors; use browser only when required; return proposals only. One unsupported/browser-required result cannot justify a negative decision.
 
-A fingerprint never proves authority, jurisdictional scope, or completeness.
+* REVIEW Typed Failures and Fixtures
 
-* REVIEW Franklin Adapter Order
+Failures include unsupported platform/source-contract, authority/delegation missing, auth/CAPTCHA/rate/stale lease, redirect out of scope, unstable pagination, file too large, content mismatch, partial period, schema changed, retired, browser/OCR/privacy review required, artifact/checkpoint failure, cancelled.
 
-For each route/subfamily:
+Fixtures cover source-contract mismatch/migration, exact manifest/runtime, all generic adapters, effective law, read/write separation, Checkbook non-completeness, oversized files, public forms, partial periods, ArcGIS viewer/REST, CAPTCHA, OCR, browser replay, redirect escape, stale fence, retry/new attempt, artifact crash, truncation, and idempotent duplicate jobs.
 
-1. load pinned applicability rule and search-plan revision
-2. verify official/delegated scope
-3. run sitemap/feed and structured inventories
-4. probe known platform signatures
-5. prefer documented/observed APIs
-6. probe delegated interfaces
-7. use browser only when structured methods fail or profile requires it
-8. return profile/deployment/gap proposals, never completion
+* REVIEW Implementation and Acceptance
 
-One unsupported or browser-required adapter result cannot justify a negative decision.
+After =PIPELINE-003/004= approval: validators/fake adapter; artifact/retrieval/checkpoint path; generic adapters; Ohio adapters as needed; browser bridge last.
 
-* REVIEW Fixture Matrix
-
-Required fixtures include exact manifest/runtime hashes, all generic adapters, effective-dated law, OhioBuys public-read/login-write separation, Checkbook non-completeness, oversized OGRIP metadata, SOS search/transfer, replayable court forms, partial-year statistics, ArcGIS viewer/REST preference, delegated portals, CAPTCHA, OCR-required PDF, browser bundle replay, redirect escape, stale lease fence, retry with new attempt, crash after artifact commit, truncated non-success, and duplicate job replay.
-
-* REVIEW Typed Failures
-
-- =:unsupported-platform=
-- =:unverified-authority=
-- =:delegation-evidence-missing=
-- =:authentication-required=
-- =:captcha-boundary=
-- =:rate-limited=
-- =:stale-lease=
-- =:redirect-out-of-scope=
-- =:pagination-unstable=
-- =:file-too-large=
-- =:content-type-mismatch=
-- =:partial-current-period=
-- =:schema-changed=
-- =:source-retired=
-- =:browser-required=
-- =:ocr-required=
-- =:privacy-review-required=
-- =:artifact-commit-failed=
-- =:checkpoint-rejected=
-- =:cancelled=
-
-Failures create evidence and may create gap proposals. They never complete a route.
-
-* REVIEW Implementation Order
-
-After parent protocol alignment and approval:
-
-1. manifest/job/attempt/result validators and deterministic fake adapter
-2. immutable artifact/retrieval/checkpoint commit path
-3. HTTP metadata, sitemap/feed, structured HTML, and static-directory adapters
-4. PDF classifier/text, CSV/XLSX, ArcGIS REST, and OGC adapters
-5. Ohio-specific adapters as pilot evidence requires
-6. bounded browser bridge before any route requires browser probing
-
-No live probes run until revision-aware commands, attempt/lease semantics, artifact ordering, and proposal-only writes pass fixtures.
-
-* REVIEW Acceptance Criteria
-
-1. Generic adapters are preferred.
-2. Durable jobs pin exact logical work but never future leases.
-3. Every execution attempt pins a current lease generation/fence.
-4. Results bind job revision and attempt ID.
-5. Results return evidence/artifacts/proposals, not canonical IDs.
-6. Success cannot hide truncation, stale leases, or missing artifacts.
-7. Checkpoints never advance past uncommitted evidence.
-8. Browser evidence is replayable and OCR bounded.
-9. Failures cannot complete routes.
-10. The parent actor protocol must support revision-aware job/attempt fields before implementation.
+Acceptance requires generic preference; exact protocol/source/applicability/policy/manifest/runtime bindings; jobs without future leases; fenced attempts; proposal-only results; no hidden truncation/artifact loss; replayable browser/OCR boundaries; and no route completion from failures.

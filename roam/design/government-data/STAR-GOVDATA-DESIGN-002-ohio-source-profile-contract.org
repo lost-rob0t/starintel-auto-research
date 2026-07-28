@@ -7,10 +7,11 @@
 #+filetags: :starintel:design:government-data:ohio:source-profile:schema:provenance:
 #+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
 
-| Version | Date       | Description of change                                                  | Did nsaspy approve it |
-|---------+------------+------------------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-28 | Define Ohio source-profile and route contracts                         | Pending               |
-| 0.2.0   | 2026-07-28 | Add immutable assessments, applicability rules, and split state models | Pending               |
+| Version | Date       | Description of change                                                           | Did nsaspy approve it |
+|---------+------------+---------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define Ohio source-profile and route contracts                                  | Pending               |
+| 0.2.0   | 2026-07-28 | Add immutable assessments, applicability rules, and split state models          | Pending               |
+| 0.3.0   | 2026-07-28 | Revision-bind decisions and gaps; enumerate all sixteen Ohio route requirements | Pending               |
 
 * Related Nodes
 
@@ -24,548 +25,280 @@ Define one durable national-compatible contract for Ohio state systems, county s
 
 * REVIEW Invariants
 
-1. A search result is never a verified source profile.
+1. Search results and adapter observations create proposals, never verified canonical state.
 2. Every verified profile revision links to official ownership or delegation evidence.
-3. Every profile revision is scoped to one government unit or component and one source family.
-4. Shared vendor deployments are represented separately from jurisdiction-specific authority and coverage.
-5. One endpoint may support multiple profiles when authority or coverage differs.
-6. One profile may contain multiple locators when they are one logical source.
-7. Raw evidence and retrieval events are immutable.
-8. Profile revisions are append-only and explicitly supersede prior revisions.
-9. Route-assessment revisions are append-only and bind exact profile revisions.
-10. A source profile does not imply complete route coverage.
-11. Negative findings are evidence-bearing, expiring assessments.
-12. Review state is separate from source or acquisition state.
-13. Current, historical, and future-effective content are measured separately.
+3. Every canonical profile, deployment, search plan, subfamily decision, gap, and route assessment is revisioned and immutable.
+4. Every revision declares its logical ID, revision ID, immediate predecessor, and the revisions it supersedes.
+5. Route assessments bind exact profile, search-plan, decision, gap, evidence, deployment, policy, and applicability-contract revisions.
+6. Shared vendor deployments are separate from jurisdiction-specific authority and coverage.
+7. A source profile does not imply complete route coverage.
+8. Negative findings are evidence-bearing, expiring decisions.
+9. =:not-applicable= requires positive authority or service-topology evidence.
+10. Source state and human review state are independent.
+11. Current, historical, and future-effective content are measured separately.
+12. A later revision never changes the evidence basis of an older decision.
+13. Browser and OCR output cannot become evidence without replayable artifact boundaries.
 14. Personal-data fields and access restrictions are recorded before acquisition is authorized.
-15. =:not-applicable= requires positive authority or service-topology evidence, not failure to find a source.
-16. A later source revision never changes the evidence basis of an older route assessment.
 
 * REVIEW Core Records
 
-** Government unit reference
+** Government unit and component references
 
 #+begin_src lisp
 (defstruct government-unit-ref
-  star-id
-  canonical-name
-  unit-kind
-  parent-star-id
-  state-code
-  state-fips
-  county-geoid
-  census-government-id
-  active-status
-  valid-from
-  valid-through)
-#+end_src
+  star-id canonical-name unit-kind parent-star-id
+  state-code state-fips county-geoid census-government-id
+  active-status valid-from valid-through)
 
-** Component reference
-
-#+begin_src lisp
 (defstruct government-component-ref
-  component-id
-  unit-ref
-  canonical-name
-  component-kind
-  function
-  authority-kind
-  service-geography
-  parent-component-id
-  identity-evidence-ids
-  confidence
-  valid-from
-  valid-through)
+  component-id unit-ref canonical-name component-kind function
+  authority-kind service-geography parent-component-id
+  identity-evidence-ids confidence valid-from valid-through)
 #+end_src
 
 =authority-kind= distinguishes county-owned, independently elected, shared, regional, municipal, state-provided, and external-but-officially-delegated functions.
 
-** Shared source deployment
+** Shared source deployment revision
 
 #+begin_src lisp
-(defstruct source-deployment
+(defstruct source-deployment-revision
   deployment-id
-  revision-id
-  prior-revision-id
-  platform-family
-  vendor
-  tenant-id
-  canonical-locator-ids
-  service-scope
-  host-aliases
-  rate-policy
-  authority-evidence-ids
-  first-seen-at
-  last-seen-at
-  source-state
-  review-state)
+  deployment-revision-id
+  prior-deployment-revision-id
+  supersedes-deployment-revision-ids
+  platform-family vendor tenant-id
+  canonical-locator-ids service-scope host-aliases
+  rate-policy deployment-evidence-ids
+  first-seen-at last-seen-at
+  source-state review-state
+  created-at created-by reviewed-at reviewed-by)
 #+end_src
 
-A deployment records one logical vendor or shared platform instance. Jurisdiction profiles reference it but retain their own authority, route, coverage, and review decisions. Different host aliases cannot create independent rate leases for one deployment.
+A deployment proves one logical platform instance. It does not prove that every named jurisdiction delegated authority to it. Each jurisdiction profile carries its own authority evidence and coverage scope.
 
 ** Coverage scope
 
 #+begin_src lisp
 (defstruct source-coverage-scope
-  jurisdiction-ids
-  component-ids
-  service-geographies
-  record-types
-  included-periods
-  excluded-periods
-  excluded-fields
-  participation-basis
-  partial-p
-  scope-evidence-ids)
+  jurisdiction-ids component-ids service-geographies record-types
+  included-periods excluded-periods excluded-fields
+  participation-basis partial-p scope-evidence-ids)
 #+end_src
 
-Participation in a state or vendor system is not equivalent to complete route coverage. The scope record states exactly what the source covers and excludes.
+Participation in a statewide or vendor system is not equivalent to complete route coverage.
 
 ** Source profile revision
 
 #+begin_src lisp
 (defstruct source-profile-revision
   profile-id
-  revision-id
-  prior-revision-id
-  supersedes-revision-id
-  unit-ref
-  component-ref
-  deployment-revision-id
-  route
-  data-family
-  canonical-name
-  official-status
-  ownership-evidence-ids
-  discovery-evidence-ids
-  coverage-scope
-  platform-family
-  vendor
-  tenant-id
-  locators
-  acquisition-methods
-  preferred-adapter
-  authentication
-  access-policy
-  rate-policy
-  pagination
-  temporal-coverage
-  refresh-policy
-  raw-artifact-policy
-  cursor-policy
-  validation-policy
-  privacy-and-redaction-policy
-  known-gaps
-  source-state
-  review-state
-  confidence
-  valid-from
-  valid-through
-  created-at
-  created-by
-  reviewed-at
-  reviewed-by)
+  profile-revision-id
+  prior-profile-revision-id
+  supersedes-profile-revision-ids
+  unit-ref component-ref deployment-revision-id
+  route data-family canonical-name official-status
+  ownership-evidence-ids discovery-evidence-ids coverage-scope
+  platform-family vendor tenant-id locators
+  acquisition-methods preferred-adapter authentication access-policy
+  rate-policy pagination temporal-coverage refresh-policy
+  raw-artifact-policy cursor-policy validation-policy
+  privacy-and-redaction-policy known-gap-revision-ids
+  source-state review-state confidence
+  valid-from valid-through created-at created-by reviewed-at reviewed-by)
 #+end_src
 
-The pair =profile-id= and =revision-id= identifies the logical profile and immutable revision. A canonical query may return the latest reviewed revision, but route decisions always retain the exact revision ID used.
+Canonical latest-state queries may select the newest reviewed revision. Historical route decisions retain the exact =profile-revision-id=.
 
 ** Locator
 
 #+begin_src lisp
 (defstruct source-locator
-  locator-id
-  kind
-  uri
-  method
-  role
-  content-type
-  official-domain-p
-  delegated-p
-  requires-browser-p
-  requires-authentication-p
-  active-p
-  predecessor-locator-id
-  successor-locator-id
-  archive-candidate-ids
-  first-seen-at
-  last-seen-at)
+  locator-id kind uri method role content-type
+  official-domain-p delegated-p
+  requires-browser-p requires-authentication-p active-p
+  predecessor-locator-id successor-locator-id archive-candidate-ids
+  first-seen-at last-seen-at)
 #+end_src
 
-Locator kinds include:
-
-- =:homepage=
-- =:api=
-- =:bulk-file=
-- =:catalog=
-- =:feed=
-- =:search-form=
-- =:download-page=
-- =:arcgis-service=
-- =:ogc-service=
-- =:document-repository=
-- =:meeting-calendar=
-- =:video-channel=
-- =:public-records-portal=
-- =:archive=
+Locator kinds include =:homepage=, =:api=, =:bulk-file=, =:catalog=, =:feed=, =:search-form=, =:download-page=, =:arcgis-service=, =:ogc-service=, =:document-repository=, =:meeting-calendar=, =:video-channel=, =:public-records-portal=, and =:archive=.
 
 ** Evidence record
 
 #+begin_src lisp
 (defstruct source-evidence
-  evidence-id
-  retrieval-event-id
-  evidence-kind
-  locator-id
-  content-hash
-  captured-at
-  observed-title
-  observed-organization
-  observed-links
-  assertion
-  assertion-scope
-  confidence
-  notes)
+  evidence-id retrieval-event-id evidence-kind locator-id
+  content-hash captured-at observed-title observed-organization
+  observed-links assertion assertion-scope confidence notes)
 #+end_src
 
-Evidence kinds include:
+Evidence kinds include official-domain declaration, official page link, government document citation, delegated vendor link, authority or service-topology record, DNS/TLS observation, redirect chain, platform fingerprint, API sample, file metadata, browser capture bundle, OCR result with source-image references, negative-search record, archived-source record, and predecessor/successor declaration.
 
-- official-domain declaration
-- official page link
-- government document citation
-- delegated vendor link
-- authority or service-topology record
-- DNS or TLS observation
-- HTTP redirect chain
-- platform fingerprint
-- API response sample
-- file metadata capture
-- browser capture bundle
-- OCR result with source-image references
-- negative-search record
-- archived-source record
-- predecessor or successor declaration
+A browser capture bundle contains the final URL, redirect chain, normalized DOM or rendered-text hash, public network-request metadata, submitted public form parameters, browser/runtime version, navigation sequence, screenshot metadata, and raw-artifact references. Screenshot metadata alone is insufficient.
 
-A browser capture bundle contains the final URL, redirect chain, normalized DOM or rendered text hash, public network-request metadata, submitted public form parameters, browser/runtime version, navigation sequence, screenshot metadata, and raw-artifact references. Screenshot metadata alone is not replayable browser evidence.
-
-OCR is a bounded last resort. Until a reviewed OCR adapter exists, a scanned document returns =:ocr-required= and enters manual review rather than silently producing unverified text.
+OCR is a bounded last resort. Until a reviewed OCR adapter exists, an image-only document returns =:ocr-required= and enters manual review.
 
 * REVIEW Official Status
 
-=:official-status= is one of:
+=:official-status= is one of =:verified-official=, =:verified-delegated=, =:candidate-official=, =:candidate-delegated=, =:unverified=, =:rejected=, or =:retired=.
 
-- =:verified-official=
-- =:verified-delegated=
-- =:candidate-official=
-- =:candidate-delegated=
-- =:unverified=
-- =:rejected=
-- =:retired=
-
-Promotion to =:verified-official= requires evidence from a government-controlled domain, authoritative registry, or authenticated official publication.
-
-Promotion to =:verified-delegated= requires an official government page, document, or authority record linking the vendor system to the government unit or component.
-
-A matching logo, organization name, TLS certificate, or search result is insufficient by itself.
+=:verified-official= requires government-controlled-domain, authoritative-registry, or authenticated-publication evidence. =:verified-delegated= requires an official government page, document, or authority record linking the vendor system to the unit or component. Logos, names, TLS certificates, and search results are insufficient by themselves.
 
 * REVIEW Versioned Route Applicability Contract
 
-Completion semantics are defined by a versioned contract rather than reviewer convention.
-
 #+begin_src lisp
 (defstruct route-applicability-contract
-  contract-id
-  version
-  jurisdiction-scope
-  valid-from
-  valid-through
-  rule-ids
-  content-hash
-  approved-at
-  approved-by)
+  contract-id version jurisdiction-scope valid-from valid-through
+  route-definition-ids rule-ids content-hash
+  review-state approved-at approved-by)
+
+(defstruct route-definition
+  route route-kind required-rule-ids allowed-route-states completion-policy)
 
 (defstruct route-subfamily-rule
-  rule-id
-  route
-  unit-kinds
-  component-kinds
-  subfamily
-  requirement
-  applicability-predicate
-  required-authority-kinds
-  not-applicable-evidence-kinds
-  allowed-terminal-states
-  minimum-search-plan-template-id
-  state-source-substitution-policy
-  service-provider-resolution-required-p
-  negative-freshness-class)
+  rule-id route unit-kinds component-kinds subfamily requirement
+  applicability-predicate required-authority-kinds
+  not-applicable-evidence-kinds allowed-terminal-states
+  minimum-search-plan-template-id state-source-substitution-policy
+  service-provider-resolution-required-p negative-freshness-class)
 #+end_src
 
-=requirement= is =:required=, =:optional=, or =:conditional=.
+=route-kind= is =:source=, =:inventory=, or =:cross-cutting=. =requirement= is =:required=, =:optional=, or =:conditional=.
 
-The rule declares:
+A missing source never satisfies =:not-applicable=. That state requires evidence showing the function does not belong to the county or is supplied by a resolved external unit or component.
 
-- which unit and component kinds it applies to
-- the required and optional subfamilies for a route
-- what condition activates a conditional subfamily
-- what evidence is required for =:not-applicable=
-- whether a state or regional source may satisfy the subfamily
-- whether the responsible service provider must be resolved
-- the allowed terminal states
-- the minimum search-plan template
-- the negative-finding freshness class
+** Initial Ohio county route contract
 
-A missing source does not satisfy =:not-applicable=. That state requires evidence showing that the function does not belong to the county or is supplied by a resolved external government or component.
+This table is the minimum version-1 route inventory. Machine-readable rule records must encode the same requirements before Franklin County begins.
 
-** Initial Ohio county subfamily examples
+| Route | Kind | Required and conditional subfamilies |
+|-------+------+------------------------------------------|
+| identity | source | county identity and canonical domains; elected and administrative component identities; delegated hosting; service-provider topology |
+| open data | inventory | official catalog or open-data landing inventory; data.json/DCAT/CKAN/Socrata/ArcGIS Hub or equivalent probes; downloadable bulk/export inventory; reviewed negative result when none is published |
+| GIS | source | countywide GIS/parcel service or resolved provider; auditor and parcel services; engineer/planning geospatial services when operated; OGC/ArcGIS/bulk-file inventory |
+| law | source | charter or reviewed non-charter applicability; resolutions and ordinances; county code/policy repository; authenticated or authoritative version relationships where exposed |
+| meetings | source | commissioners; statutory boards and commissions; agendas/packets/minutes; votes and recordings when maintained; calendar/feed inventory |
+| finance | source | adopted/proposed budgets; annual financial reports and audits; payroll/checkbook/vendor payments when maintained; debt, grants, and revenue reports when published |
+| procurement | source | bids/solicitations; awards/contracts; purchase orders and vendor payments when maintained; delegated procurement portal and attachment inventory |
+| property | source | auditor/assessment; recorder/deeds; treasurer/tax; parcel/GIS; resolved external provider for any function not county-operated |
+| courts | source | county court and clerk topology; authoritative links to local courts serving the county; public docket/case-index/document capability when authorized; explicit access restrictions |
+| elections | source | board of elections identity; candidates and precincts; unofficial/official/canvassed/historical results; local campaign-finance filings when maintained |
+| public safety | source | sheriff identity; jail/booking when county-operated and lawfully public; incident/dispatch/enforcement data when published; inspection and reporting systems where applicable |
+| permits | source | building, zoning, planning, health, environmental, licensing, and code-enforcement providers according to service topology; permit/search/export capabilities when public |
+| public records | source | request policy; portal or submission method; contacts; fees; retention schedules; appeal or escalation instructions when officially published |
+| feeds | inventory | sitemaps; RSS/Atom/iCalendar; alerts/newsletters; public APIs/exports/change feeds; reviewed negative result for absent update mechanisms |
+| archives | inventory | retired domains; predecessor/successor locators; archive candidates; historical repositories/exports; migration evidence; visible temporal boundaries |
+| operational metadata | cross-cutting | for every bound source and negative decision: platform/vendor/deployment; locators; auth/access; rate/lease; pagination/cursor; refresh; temporal and jurisdictional scope; artifact/provenance policy; truncation; gaps and reassessment |
 
-| Route | Required or conditional subfamilies |
-|-------+-------------------------------------|
-| identity | county identity, elected components, service-provider topology |
-| meetings | commissioners; other boards when the applicability predicate is true |
-| finance | budget, audit; payroll, checkbook, debt, grants when published or legally maintained by the unit |
-| property | auditor/assessment, recorder/deeds, treasurer/tax, parcel/GIS or resolved service provider |
-| courts | county courts and clerks plus authoritative links to local courts serving the county |
-| elections | board of elections, local results; campaign finance when maintained locally |
-| public safety | sheriff; jail and incident/enforcement systems when operated by the county |
-| permits | building, zoning, planning, health, and code subfamilies according to service topology |
+The operational-metadata route is derived from the completeness of all bound revisions. No independent source profile can satisfy it by itself.
 
-The complete initial contract must enumerate all sixteen routes before Franklin County begins.
+* REVIEW Revisioned Route Decisions
 
-* REVIEW Route Assessment Revision
-
-Each government unit receives append-only route-assessment revisions.
+** Route assessment revision
 
 #+begin_src lisp
 (defstruct route-assessment-revision
   assessment-id
   assessment-revision-id
   prior-assessment-revision-id
-  supersedes-assessment-revision-id
-  run-id
-  unit-ref
-  route
-  applicability-contract-id
-  applicability-contract-version
-  subfamily-decision-ids
-  source-profile-revision-ids
-  candidate-proposal-ids
-  state
-  search-plan-revision-ids
-  evidence-ids
-  gap-ids
-  assessed-at
-  assessor
-  reviewed-at
-  reviewer
-  created-at)
+  supersedes-assessment-revision-ids
+  run-id unit-ref route
+  applicability-contract-id applicability-contract-version
+  policy-snapshot-id
+  subfamily-decision-revision-ids
+  source-profile-revision-ids candidate-proposal-ids
+  search-plan-revision-ids evidence-ids gap-revision-ids
+  state review-state assessed-at assessor reviewed-at reviewer created-at)
 #+end_src
 
-=assessment-id= is the stable logical identity. =assessment-revision-id= is the immutable decision revision. Reassessment, changed evidence, contract migration, or expiry creates a new revision and preserves the old one.
+Reassessment, changed evidence, policy migration, contract migration, or expiry creates a new revision. =:candidate-found=, =:ambiguous=, and =:unassessed= are nonterminal and cannot satisfy a pilot or completion gate.
 
-A route assessment cannot reference only logical profile IDs. It pins exact profile revisions, search-plan revisions, evidence records, gaps, and the applicability-contract version.
+=:verified= requires every required subfamily to have a reviewed =:verified= decision or contract-permitted reviewed =:not-applicable=. =:verified-partial= is allowed only when the rule permits it, covered and missing scope is explicit, and every missing required portion has a reviewed gap revision and reassessment policy.
 
-Route states are:
-
-- =:unassessed=
-- =:candidate-found=
-- =:verified=
-- =:verified-partial=
-- =:not-published=
-- =:records-request-required=
-- =:authentication-required=
-- =:paywalled=
-- =:blocked=
-- =:retired=
-- =:ambiguous=
-- =:not-applicable=
-
-=:verified= requires every required subfamily to have a reviewed =:verified= decision or a contract-permitted reviewed =:not-applicable= decision.
-
-=:verified-partial= is allowed only when the applicability rule permits it, the covered and missing scope is explicit, and every missing required portion has a gap and reassessment policy.
-
-=:candidate-found=, =:ambiguous=, and =:unassessed= are nonterminal and cannot satisfy a pilot or county completion gate.
-
-* REVIEW Subfamily Decision
+** Subfamily decision revision
 
 #+begin_src lisp
-(defstruct subfamily-decision
+(defstruct subfamily-decision-revision
   decision-id
-  route
-  subfamily
-  rule-id
-  applicability
-  terminal-state
+  decision-revision-id
+  prior-decision-revision-id
+  supersedes-decision-revision-ids
+  route subfamily rule-id applicability terminal-state
   responsible-unit-or-component-id
-  source-profile-revision-ids
-  search-plan-revision-id
-  evidence-ids
-  gap-ids
-  reviewer
-  reviewed-at)
+  source-profile-revision-ids search-plan-revision-id
+  evidence-ids gap-revision-ids
+  review-state reviewer reviewed-at created-at)
 #+end_src
 
-=applicability= is =:applicable=, =:not-applicable=, or =:conditional-not-triggered=. Every non-applicable decision cites the exact rule and evidence.
+=applicability= is =:applicable=, =:not-applicable=, or =:conditional-not-triggered=. Every non-applicable decision pins the rule and positive evidence.
 
-* REVIEW Search Plan Revision
-
-A negative result references an immutable completed search-plan revision.
+** Search-plan revision
 
 #+begin_src lisp
 (defstruct source-search-plan-revision
   search-plan-id
   search-plan-revision-id
   prior-search-plan-revision-id
-  contract-version
-  template-id
-  unit-ref
-  route
-  subfamily
-  official-domains
-  delegated-domains
-  terms
-  paths
-  platform-signatures
-  external-registry-sources
-  archive-sources
-  request-limit
-  depth-limit
-  started-at
-  completed-at
-  evidence-ids)
+  supersedes-search-plan-revision-ids
+  applicability-contract-id applicability-contract-version
+  template-id policy-snapshot-id unit-ref route subfamily
+  official-domains delegated-domains terms paths platform-signatures
+  external-registry-sources archive-sources
+  request-limit depth-limit started-at completed-at completion-state
+  evidence-ids result-summary created-at)
 #+end_src
 
-A county procurement plan, for example, includes official navigation, sitemaps, procurement vocabulary, OhioBuys participation, known vendor signatures, archived domains, and public-records references.
+Changing search scope, contract, policy, terms, limits, or evidence creates a new revision. A negative decision requires =completion-state :completed=.
 
-Changing the search terms, scope, contract, or evidence creates a new search-plan revision.
-
-* REVIEW Gap Record and Freshness
+** Gap revision and freshness
 
 #+begin_src lisp
-(defstruct coverage-gap
+(defstruct coverage-gap-revision
   gap-id
-  unit-ref
-  route
-  subfamily
-  gap-kind
-  description
-  evidence-ids
-  first-observed-at
-  last-confirmed-at
-  freshness-class
-  reassess-after
-  records-request-draft-id
-  status)
+  gap-revision-id
+  prior-gap-revision-id
+  supersedes-gap-revision-ids
+  unit-ref route subfamily gap-kind description evidence-ids
+  first-observed-at last-confirmed-at freshness-class reassess-after
+  records-request-draft-id status review-state
+  created-at created-by reviewed-at reviewed-by)
 #+end_src
 
-Gap kinds include:
+Gap kinds include expected source not found, known data not published, inaccessible source, authentication required, payment required, CAPTCHA boundary, ambiguous ownership, retired without successor, incomplete history, incomplete current-year data, export unavailable, machine-readable interface unavailable, records request required, OCR required, and manual review required.
 
-- expected source not found
-- known data not published
-- inaccessible source
-- authentication required
-- payment required
-- CAPTCHA or anti-automation boundary
-- ambiguous ownership
-- retired without successor
-- incomplete history
-- incomplete current-year data
-- export unavailable
-- machine-readable interface unavailable
-- records request required
-- OCR required
-- manual review required
-
-Default maximum negative-finding ages are defined by the Ohio program:
-
-- high volatility: 30 days
-- medium volatility: 90 days
-- low volatility: 180 days
-- legal-versioned: next effective date or 180 days, whichever comes first
-
-A stale gap or negative assessment cannot satisfy a current completion gate. Reassessment creates new search-plan and assessment revisions.
+Default maximum negative-finding ages are high volatility 30 days, medium volatility 90 days, low volatility 180 days, and legal-versioned next effective date or 180 days, whichever comes first. A stale revision cannot satisfy current completion.
 
 * REVIEW Temporal Coverage
 
 #+begin_src lisp
 (defstruct temporal-coverage
-  earliest-observed-date
-  latest-observed-date
-  current-period-complete-p
-  history-contiguous-p
-  known-missing-ranges
-  future-effective-records-p
-  retention-horizon
-  last-reconciled-at)
+  earliest-observed-date latest-observed-date current-period-complete-p
+  history-contiguous-p known-missing-ranges future-effective-records-p
+  retention-horizon last-reconciled-at)
 #+end_src
 
-Ohio Laws preserves current, prior, and future-effective versions separately. Court statistics distinguish partial current-year figures from completed years. Election profiles distinguish unofficial, official, canvassed, and historical results.
+Ohio Laws preserves current, prior, and future-effective versions separately. Court statistics distinguish partial current-year figures. Elections distinguish unofficial, official, canvassed, and historical results.
 
-* REVIEW Acquisition Methods
+* REVIEW Acquisition and Access
 
 #+begin_src lisp
 (defstruct acquisition-method
-  rank
-  kind
-  locator-id
-  adapter-id
-  adapter-version
-  format
-  stable-p
-  complete-p
-  incremental-p
-  browser-required-p
-  authentication-required-p
-  notes)
-#+end_src
+  rank kind locator-id adapter-id adapter-version adapter-manifest-hash
+  format stable-p complete-p incremental-p
+  browser-required-p authentication-required-p notes)
 
-Kinds include:
-
-- =:bulk=
-- =:documented-api=
-- =:machine-readable-inventory=
-- =:delegated-vendor-api=
-- =:structured-html=
-- =:embedded-json=
-- =:downloadable-document=
-- =:gis-service=
-- =:browser-rendered-public-system=
-- =:ocr-last-resort=
-- =:records-request=
-
-The preferred method is the least fragile method that meets completeness, scope, and provenance requirements.
-
-* REVIEW Authentication and Access
-
-#+begin_src lisp
 (defstruct access-policy
-  public-read-p
-  account-required-p
-  credential-kind
-  terms-locator
-  robots-observation
-  rate-limit-observation
-  prohibited-actions
-  personal-data-risk
-  legal-review-required-p)
+  public-read-p account-required-p credential-kind terms-locator
+  robots-observation rate-limit-observation prohibited-actions
+  personal-data-risk legal-review-required-p)
 #+end_src
 
-The profile records authentication without attempting enrollment. Public search and supplier filing in OhioBuys are separate capabilities. Court, property, election, jail, and public-safety systems declare sensitive-field exposure before acquisition is authorized.
+The preferred method is the least fragile method that meets completeness, scope, and provenance requirements. Public search and write/login capabilities are modeled separately.
 
 * REVIEW Independent State Models
 
-Source state and review state are independent fields with separate authorities and transitions.
-
 ** Source state
 
-Allowed source states:
-
-- =:candidate=
-- =:observed=
-- =:active=
-- =:changed=
-- =:blocked=
-- =:retired=
-- =:rejected=
+Allowed states are =:candidate=, =:observed=, =:active=, =:changed=, =:blocked=, =:retired=, and =:rejected=.
 
 #+begin_example
 :candidate -> :observed -> :active
@@ -575,184 +308,112 @@ Allowed source states:
 :candidate -> :rejected
 #+end_example
 
-Adapter workers may propose =:candidate= or =:observed=. The Source Profile Authority alone writes canonical source-state transitions after validation. Retirement and reactivation require successor or current-observation evidence.
+Workers propose candidate or observed state. The Source Profile Authority writes canonical transitions.
 
 ** Review state
 
-Allowed review states:
-
-- =:unreviewed=
-- =:evidence-collected=
-- =:verification-pending=
-- =:reviewed=
-- =:changes-requested=
-- =:invalidated=
+Allowed states are =:unreviewed=, =:evidence-collected=, =:verification-pending=, =:reviewed=, =:changes-requested=, and =:invalidated=.
 
 #+begin_example
 :unreviewed -> :evidence-collected -> :verification-pending -> :reviewed
 :verification-pending -> :changes-requested -> :evidence-collected
-:reviewed -> :invalidated -> :evidence-collected -> :verification-pending -> :reviewed
+:reviewed -> :invalidated
 #+end_example
 
-Workers may collect evidence but cannot mark a canonical revision reviewed. The independent review authority performs =:reviewed=, =:changes-requested=, and =:invalidated= transitions.
+The independent review authority performs reviewed, changes-requested, and invalidated decisions. A changed source creates a new unreviewed revision; it never mutates the previously reviewed revision.
 
-A source transition to =:changed= creates a new profile revision with review state =:invalidated= or =:unreviewed=. The previously reviewed revision remains immutable and queryable, but the changed revision cannot satisfy a current route gate until reviewed.
-
-=:retired= is a source state, not a review state. A retired revision still requires reviewed retirement evidence before it can satisfy a =:retired= route result.
-
-* REVIEW Profile Proposal Message
+* REVIEW Proposal and Decision Messages
 
 #+begin_src lisp
 (:government-data/propose-source-profile
- :schema-version "1.1"
+ :schema-version "1.2"
  :run-id "ohio-2026-001"
  :proposal-id "proposal-39049-gis-001"
  :unit (:state-code "OH" :county-geoid "39049")
  :route :gis
  :data-family :parcel-gis
- :official-status :candidate-delegated
  :deployment-revision-id "deployment-arcgis-tenant-001-r1"
- :locators ((:kind :homepage :uri "https://example.gov/gis")
-            (:kind :arcgis-service :uri "https://example.vendor/arcgis/rest/services"))
- :platform-family :arcgis-rest
- :evidence-ids ("artifact-001" "artifact-002")
- :preferred-adapter :arcgis-rest
- :source-state :observed
- :review-state :unreviewed
+ :evidence-ids ("evidence-001" "evidence-002")
+ :adapter (:id :arcgis-rest :version "1.0.0" :manifest-hash "sha256:...")
+ :policy-snapshot-id "policy-ohio-001"
  :idempotency-key "sha256:...")
-#+end_src
 
-* REVIEW Profile Decision Message
-
-#+begin_src lisp
-(:government-data/decide-source-profile
- :schema-version "1.1"
- :proposal-id "proposal-39049-gis-001"
- :decision :accept
- :profile-id "profile-39049-gis-001"
- :revision-id "profile-39049-gis-001-r1"
- :official-status :verified-delegated
- :source-state :active
- :review-state :reviewed
- :reviewer "operator-or-reviewer-id"
- :evidence-ids ("artifact-001" "artifact-002")
- :notes "Official county GIS page links the delegated ArcGIS tenant.")
-#+end_src
-
-* REVIEW Route Decision Message
-
-#+begin_src lisp
 (:government-data/decide-route-assessment
- :schema-version "1.1"
+ :schema-version "1.2"
  :assessment-id "assessment-39049-gis"
  :assessment-revision-id "assessment-39049-gis-r1"
- :unit (:state-code "OH" :county-geoid "39049")
- :route :gis
- :applicability-contract "ohio-route-applicability-v1"
- :subfamily-decision-ids ("decision-39049-parcel-gis-r1")
+ :applicability-contract (:id "ohio-route-applicability" :version "1.0.0")
+ :policy-snapshot-id "policy-ohio-001"
+ :subfamily-decision-revision-ids ("decision-39049-parcel-gis-r1")
  :source-profile-revision-ids ("profile-39049-gis-001-r1")
  :search-plan-revision-ids ("search-39049-gis-r1")
- :evidence-ids ("artifact-001" "artifact-002")
- :gap-ids ()
+ :gap-revision-ids ()
  :state :verified
+ :review-state :reviewed
  :reviewer "operator-or-reviewer-id")
 #+end_src
 
 * REVIEW Validation Rules
 
-A profile revision is invalid when:
-
-- the government unit or component cannot be resolved
-- the route or data family is missing
-- no locator exists
-- verified status lacks authority evidence
-- delegated status lacks an official delegation link
-- deployment references do not resolve to an immutable revision
-- coverage scope is absent for shared or participating-unit sources
-- preferred adapter lacks the required capability
-- temporal coverage is asserted without evidence
-- a partial source is marked complete
-- browser evidence lacks a replayable capture bundle
-- OCR-derived text lacks source-image and confidence references
-- authentication requirements are omitted after observation
-- promoted evidence lacks content hashes or retrieval events
-- review fields are self-approved by the proposing worker
+A profile revision is invalid when authority, locator, deployment, scope, adapter capability, temporal evidence, artifact/provenance, access, browser/OCR, or independent-review requirements are missing.
 
 A route-assessment revision is invalid when:
 
-- the applicability contract or version is missing
-- a required subfamily has no decision
-- a =:not-applicable= decision lacks contract-permitted authority evidence
-- it references logical profile IDs without revision IDs
-- a referenced profile revision is not reviewed
-- a negative terminal state lacks a completed search-plan revision, gap, and =reassess-after=
+- the applicability contract, policy snapshot, or exact revision bindings are missing
+- a required subfamily lacks a reviewed decision revision
+- a non-applicable decision lacks positive authority evidence
+- a referenced profile, decision, search plan, deployment, or gap is mutable or unresolved
+- a negative state lacks a completed search-plan revision, reviewed gap revision, and reassessment deadline
 - a stale negative result is used for current completion
-- =:verified-partial= lacks explicit missing scope and gaps
-- =:candidate-found=, =:ambiguous=, or =:unassessed= is used to pass a pilot gate
-- a new decision mutates an old assessment instead of superseding it
+- =:verified-partial= lacks explicit missing scope and reviewed gaps
+- a nonterminal state passes a pilot or county gate
+- a new result mutates an old revision instead of superseding it
+- the operational-metadata route is marked verified while any bound source or gap lacks required operational fields
+
+* REVIEW Parent Actor Contract Requirement
+
+Before implementation, =STAR-RESEARCH-PIPELINE-003= must expose revision-aware message fields and durable ownership for route assessments and independent reviews. Until the parent actor design defines those capabilities, the Ohio design may be reviewed but cannot enter implementation.
 
 * REVIEW Versioning and Migration
 
-- logical profile IDs remain stable across revisions
-- profile, deployment, search-plan, and assessment revision IDs are immutable
-- every superseding revision points to its predecessor
+- logical IDs remain stable; revision IDs are immutable
+- every superseding revision names the revision or revisions it replaces
 - locator IDs remain stable while the logical endpoint remains the same
-- vendor migrations create new locators and successor relationships
-- retired profiles and assessments remain queryable
-- applicability-contract migrations force new route-assessment revisions
-- unknown fields from a newer contract are preserved when possible and never silently discarded
-- canonical latest-state queries never erase the exact basis of historical decisions
-
-* REVIEW Ohio-Specific Extensions
-
-Ohio-specific fields may exist only under an extension namespace:
-
-#+begin_src lisp
-(:extensions
- (:ohio
-  (:state-system :ohio-laws
-   :effective-version-kind :current
-   :county-geoid "39049"
-   :board-of-elections-code nil)))
-#+end_src
-
-An Ohio extension cannot replace generic fields required by the national source-profile, deployment, applicability, or assessment contracts.
+- vendor migrations create new locators and deployment/profile revisions
+- retired revisions remain queryable
+- applicability or policy migrations force new decision revisions
+- unknown newer fields are preserved and never silently discarded
+- latest-state materialization never erases historical decision basis
 
 * REVIEW Acceptance Criteria
 
-1. one schema describes state, county, component, and shared-deployment sources
-2. verified profile revisions always have authority evidence
-3. route coverage and profile lifecycle remain separate
-4. route assessments pin exact immutable profile and search-plan revisions
-5. route assessments are append-only and explicitly superseding
-6. the applicability contract deterministically defines required subfamilies
-7. =:not-applicable= requires positive authority or topology evidence
-8. negative findings expire under a declared freshness class
-9. source state and review state have independent enums, authorities, and transitions
-10. changed sources reopen review without mutating prior revisions
-11. temporal and jurisdictional completeness are explicit
-12. partial current-year or participating-unit sources cannot be marked complete
-13. browser and OCR evidence have reproducible boundaries
-14. proposals and canonical writes are separated
-15. Ohio extensions do not fork the national schema
-16. the contract supports =STAR-GOVDATA-DESIGN-003=
+1. State, county, component, and shared-deployment sources use one revisioned schema.
+2. Verified profile revisions always have authority evidence.
+3. All sixteen routes have explicit machine-readable subfamily requirements.
+4. Operational metadata is a cross-cutting derived route.
+5. Route assessments pin exact profile, decision, search-plan, deployment, policy, evidence, and gap revisions.
+6. Decisions, gaps, and assessments are append-only and explicitly superseding.
+7. =:not-applicable= requires positive authority or topology evidence.
+8. Negative findings expire under a declared freshness class.
+9. Source and review state are independent.
+10. Changed sources create new unreviewed revisions.
+11. Browser and OCR evidence have reproducible boundaries.
+12. Proposals and canonical writes are separated.
+13. The parent actor protocol must become revision-aware before implementation.
 
 * REVIEW Required Fixtures
 
-- verified official Ohio domain
-- verified delegated county vendor portal
+- verified official and delegated sources
 - rejected lookalike domain
-- shared vendor deployment used by multiple jurisdictions
-- source with API and browser interfaces and replayable browser bundle
-- scanned PDF producing =:ocr-required=
-- incomplete current-year source
-- future-effective law version
-- login-only write capability with public read capability
-- source migration with retained predecessor and successor
-- negative finding with completed search-plan revision and expiry
-- legitimate =:not-applicable= decision with authority evidence
-- rejected =:not-applicable= decision based only on failed search
-- route assessment replay after a later source-profile revision
-- assessment supersession after applicability-contract migration
-- source change invalidating review on the new revision only
-- duplicate profile proposals using the same idempotency key
+- shared deployment used by multiple jurisdictions
+- all sixteen route definitions and subfamily rules
+- legitimate and rejected =:not-applicable= decisions
+- incomplete current-year and participating-unit sources
+- scanned PDF returning =:ocr-required=
+- browser source with replayable capture bundle
+- source migration with predecessor and successor
+- expiring negative result and stale-result reassessment
+- gap, decision, profile, and assessment supersession replay
+- later profile revision that does not alter an older route assessment
+- applicability-contract and policy-snapshot migration
+- duplicate proposals using one idempotency key

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Deterministic child-identity firewall for StarIntel artifacts.
+"""Deterministic Child Identity Firewall for StarIntel artifacts.
 
-This module is intentionally network-free. It sanitizes structured payloads,
-blocks child-name queries and child identity targets, verifies named adult
-identity targets, and scans exports for privacy leaks.
-
-It never includes prohibited values in violations or logs.
+The module is network-free. It sanitizes structured inputs, blocks child-name
+queries and child identity targets, verifies named adult targets, and scans
+exports for prohibited child identifiers. Findings never echo prohibited data.
 """
 
 from __future__ import annotations
@@ -20,11 +18,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 
-
 REDACTED_CHILD = "[CHILD]"
 REJECTED_QUERY = "[REJECTED UNSAFE QUERY]"
 
-CHILD_ROLE_TOKENS = {
+CHILD_ROLES = {
     "child",
     "child-victim",
     "child-survivor",
@@ -48,7 +45,7 @@ NAME_KEYS = {
     "aliases",
 }
 
-DIRECT_IDENTIFIER_KEYS = NAME_KEYS | {
+CHILD_IDENTIFIER_KEYS = NAME_KEYS | {
     "date_of_birth",
     "dob",
     "birth_date",
@@ -89,7 +86,7 @@ QUERY_KEYS = {
     "news_query",
 }
 
-PROHIBITED_QUERY_FIELD_KEYS = {
+PROHIBITED_QUERY_FIELDS = {
     "child_name",
     "victim_name",
     "minor_name",
@@ -122,15 +119,9 @@ AGE_BANDS = (
     (14, 17, "14-17"),
 )
 
-CASE_LOCAL_CHILD_ID = re.compile(
-    r"^starintel:child-case-local:[A-Za-z0-9._:-]+:[0-9]{2,}$"
-)
-
 
 @dataclass(frozen=True)
 class Violation:
-    """A privacy finding that never contains the prohibited value."""
-
     code: str
     path: str
     action: str
@@ -154,7 +145,7 @@ class FirewallResult:
 
 
 class ChildIdentityFirewall:
-    """Apply the approved Child Identity Firewall deterministically."""
+    """Enforce the approved child identity boundary."""
 
     def __init__(
         self,
@@ -162,15 +153,13 @@ class ChildIdentityFirewall:
         case_id: str,
         known_child_identifiers: Iterable[str] = (),
     ) -> None:
-        if not case_id or not case_id.strip():
-            raise ValueError("case_id is required")
         self.case_id = self._safe_case_id(case_id)
         self.known_child_identifiers = tuple(
             sorted(
                 {
-                    value.strip()
-                    for value in known_child_identifiers
-                    if isinstance(value, str) and value.strip()
+                    item.strip()
+                    for item in known_child_identifiers
+                    if isinstance(item, str) and item.strip()
                 },
                 key=len,
                 reverse=True,
@@ -181,49 +170,45 @@ class ChildIdentityFirewall:
         self._child_ordinal = 0
 
     def sanitize(self, payload: Any) -> FirewallResult:
-        """Return a sanitized copy and a fail-closed decision."""
+        self._reset()
+        sanitized = self._walk(copy.deepcopy(payload), path="$", inherited_child=False)
+        self._scan_export(sanitized, path="$", inherited_child=False)
+        return self._result(sanitized)
 
+    def scan_export(self, payload: Any) -> FirewallResult:
+        self._reset()
+        copied = copy.deepcopy(payload)
+        self._scan_export(copied, path="$", inherited_child=False)
+        return self._result(copied)
+
+    def _reset(self) -> None:
         self._violations = []
         self._redactions = Counter()
         self._child_ordinal = 0
-        sanitized = self._walk(copy.deepcopy(payload), path="$", child_context=False)
-        self._scan_export(sanitized, path="$", add_violations=True)
-        allowed = not any(item.blocking for item in self._violations)
+
+    def _result(self, sanitized: Any) -> FirewallResult:
         return FirewallResult(
-            allowed=allowed,
+            allowed=not any(item.blocking for item in self._violations),
             sanitized=sanitized,
             violations=list(self._violations),
             redaction_counts=dict(self._redactions),
         )
 
-    def scan_export(self, payload: Any) -> FirewallResult:
-        """Scan an already-produced export without mutating it."""
-
-        self._violations = []
-        self._redactions = Counter()
-        self._scan_export(payload, path="$", add_violations=True)
-        return FirewallResult(
-            allowed=not any(item.blocking for item in self._violations),
-            sanitized=copy.deepcopy(payload),
-            violations=list(self._violations),
-            redaction_counts={},
-        )
-
-    def _walk(self, value: Any, *, path: str, child_context: bool) -> Any:
+    def _walk(self, value: Any, *, path: str, inherited_child: bool) -> Any:
         if isinstance(value, MutableMapping):
-            return self._walk_mapping(value, path=path, inherited_child=child_context)
+            return self._walk_mapping(value, path=path, inherited_child=inherited_child)
         if isinstance(value, list):
             return [
-                self._walk(item, path=f"{path}[{index}]", child_context=child_context)
+                self._walk(item, path=f"{path}[{index}]", inherited_child=inherited_child)
                 for index, item in enumerate(value)
             ]
         if isinstance(value, tuple):
             return tuple(
-                self._walk(item, path=f"{path}[{index}]", child_context=child_context)
+                self._walk(item, path=f"{path}[{index}]", inherited_child=inherited_child)
                 for index, item in enumerate(value)
             )
         if isinstance(value, str):
-            return self._redact_known_identifiers(value, path=path)
+            return self._redact_known(value, path=path)
         return value
 
     def _walk_mapping(
@@ -234,22 +219,21 @@ class ChildIdentityFirewall:
         inherited_child: bool,
     ) -> dict[str, Any]:
         normalized = {str(key): item for key, item in value.items()}
-        child_context = inherited_child or self._mapping_is_child(normalized)
-        identity_target = self._mapping_is_identity_target(normalized)
+        direct_child = self._is_child(normalized)
+        child_context = inherited_child or direct_child
+        identity_target = self._is_identity_target(normalized)
 
         if identity_target:
-            self._enforce_identity_target(normalized, path=path, child_context=child_context)
+            self._enforce_identity_target(normalized, path=path, is_child=direct_child)
 
+        pseudonym = self._new_child_id() if direct_child else None
         output: dict[str, Any] = {}
-        child_pseudonym: str | None = None
-        if child_context:
-            child_pseudonym = self._case_local_pseudonym()
 
         for key, item in normalized.items():
-            lower_key = key.lower()
+            lower = key.lower()
             item_path = f"{path}.{key}"
 
-            if lower_key in PROHIBITED_QUERY_FIELD_KEYS:
+            if lower in PROHIBITED_QUERY_FIELDS:
                 self._record(
                     "child-query-field",
                     item_path,
@@ -259,9 +243,9 @@ class ChildIdentityFirewall:
                 self._redactions["query-field"] += 1
                 continue
 
-            if lower_key in QUERY_KEYS:
-                query = item if isinstance(item, str) else json.dumps(item, sort_keys=True)
-                if child_context or self._contains_known_identifier(query):
+            if lower in QUERY_KEYS:
+                serialized = item if isinstance(item, str) else json.dumps(item, sort_keys=True)
+                if child_context or self._contains_known(serialized):
                     output[key] = REJECTED_QUERY
                     self._record(
                         "unsafe-child-query",
@@ -271,22 +255,21 @@ class ChildIdentityFirewall:
                     )
                     self._redactions["query"] += 1
                 else:
-                    output[key] = self._walk(item, path=item_path, child_context=False)
+                    output[key] = self._walk(item, path=item_path, inherited_child=False)
                 continue
 
-            if child_context and lower_key in DIRECT_IDENTIFIER_KEYS:
+            if child_context and lower in CHILD_IDENTIFIER_KEYS:
                 self._record(
                     "child-direct-identifier",
                     item_path,
                     "removed prohibited child identifier",
                     blocking=False,
                 )
-                self._redactions[lower_key] += 1
+                self._redactions[lower] += 1
                 continue
 
-            if child_context and lower_key == "age":
-                age_band = self._age_band(item)
-                output["age_band"] = age_band
+            if direct_child and lower == "age":
+                output["age_band"] = self._age_band(item)
                 self._record(
                     "child-exact-age",
                     item_path,
@@ -296,23 +279,25 @@ class ChildIdentityFirewall:
                 self._redactions["exact-age"] += 1
                 continue
 
-            if child_context and lower_key in {"id", "person_id", "subject_id"}:
-                if isinstance(item, str) and CASE_LOCAL_CHILD_ID.fullmatch(item):
+            if direct_child and lower in {"id", "person_id", "subject_id"}:
+                if isinstance(item, str) and self._is_current_case_child_id(item):
                     output[key] = item
+                    pseudonym = item
                 else:
-                    output[key] = child_pseudonym
+                    output[key] = pseudonym
                     self._record(
                         "cross-case-child-id",
                         item_path,
-                        "replaced non-case-local child identifier",
+                        "replaced non-current-case child identifier",
                         blocking=True,
                     )
                     self._redactions["child-id"] += 1
                 continue
 
-            if child_context and lower_key == "display_name":
-                output[key] = self._display_name(child_pseudonym)
-                if item != output[key]:
+            if direct_child and lower == "display_name":
+                replacement = self._display_name(pseudonym)
+                output[key] = replacement
+                if item != replacement:
                     self._record(
                         "child-display-name",
                         item_path,
@@ -322,73 +307,26 @@ class ChildIdentityFirewall:
                     self._redactions["display-name"] += 1
                 continue
 
-            output[key] = self._walk(
-                item,
-                path=item_path,
-                child_context=child_context and lower_key not in {"adult_defendant", "adult_target"},
-            )
+            nested_child = child_context and lower not in {"adult_defendant", "adult_target"}
+            output[key] = self._walk(item, path=item_path, inherited_child=nested_child)
 
-        if child_context:
-            output.setdefault("id", child_pseudonym)
-            output.setdefault("display_name", self._display_name(child_pseudonym))
+        if direct_child:
+            output.setdefault("id", pseudonym)
+            output.setdefault("display_name", self._display_name(pseudonym))
             output["public_identity_prohibited"] = True
             output["cross_case_linkage_prohibited"] = True
-            if "age_band" not in output:
-                output["age_band"] = "unknown-child"
+            output.setdefault("age_band", "unknown-child")
 
         return output
 
-    def _mapping_is_child(self, value: Mapping[str, Any]) -> bool:
-        if value.get("public_identity_prohibited") is True:
-            return True
-        if value.get("is_child") is True or value.get("minor") is True:
-            return True
-
-        age = value.get("age")
-        if isinstance(age, (int, float)) and not isinstance(age, bool) and age < 18:
-            return True
-
-        age_at_event = value.get("age_at_event")
-        if (
-            isinstance(age_at_event, (int, float))
-            and not isinstance(age_at_event, bool)
-            and age_at_event < 18
-        ):
-            return True
-
-        if str(value.get("age_band", "")).lower() in {
-            "under-1",
-            "1-4",
-            "5-9",
-            "10-13",
-            "14-17",
-            "unknown-child",
-        }:
-            return True
-
-        role_values: list[str] = []
-        for key in ("role", "person_role", "subject_role", "target_role"):
-            raw = value.get(key)
-            if isinstance(raw, str):
-                role_values.append(raw.lower())
-            elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
-                role_values.extend(str(item).lower() for item in raw)
-        return any(role in CHILD_ROLE_TOKENS for role in role_values)
-
-    def _mapping_is_identity_target(self, value: Mapping[str, Any]) -> bool:
-        if any(value.get(key) is True for key in IDENTITY_TARGET_KEYS):
-            return True
-        target_type = str(value.get("target_type", "")).lower()
-        return target_type in {"named-person", "adult-defendant", "adult-offender"}
-
     def _enforce_identity_target(
         self,
-        value: MutableMapping[str, Any],
+        value: Mapping[str, Any],
         *,
         path: str,
-        child_context: bool,
+        is_child: bool,
     ) -> None:
-        if child_context:
+        if is_child:
             self._record(
                 "named-child-target",
                 path,
@@ -399,13 +337,12 @@ class ChildIdentityFirewall:
 
         age = value.get("age_at_event", value.get("age"))
         adult_status = str(value.get("adult_status", "")).lower()
-        adult_verified = (
+        verified_adult = (
             isinstance(age, (int, float))
             and not isinstance(age, bool)
             and age >= 18
         ) or adult_status in {"verified", "authoritative-verified"}
-
-        if not adult_verified:
+        if not verified_adult:
             self._record(
                 "adult-status-unverified",
                 path,
@@ -422,89 +359,138 @@ class ChildIdentityFirewall:
                 blocking=True,
             )
 
-    def _scan_export(self, value: Any, *, path: str, add_violations: bool) -> None:
+    def _scan_export(self, value: Any, *, path: str, inherited_child: bool) -> None:
         if isinstance(value, Mapping):
-            child_context = self._mapping_is_child(value)
+            direct_child = self._is_child(value)
+            child_context = inherited_child or direct_child
             for key, item in value.items():
+                lower = str(key).lower()
                 item_path = f"{path}.{key}"
-                lower_key = str(key).lower()
-                if child_context and lower_key in DIRECT_IDENTIFIER_KEYS:
-                    if add_violations:
+                if child_context and lower in CHILD_IDENTIFIER_KEYS:
+                    self._record(
+                        "export-child-identifier-key",
+                        item_path,
+                        "blocked export containing child identifier field",
+                        blocking=True,
+                    )
+                if direct_child and lower == "age":
+                    self._record(
+                        "export-child-exact-age",
+                        item_path,
+                        "blocked export containing exact child age",
+                        blocking=True,
+                    )
+                if direct_child and lower in {"id", "person_id", "subject_id"}:
+                    if not isinstance(item, str) or not self._is_current_case_child_id(item):
                         self._record(
-                            "export-child-identifier-key",
+                            "export-cross-case-child-id",
                             item_path,
-                            "blocked export containing child identifier field",
+                            "blocked export containing non-current-case child identifier",
                             blocking=True,
                         )
-                if child_context and lower_key == "age":
-                    if add_violations:
-                        self._record(
-                            "export-child-exact-age",
-                            item_path,
-                            "blocked export containing exact child age",
-                            blocking=True,
-                        )
-                if child_context and lower_key in {"id", "person_id", "subject_id"}:
-                    if not isinstance(item, str) or not CASE_LOCAL_CHILD_ID.fullmatch(item):
-                        if add_violations:
-                            self._record(
-                                "export-cross-case-child-id",
-                                item_path,
-                                "blocked export containing non-case-local child identifier",
-                                blocking=True,
-                            )
-                self._scan_export(item, path=item_path, add_violations=add_violations)
+                nested_child = child_context and lower not in {"adult_defendant", "adult_target"}
+                self._scan_export(item, path=item_path, inherited_child=nested_child)
             return
 
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             for index, item in enumerate(value):
-                self._scan_export(item, path=f"{path}[{index}]", add_violations=add_violations)
+                self._scan_export(
+                    item,
+                    path=f"{path}[{index}]",
+                    inherited_child=inherited_child,
+                )
             return
 
-        if isinstance(value, str) and self._contains_known_identifier(value):
-            if add_violations:
-                self._record(
-                    "export-known-child-identifier",
-                    path,
-                    "blocked export containing known child identifier",
-                    blocking=True,
-                )
+        if isinstance(value, str) and self._contains_known(value):
+            self._record(
+                "export-known-child-identifier",
+                path,
+                "blocked export containing known child identifier",
+                blocking=True,
+            )
 
-    def _redact_known_identifiers(self, text: str, *, path: str) -> str:
+    def _is_child(self, value: Mapping[str, Any]) -> bool:
+        if value.get("public_identity_prohibited") is True:
+            return True
+        if value.get("is_child") is True or value.get("minor") is True:
+            return True
+
+        for key in ("age", "age_at_event"):
+            age = value.get(key)
+            if isinstance(age, (int, float)) and not isinstance(age, bool) and age < 18:
+                return True
+
+        if str(value.get("age_band", "")).lower() in {
+            "under-1",
+            "1-4",
+            "5-9",
+            "10-13",
+            "14-17",
+            "unknown-child",
+        }:
+            return True
+
+        roles: list[str] = []
+        for key in ("role", "person_role", "subject_role", "target_role"):
+            raw = value.get(key)
+            if isinstance(raw, str):
+                roles.append(raw.lower())
+            elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes)):
+                roles.extend(str(item).lower() for item in raw)
+        return any(role in CHILD_ROLES for role in roles)
+
+    @staticmethod
+    def _is_identity_target(value: Mapping[str, Any]) -> bool:
+        if any(value.get(key) is True for key in IDENTITY_TARGET_KEYS):
+            return True
+        return str(value.get("target_type", "")).lower() in {
+            "named-person",
+            "adult-defendant",
+            "adult-offender",
+        }
+
+    def _redact_known(self, text: str, *, path: str) -> str:
         result = text
-        redacted = 0
+        total = 0
         for identifier in self.known_child_identifiers:
-            pattern = re.compile(re.escape(identifier), flags=re.IGNORECASE)
-            result, count = pattern.subn(REDACTED_CHILD, result)
-            redacted += count
-        if redacted:
+            result, count = re.subn(
+                re.escape(identifier),
+                REDACTED_CHILD,
+                result,
+                flags=re.IGNORECASE,
+            )
+            total += count
+        if total:
             self._record(
                 "known-child-identifier",
                 path,
                 "redacted known child identifier",
                 blocking=False,
             )
-            self._redactions["known-child-identifier"] += redacted
+            self._redactions["known-child-identifier"] += total
         return result
 
-    def _contains_known_identifier(self, text: str) -> bool:
-        lowered = text.casefold()
-        return any(identifier.casefold() in lowered for identifier in self.known_child_identifiers)
+    def _contains_known(self, text: str) -> bool:
+        folded = text.casefold()
+        return any(identifier.casefold() in folded for identifier in self.known_child_identifiers)
 
     def _record(self, code: str, path: str, action: str, *, blocking: bool) -> None:
-        finding = Violation(code=code, path=path, action=action, blocking=blocking)
-        if finding not in self._violations:
-            self._violations.append(finding)
+        violation = Violation(code=code, path=path, action=action, blocking=blocking)
+        if violation not in self._violations:
+            self._violations.append(violation)
 
-    def _case_local_pseudonym(self) -> str:
+    def _new_child_id(self) -> str:
         self._child_ordinal += 1
         return f"starintel:child-case-local:{self.case_id}:{self._child_ordinal:02d}"
 
+    def _is_current_case_child_id(self, identifier: str) -> bool:
+        prefix = f"starintel:child-case-local:{self.case_id}:"
+        suffix = identifier.removeprefix(prefix)
+        return identifier.startswith(prefix) and suffix.isdigit() and len(suffix) >= 2
+
     @staticmethod
     def _display_name(identifier: str | None) -> str:
-        if not identifier:
-            return "Child victim"
-        ordinal = identifier.rsplit(":", 1)[-1]
+        ordinal = identifier.rsplit(":", 1)[-1] if identifier else "01"
         return f"Child victim {ordinal}"
 
     @staticmethod
@@ -519,6 +505,8 @@ class ChildIdentityFirewall:
 
     @staticmethod
     def _safe_case_id(case_id: str) -> str:
+        if not isinstance(case_id, str) or not case_id.strip():
+            raise ValueError("case_id is required")
         safe = re.sub(r"[^A-Za-z0-9._:-]+", "-", case_id.strip()).strip("-")
         if not safe:
             raise ValueError("case_id does not contain a usable identifier")
@@ -530,12 +518,12 @@ def _load_identifiers(path: str | None) -> list[str]:
         return []
     text = Path(path).read_text(encoding="utf-8")
     try:
-        parsed = json.loads(text)
+        payload = json.loads(text)
     except json.JSONDecodeError:
         return [line.strip() for line in text.splitlines() if line.strip()]
-    if not isinstance(parsed, list) or not all(isinstance(item, str) for item in parsed):
-        raise ValueError("known identifiers file must contain a JSON string list or one value per line")
-    return parsed
+    if not isinstance(payload, list) or not all(isinstance(item, str) for item in payload):
+        raise ValueError("identifier file must be a JSON string list or one value per line")
+    return payload
 
 
 def _read_json(path: str) -> Any:
@@ -558,8 +546,8 @@ def _write_json(path: str, payload: Any) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("sanitize", "scan"))
-    parser.add_argument("input", help="JSON input path or - for stdin")
-    parser.add_argument("output", help="JSON output path or - for stdout")
+    parser.add_argument("input", help="JSON path or - for stdin")
+    parser.add_argument("output", help="JSON path or - for stdout")
     parser.add_argument("--case-id", required=True)
     parser.add_argument("--known-child-identifiers-file")
     return parser
@@ -568,12 +556,11 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        identifiers = _load_identifiers(args.known_child_identifiers_file)
-        payload = _read_json(args.input)
         firewall = ChildIdentityFirewall(
             case_id=args.case_id,
-            known_child_identifiers=identifiers,
+            known_child_identifiers=_load_identifiers(args.known_child_identifiers_file),
         )
+        payload = _read_json(args.input)
         result = firewall.sanitize(payload) if args.command == "sanitize" else firewall.scan_export(payload)
         _write_json(args.output, result.as_dict())
         return 0 if result.allowed else 2

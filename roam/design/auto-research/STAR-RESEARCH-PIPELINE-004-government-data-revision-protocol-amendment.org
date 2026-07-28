@@ -2,14 +2,15 @@
 :ID:       starintel-auto-research-government-data-revision-protocol-004
 :END:
 #+title: STAR-RESEARCH-PIPELINE-004 Government Data Revision Protocol Amendment
-#+description: Amend the government-data actor protocol with immutable revision IDs, route-assessment and review ownership, job-attempt separation, lease fencing, and migration from protocol v1.
+#+description: Amend the government-data actor protocol with immutable revisions, independent reviews, atomic coverage gates, job-attempt separation, lease fencing, and migration from protocol v1.
 #+status: REVIEW
-#+filetags: :starintel:design:auto-research:government-data:protocol:actors:revisions:review:
+#+filetags: :starintel:design:auto-research:government-data:protocol:actors:revisions:review:gates:
 #+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
 
-| Version | Date       | Description of change                                            | Did nsaspy approve it |
-|---------+------------+------------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-28 | Define revision-aware amendment to government-data actor protocol | Pending               |
+| Version | Date       | Description of change                                                   | Did nsaspy approve it |
+|---------+------------+-------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define revision-aware amendment to government-data actor protocol       | Pending               |
+| 0.2.0   | 2026-07-28 | Separate review decisions and add atomic jurisdiction/wave gate records | Pending               |
 
 * Related Nodes
 
@@ -21,63 +22,57 @@
 
 * REVIEW Objective
 
-Amend =STAR-RESEARCH-PIPELINE-003= so its actor ownership, commands, events, results, checkpoints, routing, scheduling, leases, and replay semantics can execute revisioned jurisdiction-coverage contracts without mutable logical-ID shortcuts.
+Amend =STAR-RESEARCH-PIPELINE-003= so its ownership, messages, routing, scheduling, leases, replay, review, and completion semantics can execute revisioned jurisdiction coverage without mutable logical-ID shortcuts or multi-writer state.
 
-This amendment does not replace the parent supervision architecture. It supersedes the parent protocol fields and state rules identified below.
+This amendment preserves the parent supervision architecture. After approval it supersedes conflicting protocol-v1 fields and state rules.
 
 * REVIEW Problems Corrected
 
-The parent v1 design currently:
+The parent v1 design:
 
-- carries logical =source-profile-id= in command, event, result, checkpoint, routing, and scheduler contracts
-- does not define durable source-deployment, search-plan, subfamily-decision, gap-revision, or route-assessment records
-- does not define serialized ownership for route assessments
-- mixes profile verification/access conditions into one lifecycle without an independent review authority
-- treats adapter jobs and network attempts as one object even though leases are issued after job planning
-- records lease generation but not a fencing token on each request attempt
-- cannot pin applicability-contract and policy-snapshot versions into historical decisions
+- carries logical source-profile IDs through commands, events, results, checkpoints, routing, and scheduling
+- omits deployment, search-plan, subfamily-decision, gap, route-assessment, review-decision, and coverage-gate revisions
+- has no serialized route-assessment or atomic completion owner
+- has no independent immutable review record
+- risks two authorities writing the same profile/assessment review state
+- merges durable logical jobs with leases issued only after dispatch
+- lacks per-attempt fencing tokens
+- cannot pin applicability contract, policy, manifest, and runtime snapshots into historical decisions
 
-These gaps make historical replay and deterministic county completion impossible.
+* REVIEW Normative Status
 
-* REVIEW Amendment Status
-
-This node is normative for protocol v1.1. Where it conflicts with v1 fields in =STAR-RESEARCH-PIPELINE-003=, this amendment controls after approval.
-
-No implementation may claim conformance until both the parent design and this amendment are approved.
+This node defines protocol v1.1. Both =PIPELINE-003= and this amendment require approval before implementation. Protocol v1 remains readable for migration and historical replay only after cutover.
 
 * REVIEW Authority Changes
 
-Add these pinned state owners:
+Add pinned state owners:
 
 - Source Deployment Authority
 - Search Plan Authority
 - Gap Authority
 - Route Assessment Authority
+- Coverage Gate Authority
 - Independent Review Authority
 
-The existing Source Profile Authority remains the only canonical writer for source-profile revisions. The Coverage Ledger remains append-only observation storage and current-state materialization; it is not the canonical writer for route decisions or reviews.
+Existing identity/profile authorities continue owning their subject revisions. The Independent Review Authority never mutates those subjects; it owns separate review-decision revisions. The Coverage Ledger stores observations/materialized views and cannot synthesize canonical route or jurisdiction completion.
 
-Required root readiness now includes replay completion for identity, deployment, profile, search-plan, gap, route-assessment, review, adapter-registry, raw-artifact, rate/lease, and coverage authorities.
+Root readiness requires replay completion for identity, deployment, profile, search-plan, gap, route-assessment, coverage-gate, review, adapter registry, raw artifact, rate/lease, and coverage authorities.
 
 * REVIEW Durable Document Families
 
-Protocol v1.1 requires:
+Required families:
 
-- government-unit and government-component records
-- source-deployment revisions
-- source-profile revisions
-- route-applicability-contract revisions
-- search-plan revisions
-- subfamily-decision revisions
-- gap revisions
-- route-assessment revisions
-- review-state revisions or revisioned review fields under one-writer authority
-- adapter-job revisions
-- adapter-attempt records
-- immutable retrieval events, raw artifacts, evidence records, and checkpoints
-- policy snapshots and manifest-set snapshots
+- government unit/component records
+- deployment and profile revisions
+- applicability-contract revisions
+- search-plan, gap, subfamily-decision, and route-assessment revisions
+- independent review-decision revisions
+- jurisdiction/wave/state coverage-gate revisions
+- policy and adapter-manifest/runtime snapshots
+- adapter-job revisions and adapter-attempt records
+- retrieval events, raw artifacts, evidence, and checkpoints
 
-Every canonical state transition creates a new immutable revision with logical ID, revision ID, predecessor, and superseded-revision references.
+Every subject transition is a new subject revision under one subject owner. Every human review transition is a new separate review-decision revision under the Independent Review Authority.
 
 * REVIEW Command Envelope v1.1
 
@@ -88,32 +83,24 @@ Every canonical state transition creates a new immutable revision with logical I
   deployment-revision-id source-profile-revision-id
   search-plan-revision-id subfamily-decision-revision-id
   gap-revision-id route-assessment-revision-id
+  review-revision-id coverage-gate-revision-id
   applicability-contract-id applicability-contract-version
   policy-snapshot-id adapter-manifest-set-hash runtime-environment-set-hash
   data-family route subfamily payload limits capabilities artifact-policy
   deadline idempotency-key cancel-id configuration-hash reply-to)
 #+end_src
 
-Logical IDs may remain inside payloads for routing or creation, but any command that reads canonical state must pin exact revisions.
+Commands reading canonical state pin exact revisions. Logical IDs may appear only for creation and serialized write routing.
 
-Initial new operations:
+New operations include subject propose/decide operations plus:
 
-- =:propose-source-deployment=
-- =:decide-source-deployment=
-- =:propose-source-profile=
-- =:decide-source-profile=
-- =:create-search-plan-revision=
-- =:complete-search-plan-revision=
-- =:propose-gap-revision=
-- =:decide-gap-revision=
-- =:propose-subfamily-decision=
-- =:decide-subfamily-decision=
-- =:propose-route-assessment=
-- =:decide-route-assessment=
-- =:review-revision=
-- =:invalidate-reviewed-revision=
+- =:decide-review=
+- =:invalidate-review=
+- =:propose-coverage-gate=
+- =:decide-coverage-gate=
+- =:expire-coverage-gate=
 
-* REVIEW Event Envelope v1.1
+* REVIEW Event and Result Envelopes
 
 #+begin_src lisp
 (defstruct government-data-event-v1.1
@@ -122,31 +109,15 @@ Initial new operations:
   deployment-revision-id source-profile-revision-id
   search-plan-revision-id subfamily-decision-revision-id
   gap-revision-id route-assessment-revision-id
+  review-revision-id coverage-gate-revision-id
   policy-snapshot-id configuration-hash payload)
-#+end_src
 
-New event kinds include:
-
-- =:deployment-proposed= and =:deployment-revision-committed=
-- =:profile-proposed= and =:profile-revision-committed=
-- =:search-plan-revision-started= and =:search-plan-revision-completed=
-- =:gap-revision-proposed= and =:gap-revision-committed=
-- =:subfamily-decision-revision-committed=
-- =:route-assessment-revision-committed=
-- =:review-revision-committed=
-- =:revision-invalidated=
-- =:adapter-attempt-started= and =:adapter-attempt-fenced=
-
-Events remain append-only with one terminal event per command.
-
-* REVIEW Result Envelope v1.1
-
-#+begin_src lisp
 (defstruct government-data-result-v1.1
   protocol command-id run-id status government-id component-id
   deployment-revision-id source-profile-revision-id
   search-plan-revision-id subfamily-decision-revision-id
   gap-revision-id route-assessment-revision-id
+  review-revision-id coverage-gate-revision-id
   adapter-id adapter-version adapter-manifest-hash runtime-environment-hash
   job-revision-id attempt-id
   started-at completed-at checkpoint-ids artifact-ids evidence-ids
@@ -154,15 +125,60 @@ Events remain append-only with one terminal event per command.
   input-hash output-hash policy-snapshot-id configuration-hash)
 #+end_src
 
-A result may contain proposal IDs but cannot allocate canonical profile, gap, decision, or assessment revisions unless returned by the owning authority.
+New events include review-decision committed/invalidated and coverage-gate proposed/committed/expired/superseded. Only owning authorities allocate canonical revision IDs.
+
+* REVIEW Independent Review Decision
+
+#+begin_src lisp
+(defstruct government-data-review-decision-revision
+  review-id review-revision-id prior-review-revision-id
+  supersedes-review-revision-ids
+  subject-kind subject-revision-id decision
+  reviewer-id reviewer-generation
+  independence-policy-id conflict-check-result
+  evidence-ids notes decided-at created-at)
+#+end_src
+
+The review authority:
+
+- validates subject immutability and existence
+- rejects self-review and policy conflicts
+- records reviewer identity/generation and conflict result
+- never writes subject fields
+- creates a new review revision for review change or invalidation
+
+Current reviewed state is a materialized join between a subject revision and its latest applicable review decision.
+
+* REVIEW Atomic Coverage Gate
+
+#+begin_src lisp
+(defstruct government-data-coverage-gate-revision
+  gate-id gate-revision-id prior-gate-revision-id
+  supersedes-gate-revision-ids
+  gate-kind scope-id run-id wave-id
+  applicability-contract-id applicability-contract-version
+  applicability-contract-review-revision-id
+  policy-snapshot-id adapter-manifest-set-hash runtime-environment-set-hash
+  route-assessment-revision-ids route-assessment-review-revision-ids
+  required-subject-review-revision-ids
+  blocker-ids status basis-hash decided-at decider-id created-at)
+#+end_src
+
+Gate kinds are jurisdiction completion, wave exit, and state completion. Only a reviewed =:passed= jurisdiction-completion gate may drive catalog =DONE=.
+
+The Coverage Gate Authority:
+
+- binds the exact ordered sixteen-route assessment/review set
+- validates contract, policy, manifest/runtime, freshness, and required subject reviews
+- calculates and verifies =basis-hash=
+- creates a new gate on expiry, evidence change, review invalidation, or contract/policy migration
+- never infers completion from mutable “latest” queries
+
+The Independent Review Authority separately reviews the gate revision. Gate decider and gate reviewer must satisfy independence policy.
 
 * REVIEW Job and Attempt Separation
 
-A durable adapter job revision binds logical work, exact source/proposal/search-plan revisions, contract, policy, adapter version, manifest hash, runtime hash, bounds, artifact policy, and idempotency key.
-
-A job does not contain a future lease.
-
-After validating the job, the dispatcher obtains a lease and creates:
+A durable adapter job revision binds logical work, exact profile/proposal/search-plan revisions, contract, policy, adapter/manifest/runtime versions, bounds, artifact policy, and idempotency key. It contains no future lease.
 
 #+begin_src lisp
 (defstruct government-data-adapter-attempt
@@ -171,7 +187,7 @@ After validating the job, the dispatcher obtains a lease and creates:
   rate-lease-key-hash worker-generation started-at deadline input-hash)
 #+end_src
 
-Every network request validates the current fence. Retry creates a new attempt; logical scope changes create a new job revision.
+After job validation the dispatcher acquires a lease and creates an attempt. Retry creates a new attempt/fence. Logical scope changes create a new job revision.
 
 * REVIEW Checkpoint v1.1
 
@@ -186,146 +202,93 @@ Every network request validates the current fence. Retry creates a new attempt; 
   prior-checkpoint-id checkpoint-hash policy-snapshot-id configuration-hash)
 #+end_src
 
-A checkpoint cannot advance beyond artifact and evidence commits. Resume creates a new attempt referencing the checkpoint; the checkpoint is never mutated.
+Checkpoints never advance beyond committed artifacts/evidence. Resume creates a new attempt referencing an immutable checkpoint.
 
-* REVIEW Routing Changes
+* REVIEW Routing
 
-| Work | Revision-aware key |
-|------|--------------------|
-| deployment writes | deployment logical ID |
-| profile writes | profile logical ID |
-| search-plan writes | search-plan logical ID |
-| gap writes | gap logical ID |
+| Work | Serialization or read key |
+|------|---------------------------|
+| deployment/profile/search-plan/gap writes | logical subject ID for one-writer serialization |
 | subfamily decisions | unit + route + subfamily + contract version |
-| route assessments | unit + route + applicability-contract version |
+| route assessments | unit + route + contract version |
+| coverage gates | gate kind + scope ID + contract/policy |
 | review decisions | subject kind + subject revision ID |
-| acquisition cursor ordering | source-profile revision + cursor partition |
-| schedules | current reviewed profile revision + policy snapshot |
-| coverage materialization | unit + route + contract version |
+| acquisition cursor ordering | profile revision + partition |
+| schedules | reviewed profile revision + policy snapshot |
+| coverage materialization | scope + contract/policy + reviewed gate revision |
 
-Routing on logical IDs is allowed only to serialize writes. Reads and emitted decisions pin revisions.
+Reads and emitted decisions pin exact revisions even when write routing uses logical IDs.
 
-* REVIEW State Ownership
+* REVIEW State Ownership Boundaries
 
-** Source Deployment Authority
+- Deployment/Profile/Search Plan/Gap/Route Assessment authorities own only their subject revisions.
+- Independent Review owns only review decisions.
+- Coverage Gate owns only aggregate gate revisions.
+- Coverage Ledger owns observations and derived views only.
+- No authority may directly set another authority’s canonical state.
 
-Serializes deployment revisions and host-alias/tenant reconciliation. It cannot grant jurisdiction delegation by itself.
+* REVIEW Scheduler and Lease Changes
 
-** Source Profile Authority
+Scheduled work pins reviewed profile revision, deployment revision, policy, manifest/runtime hashes, checkpoint, due reason, and freshness basis. If any pinned current review changes before dispatch, the scheduler replans rather than following latest silently.
 
-Serializes profile revisions and source-state transitions. Every transition creates a new profile revision. It cannot mark human review state without an Independent Review Authority decision.
-
-** Search Plan Authority
-
-Owns immutable search-plan revisions and completed-state validation. A negative decision cannot reference an incomplete plan.
-
-** Gap Authority
-
-Owns immutable gap revisions, freshness, reassessment deadlines, and records-request links. Gap expiry produces a due-reassessment event, not in-place mutation.
-
-** Route Assessment Authority
-
-Serializes route-assessment revisions for one unit/route/contract key. It validates required subfamilies, exact revision bindings, terminal states, freshness, and explicit supersession.
-
-** Independent Review Authority
-
-Commits reviewed, changes-requested, or invalidated revisions. The proposing worker/authority cannot self-approve. Review transitions create new subject or review revisions; they never mutate prior reviewed state.
-
-* REVIEW Coverage Ledger Boundary
-
-The Coverage Ledger stores append-only observations and materialized views. It may report current route state only from the latest reviewed route-assessment revision under the selected contract/policy.
-
-It may not invent route completion by aggregating adapter successes, profile counts, or coverage observations without a committed route-assessment revision.
-
-* REVIEW Scheduler Changes
-
-A scheduled job pins:
-
-- current reviewed profile revision
-- deployment revision
-- policy snapshot
-- adapter manifest/runtime hashes
-- cursor checkpoint
-- due reason and freshness basis
-
-If the current reviewed revision changes before dispatch, the scheduler cancels or replans the stale job. A job cannot silently follow “latest profile.”
-
-* REVIEW Lease Fencing
-
-The Rate and Lease Authority issues ID, key hash, generation, fence, issued-at, expiry, and close state.
-
-The dispatcher creates an attempt only after lease issue. Workers include the fence on every request event. The authority or dispatcher rejects stale-fence requests and emits =:adapter-attempt-fenced=.
-
-Host aliases mapped to one deployment share vendor/deployment limits.
+The Rate and Lease Authority issues ID, key hash, generation, fence, issue time, expiry, and close state. Every request event carries the attempt fence. Stale fences are rejected.
 
 * REVIEW Artifact and Checkpoint Ordering
 
-Required sequence:
-
-1. job validation
-2. lease issue
-3. attempt creation
+1. validate job
+2. acquire lease
+3. create attempt
 4. request
-5. artifact reservation/stream
-6. byte count and hash verification
-7. artifact and retrieval-event commit
-8. evidence/proposal commit
-9. checkpoint commit
-10. lease close
+5. reserve/stream artifact
+6. verify bytes/hash
+7. commit artifact/retrieval event
+8. commit evidence/proposals
+9. commit checkpoint
+10. close lease
 11. terminal result
 
-A successful result is invalid when truncation is unexplained, artifacts are uncommitted, counts do not reconcile, or the attempt fence expired before the final request.
+Success is invalid with unexplained truncation, uncommitted artifacts, unreconciled counts, or expired attempt fence.
 
 * REVIEW Protocol Migration
 
-- v1 commands without revision IDs remain readable for historical replay but cannot create new canonical coverage decisions.
-- v1 logical profile IDs resolve only through an explicit migration command that records the selected revision and evidence.
-- existing source-profile versions migrate to profile revisions preserving prior version IDs as aliases.
-- existing coverage observations remain observations; they do not become route assessments automatically.
-- existing gaps migrate to first gap revisions with inferred fields marked and reviewed before use.
-- schedulers stop issuing v1 acquisition commands after the cutover policy time.
-- mixed v1/v1.1 operation is allowed only for read-only replay or migration, never current completion.
+- v1 logical-ID commands remain readable but cannot create current canonical coverage decisions
+- explicit migration selects and records exact revisions
+- existing profile versions become immutable profile revisions with aliases
+- coverage observations do not become assessments or gates automatically
+- old gaps become first gap revisions and require independent review
+- no v1 review field becomes an approved review decision automatically
+- no jurisdiction becomes complete without a new reviewed coverage gate
+- mixed v1/v1.1 is read-only or migration-only after cutover
 
 * REVIEW Capability Changes
 
-Add explicit capabilities:
-
-- source-deployment propose/commit
-- search-plan propose/commit
-- gap propose/commit
-- subfamily-decision propose/commit
-- route-assessment propose/commit
-- independent review commit
-- lease-fenced adapter attempt
-
-Only owning authorities receive commit capabilities. Workers receive proposal capabilities.
+Add propose/commit capabilities for deployment, search plan, gap, subfamily decision, route assessment, coverage gate, and independent review, plus lease-fenced adapter attempts. Only owning authorities receive commit capabilities.
 
 * REVIEW Deterministic Fixtures
 
-Required fixtures:
-
-- v1 logical-ID command rejected for current completion
-- profile revision changes after an old assessment without altering replay
-- route assessment supersession after contract migration
-- negative gap expiry and reassessment
-- self-review rejection
-- stale scheduled job after profile revision change
-- adapter retry using same job revision and new attempt/fence
-- stale-fence request rejection
-- crash after artifact commit and before checkpoint
-- coverage observations without assessment cannot produce completion
-- migration of a v1 profile, gap, and checkpoint
-- mixed v1/v1.1 command rejection outside migration/read-only scope
+- v1 logical-ID current-completion rejection
+- self-review/conflict rejection
+- reviewed subject without subject mutation
+- invalidated review preserving subject history
+- full sixteen-route atomic gate and basis hash
+- route change after old gate without replay mutation
+- gate expiry from stale negative evidence
+- coverage observations without reviewed gate cannot create completion
+- profile change invalidating scheduled work
+- retry with same job/new attempt fence
+- stale-fence rejection
+- crash after artifact commit/before checkpoint
+- explicit v1 profile/gap/review/gate migration
 
 * REVIEW Acceptance Criteria
 
 1. Every canonical decision pins exact revisions.
-2. Route Assessment and Independent Review have explicit state owners.
-3. Coverage Ledger cannot synthesize completion without an assessment revision.
-4. Jobs and lease-bound attempts are separate.
-5. Every request is lease-fenced.
-6. Checkpoints cannot outrun artifact/evidence commits.
-7. Scheduler jobs never silently follow latest state.
-8. v1 migration is explicit and cannot create unreviewed completion.
-9. Ohio contracts can execute without protocol-specific exceptions.
-10. This amendment and the parent design are approved before implementation.
+2. Subject owners and review owner are disjoint.
+3. Route Assessment, Coverage Gate, and Independent Review have explicit owners.
+4. Coverage Ledger cannot synthesize completion.
+5. Catalog =DONE= requires a reviewed passed atomic gate.
+6. Jobs and lease-bound attempts are separate and fenced.
+7. Checkpoints cannot outrun artifact/evidence commits.
+8. Scheduler jobs never silently follow latest state.
+9. v1 migration cannot create unreviewed completion.
+10. Ohio contracts execute without protocol exceptions after approval.

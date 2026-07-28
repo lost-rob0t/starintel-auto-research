@@ -4,19 +4,21 @@
 #+title: STAR-GOVDATA-TODO-000 State and County Source Catalog
 #+description: Generated Org TODO queue for every 2025 Census state group and county or county-equivalent, with stable GEOIDs and a shared source-catalog completion contract.
 #+status: ACTIVE
-#+filetags: :starintel:todo:government-data:states:counties:catalog:
+#+filetags: :starintel:todo:government-data:states:counties:catalog:gates:
 #+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
 
-| Version | Date       | Description of change                                                   | Did nsaspy approve it |
-|---------+------------+-------------------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-28 | Seed state and county-equivalent source-catalog TODO queue               | Pending               |
-| 0.2.0   | 2026-07-28 | Require immutable reviewed route decisions before jurisdiction completion | Pending             |
+| Version | Date       | Description of change                                                    | Did nsaspy approve it |
+|---------+------------+--------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Seed state and county-equivalent source-catalog TODO queue                | Pending               |
+| 0.2.0   | 2026-07-28 | Require immutable reviewed route decisions before completion             | Pending               |
+| 0.3.0   | 2026-07-28 | Require a separately reviewed atomic jurisdiction-completion gate        | Pending               |
 
 * Related Nodes
 
 - [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
 - [[file:../../research/auto-research/STAR-RESEARCH-003-us-government-data-acquisition-landscape.org][STAR-RESEARCH-003 U.S. Government Data Acquisition Landscape]]
 - [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-004-government-data-revision-protocol-amendment.org][STAR-RESEARCH-PIPELINE-004 Government Data Revision Protocol Amendment]]
 - [[file:../../design/government-data/STAR-GOVDATA-DESIGN-001-ohio-coverage-program.org][STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program]]
 - [[file:../../design/government-data/STAR-GOVDATA-DESIGN-002-ohio-source-profile-contract.org][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]]
 - [[file:../../design/government-data/STAR-GOVDATA-DESIGN-003-ohio-adapter-pack.org][STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack]]
@@ -25,70 +27,75 @@
 
 - Source vintage: 2025 Census Gazetteer county and county-equivalent national file.
 - Source locator: =https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2025_Gazetteer/2025_Gaz_counties_national.zip=.
-- Generated state-level queues: 52 (50 states, District of Columbia, and Puerto Rico).
-- Generated county and county-equivalent TODOs: 3,222.
-- Regenerate with =tools/generate-government-jurisdiction-todos.py=; do not hand-edit generated jurisdiction shards.
+- Generated state-level queues: 52.
+- Generated county/county-equivalent TODOs: 3,222.
+- Regenerate with =tools/generate-government-jurisdiction-todos.py=; do not hand-edit generated shards.
 
 * Active State Designs
 
 ** REVIEW Ohio
 
-Ohio is the first state design. The generated Ohio and county headings remain =TODO=. Design activity, candidate discovery, source profiling, or partial route assessment does not count as source-catalog completion.
+Ohio is the first state design. Generated Ohio/county headings remain =TODO=. Design work, candidate discovery, source profiles, route assessments, or unreviewed gates do not count as completion.
 
 * Completion Contract
 
-A jurisdiction reaches =DONE= only when one reviewed completion decision binds:
+A jurisdiction reaches =DONE= only when the Coverage Gate Authority has committed one =:jurisdiction-completion= gate revision with =status :passed= and the Independent Review Authority has committed a separate =:reviewed= review-decision revision for that exact gate revision.
 
-- one approved applicability-contract ID and version
-- one policy snapshot
-- reviewed immutable route-assessment revisions for all sixteen routes
-- reviewed subfamily-decision revisions for every required or triggered conditional subfamily
-- exact source-profile and deployment revisions
-- completed search-plan revisions for negative results
-- reviewed gap revisions with current reassessment deadlines
-- immutable evidence and raw-artifact references
-- reviewer identity and review timestamp
+The gate must bind atomically:
 
-=:candidate-found=, =:ambiguous=, =:unassessed=, stale negative findings, mutable logical IDs, unresolved required manual review, or missing applicability evidence block =DONE=.
+- one independently reviewed applicability-contract revision
+- one policy snapshot and adapter manifest/runtime set
+- exact route-assessment revisions for all sixteen routes
+- exact independent review-decision revisions for every route assessment and required subject
+- exact subfamily-decision, source-profile, deployment, search-plan, and gap revisions
+- immutable evidence, retrieval-event, and raw-artifact references
+- current freshness/reassessment basis for every negative result
+- an ordered =basis-hash= over the complete revision set
 
-A route may end in a contract-permitted reviewed positive, partial, negative, access-restricted, retired, or not-applicable state. =:not-applicable= requires positive authority or service-topology evidence. Search failure alone never makes a route not applicable.
+The gate decider and gate reviewer must satisfy the independence policy.
 
-The operational-metadata route is cross-cutting. It is complete only when every bound source, deployment, search plan, decision, artifact policy, and gap contains the required platform, access, rate, pagination, cursor, refresh, scope, provenance, truncation, and reassessment metadata.
+=:candidate-found=, =:ambiguous=, =:unassessed=, stale evidence, mutable logical IDs, unresolved required manual review, missing applicability evidence, a blocked/expired gate, a basis-hash mismatch, or an invalidated gate review blocks =DONE=.
+
+Changes after a passed gate never mutate it. They may expire current completion and require a new route/subject/review/gate revision chain.
+
+The operational-metadata route is cross-cutting and passes only when every bound subject contains platform, access, rate/lease, pagination/cursor, refresh, scope, provenance, truncation, and reassessment metadata.
 
 * Required Source Routes
 
-1. Official identity, canonical domains, aliases, components, delegated hosting, and service-provider topology.
-2. Open-data catalogs, data.json, DCAT, CKAN, Socrata, ArcGIS Hub, Huwise/OpenDataSoft, exports, and reviewed absence.
-3. GIS, parcel maps, ArcGIS/OGC services, downloads, viewers, and responsible-provider mapping.
-4. Charter, code, ordinances, resolutions, laws, policies, and authoritative version relationships.
-5. Meetings, calendars, agendas, packets, minutes, votes, transcripts, recordings, and video archives.
+1. Official identity, domains, aliases, components, delegated hosting, and service-provider topology.
+2. Open-data catalogs/platforms/exports and reviewed absence.
+3. GIS, parcels, ArcGIS/OGC, downloads, viewers, and provider mapping.
+4. Charter, code, ordinances, resolutions, laws, policies, and version relationships.
+5. Meetings, calendars, agendas, packets, minutes, votes, transcripts, recordings, and archives.
 6. Budgets, financial reports, audits, checkbooks, payroll, debt, grants, revenue, and scope gaps.
-7. Procurement, bids, solicitations, awards, contracts, purchase orders, attachments, and vendor payments.
-8. Property, assessment, tax, recorder, deed, parcel, and land-record systems or resolved providers.
-9. Court and clerk topology, dockets, case indexes, documents, access restrictions, and linked local-court assessments.
-10. Elections, candidates, campaign finance, precincts, results states, and voter-information products.
-11. Sheriff, jail, incident, dispatch, inspection, enforcement, and public-safety systems where lawfully public.
-12. Building, zoning, planning, development, health, environmental, licensing, and code-enforcement providers and systems.
-13. Public-records portal or method, policy, retention schedules, contacts, fees, and official escalation instructions.
-14. Sitemaps, RSS/Atom/iCalendar, alerts, newsletters, APIs, exports, and change feeds or reviewed absence.
-15. Archives, retired domains, historical portals, repositories, migrations, predecessor/successor links, and visible temporal bounds.
-16. Cross-cutting operational metadata for every source, decision, gap, artifact, and acquisition path.
+7. Procurement, bids, awards, contracts, purchase orders, attachments, and vendor payments.
+8. Property, assessment, tax, recorder, deed, parcel, and land-record systems/providers.
+9. Court/clerk topology, dockets, indexes, documents, restrictions, and linked local-court assessments.
+10. Elections, candidates, campaign finance, precincts, result states, and voter-information products.
+11. Sheriff, jail, incident, dispatch, inspection, enforcement, and lawfully public safety systems.
+12. Building, zoning, planning, development, health, environmental, licensing, and code providers/systems.
+13. Public-records method, policy, retention, contacts, fees, and escalation instructions.
+14. Sitemaps, feeds, alerts, newsletters, APIs, exports, and change feeds or reviewed absence.
+15. Archives, retired domains, repositories, migrations, predecessor/successor links, and date bounds.
+16. Cross-cutting operational metadata for every source, decision, review, gap, artifact, and acquisition path.
 
 * Required Output Bindings
 
-- applicability-contract and policy-snapshot identifiers
-- assessment, subfamily-decision, source-profile, deployment, search-plan, and gap revision IDs
-- official status and authority evidence
-- data family, component, and service geography
-- platform, vendor, tenant, adapter version, and manifest hash
-- locator, discovery path, predecessor/successor, and archive evidence
-- access, credential, rate-lease, legal, privacy, and browser constraints
-- earliest/latest observed coverage and completeness scope
-- raw-artifact, retrieval-event, and content-hash references
-- cursor/checkpoint and reconciliation method
-- unsupported, missing, inaccessible, partial, retired, records-request, OCR, or manual-review state
-- freshness class and reassessment deadline
-- independent reviewer and review timestamp
+- jurisdiction-completion gate and gate-review revision IDs
+- gate basis hash and decision timestamp
+- applicability-contract review and policy snapshot
+- route-assessment and route-review revision IDs
+- subfamily-decision, profile, deployment, search-plan, gap, and subject-review revision IDs
+- authority/status evidence, component, data family, and service geography
+- platform/vendor/tenant, adapter version, manifest/runtime hashes
+- locator, discovery, predecessor/successor, and archive evidence
+- access, credential, lease fence, legal, privacy, and browser constraints
+- temporal/jurisdictional completeness scope
+- artifact, retrieval-event, evidence, and content hashes
+- cursor/checkpoint/reconciliation method
+- negative/access/partial/retired/OCR/manual-review state
+- freshness and reassessment deadline
+- reviewer identity/generation and independence-policy result
 
 * Generated Jurisdiction Shards
 

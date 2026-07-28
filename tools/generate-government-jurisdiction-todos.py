@@ -45,7 +45,6 @@ STATE_NAMES = {
     "WI": "Wisconsin", "WY": "Wyoming", "PR": "Puerto Rico",
 }
 
-# Stable Org-roam shards. Do not regroup based on file size.
 SHARD_GROUPS = (
     ("AL", "AK", "AZ", "AR"),
     ("CA", "CO", "CT", "DE", "DC", "FL"),
@@ -86,10 +85,11 @@ SOURCE_ROUTES = (
 
 OUTPUT_FIELDS = (
     "jurisdiction-completion gate and gate-review revision IDs",
-    "gate basis hash and decision timestamp",
-    "applicability-contract review and policy snapshot",
+    "source-contract ID/version and source-contract review revision",
+    "applicability-contract ID/version/review and policy snapshot/review",
+    "gate basis schema, hash algorithm, basis-as-of, basis hash, freshness deadline, and valid-through",
     "route-assessment and route-review revision IDs",
-    "subfamily-decision, profile, deployment, search-plan, gap, and subject-review revision IDs",
+    "subfamily, profile, deployment, search-plan, gap, and subject-review revision IDs",
     "authority/status evidence, component, data family, and service geography",
     "platform/vendor/tenant, adapter version, manifest/runtime hashes",
     "locator, discovery, predecessor/successor, and archive evidence",
@@ -286,6 +286,7 @@ def render_master() -> str:
         "| 0.1.0   | 2026-07-28 | Seed state and county-equivalent source-catalog TODO queue                | Pending               |",
         "| 0.2.0   | 2026-07-28 | Require immutable reviewed route decisions before completion             | Pending               |",
         "| 0.3.0   | 2026-07-28 | Require a separately reviewed atomic jurisdiction-completion gate        | Pending               |",
+        "| 0.4.0   | 2026-07-28 | Bind reviewed source contract and deterministic gate validity/hash       | Pending               |",
         "",
         "* Related Nodes",
         "",
@@ -304,35 +305,36 @@ def render_master() -> str:
         "- Generated state-level queues: 52.",
         "- Generated county/county-equivalent TODOs: 3,222.",
         "- Regenerate with =tools/generate-government-jurisdiction-todos.py=; do not hand-edit generated shards.",
+        "- The shard =:CHECKLIST:= value is a stable logical contract key. Exact source/applicability contract and policy versions are pinned by gate revisions.",
         "",
         "* Active State Designs",
         "",
         "** REVIEW Ohio",
         "",
-        "Ohio is the first state design. Generated Ohio/county headings remain =TODO=. Design work, candidate discovery, source profiles, route assessments, or unreviewed gates do not count as completion.",
+        "Ohio is the first state design. Generated Ohio/county headings remain =TODO=. Design work, candidates, profiles, assessments, or unreviewed gates do not count as completion.",
         "",
         "* Completion Contract",
         "",
-        "A jurisdiction reaches =DONE= only when the Coverage Gate Authority has committed one =:jurisdiction-completion= gate revision with =status :passed= and the Independent Review Authority has committed a separate =:reviewed= review-decision revision for that exact gate revision.",
+        "A jurisdiction reaches =DONE= only when the Coverage Gate Authority has committed one =:jurisdiction-completion= gate revision with =status :passed= and the Independent Review Authority has committed a separate =:reviewed= review decision for that exact gate revision.",
         "",
-        "The gate must bind atomically:",
+        "The gate binds atomically:",
         "",
-        "- one independently reviewed applicability-contract revision",
-        "- one policy snapshot and adapter manifest/runtime set",
+        "- one independently reviewed =star.govdata.source-profile= source-contract version",
+        "- one independently reviewed applicability-contract version",
+        "- one reviewed policy snapshot and reviewed adapter manifest/runtime sets",
         "- exact route-assessment revisions for all sixteen routes",
-        "- exact independent review-decision revisions for every route assessment and required subject",
-        "- exact subfamily-decision, source-profile, deployment, search-plan, and gap revisions",
-        "- immutable evidence, retrieval-event, and raw-artifact references",
-        "- current freshness/reassessment basis for every negative result",
-        "- an ordered =basis-hash= over the complete revision set",
+        "- exact review-decision revisions for every route assessment and required subject",
+        "- exact subfamily, profile, deployment, search-plan, and gap revisions",
+        "- immutable evidence, retrieval events, and artifacts",
+        "- canonical basis schema, hash algorithm, basis time/hash, freshness deadline, and valid-through",
         "",
-        "The gate decider and gate reviewer must satisfy the independence policy.",
+        "The gate decider and reviewer satisfy independence policy.",
         "",
-        "=:candidate-found=, =:ambiguous=, =:unassessed=, stale evidence, mutable logical IDs, unresolved required manual review, missing applicability evidence, a blocked/expired gate, a basis-hash mismatch, or an invalidated gate review blocks =DONE=.",
+        "Candidate, ambiguous, unassessed, stale, mutable, unresolved manual review, missing applicability, blocked/expired, hash mismatch, invalidated review, source-contract mismatch, or current time after =valid-through= blocks =DONE=.",
         "",
-        "Changes after a passed gate never mutate it. They may expire current completion and require a new route/subject/review/gate revision chain.",
+        "Changes never mutate a passed gate. They may make it non-current and require new subject/review/gate revisions.",
         "",
-        "The operational-metadata route is cross-cutting and passes only when every bound subject contains platform, access, rate/lease, pagination/cursor, refresh, scope, provenance, truncation, and reassessment metadata.",
+        "Operational metadata is cross-cutting and requires platform, access, lease, cursor, refresh, scope, provenance, truncation, and reassessment fields across all bound subjects.",
         "",
         "* Required Source Routes",
         "",
@@ -386,7 +388,13 @@ def validate_output(output_dir: Path) -> None:
     if len(geoids) != EXPECTED_ROWS or len(set(geoids)) != EXPECTED_ROWS:
         raise ValueError("Generated county TODO or unique GEOID count is incorrect")
     master = (output_dir / MASTER_NAME).read_text(encoding="utf-8")
-    if "| 0.3.0" not in master or "=:jurisdiction-completion=" not in master:
+    required = (
+        "| 0.4.0",
+        "=:jurisdiction-completion=",
+        "star.govdata.source-profile",
+        "valid-through",
+    )
+    if any(token not in master for token in required):
         raise ValueError("Generated master completion contract is stale")
 
 

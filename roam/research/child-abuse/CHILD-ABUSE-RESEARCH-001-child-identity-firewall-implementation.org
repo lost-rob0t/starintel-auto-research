@@ -10,6 +10,7 @@
 | Version | Date       | Description of change                                  | Did nsaspy approve it |
 |---------+------------+--------------------------------------------------------+-----------------------|
 | 1.0.0   | 2026-07-28 | Implement deterministic child identity firewall checks | Yes                   |
+| 1.0.1   | 2026-07-28 | Add hardened URL and filename identifier variants       | Yes                   |
 
 * Related Nodes
 
@@ -19,15 +20,18 @@
 
 * Implemented Boundary
 
-The approved child-identity policy now has an executable enforcement component at =scripts/child_identity_firewall.py=.
+The approved child-identity policy now has an executable deterministic core at =scripts/child_identity_firewall.py= and a hardened public entrypoint at =scripts/child_identity_firewall_runtime.py=.
 
-The component:
+The hardened entrypoint expands each restricted identifier into common locator forms using spaces, hyphens, underscores, periods, plus signs, and percent-encoded spaces before invoking the core firewall. Operators and actors must use the hardened entrypoint.
+
+The implementation:
 
 - accepts structured JavaScript Object Notation[fn:json] input only;
 - removes child names and direct identifying fields from child records;
 - replaces child identities with case-local pseudonyms;
 - generalizes exact child ages into approved age bands;
 - rejects child-name query fields and queries containing known child identifiers;
+- detects known identifiers in ordinary text, URL slugs, filenames, and similarly separated locators;
 - rejects named minor targets;
 - removes names from identity targets whose adult status is unresolved;
 - rejects named adult targets below the approved legal-status threshold;
@@ -56,7 +60,7 @@ It can process only input explicitly supplied by a caller. This preserves the us
 Sanitize a supplied structured artifact:
 
 #+begin_src sh
-python scripts/child_identity_firewall.py sanitize input.json result.json \
+python scripts/child_identity_firewall_runtime.py sanitize input.json result.json \
   --case-id synthetic-case-001 \
   --known-child-identifiers-file restricted-identifiers.json
 #+end_src
@@ -64,7 +68,7 @@ python scripts/child_identity_firewall.py sanitize input.json result.json \
 Scan an already generated export:
 
 #+begin_src sh
-python scripts/child_identity_firewall.py scan export.json report.json \
+python scripts/child_identity_firewall_runtime.py scan export.json report.json \
   --case-id synthetic-case-001 \
   --known-child-identifiers-file restricted-identifiers.json
 #+end_src
@@ -79,7 +83,7 @@ The file =tests/test_child_identity_firewall.py= covers:
 
 1. child-record pseudonymization and direct-identifier removal;
 2. exact-age generalization;
-3. child identifiers in evidence text and source locators;
+3. child identifiers in evidence text and URL slugs;
 4. unsafe child-name queries;
 5. explicit child-name query fields;
 6. unknown-age named targets;
@@ -96,7 +100,7 @@ All fixtures use fictional synthetic values. No real child or adult case is repr
 
 * Continuous Enforcement
 
-The workflow =.github/workflows/child-identity-firewall.yml= compiles the firewall and runs the synthetic unit tests[fn:unit-test] on every pull request and on pushes to =main=.
+The workflow =.github/workflows/child-identity-firewall.yml= compiles both firewall layers and runs the synthetic unit tests[fn:unit-test] on every pull request and on pushes to =main=.
 
 A failing privacy test blocks the workflow. This is independent from the Org-roam pages and electronic-publication workflows.
 

@@ -1,0 +1,441 @@
+:PROPERTIES:
+:ID:       starintel-government-data-ohio-adapter-pack-003
+:END:
+#+title: STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack
+#+description: Define the Ohio-specific and reusable platform adapters needed to profile state systems, execute the Franklin County pilot, and expand across all 88 counties.
+#+status: REVIEW
+#+filetags: :starintel:design:government-data:ohio:adapters:actors:common-lisp:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                         | Did nsaspy approve it |
+|---------+------------+-----------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define Ohio source adapters and worker bounds | Pending               |
+
+* Related Nodes
+
+- [[file:STAR-GOVDATA-DESIGN-001-ohio-coverage-program.org][STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program]]
+- [[file:STAR-GOVDATA-DESIGN-002-ohio-source-profile-contract.org][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]]
+- [[file:../auto-research/STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+
+* REVIEW Objective
+
+Define the smallest adapter set that can profile Ohio's state systems and county source variation without writing one scraper per jurisdiction.
+
+Ohio-specific adapters are allowed only where a source has stable Ohio semantics or a unique protocol. Generic platform and format adapters remain preferred.
+
+* REVIEW Adapter Boundary
+
+An adapter worker receives one immutable bounded job and returns observations, raw-artifact references, cursor state, typed failures, and source-profile proposals.
+
+An adapter may not:
+
+- write canonical government identity
+- write canonical source profiles
+- mark a route complete
+- approve its own evidence
+- exceed host or vendor leases
+- follow arbitrary links outside declared source scope
+- create credentials
+- bypass access controls
+- retain protected data not authorized by policy
+
+* REVIEW Capability Manifest
+
+#+begin_src lisp
+(defstruct government-data-adapter-manifest
+  adapter-id
+  version
+  platform-families
+  source-families
+  operations
+  input-formats
+  output-formats
+  network-capabilities
+  browser-capabilities
+  authentication-capabilities
+  pagination-capabilities
+  cursor-capabilities
+  default-bounds
+  retry-policy
+  fixture-ids)
+#+end_src
+
+Required operations:
+
+- =:probe=
+- =:inventory=
+- =:fetch-page=
+- =:fetch-document=
+- =:fetch-bulk=
+- =:extract-links=
+- =:fingerprint=
+- =:checkpoint=
+
+No adapter is assumed to support every operation.
+
+* REVIEW Generic Adapters First
+
+| Adapter | Platforms or formats | Ohio use |
+|---------+----------------------+----------|
+| =http-metadata= | HTTP, redirects, headers, TLS observations | official-domain and delegation evidence |
+| =html-structured= | semantic HTML, tables, pagination, JSON-LD | agency pages, county directories, reports |
+| =sitemap-feed= | sitemap XML, RSS, Atom, iCalendar | meetings, alerts, publications, change discovery |
+| =static-directory= | public directory indexes and deterministic file paths | OGRIP/OSIP bulk files and legacy archives |
+| =csv-xlsx= | CSV, TSV, XLS, XLSX | election, finance, reporting, and bulk exports |
+| =pdf-text= | text-bearing PDF and authenticated document capture | laws, reports, agendas, audits, contracts |
+| =arcgis-rest= | ArcGIS REST services and item metadata | state and county GIS systems |
+| =ogc-service= | WMS, WFS, WMTS and capabilities documents | OGRIP and county geospatial services |
+| =aspnet-form= | bounded public ASP.NET search forms | legacy docket, opinion, and record searches |
+| =embedded-json= | page configuration, script data, JSON endpoints | dashboards and JavaScript public systems |
+| =browser-public= | allowlisted JavaScript-only public interfaces | last structured option before manual review |
+| =archive-resolver= | redirects, Wayback candidates, retired-domain links | historical and migrated source discovery |
+
+The generic adapter must be selected whenever it can preserve the same completeness and provenance as an Ohio-specific adapter.
+
+* REVIEW Ohio-Specific Adapters
+
+** =ohio-laws=
+
+Source family:
+
+- Ohio Revised Code
+- Ohio Administrative Code
+- authenticated PDF versions
+- current, prior, and future-effective versions
+- section and chapter metadata
+
+Capabilities:
+
+- inventory chapters and sections
+- resolve effective versions
+- fetch text and authenticated documents
+- preserve legislation provenance
+- detect future-effective versions
+- emit version relationships
+
+Key invariant:
+
+A future-effective version never replaces the current version before its effective date.
+
+** =ohio-legislature=
+
+Source family:
+
+- bills and resolutions
+- sponsors and cosponsors
+- committees
+- status and actions
+- votes
+- documents
+- calendars, session schedules, journals, and acts
+
+Capabilities:
+
+- bounded legislation search
+- item inventory by General Assembly
+- document and status capture
+- committee and sponsor relationship extraction
+- pagination and update-marker observation
+
+The adapter must preserve the site's disclaimer and distinguish online bill text from authenticated enacted law.
+
+** =ohio-buys=
+
+Source family:
+
+- public solicitations
+- public awards and contracts
+- attachments
+- supplier resources
+- public contract browsing
+
+Capabilities:
+
+- public inventory without login
+- solicitation and contract detail capture
+- attachment capture
+- award and amendment relationship extraction
+- tenant and pagination fingerprinting
+
+Separate capability states:
+
+- public read
+- public download
+- supplier login
+- response submission
+
+The adapter is authorized only for public read and download operations.
+
+** =ohio-checkbook=
+
+Source family:
+
+- state expenditures
+- participating local expenditures
+- agency and local-government views
+- public transparency reports
+
+Capabilities:
+
+- identify public exports and backing endpoints
+- record participating-unit coverage
+- capture update timestamps and reporting periods
+- distinguish state and local submissions
+- reconcile displayed totals with acquired rows when possible
+
+Ohio Checkbook is a discovery and validation source for local finance. Participation does not prove complete county finance coverage.
+
+** =ohio-sos=
+
+Source family:
+
+- election results and historical results
+- voter and turnout dashboards
+- campaign-finance search and file transfer
+- county boards of elections directory
+- business data where in scope
+
+Capabilities:
+
+- inventory public data products
+- capture downloadable files
+- distinguish official, unofficial, and historical election states
+- profile campaign-finance search and transfer interfaces
+- crosswalk county boards to county GEOIDs
+
+Sensitive-field rules must be evaluated before any voter-record acquisition job is authorized.
+
+** =ohio-courts=
+
+Source family:
+
+- Supreme Court public docket
+- opinions and announcements
+- clerk journal
+- court statistics dashboards
+- local court directory and reporting forms
+
+Capabilities:
+
+- bounded docket and opinion search
+- opinion and order document capture
+- court-statistics metadata and export discovery
+- local-court source discovery
+- partial-current-year warning propagation
+
+The adapter does not assume one statewide local-case API. Individual local court systems are separate source profiles and may require generic or vendor-specific adapters.
+
+* REVIEW OGRIP Composition
+
+OGRIP and OSIP do not require one monolithic Ohio adapter initially.
+
+Use a composition:
+
+#+begin_example
+http-metadata
+  -> static-directory
+  -> arcgis-rest or ogc-service
+  -> bulk-file metadata
+  -> archive-resolver
+#+end_example
+
+The composition must support:
+
+- county-level LBRS file inventory
+- imagery and elevation tile inventory
+- county mosaic discovery
+- large-file metadata capture without automatic download
+- update-date extraction where exposed
+- legacy and current archive relationships
+
+Files above policy limits are recorded, not silently skipped or partially downloaded.
+
+* REVIEW Adapter Job
+
+#+begin_src lisp
+(defstruct adapter-job
+  job-id
+  run-id
+  unit-ref
+  source-profile-id
+  adapter-id
+  operation
+  locators
+  cursor
+  route
+  data-family
+  request-limit
+  byte-limit
+  object-limit
+  depth-limit
+  wall-time-limit
+  allowed-hosts
+  rate-lease-id
+  cancellation-id
+  idempotency-key)
+#+end_src
+
+* REVIEW Adapter Result
+
+#+begin_src lisp
+(defstruct adapter-result
+  job-id
+  adapter-id
+  adapter-version
+  status
+  observation-ids
+  raw-artifact-ids
+  proposed-profile-ids
+  next-cursor
+  truncation
+  request-count
+  byte-count
+  object-count
+  started-at
+  finished-at
+  failure)
+#+end_src
+
+Statuses:
+
+- =:success=
+- =:partial=
+- =:no-change=
+- =:blocked=
+- =:unsupported=
+- =:failed=
+- =:cancelled=
+
+* REVIEW Default Bounds
+
+| Worker kind | Requests | Bytes | Objects | Wall time | Concurrency |
+|-------------+----------+-------+---------+-----------+-------------|
+| metadata probe | 10 | 5 MB | 100 | 120 s | 2 per host |
+| HTML inventory | 50 | 25 MB | 2,000 | 300 s | 2 per host |
+| API inventory | 100 | 50 MB | 10,000 | 600 s | lease controlled |
+| document capture | 25 | 100 MB | 250 | 600 s | 2 per host |
+| static-directory inventory | 100 | 25 MB metadata-only | 25,000 | 600 s | 2 per host |
+| browser probe | 20 navigations | 50 MB | 1,000 | 600 s | 1 per host |
+
+Source profiles may lower these bounds. Raising them requires an explicit run policy revision.
+
+* REVIEW Rate and Lease Keys
+
+Lease dimensions:
+
+- host
+- vendor
+- tenant
+- API key
+- source profile
+- browser worker pool
+
+A county batch cannot bypass a vendor-wide limit by using different host aliases.
+
+* REVIEW Fingerprint Pipeline
+
+#+begin_example
+official-domain evidence
+  -> HTTP and redirect observations
+  -> HTML metadata and linked assets
+  -> known path probes
+  -> JavaScript and embedded configuration fingerprints
+  -> API-shape probes
+  -> platform candidate
+  -> reviewed source-profile proposal
+#+end_example
+
+A fingerprint is probabilistic evidence. It does not prove authority or completeness.
+
+* REVIEW Franklin County Pilot Adapter Order
+
+For each route:
+
+1. official-domain and delegation verification
+2. sitemap and feed inventory
+3. structured HTML and downloadable files
+4. known platform fingerprints
+5. documented or observed APIs
+6. delegated vendor interfaces
+7. browser-public probe when structured methods fail
+8. explicit gap or manual review
+
+Likely high-yield generic adapters for Franklin County:
+
+- HTTP metadata
+- sitemap/feed
+- structured HTML
+- ArcGIS REST
+- CSV/XLSX
+- PDF text
+- ASP.NET form
+- embedded JSON
+
+No Franklin-specific adapter is approved by this design.
+
+* REVIEW Fixture Matrix
+
+| Fixture | Expected adapter behavior |
+|---------+---------------------------|
+| Ohio law with current and future-effective versions | emit separate version records and relationships |
+| OhioBuys public solicitation with attachments | capture public detail and files without login |
+| Ohio Checkbook source with participating local unit | mark participation scope, not full route completion |
+| OGRIP directory containing multi-gigabyte ZIP | capture metadata and policy-limit result |
+| OGRIP LBRS county table with mixed update dates | preserve per-file update observations |
+| SOS campaign-finance search plus transfer page | emit separate search and export capabilities |
+| Supreme Court docket form | bounded form query with replayable parameters |
+| court statistics current-year dashboard | propagate partial-year state |
+| county ArcGIS viewer with REST service | prefer ArcGIS REST over browser scraping |
+| vendor-hosted county meeting portal | require official delegation evidence |
+| inaccessible source with CAPTCHA | return blocked; do not bypass |
+| retired county source with archived successor | emit retirement and successor proposal |
+
+* REVIEW Typed Failures
+
+- =:unsupported-platform=
+- =:unverified-authority=
+- =:delegation-evidence-missing=
+- =:authentication-required=
+- =:captcha-boundary=
+- =:rate-limited=
+- =:pagination-unstable=
+- =:file-too-large=
+- =:content-type-mismatch=
+- =:partial-current-period=
+- =:schema-changed=
+- =:source-retired=
+- =:browser-required=
+- =:privacy-review-required=
+- =:cancelled=
+
+Failures are recorded in the Coverage Ledger and may create a gap. They do not mark the route complete.
+
+* REVIEW Implementation Order
+
+After parent approval:
+
+1. deterministic fake adapter and manifest validator
+2. HTTP metadata, sitemap/feed, structured HTML, and static-directory adapters
+3. PDF text, CSV/XLSX, ArcGIS REST, and OGC adapters
+4. Ohio Laws adapter
+5. Ohio Legislature adapter
+6. OhioBuys public-read adapter
+7. Ohio SOS public-data adapter
+8. Ohio Courts public-data adapter
+9. Ohio Checkbook adapter
+10. bounded browser-public bridge
+
+Adapters enter implementation based on pilot evidence, not this order alone.
+
+* REVIEW Acceptance Criteria
+
+1. generic adapters are preferred over jurisdiction-specific scrapers
+2. Ohio-specific adapters have stable source semantics
+3. all jobs are bounded and cancellable
+4. adapters submit proposals rather than canonical writes
+5. public and authenticated capabilities are separated
+6. large-file handling is explicit
+7. partial current-year data is propagated
+8. authority verification is outside platform fingerprinting
+9. fixtures cover state and county variation
+10. no Franklin- or county-specific adapter is approved without evidence

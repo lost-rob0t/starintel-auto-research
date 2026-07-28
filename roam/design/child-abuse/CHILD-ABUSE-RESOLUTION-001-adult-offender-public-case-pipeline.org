@@ -1,0 +1,844 @@
+:PROPERTIES:
+:ID:       starintel-child-abuse-resolution-001
+:END:
+#+title: CHILD-ABUSE-RESOLUTION-001 Adult-Offender Public-Case Pipeline
+#+description: Design an actor-only, non-executing architecture for severe child-abuse public cases that may resolve publicly charged adult defendants while making child identity exposure structurally impossible.
+#+status: REVIEW
+#+filetags: :starintel:design:child-abuse:actors:privacy:adult-defendants:no-autodig:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                           | Did nsaspy approve it |
+|---------+------------+-----------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define actor-only design with a mandatory child identity firewall | Pending               |
+
+* Related Nodes
+
+- [[file:CHILD-ABUSE-POLICY-001-child-identity-firewall.org][CHILD-ABUSE-POLICY-001 Child Identity Firewall]]
+- [[file:../../research/child-abuse/CHILD-ABUSE-RESEARCH-000-national-severe-case-landscape.org][CHILD-ABUSE-RESEARCH-000 National Severe-Case Landscape]]
+- [[file:../../indexes/child-abuse/CHILD-ABUSE-INDEX-000-severe-case-adult-offender-research.org][CHILD-ABUSE-INDEX-000 Severe-Case Adult-Offender Research]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+
+* REVIEW Objective
+
+Define actors and message contracts for severe child-abuse public-case research without running AutoDig, selecting real cases, crawling sources, ingesting a dataset, or publishing names.
+
+The architecture may later support evidence-backed records about publicly documented adult defendants. It must never identify child victims, child survivors, minor witnesses, or minor alleged offenders.
+
+* REVIEW User Directive
+
+The user explicitly directed:
+
+- actors only;
+- no AutoDig for this domain;
+- do not expose child names;
+- child-name exposure would abuse the child further;
+- document the request as a durable project rule.
+
+This directive is implemented by [[file:CHILD-ABUSE-POLICY-001-child-identity-firewall.org][CHILD-ABUSE-POLICY-001 Child Identity Firewall]]. The firewall is approved and supersedes weaker generic evidence-preservation behavior.
+
+* REVIEW Invariants
+
+1. No live source retrieval occurs under this design review.
+2. No AutoDig run, dataset, case packet, target queue, or monitoring job is created.
+3. No real child identity enters an actor request, response, log, prompt, fixture, filename, or document.
+4. Child identities remain prohibited even when a source has already made them public.
+5. Only adults with a supported public legal role may become future named targets.
+6. A person whose adult status is unresolved is treated as a child and cannot be named.
+7. The adult defendant and child victim are separate roles; proximity in source text cannot establish either role.
+8. Child records are case-local pseudonyms and cannot be linked across cases.
+9. Raw source content is unavailable to downstream actors until child identifiers are removed.
+10. Detailed sexual or medical narratives are removed unless indispensable to a legal element and approved for restricted use.
+11. Every stage may abstain or stop.
+12. Privacy failure overrides evidence confidence and blocks publication.
+13. Legal status is represented exactly and temporally.
+14. Synthetic fixtures are the only permitted inputs before separate implementation approval.
+15. No actor may expand to relatives, schools, households, social accounts, or associates.
+
+* REVIEW Non-Execution Boundary
+
+This design describes actors but does not authorize actors to execute against real sources.
+
+All network capabilities default to disabled:
+
+#+begin_src json
+{
+  "network": false,
+  "web_search": false,
+  "browser": false,
+  "archive_search": false,
+  "court_fetch": false,
+  "government_portal_fetch": false,
+  "public_records_send": false,
+  "autodig": false,
+  "canonical_write": false
+}
+#+end_src
+
+The only enabled capabilities during design validation are:
+
+- read synthetic fixtures;
+- emit protocol events;
+- apply deterministic redaction;
+- validate synthetic adult status and legal status;
+- generate nonpublic test reports;
+- scan test exports for prohibited values.
+
+A later implementation proposal must name each capability it seeks to enable. Approval of this design does not enable live retrieval.
+
+* REVIEW Architecture
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+component "Operator Authorization Gate" as Operator
+component "Case Scope Gate" as Scope
+component "Child Identity Input Firewall" as InputFirewall
+component "Synthetic Fixture Adapter" as Fixture
+component "Source Request Policy Actor" as RequestPolicy
+component "Child-Safe Query Rewriter" as Query
+component "Fake Retrieval Adapter" as FakeFetch
+component "Raw Content Quarantine" as Quarantine
+component "Child Identifier Redactor" as Redactor
+component "Indirect Identification Detector" as Indirect
+component "Severe Harm Classifier" as Harm
+component "Adult Status Verifier" as Adult
+component "Adult Role Extractor" as Role
+component "Legal Status Extractor" as Legal
+component "Case Evidence Normalizer" as Evidence
+component "Adult Candidate Linker" as Linker
+component "Independent Evidence Reviewer" as EvidenceReview
+component "Independent Privacy Reviewer" as PrivacyReview
+component "Publication Policy Gate" as Publication
+component "Child-Safe StarIntel Writer" as Writer
+component "Export Leakage Scanner" as ExportScan
+component "Audit and Retraction Actor" as Audit
+
+Operator --> Scope
+Scope --> InputFirewall
+InputFirewall --> Fixture
+Fixture --> RequestPolicy
+RequestPolicy --> Query
+Query --> FakeFetch
+FakeFetch --> Quarantine
+Quarantine --> Redactor
+Redactor --> Indirect
+Indirect --> Harm
+Harm --> Adult
+Adult --> Role
+Role --> Legal
+Legal --> Evidence
+Evidence --> Linker
+Linker --> EvidenceReview
+Linker --> PrivacyReview
+EvidenceReview --> Publication
+PrivacyReview --> Publication
+Publication --> Writer
+Writer --> ExportScan
+ExportScan --> Audit
+@enduml
+#+end_src
+
+No component in this diagram is a live crawler. The Fake Retrieval Adapter returns fixed synthetic pages containing representative privacy hazards.
+
+* REVIEW Actor Contracts
+
+** Operator Authorization Gate
+
+Purpose: reject execution modes not explicitly approved.
+
+Consumes:
+
+- requested operation;
+- capability set;
+- project policy version.
+
+Produces:
+
+- authorized design-test request;
+- denied-operation event.
+
+Rules:
+
+- =autodig= is always denied;
+- live network capabilities are denied;
+- only synthetic fixture identifiers are accepted;
+- denied requests do not echo prohibited child identifiers.
+
+** Case Scope Gate
+
+Purpose: restrict the design to severe child-abuse public-case patterns.
+
+Consumes:
+
+- synthetic case classification;
+- synthetic outcome and source classes.
+
+Produces:
+
+- eligible test branch;
+- ineligible terminal result;
+- unresolved classification.
+
+Eligible synthetic classes:
+
+- fatal abuse or neglect;
+- near fatality;
+- serious bodily injury;
+- permanent impairment;
+- severe starvation, poisoning, burning, torture, or medical neglect;
+- publicly charged sexual abuse represented without graphic victim details.
+
+Excluded classes:
+
+- custody disputes;
+- unsubstantiated referrals;
+- minor injuries;
+- school discipline;
+- social-media accusations;
+- family-court-only allegations;
+- ordinary parenting disputes;
+- cases lacking public adult legal action.
+
+** Child Identity Input Firewall
+
+Purpose: prevent prohibited child identity from entering the run.
+
+Consumes:
+
+- operator input;
+- fixture payload;
+- attachment metadata.
+
+Produces:
+
+- sanitized request;
+- privacy rejection event.
+
+Rules:
+
+- remove child names, initials, exact birth dates, addresses, schools, photos, handles, and contacts;
+- reject rather than guess when safe rewriting is impossible;
+- never place the rejected token in logs;
+- adult names are allowed only in synthetic fixtures and only when marked adult.
+
+** Synthetic Fixture Adapter
+
+Purpose: provide deterministic test cases without real people.
+
+Consumes:
+
+- fixture identifier;
+- fixture version.
+
+Produces:
+
+- synthetic official release;
+- synthetic court filing;
+- synthetic local-news story;
+- expected redaction and legal-status outputs.
+
+Rules:
+
+- all names are obviously fictional;
+- child names remain prohibited even in fixtures; use placeholders such as =[CHILD]=;
+- no fixture copies a real case narrative;
+- fixture labels remain inaccessible to scoring actors until evaluation.
+
+** Source Request Policy Actor
+
+Purpose: decide whether a proposed future retrieval request would be permitted.
+
+Consumes:
+
+- source class;
+- proposed query or URL template;
+- capability policy.
+
+Produces:
+
+- permit, rewrite, or deny decision;
+- required redaction profile.
+
+Rules:
+
+- deny child-name searches;
+- deny reverse-family and associate expansion;
+- deny obituary, fundraiser, school, or social-account searching;
+- deny search requests when the adult legal role is absent;
+- in current design mode, route every permitted request to the fake adapter.
+
+** Child-Safe Query Rewriter
+
+Purpose: remove child identifiers from query plans.
+
+Consumes:
+
+- synthetic event facts;
+- adult candidate facts after event-based discovery;
+- source restrictions.
+
+Produces:
+
+- nonidentifying event query;
+- adult official-record confirmation query;
+- denied-query event.
+
+Allowed query features:
+
+- month or date;
+- county or state;
+- public agency;
+- severe outcome class;
+- adult candidate name only after event-based discovery;
+- public charge and case terms.
+
+Prohibited query features:
+
+- child name or initials;
+- school or daycare;
+- home address;
+- sibling or parent discovery from child identity;
+- obituary or fundraiser terms;
+- child social account.
+
+** Fake Retrieval Adapter
+
+Purpose: simulate source retrieval while proving actor contracts.
+
+Consumes:
+
+- permitted synthetic query;
+- fixture source identifier.
+
+Produces:
+
+- synthetic content;
+- source metadata;
+- retrieval event.
+
+Rules:
+
+- no network access;
+- one immutable output per fixture version;
+- simulate redirects, PDFs, URL slugs, image captions, and copied stories;
+- include adversarial child identifiers so downstream redaction can be tested.
+
+** Raw Content Quarantine
+
+Purpose: prevent unredacted content from reaching normal actors.
+
+Consumes:
+
+- fake retrieval result.
+
+Produces:
+
+- quarantine artifact reference;
+- redaction task.
+
+Rules:
+
+- only the redactor can read quarantined content;
+- raw content is never indexed, embedded, logged, graphed, or exported;
+- public repositories receive no quarantine artifacts;
+- fixture teardown deletes transient raw content.
+
+** Child Identifier Redactor
+
+Purpose: remove direct child identity.
+
+Consumes:
+
+- quarantined content;
+- metadata and attachment names.
+
+Produces:
+
+- redacted text;
+- redacted metadata;
+- category counts;
+- privacy warnings.
+
+Redaction categories:
+
+- child name and initials;
+- exact birth date and exact age;
+- address and precise location;
+- school, daycare, classroom, team, or club;
+- child photo, caption, alt text, and filename;
+- social handle and contact details;
+- sibling and minor witness identity;
+- quoted child statement;
+- detailed medical or sexual narrative.
+
+** Indirect Identification Detector
+
+Purpose: detect combinations that could identify a child without naming them.
+
+Consumes:
+
+- redacted content;
+- proposed normalized facts;
+- geography and age precision.
+
+Produces:
+
+- safe, generalize, or reject decision;
+- indirect-identification reasons.
+
+Rules:
+
+- generalize exact ages into approved bands;
+- generalize location to county or state;
+- remove distinctive school, family, medical, and event details;
+- reject when several remaining facts make the child readily identifiable;
+- never reconstruct a removed name.
+
+** Severe Harm Classifier
+
+Purpose: classify the synthetic case outcome without determining guilt.
+
+Consumes:
+
+- redacted official facts;
+- synthetic medical and legal outcome fields.
+
+Produces:
+
+- fatality, near-fatality, serious-injury, charged-sexual-abuse, or out-of-scope class;
+- source-supported reasons.
+
+Rules:
+
+- severity does not identify an offender;
+- ambiguous severity yields unresolved;
+- graphic detail is not retained merely to justify severity.
+
+** Adult Status Verifier
+
+Purpose: establish that a potential named target was at least eighteen at the event.
+
+Consumes:
+
+- redacted source packet;
+- adult candidate record.
+
+Produces:
+
+- adult, minor, or unresolved decision;
+- age evidence locator.
+
+Rules:
+
+- minor and unresolved decisions block naming;
+- never infer adult status from appearance, occupation, parenthood, or marital status;
+- use explicit age, date-of-birth calculation from an authoritative adult record, or a court statement that the person was tried as an adult;
+- do not retain unnecessary exact birth dates.
+
+** Adult Role Extractor
+
+Purpose: identify the adult's exact public role.
+
+Consumes:
+
+- redacted source packet.
+
+Produces:
+
+- defendant, charged adult, convicted offender, nonoffending caregiver, witness, reporter, official, or ambiguous role;
+- supporting evidence.
+
+Rules:
+
+- only a supported defendant or offender role proceeds;
+- nonoffending caregiver and ambiguous roles remain unnamed;
+- article proximity is not role evidence;
+- several adults in one case remain separate candidates.
+
+** Legal Status Extractor
+
+Purpose: preserve procedural status and lifecycle.
+
+Consumes:
+
+- redacted court, prosecutor, police, and reporting artifacts.
+
+Produces:
+
+- arrest, charge, indictment, plea, verdict, sentence, acquittal, dismissal, appeal, or correction event;
+- exact date and authority when safe;
+- contradiction records.
+
+Rules:
+
+- allegations remain allegations;
+- arrest without public charge does not authorize publication;
+- later dismissals, acquittals, and corrections supersede earlier status;
+- child identity never appears in event text.
+
+** Case Evidence Normalizer
+
+Purpose: convert redacted evidence into source, evidence, claim, legal-case, event, and adult-person candidates.
+
+Consumes:
+
+- redacted artifacts;
+- role and legal-status results;
+- severe-harm classification.
+
+Produces:
+
+- noncanonical candidate documents;
+- provenance links;
+- contradiction set.
+
+Rules:
+
+- child person uses only a case-local pseudonym and age band;
+- source excerpts use =[CHILD]=;
+- no raw artifact path enters candidate documents;
+- synthetic mode cannot write canonical documents.
+
+** Adult Candidate Linker
+
+Purpose: decide whether several public adult references describe the same adult in the same case.
+
+Consumes:
+
+- adult candidate records;
+- case identifiers;
+- legal-status evidence.
+
+Produces:
+
+- same-adult, different-adult, or unresolved decision;
+- feature report.
+
+Rules:
+
+- no child features are linkage keys;
+- no household graph is created;
+- cross-case adult linkage is deferred;
+- name alone is insufficient when several adults share a name.
+
+** Independent Evidence Reviewer
+
+Purpose: review adult role, case match, and legal status without inheriting the linker conclusion.
+
+Consumes:
+
+- candidate packet;
+- redacted sources;
+- contradictions.
+
+Produces:
+
+- approve, reject, or abstain;
+- unsupported claims;
+- follow-up requirements.
+
+Rules:
+
+- reviews exact legal status;
+- rejects copied-source pseudo-corroboration;
+- checks nonoffending-adult confusion;
+- cannot waive child privacy rules.
+
+** Independent Privacy Reviewer
+
+Purpose: independently evaluate direct and indirect child identification.
+
+Consumes:
+
+- complete proposed packet;
+- redaction report;
+- export preview.
+
+Produces:
+
+- approve, reject, or require-generalization;
+- leakage findings.
+
+Rules:
+
+- default is reject when uncertain;
+- checks text, metadata, identifiers, URLs, attachment names, graph labels, and generated prose;
+- may require removal of analytically interesting facts;
+- cannot be overridden by the evidence reviewer.
+
+** Publication Policy Gate
+
+Purpose: make the only decision about whether a future adult record could be published.
+
+Consumes:
+
+- adult verification;
+- role and legal-status result;
+- evidence review;
+- privacy review;
+- contradiction state;
+- export scan preview.
+
+Produces:
+
+- structurally-publishable, nonpublic-candidate, rejected, or unresolved decision.
+
+Rules:
+
+- current design mode always returns =nonpublic-design-output=;
+- live publication remains disabled;
+- adult status, formal public legal role, evidence approval, privacy approval, and zero leakage are all mandatory;
+- one failed prerequisite blocks the packet.
+
+** Child-Safe StarIntel Writer
+
+Purpose: validate the shape of future documents without writing them canonically.
+
+Consumes:
+
+- structurally-publishable synthetic packet.
+
+Produces:
+
+- temporary test documents;
+- schema diagnostics.
+
+Future document pattern:
+
+#+begin_src text
+adult public defendant
+  --defendant_in-->
+public legal case
+  --concerns-->
+child-victim-01
+#+end_src
+
+Rules:
+
+- child label is case-local;
+- no =resolved_as= relation targets a child;
+- no child identity or stable cross-case identifier exists;
+- current mode writes only to temporary test storage.
+
+** Export Leakage Scanner
+
+Purpose: scan every serialized output surface.
+
+Consumes:
+
+- JSON, JSONL, Org, HTML, EPUB, graph, search-index, log, and error-output previews.
+
+Produces:
+
+- pass or fail;
+- prohibited-token and risky-combination findings.
+
+Rules:
+
+- scan content and metadata;
+- scan URL slugs and attachment titles;
+- scan generated summaries;
+- a missing scan is a failure;
+- any known child-identity leak fails the release.
+
+** Audit and Retraction Actor
+
+Purpose: prove that corrections remove prohibited output and preserve adult legal lifecycle.
+
+Consumes:
+
+- test publication packet;
+- simulated correction, dismissal, or privacy incident.
+
+Produces:
+
+- supersession or retraction test record;
+- cleanup verification;
+- incident report.
+
+Rules:
+
+- child identity must not appear in incident reports;
+- caches and indexes are included in cleanup tests;
+- adult dismissals and acquittals are prominently preserved;
+- retraction cannot silently delete provenance history.
+
+* REVIEW Message Flow
+
+#+begin_src text
+operator.request
+  -> authorization.gate
+  -> case.scope
+  -> child-identity.input-firewall
+  -> synthetic.fixture
+  -> source-request.policy
+  -> query.child-safe-rewrite
+  -> retrieval.fake
+  -> content.quarantine
+  -> child-identifier.redact
+  -> indirect-identification.detect
+  -> severe-harm.classify
+  -> adult-status.verify
+  -> adult-role.extract
+  -> legal-status.extract
+  -> evidence.normalize
+  -> adult-candidate.link
+  -> review.evidence || review.privacy
+  -> publication.policy
+  -> starintel.test-write
+  -> export.leakage-scan
+  -> audit.test
+#+end_src
+
+Every message carries the policy version, fixture identifier, synthetic-data marker, capability set, and child-identity-prohibited flag.
+
+* REVIEW Protocol Boundary
+
+Protocol identifier:
+
+#+begin_src text
+star.child-abuse-actor-design.v1
+#+end_src
+
+Required request fields:
+
+#+begin_src json
+{
+  "protocol": "star.child-abuse-actor-design.v1",
+  "mode": "synthetic-design-test",
+  "fixture_id": "fixture-id",
+  "capabilities": {
+    "network": false,
+    "autodig": false,
+    "canonical_write": false
+  },
+  "privacy": {
+    "child_names_prohibited": true,
+    "cross_case_child_linkage_prohibited": true,
+    "raw_public_artifacts_prohibited": true,
+    "zero_leakage_required": true
+  }
+}
+#+end_src
+
+The validator rejects any request with another mode or an enabled prohibited capability.
+
+* REVIEW Synthetic Fixture Suite
+
+Required fixtures:
+
+1. official release contains a fictional child name;
+2. initials appear throughout a court filing;
+3. child name appears in a URL slug;
+4. child name appears in PDF metadata;
+5. photograph filename and alt text identify a child;
+6. school, address, and exact birth date permit indirect identification;
+7. obituary reveals siblings and caregivers;
+8. fundraiser contains medical narrative;
+9. adult defendant and child share a surname;
+10. nonoffending caregiver is named more prominently than defendant;
+11. two adult defendants exist in one case;
+12. adult age is unresolved;
+13. alleged offender is a minor;
+14. arrest occurred but no public charge followed;
+15. charge was dismissed;
+16. adult was acquitted;
+17. copied stories create false source independence;
+18. model attempts to reconstruct the child's name;
+19. graph exporter creates a stable child identifier;
+20. error log echoes rejected input;
+21. child identity appears only inside an attachment title;
+22. exact age plus tiny locality permits re-identification;
+23. sexual-abuse source contains unnecessary graphic details;
+24. synthetic case is out of severe-harm scope;
+25. request attempts to enable AutoDig.
+
+Expected outcome for fixture 25: immediate denial before any other actor executes.
+
+* REVIEW Evaluation Gates
+
+A design-test release must demonstrate:
+
+- zero child names in all outputs;
+- zero child-name queries;
+- zero exact child birth dates;
+- zero child photos or image identifiers;
+- zero stable cross-case child identifiers;
+- zero named minor alleged offenders;
+- zero AutoDig execution paths;
+- zero network calls;
+- zero canonical writes;
+- all legal-status corrections represented;
+- all adult-age-unknown cases blocked;
+- every export surface scanned;
+- every fixture deterministic and replayable.
+
+There is no acceptable child-identity leakage threshold above zero.
+
+* REVIEW Implementation Sequence
+
+This sequence is a future proposal, not authorization to implement live research:
+
+1. Define schemas for requests, events, redaction reports, review results, and test documents.
+2. Build synthetic fixtures with no real names.
+3. Implement the Operator Authorization Gate.
+4. Implement the Child Identity Input Firewall.
+5. Implement deterministic direct-identifier redaction.
+6. Implement indirect-identification rules.
+7. Implement fake retrieval and quarantine.
+8. Implement adult-status, adult-role, and legal-status validators.
+9. Implement evidence and privacy reviewers.
+10. Implement temporary child-safe document generation.
+11. Implement export scanning across every supported format.
+12. Run the complete privacy suite.
+13. Review results with the user.
+14. Do not add live search or AutoDig unless the user makes a separate explicit request.
+
+* REVIEW Deferred and Prohibited Work
+
+Deferred pending separate approval:
+
+- live official-source retrieval;
+- court adapters;
+- prosecutor and police adapters;
+- aggregate NCANDS, NIBRS, or NVSS analysis;
+- state disclosure registries;
+- real-case benchmarking.
+
+Prohibited under the current user directive:
+
+- AutoDig case research;
+- child-name search;
+- child-name storage;
+- child identity resolution;
+- cross-case child linkage;
+- family or associate expansion;
+- school and social-account discovery;
+- child image collection;
+- obituary and fundraiser harvesting;
+- public raw source storage;
+- named minor-offender records.
+
+* REVIEW Acceptance Criteria
+
+This design is ready for approval when:
+
+- the user directive is quoted accurately in the research node;
+- the Child Identity Firewall remains approved;
+- actors have no enabled live-network or AutoDig capability;
+- every child-data path passes through redaction and privacy review;
+- the fixture suite covers direct and indirect identification;
+- adult naming requires adult status and formal public legal status;
+- no implementation slot is occupied;
+- CI validates Org-roam links and publication artifacts.
+
+* Footnotes and Glossary
+
+[fn:actor] Actor: A small independent software worker that owns a limited responsibility and communicates through structured messages.
+
+[fn:privacy-firewall] Privacy firewall: Mandatory checks at several system boundaries that reject, remove, or generalize prohibited identifying information.
+
+[fn:quarantine] Quarantine: A restricted temporary area where untrusted raw content is isolated until it has been sanitized.
+
+[fn:indirect-identification] Indirect identification: Recognizing a person from a combination of details such as age, school, location, family structure, and medical facts even when their name is absent.

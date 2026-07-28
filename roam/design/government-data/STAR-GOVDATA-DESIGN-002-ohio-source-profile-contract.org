@@ -1,0 +1,467 @@
+:PROPERTIES:
+:ID:       starintel-government-data-ohio-source-profile-contract-002
+:END:
+#+title: STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract
+#+description: Define the durable source-profile, route-assessment, evidence, review, and lifecycle contracts used by the Ohio government-data coverage program.
+#+status: REVIEW
+#+filetags: :starintel:design:government-data:ohio:source-profile:schema:provenance:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                             | Did nsaspy approve it |
+|---------+------------+---------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define Ohio source-profile and route contracts   | Pending               |
+
+* Related Nodes
+
+- [[file:STAR-GOVDATA-DESIGN-001-ohio-coverage-program.org][STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program]]
+- [[file:STAR-GOVDATA-DESIGN-003-ohio-adapter-pack.org][STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack]]
+- [[file:../auto-research/STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+
+* REVIEW Objective
+
+Define one durable contract that can describe Ohio state systems, county systems, delegated vendor portals, static files, APIs, dashboards, form-driven searches, document archives, and explicit coverage gaps without creating a schema fork for each county.
+
+* REVIEW Invariants
+
+1. A search result is never a verified source profile.
+2. Every verified profile links to official ownership or delegation evidence.
+3. Every profile is scoped to one government unit or component and one source family.
+4. One endpoint may support multiple profiles when its authority or coverage differs.
+5. One profile may contain multiple acquisition endpoints when they are one logical source.
+6. Raw evidence and retrieval events are immutable.
+7. Profile revisions are append-only and supersede prior revisions.
+8. A source profile does not imply complete route coverage.
+9. Negative findings are evidence-bearing assessments, not empty fields.
+10. Review state is separate from acquisition state.
+11. Current, historical, and future-effective content are measured separately.
+12. Personal-data fields and access restrictions are recorded before acquisition is authorized.
+
+* REVIEW Core Records
+
+** Government unit reference
+
+#+begin_src lisp
+(defstruct government-unit-ref
+  star-id
+  canonical-name
+  unit-kind
+  parent-star-id
+  state-code
+  state-fips
+  county-geoid
+  census-government-id
+  active-status
+  valid-from
+  valid-through)
+#+end_src
+
+** Source profile revision
+
+#+begin_src lisp
+(defstruct source-profile-revision
+  profile-id
+  revision-id
+  prior-revision-id
+  unit-ref
+  component-ref
+  route
+  data-family
+  canonical-name
+  official-status
+  ownership-evidence-ids
+  discovery-evidence-ids
+  platform-family
+  vendor
+  tenant-id
+  locators
+  acquisition-methods
+  preferred-adapter
+  authentication
+  access-policy
+  rate-policy
+  pagination
+  temporal-coverage
+  refresh-policy
+  raw-artifact-policy
+  cursor-policy
+  validation-policy
+  privacy-and-redaction-policy
+  known-gaps
+  source-state
+  review-state
+  confidence
+  valid-from
+  valid-through
+  created-at
+  created-by
+  reviewed-at
+  reviewed-by)
+#+end_src
+
+** Locator
+
+#+begin_src lisp
+(defstruct source-locator
+  locator-id
+  kind
+  uri
+  method
+  role
+  content-type
+  official-domain-p
+  delegated-p
+  requires-browser-p
+  requires-authentication-p
+  active-p
+  first-seen-at
+  last-seen-at)
+#+end_src
+
+Locator kinds include:
+
+- =:homepage=
+- =:api=
+- =:bulk-file=
+- =:catalog=
+- =:feed=
+- =:search-form=
+- =:download-page=
+- =:arcgis-service=
+- =:ogc-service=
+- =:document-repository=
+- =:meeting-calendar=
+- =:video-channel=
+- =:public-records-portal=
+- =:archive=
+
+** Evidence record
+
+#+begin_src lisp
+(defstruct source-evidence
+  evidence-id
+  retrieval-event-id
+  evidence-kind
+  locator-id
+  content-hash
+  captured-at
+  observed-title
+  observed-organization
+  observed-links
+  assertion
+  assertion-scope
+  confidence
+  notes)
+#+end_src
+
+Evidence kinds include:
+
+- official-domain declaration
+- official page link
+- government document citation
+- delegated vendor link
+- DNS or TLS observation
+- HTTP redirect chain
+- platform fingerprint
+- API response sample
+- file metadata capture
+- screenshot metadata when browser rendering is required
+- negative-search record
+- archived-source record
+
+* REVIEW Official Status
+
+=:official-status= is one of:
+
+- =:verified-official=
+- =:verified-delegated=
+- =:candidate-official=
+- =:candidate-delegated=
+- =:unverified=
+- =:rejected=
+- =:retired=
+
+Promotion to =:verified-official= requires evidence from the government-controlled domain, an authoritative registry, or an authenticated official publication.
+
+Promotion to =:verified-delegated= requires an official government page or document linking the vendor system to the government unit or component.
+
+A matching logo, organization name, or search-engine result is insufficient.
+
+* REVIEW Route Assessment
+
+Each government unit receives a route assessment for every required catalog route.
+
+#+begin_src lisp
+(defstruct route-assessment
+  assessment-id
+  run-id
+  unit-ref
+  route
+  source-profile-ids
+  candidate-profile-ids
+  state
+  search-plan-id
+  evidence-ids
+  gap-ids
+  assessed-at
+  assessor
+  reviewed-at
+  reviewer)
+#+end_src
+
+Route states:
+
+- =:unassessed=
+- =:candidate-found=
+- =:verified=
+- =:verified-partial=
+- =:not-published=
+- =:records-request-required=
+- =:authentication-required=
+- =:paywalled=
+- =:blocked=
+- =:retired=
+- =:ambiguous=
+- =:not-applicable=
+
+A route is =:verified= only when all required subfamilies for the jurisdiction and route have been assessed or explicitly marked not applicable.
+
+* REVIEW Search Plan
+
+A negative finding must reference a durable search plan.
+
+#+begin_src lisp
+(defstruct source-search-plan
+  search-plan-id
+  contract-version
+  unit-ref
+  route
+  official-domains
+  delegated-domains
+  terms
+  paths
+  platform-signatures
+  external-registry-sources
+  archive-sources
+  request-limit
+  depth-limit
+  completed-at)
+#+end_src
+
+For example, a county procurement search plan should include official-domain navigation, sitemap terms, procurement vocabulary, OhioBuys participation checks, known procurement vendor signatures, archived domains, and records-policy references.
+
+* REVIEW Gap Record
+
+#+begin_src lisp
+(defstruct coverage-gap
+  gap-id
+  unit-ref
+  route
+  gap-kind
+  description
+  evidence-ids
+  first-observed-at
+  last-confirmed-at
+  reassess-after
+  records-request-draft-id
+  status)
+#+end_src
+
+Gap kinds:
+
+- expected source not found
+- known data not published
+- inaccessible source
+- authentication required
+- payment required
+- CAPTCHA or anti-automation boundary
+- ambiguous ownership
+- retired without successor
+- incomplete history
+- incomplete current-year data
+- export unavailable
+- machine-readable interface unavailable
+- records request required
+- manual review required
+
+* REVIEW Temporal Coverage
+
+#+begin_src lisp
+(defstruct temporal-coverage
+  earliest-observed-date
+  latest-observed-date
+  current-period-complete-p
+  history-contiguous-p
+  known-missing-ranges
+  future-effective-records-p
+  retention-horizon
+  last-reconciled-at)
+#+end_src
+
+Ohio Laws profiles must preserve current, prior, and future-effective versions separately. Court-statistics profiles must distinguish partial current-year figures from completed prior years. Election profiles must distinguish unofficial, official, canvassed, and historical results.
+
+* REVIEW Acquisition Methods
+
+Acquisition methods are ranked, not merely listed.
+
+#+begin_src lisp
+(defstruct acquisition-method
+  rank
+  kind
+  locator-id
+  adapter-id
+  format
+  stable-p
+  complete-p
+  incremental-p
+  browser-required-p
+  authentication-required-p
+  notes)
+#+end_src
+
+Kinds:
+
+- =:bulk=
+- =:documented-api=
+- =:machine-readable-inventory=
+- =:delegated-vendor-api=
+- =:structured-html=
+- =:embedded-json=
+- =:downloadable-document=
+- =:gis-service=
+- =:browser-rendered-public-system=
+- =:ocr-last-resort=
+- =:records-request=
+
+The preferred method is the least fragile method that meets completeness and provenance requirements.
+
+* REVIEW Authentication and Access
+
+#+begin_src lisp
+(defstruct access-policy
+  public-read-p
+  account-required-p
+  credential-kind
+  terms-locator
+  robots-observation
+  rate-limit-observation
+  prohibited-actions
+  personal-data-risk
+  legal-review-required-p)
+#+end_src
+
+The profile records authentication without attempting enrollment. Public search and supplier filing in OhioBuys must be modeled as separate capabilities. Court, property, and election systems must declare sensitive-field exposure before acquisition is authorized.
+
+* REVIEW Review State Machine
+
+#+begin_example
+:candidate
+   -> :evidence-collected
+   -> :verification-pending
+   -> :reviewed
+   -> :active
+   -> :changed
+   -> :reviewed
+   -> :retired
+#+end_example
+
+Rejected candidates move to =:rejected= with a reason and retained evidence.
+
+Only the Source Profile Authority may write canonical profile revisions. Workers submit proposals.
+
+* REVIEW Profile Proposal Message
+
+#+begin_src lisp
+(:government-data/propose-source-profile
+ :schema-version "1.0"
+ :run-id "ohio-2026-001"
+ :proposal-id "proposal-39049-gis-001"
+ :unit (:state-code "OH" :county-geoid "39049")
+ :route :gis
+ :official-status :candidate-delegated
+ :locators ((:kind :homepage :uri "https://example.gov/gis")
+            (:kind :arcgis-service :uri "https://example.vendor/arcgis/rest/services"))
+ :platform-family :arcgis-rest
+ :evidence-ids ("artifact-001" "artifact-002")
+ :preferred-adapter :arcgis-rest
+ :idempotency-key "sha256:...")
+#+end_src
+
+* REVIEW Profile Decision Message
+
+#+begin_src lisp
+(:government-data/decide-source-profile
+ :schema-version "1.0"
+ :proposal-id "proposal-39049-gis-001"
+ :decision :accept
+ :official-status :verified-delegated
+ :reviewer "operator-or-reviewer-id"
+ :evidence-ids ("artifact-001" "artifact-002")
+ :notes "Official county GIS page links the delegated ArcGIS tenant.")
+#+end_src
+
+* REVIEW Validation Rules
+
+A profile revision is invalid when:
+
+- the government unit cannot be resolved
+- the route is missing
+- no locator exists
+- verified status lacks ownership evidence
+- delegated status lacks an official delegation link
+- the preferred adapter does not advertise the needed capability
+- temporal coverage is asserted without evidence
+- a partial source is marked complete
+- a browser-required source is assigned to a non-browser worker
+- authentication requirements are omitted after observation
+- content hashes or retrieval events are missing for promoted evidence
+- review fields are self-approved by the proposing worker
+
+* REVIEW Versioning and Migration
+
+- profile identifiers remain stable across revisions
+- locator identifiers remain stable while the logical endpoint remains the same
+- vendor migrations create a new locator and successor relationship
+- retired profiles remain queryable
+- contract migrations are explicit and deterministic
+- unknown fields from a newer contract are preserved when possible and never silently discarded
+
+* REVIEW Ohio-Specific Extensions
+
+Ohio-specific fields may exist only under an extension namespace:
+
+#+begin_src lisp
+(:extensions
+ (:ohio
+  (:state-system :ohio-laws
+   :effective-version-kind :current
+   :county-geoid "39049"
+   :board-of-elections-code nil)))
+#+end_src
+
+An Ohio extension cannot replace generic fields required by the national source-profile contract.
+
+* REVIEW Acceptance Criteria
+
+1. one schema describes state and county sources
+2. verified status always has ownership evidence
+3. route coverage and profile lifecycle remain separate
+4. negative findings require a completed search plan
+5. temporal completeness is explicit
+6. partial current-year sources cannot be marked complete
+7. proposals and canonical writes are separated
+8. profile revisions are replayable and append-only
+9. Ohio extensions do not fork the national schema
+10. the contract supports the adapter capabilities defined in =STAR-GOVDATA-DESIGN-003=
+
+* REVIEW Required Fixtures
+
+- verified official Ohio domain
+- verified delegated county vendor portal
+- rejected lookalike domain
+- source with API and browser interfaces
+- source with incomplete current-year data
+- future-effective law version
+- source with login-only write functions but public read functions
+- source migration with retained predecessor
+- negative finding with complete search plan
+- profile proposal replay using the same idempotency key

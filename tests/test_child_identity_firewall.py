@@ -7,8 +7,10 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = ROOT / "scripts" / "child_identity_firewall.py"
-SPEC = importlib.util.spec_from_file_location("child_identity_firewall", MODULE_PATH)
+CORE_PATH = ROOT / "scripts" / "child_identity_firewall.py"
+MODULE_PATH = ROOT / "scripts" / "child_identity_firewall_runtime.py"
+sys.path.insert(0, str(ROOT))
+SPEC = importlib.util.spec_from_file_location("child_identity_firewall_runtime", MODULE_PATH)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = MODULE
@@ -203,7 +205,10 @@ class ChildIdentityFirewallTests(unittest.TestCase):
         self.assertTrue(self.firewall().scan_export(export).allowed)
 
     def test_source_has_no_network_or_autodig_dependency(self) -> None:
-        source = MODULE_PATH.read_text(encoding="utf-8").lower()
+        source = "\n".join(
+            path.read_text(encoding="utf-8").lower()
+            for path in (CORE_PATH, MODULE_PATH)
+        )
         prohibited = (
             "import requests",
             "import urllib",

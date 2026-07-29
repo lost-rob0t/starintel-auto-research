@@ -1,0 +1,363 @@
+:PROPERTIES:
+:ID:       star-lang-research-019-common-lisp-library-gap-analysis
+:END:
+#+title: STAR-LANG-RESEARCH-019 Common Lisp Library Gap Analysis
+#+description: Audit reusable Common Lisp libraries, required compatibility layers, likely forks, and new systems needed to implement the Franklin County StarLang actor runtime.
+#+status: DONE
+#+filetags: :starintel:research:star-lang:common-lisp:actors:libraries:runtime:franklin-county:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Audit CL libraries and estimate runtime implementation     | Pending review        |
+
+* Related Nodes
+
+- [[file:../../design/star-lang/STAR-LANG-002-durable-actor-runtime.org][STAR-LANG-002 Durable Actor Runtime]]
+- [[file:../../design/government-data/STAR-GOVDATA-DESIGN-004-franklin-county-starlang-actor-system.org][STAR-GOVDATA-DESIGN-004 Franklin County StarLang Actor System]]
+- [[file:STAR-LANG-RESEARCH-013-cl-gserver-runtime-facade.org][STAR-LANG-RESEARCH-013 cl-gserver Runtime Facade]]
+- [[file:STAR-LANG-RESEARCH-018-comparative-gate-and-language-selection.org][STAR-LANG-RESEARCH-018 Comparative Gate and Language Selection]]
+
+* Research Question
+
+Which Common Lisp libraries can be adopted directly, which require wrappers or pinned copies, which may need maintained forks, and which runtime systems must be built to support a production-quality StarLang actor system for full Franklin County government data?
+
+* Executive Finding
+
+Common Lisp already provides strong components for portable threads, actors, parallel work, HTTP, parsing, compression, hashing, databases, and testing. The project should not rewrite these foundations.
+
+The material gaps are above those libraries:
+
+1. bounded actor mailboxes with explicit overload behavior
+2. OTP-style supervision and generation-aware actor identity
+3. durable job journals independent of mailboxes
+4. lease fencing, idempotency, replay, and checkpoint semantics
+5. revision-aware message and authority protocols
+6. capability manifests and process isolation
+7. artifact custody and provenance commit protocols
+8. StarLang compilation into those runtime constructs
+
+The recommended approach is an upstream-first compatibility layer over Sento/cl-gserver, followed by a fork only if the required semantics cannot be landed or maintained cleanly upstream.
+
+* Copy, Pin, Wrap, Fork, or Build
+
+These terms are distinct.
+
+- =adopt=: depend on an upstream release or commit without source changes
+- =pin=: lock an exact source revision and transitive dependency graph
+- =wrap=: expose a narrower StarLang runtime contract without modifying upstream
+- =vendor=: keep an exact source copy for reproducible or abandoned dependencies while retaining history and license
+- =fork=: maintain intentional source changes under a new project namespace
+- =build=: create a new reusable ASDF system because no existing library owns the required semantics
+
+Blind copies are rejected. Every copied or forked library must retain upstream provenance, commit identity, license, patch series, and compatibility tests.
+
+* Library Assessment Matrix
+
+| Area | Candidate | Initial action | Required work | Risk |
+|------+-----------+----------------+---------------+------|
+| portable threads | Bordeaux Threads | adopt and pin | thin runtime facade; test locks, conditions, semaphores, thread interruption on supported Lisps | low |
+| actor framework | Sento/cl-gserver | wrap, then decide fork | bounded mailboxes, supervisors, generations, readiness, capability hooks, durable-job integration | high |
+| actor remoting | sento-remoting | evaluate behind protocol port | versioned frames, authentication/TLS policy, replay boundaries, message-size and backpressure tests | high |
+| CPU parallelism | lparallel | adopt and pin | dedicated kernels, cancellation bridge, condition translation, resource metrics | low-medium |
+| HTTP client | Dexador | adopt and pin | request policy, streaming artifact sink, connection-pool ownership, typed errors, instrumentation | medium |
+| URI handling | QURI | adopt and pin | canonicalization policy and source-locator tests | low |
+| TLS | cl+ssl | adopt and pin | trust-store configuration, certificate metadata, timeout and error normalization | medium |
+| JSON | com.inuoe.jzon | adopt after conformance gate | canonical JSON, duplicate-key policy, number limits, streaming or bounded decode tests | medium |
+| HTML | Plump | adopt and pin | malformed-document fixtures, resource limits, source-location preservation | medium |
+| HTML query | lquery or explicit Plump traversal | evaluate | selector stability and dependency weight | medium |
+| XML | CXML | adopt and pin | namespace policy, entity expansion limits, streaming parsing | medium |
+| CSV | cl-csv | adopt and pin | bounded rows/fields, encoding tests, source line and column metadata | low-medium |
+| spreadsheets | ZIP plus XML stack initially | build adapter layer | XLSX package traversal, shared strings, date systems, merged cells, formulas, worksheet limits | high |
+| gzip/zlib/bzip2 | chipz | adopt and pin | streaming limits and decompression-bomb protection | low-medium |
+| ZIP and broad archives | libarchive process/FFI port initially | build process port, later CL binding | entry limits, path traversal rejection, nested archive policy, content hashes | high |
+| hashing | Ironclad | adopt and pin | per-task digest objects, approved algorithms, streaming artifact integration | low |
+| UUIDs | UUID library or runtime-native IDs | evaluate and pin | canonical byte/string form and deterministic fixture IDs | low |
+| time | local-time | adopt and pin | UTC normalization, source timezone preservation, ambiguous local-time fixtures | low |
+| regex | cl-ppcre | adopt and pin | timeout/input-size policy; avoid regex-only HTML parsing | low-medium |
+| SQLite | sqlite | adopt behind persistence port | WAL, migrations, transaction and crash tests | medium |
+| CouchDB | existing StarIntel client/runtime | reuse behind port | revision-safe writes, outbox integration, view contracts | medium |
+| LMDB | cl-lmdb candidate | benchmark only | transaction ownership, map resize, crash and portability tests | medium-high |
+| logging | log4cl or structured runtime logger | evaluate | event schema, correlation IDs, secret filtering, metrics bridge | medium |
+| testing | FiveAM and/or Rove | adopt | deterministic scheduler, property tests, crash fixtures, implementation matrix | low-medium |
+| dependency lock | Qlot or OCI-based CL tooling | choose one and pin | reproducible source graph, license inventory, SBOM, offline cache | medium |
+| process control | UIOP plus runtime process port | wrap and extend | ceilings, cancellation, process groups, protocol framing, stderr capture | medium-high |
+| PDF text | pdftotext/Poppler process port initially | build process adapter | page mapping, metadata, timeout, malformed files, image-only detection | high |
+| browser | Playwright-compatible external worker | build process adapter | replayable capture bundle, network allowlist, resource limits, deterministic result protocol | high |
+| OCR | external worker only after review | deferred | confidence, page coordinates, language packs, reproducibility | high |
+
+* Primary Library Findings
+
+** Bordeaux Threads
+
+Bordeaux Threads intentionally provides a small portable layer for threads, locks, semaphores, and condition variables. It does not attempt to own queues, mailboxes, futures, or thread pools.
+
+Decision: use it as the lowest portable concurrency layer. Do not add StarLang semantics directly to Bordeaux Threads.
+
+Upstream: =https://github.com/sionescu/bordeaux-threads=
+
+** Sento/cl-gserver
+
+Sento already supplies actor references, ask/tell messaging, shared and pinned dispatchers, routers, agents, finite-state machines, event streams, tasks, futures, and optional remoting.
+
+The documented default actor-system dispatcher is shared, while pinned dispatchers exist for actors that require a dedicated thread. Long-running work should be moved off ordinary actor dispatcher threads. The documented default mailbox queue is unbounded.
+
+Those are useful foundations, but the Franklin runtime requires stronger operational semantics than the public API presently demonstrates:
+
+- bounded mailbox declaration for every actor
+- explicit reject, drop, backpressure, spill, and quarantine policies
+- parent-child supervisor trees
+- one-for-one, one-for-all, and rest-for-one strategies
+- restart intensity windows and permanent degradation
+- actor generation in references and messages
+- readiness after durable replay
+- durable-job hooks independent of mailboxes
+- lease and fencing integration
+- capability and manifest enforcement
+- stable health and lifecycle event contracts
+
+Decision: first implement =star-sento-compat= as a narrow facade and conformance suite. Submit generic fixes upstream. Fork only if the required semantics cannot be expressed or maintained without invasive private-API coupling.
+
+Potential fork name: =star-sento=, preserving Apache-2.0 attribution and upstream history.
+
+Upstream: =https://github.com/mdbergmann/cl-gserver=
+
+** lparallel
+
+lparallel supplies queues, futures, task submission, priorities, timeouts, and parallel computation support.
+
+Decision: use dedicated kernels for CPU-bound parsers, hashing, geometry processing, and normalization batches. Actor control dispatchers must not execute those workloads directly.
+
+Upstream: =https://github.com/sharplispers/lparallel=
+
+** Dexador, QURI, and cl+ssl
+
+Dexador provides Common Lisp HTTP requests with connection reuse, redirect handling, streaming, timeouts, and typed HTTP conditions. QURI provides URI parsing and manipulation. cl+ssl supplies TLS bindings.
+
+Decision: adopt behind =star-http-port=. The port owns:
+
+- request and redirect bounds
+- host policy and DNS binding
+- streaming directly into artifact staging
+- response byte ceilings
+- normalized timeout and TLS conditions
+- content-decoding policy
+- connection-pool lifetime
+- instrumentation
+- no automatic retry outside the durable attempt protocol
+
+Upstreams:
+
+- =https://github.com/fukamachi/dexador=
+- =https://github.com/fukamachi/quri=
+- =https://github.com/cl-plus-ssl/cl-plus-ssl=
+
+** com.inuoe.jzon
+
+The JSON runtime needs strict parsing, predictable numeric behavior, bounded nesting and size, duplicate-key policy, and deterministic canonical serialization.
+
+Decision: use jzon if it passes the StarLang canonical-JSON and hostile-input suite across supported Common Lisp implementations. Keep the wire-format implementation behind a port so another parser can be substituted.
+
+Upstream: =https://github.com/Zulu-Inuoe/jzon=
+
+** Plump and CXML
+
+Plump is suitable for lenient HTML parsing. CXML is suitable for standards-oriented XML processing.
+
+Decision: use separate HTML and XML ports. Apply input bounds, disable dangerous entity behavior, preserve source positions where available, and never parse HTML with regexes alone.
+
+Upstreams:
+
+- =https://github.com/Shinmera/plump=
+- =https://github.com/sharplispers/cxml=
+
+** cl-csv
+
+cl-csv supports streaming reads and quoted multiline fields.
+
+Decision: adopt behind a tabular-source port with explicit delimiter, encoding, row, field, and cell-size limits. Preserve row and column locators in normalized provenance.
+
+Upstream: =https://github.com/AccelerationNet/cl-csv=
+
+** Spreadsheet gap
+
+A production XLSX reader with the required hostile-input limits, provenance locators, date semantics, formula handling, and worksheet metadata is not accepted merely because a package can return cell values.
+
+Initial design:
+
+1. open the XLSX package through a bounded archive port
+2. parse workbook relationships and worksheets with CXML
+3. resolve shared strings and styles
+4. preserve workbook, worksheet, row, and cell coordinates
+5. distinguish stored values from formulas and calculated caches
+6. handle both Excel date systems
+7. expose merged-cell and hidden-sheet metadata
+8. reject excessive entries, dimensions, nesting, and decompression ratios
+
+This should become a reusable =star-xlsx= ASDF system rather than Franklin-specific code.
+
+** Archive gap
+
+chipz handles compressed streams but is not the complete policy layer for ZIP, TAR, 7z, nested archives, path safety, and entry enumeration.
+
+Initial decision: use a supervised libarchive process port or narrow CFFI binding. Build a pure Common Lisp archive implementation only if conformance, deployment, or licensing evidence justifies the cost.
+
+** PDF gap
+
+Common Lisp PDF generation libraries do not solve reliable text and layout extraction.
+
+Initial decision: use a Poppler =pdftotext= process adapter with page-aware output and metadata. Mark image-only pages =ocr-required=. A future Common Lisp Poppler binding may replace the process boundary after the actor protocol and fixtures stabilize.
+
+** Browser gap
+
+A browser is a separate capability domain, not an ordinary library call.
+
+Initial decision: run a Playwright-compatible worker as a supervised process behind versioned request/result frames. Capture final HTML, selected responses, screenshots where required, console errors, redirects, and a network manifest. Browser workers cannot write canonical ledgers.
+
+* New Reusable Common Lisp Systems
+
+The following systems should be built in the new StarLang repository.
+
+** =star-actor-protocol=
+
+Owns versioned message envelopes, immutable revision identifiers, command/event/result/checkpoint schemas, typed failures, cancellation, correlation, idempotency, job/attempt separation, lease generations, and fencing tokens.
+
+** =star-supervisor=
+
+Owns child specifications, startup order, one-for-one, one-for-all, rest-for-one, restart intensity, generation-aware references, readiness, degradation, and lifecycle events.
+
+** =star-mailbox=
+
+Owns bounded queues and overload policies. It may adapt Sento queues but must expose implementation-neutral semantics and metrics.
+
+** =star-journal=
+
+Owns durable jobs, append-only events, replay, deduplication, checkpoints, materialized state hashes, compaction policy, and storage ports.
+
+** =star-lease=
+
+Owns rate limits, concurrency leases, generations, fencing, expiry, renewal, host/vendor/tenant/key scopes, and circuit-breaker state.
+
+** =star-capability=
+
+Owns network, DNS, filesystem, artifact, process, credential, clock, random, and canonical-write grants. Retrieved content cannot expand capabilities.
+
+** =star-artifact=
+
+Owns staging, atomic commit, content addressing, hashes, metadata, retention class, artifact references, and non-retained-source records.
+
+** =star-adapter-sdk=
+
+Owns adapter manifests, source-family capabilities, bounded request APIs, streaming artifact sinks, parser warnings, checkpoint contracts, typed results, and deterministic fake adapters.
+
+** =star-http-port=
+
+Wraps Dexador/QURI/cl+ssl with StarLang policies and typed conditions.
+
+** =star-process-port=
+
+Owns subprocess framing, ceilings, cancellation, process groups, environment allowlists, stderr handling, and crash classification.
+
+** =star-xlsx=
+
+Provides bounded, provenance-preserving XLSX extraction.
+
+** =star-canonical-json=
+
+Owns canonical JSON serialization and parser conformance independent of the selected JSON library.
+
+** =starlang-compiler=
+
+Parses StarLang, validates manifests and authority ownership, produces normalized IR, generates Common Lisp systems, emits conformance fixtures, and rejects unbounded or capability-invalid designs.
+
+** =starlang-runtime=
+
+Assembles the protocol, supervisors, mailboxes, journal, leases, capabilities, adapters, health, and generated bindings into the host runtime.
+
+* Fork Decision Gates
+
+A fork is permitted only when all conditions hold:
+
+1. the missing semantic is generic and required by more than Franklin
+2. a wrapper cannot implement it without private-API coupling or semantic races
+3. an upstream issue or patch has been attempted when the project is maintained
+4. the fork has a conformance suite and migration path
+5. license obligations are recorded
+6. a maintainer is assigned
+7. the fork does not absorb Franklin-specific policy
+
+* Dependency Reproducibility
+
+The runtime repository must contain:
+
+- exact source revisions
+- locked transitive dependencies
+- license inventory
+- source archive hashes
+- supported Lisp implementation matrix
+- deterministic build entry point
+- offline dependency cache procedure
+- generated software bill of materials
+- upstream/fork provenance file
+- patch series for every vendored or forked dependency
+
+Target implementations:
+
+- SBCL as the production baseline
+- CCL only if current platform support and tests remain viable
+- ECL or ABCL only after the core conformance suite identifies a real deployment requirement
+
+Portability claims require CI evidence. The initial runtime may be SBCL-first while preserving implementation ports.
+
+* Effort Estimate
+
+These are engineering planning ranges, not delivery guarantees.
+
+| Workstream | Engineer-weeks | Notes |
+|------------+----------------+-------|
+| protocol correction and conformance model | 3-5 | revision IDs, authorities, job/attempt split, fixtures |
+| StarLang actor surface and compiler extensions | 6-10 | parser, IR, validation, CL generation, diagnostics |
+| Sento compatibility layer and runtime audit | 3-5 | API facade, deterministic tests, instrumentation |
+| bounded mailbox and supervision runtime | 6-10 | strategies, generations, readiness, overload tests |
+| journal, replay, idempotency, cancellation | 6-10 | storage ports, crash recovery, state hashes |
+| leases, fencing, rate limits, circuit breakers | 4-7 | attempt protocol and concurrency scopes |
+| artifact and provenance spine | 5-8 | staging, commit, hashes, retrieval events |
+| generic HTTP/HTML/JSON/XML/CSV adapters | 6-10 | streaming, limits, parser locators |
+| ArcGIS, OGC, feeds, and static-directory adapters | 5-8 | pagination and reconciliation |
+| XLSX reusable library | 5-9 | package/XML semantics and hostile fixtures |
+| PDF and browser process adapters | 5-8 | framing, capture bundles, resource limits |
+| Franklin source discovery and profile review | 8-14 | components, routes, vendors, history |
+| Franklin source-specific adapter semantics | 8-14 | depends on discovered systems |
+| normalization and reconciliation families | 10-16 | eight data-family normalizers |
+| CI, implementation matrix, fault injection, observability | 8-12 | continuous across all slices |
+
+A credible non-production Franklin pilot is approximately 4-6 calendar months for a focused team with parallel workstreams. A production-quality reusable runtime plus full Franklin route coverage is approximately 9-15 calendar months for a small experienced team. A single engineer should expect longer because compiler, runtime, adapters, source research, and operations cannot all progress in parallel.
+
+* Recommended Staffing Shape
+
+- one StarLang/compiler and protocol engineer
+- one actor runtime and persistence engineer
+- one adapter and document-processing engineer
+- one Franklin source researcher/data engineer
+- shared testing/operations responsibility
+
+A two-person team can execute the plan by reducing parallelism. The design must not compensate for limited staffing by deleting replay, provenance, independent review, or bounded-execution requirements.
+
+* Contribution Strategy for the Common Lisp Ecosystem
+
+1. Publish narrow ASDF systems rather than one monolith.
+2. Write implementation-neutral conformance suites.
+3. Submit generic bug fixes upstream first.
+4. Document real production workloads and failure fixtures.
+5. Keep public APIs small and stable.
+6. Provide Roswell and Nix development entry points.
+7. Release libraries independently when they are useful outside StarIntel.
+8. Avoid branding generic forks as Franklin-specific tools.
+9. Preserve licenses and contributor history.
+10. Maintain examples that do not require StarIntel infrastructure.
+
+* Recommended Decision
+
+Adopt mature low-level libraries. Build the missing durable actor semantics as new, reusable Common Lisp systems. Wrap Sento first and fork only after the conformance suite demonstrates that a compatibility layer is insufficient.
+
+The largest effort is not HTTP or parsing. It is the correctness layer connecting StarLang declarations to bounded supervision, durable attempts, revisioned authority state, raw evidence, provenance, replay, and independent coverage review.

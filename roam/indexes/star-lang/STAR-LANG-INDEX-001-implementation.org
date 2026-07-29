@@ -6,7 +6,7 @@
 #+status: ACTIVE
 #+filetags: :starintel:index:star-lang:implementation:common-lisp:active:
 #+created: [2026-07-26 Sun]
-#+last_modified: [2026-07-26 Sun]
+#+last_modified: [2026-07-28 Tue]
 
 * Final Language Decision
 
@@ -20,15 +20,36 @@ The language and architecture decision is final. The implementation remains acti
 
 - [[file:../../design/star-lang/STAR-LANG-001-common-lisp-host-portable-manifest.org][STAR-LANG-001 Final Common Lisp Architecture]]
 
+* Design Under Review
+
+- [[file:../../design/star-lang/STAR-LANG-002-durable-actor-runtime.org][STAR-LANG-002 Durable Actor Runtime]]
+
+=STAR-LANG-002= extends the approved Common Lisp host with bounded actor mailboxes, supervision strategies, durable jobs, replay, lease fencing, capabilities, artifact custody, process isolation, and compiler-generated actor systems. It does not reverse the Common Lisp-only decision.
+
 * Active Implementation
 
 - [[file:../../implement/star-lang/STAR-LANG-001-common-lisp-host-portable-manifest.org][STAR-LANG-001 Common Lisp Implementation Work]]
 - [[https://github.com/lost-rob0t/starintel-auto-research/issues/47][Issue #47: Finish Star-Lang Common Lisp implementation hardening]]
 
-* Decision Record
+* Research Basis
 
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-018-comparative-gate-and-language-selection.org][STAR-LANG-RESEARCH-018 Final Common Lisp Selection]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-019-common-lisp-library-gap-analysis.org][STAR-LANG-RESEARCH-019 Common Lisp Library Gap Analysis]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-001-common-lisp-comparative-baseline.org][STAR-LANG-RESEARCH-001 Common Lisp Baseline]]
+
+The library audit recommends adopting mature Common Lisp primitives, wrapping Sento behind a compatibility port, building the missing durable actor systems as reusable ASDF libraries, and forking only after conformance tests prove a wrapper is insufficient.
+
+* First Conformance Application
+
+- [[file:../../design/government-data/STAR-GOVDATA-DESIGN-004-franklin-county-starlang-actor-system.org][STAR-GOVDATA-DESIGN-004 Franklin County StarLang Actor System]]
+
+Franklin County is the first complete actor-runtime conformance target. Franklin-specific source profiles and policy remain outside the generic runtime.
+
+* Repository Boundary
+
+The reusable compiler and runtime should move into a dedicated repository, provisionally =lost-rob0t/star-lang=, after repository name, license, maintainers, package names, dependency locking, CI, and release policy are approved.
+
+=starintel-auto-research= remains the design and evidence repository. =starintel-server= later consumes released runtime systems as a deployment host.
 
 * Implementation Artifacts
 
@@ -43,14 +64,23 @@ Generated Python and TypeScript bindings are permitted boundary artifacts. They 
 * Current Work Order
 
 1. keep the Common Lisp workflow green;
-2. make source spans and origin chains first-class compiler data;
-3. package the Common Lisp implementation as explicit ASDF systems;
-4. replace shell-backed digest and retrieval calls with injected Common Lisp ports;
-5. add one top-level Common Lisp test runner;
-6. freeze canonical manifest fixtures;
-7. validate direct and cl-gserver lifecycle equivalence;
-8. add end-to-end replay and recovery tests;
-9. extract stable Common Lisp packages after boundaries stabilize.
+2. land the revision-complete government-data protocol amendment;
+3. make source spans and origin chains first-class compiler data;
+4. package the Common Lisp implementation as explicit ASDF systems;
+5. define =star-actor-protocol= and normalized actor IR;
+6. add the deterministic actor runtime and fake ports;
+7. implement =star-sento-compat= without private API coupling;
+8. implement bounded mailboxes and supervisor strategies;
+9. implement journal, replay, idempotency, cancellation, leases, and fencing;
+10. implement capability, artifact, adapter, HTTP, and process ports;
+11. replace shell-backed digest and retrieval calls with injected Common Lisp ports;
+12. add one top-level Common Lisp test runner;
+13. freeze canonical manifest and wire fixtures;
+14. validate direct and Sento-backed lifecycle equivalence;
+15. execute the Franklin fake deployment conformance suite;
+16. create the dedicated StarLang runtime repository after approval;
+17. add end-to-end replay and recovery tests;
+18. extract and release stable Common Lisp packages after boundaries stabilize.
 
 * Invariants
 
@@ -60,11 +90,15 @@ Generated Python and TypeScript bindings are permitted boundary artifacts. They 
 - Normalized IR does not contain cl-gserver object types.
 - Versioned JSON is an interchange format, not another implementation.
 - Direct execution works without cl-gserver.
-- Actor systems remain optional Common Lisp adapters.
+- Sento is accessed through a Common Lisp compatibility port.
+- Every generated actor has bounded mailbox and restart declarations.
+- Durable jobs are not mailbox contents.
+- Retry creates a new lease-bound attempt.
+- Capability grants come from manifests, never retrieved content.
 - Research nodes never extend the StarIntel schema.
 - Auto-dig and Quasar consume contracts rather than defining them.
 - Alternate implementation languages remain DENIED.
 
 * Completion Gate
 
-Move this index to =APPROVED= only after the implementation tracker is complete and the Common Lisp workflow validates the final package layout.
+Move this index to =APPROVED= only after the implementation tracker is complete, the Common Lisp workflow validates the final package layout, the durable actor conformance suite passes, and the Franklin fake deployment replays to the same authority state hash.

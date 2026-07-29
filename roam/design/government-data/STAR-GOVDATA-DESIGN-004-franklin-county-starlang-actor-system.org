@@ -1,0 +1,710 @@
+:PROPERTIES:
+:ID:       starintel-govdata-design-004-franklin-county-starlang-actors
+:END:
+#+title: STAR-GOVDATA-DESIGN-004 Franklin County StarLang Actor System
+#+description: Define a complete, supervised, revision-aware StarLang actor system for discovering, acquiring, preserving, normalizing, reviewing, and refreshing public Franklin County government data.
+#+status: REVIEW
+#+filetags: :starintel:design:government-data:franklin-county:ohio:starlang:common-lisp:actors:provenance:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define the Franklin County StarLang actor system           | Pending               |
+
+* Related Nodes
+
+- [[file:STAR-GOVDATA-DESIGN-001-ohio-coverage-program.org][STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program]]
+- [[file:STAR-GOVDATA-DESIGN-002-ohio-source-profile-contract.org][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]]
+- [[file:STAR-GOVDATA-DESIGN-003-ohio-adapter-pack.org][STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack]]
+- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-004-revisioned-government-data-actor-protocol.org][STAR-RESEARCH-PIPELINE-004 Revisioned Government Data Actor Protocol]]
+- [[file:../../design/star-lang/STAR-LANG-002-durable-actor-runtime.org][STAR-LANG-002 Durable Actor Runtime]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-019-common-lisp-library-gap-analysis.org][STAR-LANG-RESEARCH-019 Common Lisp Library Gap Analysis]]
+
+* REVIEW Objective
+
+Build the best possible actor system for the complete Franklin County government-data pilot, keyed by Census GEOID =39049=.
+
+The system must discover and continuously acquire every applicable public route defined by the Ohio coverage contract. It must preserve raw evidence, normalize data without destroying source meaning, expose uncertainty and gaps, and support replay and historical reconciliation.
+
+The later violent-offender website is explicitly downstream and out of scope. This design is source-neutral. It does not classify people, determine dangerousness, rank individuals, or define publication rules.
+
+* REVIEW Language Decision
+
+Use StarLang for the complete application-level actor system:
+
+- domain and supervision declarations
+- actor definitions
+- typed commands, events, results, and checkpoints
+- authority ownership
+- capability manifests
+- routing and dispatcher declarations
+- restart and overload policy
+- workflows and acceptance gates
+- adapter manifests and source-family bindings
+- deterministic fixtures
+
+Compile StarLang to Common Lisp. Use Common Lisp libraries for runtime primitives, network protocols, parsing, compression, hashing, persistence, and process control.
+
+"StarLang entirely" therefore means that the Franklin application is authored and reviewed in StarLang. It does not mean reimplementing TLS, HTTP, ZIP, XML, PDF extraction, or operating-system process primitives in the language surface.
+
+* REVIEW Repository Decision
+
+The design and evidence remain in =starintel-auto-research=.
+
+The reusable compiler and runtime should live in a new repository, provisionally named =lost-rob0t/star-lang=, with independently versioned ASDF systems. Franklin-specific profiles and source adapters remain separate from the generic runtime.
+
+=starintel-server= later consumes released StarLang runtime systems and hosts the production government-data domain. It must not become the source repository for the language compiler.
+
+Creating the runtime repository is an implementation prerequisite, not a prerequisite for completing this design.
+
+* REVIEW Scope
+
+** Included
+
+- Franklin County government and county components
+- countywide systems delegated to vendors
+- county courts and clerks where public access is authorized
+- county offices, boards, commissions, authorities, and dependent components
+- state systems that index or publish Franklin County records
+- official websites, APIs, feeds, bulk files, GIS services, document repositories, and public vendor systems
+- current and historical discovery
+- raw artifact custody and provenance
+- route applicability and coverage assessment
+- independent review
+- refresh, migration detection, replay, and reconciliation
+
+** Deferred
+
+- public website implementation
+- offender classification or scoring
+- identity resolution beyond what a source explicitly publishes
+- facial recognition
+- private-data brokers
+- bypass of authentication, CAPTCHA, fees, or access controls
+- automatic public-records request sending
+- automatic publication of person records
+- production deployment
+
+* REVIEW Domain Identity
+
+#+begin_example
+/user/domains/government-data/ohio/franklin-county
+#+end_example
+
+Stable jurisdiction key:
+
+#+begin_src lisp
+(jurisdiction
+  :star-id "gov:us:oh:franklin-county"
+  :census-geoid "39049"
+  :state-fips "39"
+  :county-fips "049"
+  :canonical-name "Franklin County"
+  :jurisdiction-kind :county
+  :valid-from nil
+  :valid-through nil)
+#+end_src
+
+The domain is one supervised deployment. A source, office, court, route, record family, or person does not receive a permanent operating-system actor merely because it exists. Durable records identify them; bounded jobs select them.
+
+* REVIEW Actor Topology
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+component "Franklin Domain Supervisor" as Root
+component "Control" as Control
+component "Identity" as Identity
+component "Discovery" as Discovery
+component "Acquisition" as Acquisition
+component "Evidence" as Evidence
+component "Normalization" as Normalize
+component "Assessment" as Assessment
+component "Operations" as Operations
+
+Root --> Control
+Root --> Identity
+Root --> Discovery
+Root --> Acquisition
+Root --> Evidence
+Root --> Normalize
+Root --> Assessment
+Root --> Operations
+
+Control --> "Ingress"
+Control --> "Run Coordinator"
+Control --> "Manifest Authority"
+Control --> "Policy Snapshot Authority"
+
+Identity --> "Jurisdiction Identity Authority"
+Identity --> "Component Registry Authority"
+Identity --> "Domain Candidate Resolver"
+Identity --> "Delegation Verifier"
+
+Discovery --> "Search Plan Authority"
+Discovery --> "Route Planner"
+Discovery --> "Web Surface Enumerator"
+Discovery --> "Platform Fingerprint Pool"
+Discovery --> "Historical Source Locator"
+Discovery --> "Source Profile Proposal Pool"
+
+Acquisition --> "Adapter Registry Authority"
+Acquisition --> "Acquisition Dispatcher"
+Acquisition --> "Rate and Lease Authority"
+Acquisition --> "Generic Adapter Pools"
+Acquisition --> "Ohio Adapter Pools"
+Acquisition --> "Process Worker Bridge"
+
+Evidence --> "Raw Artifact Authority"
+Evidence --> "Retrieval Event Authority"
+Evidence --> "Content Hash Worker Pool"
+Evidence --> "Artifact Metadata Extractor"
+Evidence --> "Provenance Validator"
+
+Normalize --> "Normalization Dispatcher"
+Normalize --> "Identity and Organization Normalizer"
+Normalize --> "Meeting and Legislation Normalizer"
+Normalize --> "Finance and Procurement Normalizer"
+Normalize --> "Property and Land Normalizer"
+Normalize --> "Court and Docket Normalizer"
+Normalize --> "Election Normalizer"
+Normalize --> "Safety and Justice Normalizer"
+Normalize --> "Permit and Planning Normalizer"
+Normalize --> "Records and Retention Normalizer"
+
+Assessment --> "Route Assessment Authority"
+Assessment --> "Applicability Decision Authority"
+Assessment --> "Independent Review Authority"
+Assessment --> "Coverage Ledger Authority"
+Assessment --> "Gap Authority"
+
+Operations --> "Refresh Scheduler"
+Operations --> "Migration Detector"
+Operations --> "Reconciliation Auditor"
+Operations --> "Quarantine Authority"
+Operations --> "Health and Metrics Actor"
+@enduml
+#+end_src
+
+* REVIEW Actor Catalog
+
+** Control actors
+
+*** Franklin Domain Supervisor
+
+Owns startup order, child generations, restart strategy, readiness, degradation, and terminal shutdown.
+
+Uses =rest-for-one= across authority groups and =one-for-one= inside worker pools. A failed authority does not silently reuse stale handles or lease generations.
+
+*** Franklin Ingress
+
+Validates externally submitted StarLang commands and capability scopes. It rejects unknown schema versions, missing revision bindings, unbounded jobs, and direct canonical-write requests from adapters.
+
+*** Franklin Run Coordinator
+
+Creates immutable run revisions, expands the selected route plan into durable jobs, tracks cancellation, and reports run-level completion without treating mailbox state as durable work state.
+
+*** Manifest Authority
+
+Serializes actor, adapter, capability, normalization, and source-family manifest revisions. A running attempt binds exact manifest hashes.
+
+*** Policy Snapshot Authority
+
+Stores the exact applicability, acquisition, retention, review, and publication-neutral policy revisions used by each run.
+
+** Identity actors
+
+*** Jurisdiction Identity Authority
+
+Is the sole writer for Franklin County's canonical government identity and validity intervals.
+
+*** Component Registry Authority
+
+Owns county departments, elected offices, boards, commissions, courts, clerks, authorities, dependent organizations, predecessors, successors, and unresolved components.
+
+*** Domain Candidate Resolver
+
+Produces candidate official domains, subdomains, redirects, certificate names, archived domains, and vendor links. It cannot verify them.
+
+*** Delegation Verifier
+
+Confirms whether an external vendor deployment is officially delegated by an authorized county or component source. Verification requires evidence and validity dates.
+
+** Discovery actors
+
+*** Search Plan Authority
+
+Owns immutable route and subfamily search plans. Each plan records required queries, paths, discovery techniques, bounds, expiry, and prior negative findings.
+
+*** Route Planner
+
+Maps the sixteen Ohio route requirements to applicable Franklin components and expected source families.
+
+*** Web Surface Enumerator
+
+Enumerates homepages, robots files, sitemaps, feeds, calendars, developer pages, data inventories, downloads, linked portals, and machine-readable metadata under fixed depth and request limits.
+
+*** Platform Fingerprint Pool
+
+Detects ArcGIS, OGC, CKAN, Socrata, Legistar, Granicus, CivicClerk, Municode, eCode, ASP.NET forms, static directory indexes, embedded JSON applications, document repositories, and unknown platform signatures.
+
+*** Historical Source Locator
+
+Finds retired domains, archive captures, predecessor systems, old path structures, historical bulk files, and migration evidence.
+
+*** Source Profile Proposal Pool
+
+Combines discovery evidence into immutable source-profile and deployment-revision proposals. It cannot approve them.
+
+** Acquisition actors
+
+*** Adapter Registry Authority
+
+Owns the exact adapter manifests eligible for Franklin runs, including capability grants, supported source families, limits, parser versions, and runtime hashes.
+
+*** Acquisition Dispatcher
+
+Routes durable job revisions to compatible adapters. It may not invent capabilities or loosen job limits.
+
+*** Rate and Lease Authority
+
+Owns host, vendor, tenant, credential, and source concurrency. Every attempt receives a lease generation and fencing token. Results from expired or superseded leases are rejected.
+
+*** Generic Adapter Pools
+
+Provide reusable HTTP metadata, HTML, feed, JSON, XML, CSV, spreadsheet, PDF, ArcGIS, OGC, static-directory, ASP.NET-form, embedded-JSON, browser-process, and archive adapters.
+
+*** Ohio Adapter Pools
+
+Implement stable Ohio-specific semantics only when generic adapters cannot express pagination, identifiers, temporal meaning, or record linkage correctly.
+
+*** Process Worker Bridge
+
+Runs browser, PDF extraction, OCR, archive, and other dependency-heavy tools as supervised subprocesses with explicit stdin/stdout protocols, resource ceilings, and no direct canonical-ledger access.
+
+** Evidence actors
+
+*** Raw Artifact Authority
+
+Is the sole committer of immutable raw artifacts and non-retained-source records. Atomic commit precedes normalization.
+
+*** Retrieval Event Authority
+
+Owns request/response metadata, timestamps, locators, redirects, status, headers, byte counts, truncation, lease identity, and source-profile revision bindings.
+
+*** Content Hash Worker Pool
+
+Calculates approved cryptographic hashes and deduplication fingerprints without deciding canonical identity.
+
+*** Artifact Metadata Extractor
+
+Extracts content type, encoding, archive members, document metadata, page count, row count, geometry metadata, and parser warnings.
+
+*** Provenance Validator
+
+Rejects normalized records that cannot resolve to exact retrieval events, artifacts or explicit non-retained-source records, locators, hashes, adapters, and source revisions.
+
+** Normalization actors
+
+Each normalizer emits candidate StarIntel records and relations. None writes canonical government or assessment state directly.
+
+*** Identity and Organization Normalizer
+
+Normalizes offices, departments, boards, authorities, officials as explicitly published, organizational relationships, validity intervals, and source-provided identifiers.
+
+*** Meeting and Legislation Normalizer
+
+Handles agendas, packets, minutes, calendars, ordinances, resolutions, votes, recordings, and agenda-item relationships.
+
+*** Finance and Procurement Normalizer
+
+Handles budgets, audits, checkbooks, payroll, debt, grants, solicitations, bids, awards, contracts, purchase orders, vendors, and payments.
+
+*** Property and Land Normalizer
+
+Handles parcels, assessment, tax, recorder indexes, deeds where publicly available, ownership fields as source-published, and geospatial crosswalks.
+
+*** Court and Docket Normalizer
+
+Handles courts, case indexes, dockets, filings, dispositions, schedules, opinions, and clerk metadata without inferring guilt or offender status.
+
+*** Election Normalizer
+
+Handles offices, candidates, committees, campaign-finance records, precincts, ballots, and results.
+
+*** Safety and Justice Normalizer
+
+Handles public incident, jail, inspection, enforcement, and justice-system records while preserving source status, allegation, charge, disposition, and temporal distinctions.
+
+*** Permit and Planning Normalizer
+
+Handles permits, licenses, planning cases, zoning, development, environmental records, inspections, and code-enforcement records.
+
+*** Records and Retention Normalizer
+
+Handles public-records policies, request portals, retention schedules, contacts, fees, exemptions, and response metadata.
+
+** Assessment actors
+
+*** Route Assessment Authority
+
+Is the sole writer for revisioned route assessments. An assessment binds the exact jurisdiction, route, subfamily, applicability contract, source profiles, search plan, evidence, gaps, policy snapshot, reviewer decision, and validity interval.
+
+*** Applicability Decision Authority
+
+Owns =applicable=, =not-applicable=, =unresolved=, and =superseded= decisions. =not-applicable= requires positive evidence and an expiry or validity condition.
+
+*** Independent Review Authority
+
+Reviews source verification, route coverage, negative findings, parser warnings, contradictions, and provenance without sharing the proposing actor's state or random seed.
+
+*** Coverage Ledger Authority
+
+Appends coverage events and materialized coverage views. It never reduces coverage to one boolean.
+
+*** Gap Authority
+
+Owns missing, inaccessible, ambiguous, authentication-required, fee-required, records-request-required, parser-unsupported, OCR-required, historical-gap, and source-retired gaps.
+
+** Operations actors
+
+*** Refresh Scheduler
+
+Schedules source refresh, profile re-verification, negative-finding expiry, archive checks, and full reconciliation using durable schedule revisions.
+
+*** Migration Detector
+
+Detects redirects, domain changes, vendor changes, identifier changes, path migrations, schema drift, and source retirement.
+
+*** Reconciliation Auditor
+
+Compares pages, cursors, counts, dates, hashes, archive members, geometry totals, and normalized outputs to detect silent loss or duplication.
+
+*** Quarantine Authority
+
+Owns terminally failed attempts and malformed artifacts. Quarantine records preserve bounded diagnostic context and never echo protected credentials.
+
+*** Health and Metrics Actor
+
+Reports queue depth, oldest durable job, lease pressure, throughput, error classes, replay counts, artifact lag, normalization lag, review lag, and coverage freshness.
+
+* REVIEW Proposed StarLang Surface
+
+This is a required compiler extension, not a claim that the current compiler already accepts every form.
+
+#+begin_src lisp
+(domain franklin-county-government-data
+  (:jurisdiction "gov:us:oh:franklin-county")
+  (:geoid "39049")
+  (:runtime star.actor/runtime-v1)
+  (:policy ohio-government-data/policy-v1)
+
+  (authority route-assessment
+    (:state revisioned-journal)
+    (:dispatcher :coverage)
+    (:mailbox (bounded 2048 :overflow :reject))
+    (:writes route-assessment-revision))
+
+  (authority raw-artifact
+    (:state content-addressed-artifact-store)
+    (:dispatcher :evidence)
+    (:mailbox (bounded 1024 :overflow :backpressure)))
+
+  (pool platform-fingerprint
+    (:size 16)
+    (:dispatcher :network)
+    (:restart (one-for-one :max 5 :within 60))
+    (:capabilities (network-read dns-read tls-metadata-read)))
+
+  (workflow acquire-route
+    (receive acquire-route-command/v1)
+    (bind-revisions jurisdiction profile search-plan policy adapter)
+    (persist job-revision)
+    (lease rate-and-lease)
+    (attempt selected-adapter)
+    (commit raw-artifact retrieval-event)
+    (normalize candidate-records)
+    (validate provenance)
+    (propose route-assessment)
+    (review independent-review)
+    (append coverage-event)))
+#+end_src
+
+* REVIEW Message Contracts
+
+All identifiers refer to immutable revisions unless explicitly named =logical-*=.
+
+** =franklin-command/v1=
+
+Required fields:
+
+- command ID
+- command kind
+- jurisdiction ID and revision
+- run ID and revision
+- route and subfamily
+- source-profile ID and revision where known
+- deployment ID and revision where known
+- search-plan ID and revision
+- applicability-contract revision
+- policy-snapshot revision
+- adapter-manifest revision where selected
+- fixed request, byte, object, time, depth, and concurrency bounds
+- cancellation ID
+- idempotency key
+- issued-at timestamp
+
+** =franklin-job/v1=
+
+A durable logical job. It never contains a lease ID before lease issuance.
+
+** =franklin-attempt/v1=
+
+A single execution attempt binding:
+
+- job revision
+- attempt ID
+- adapter manifest revision
+- runtime build hash
+- lease ID
+- lease generation
+- fencing token
+- start deadline
+- execution deadline
+
+** =franklin-result/v1=
+
+Binds job and attempt IDs, terminal status, artifact and retrieval-event IDs, checkpoints, counts, truncation, warnings, typed failures, and retry advice.
+
+** =franklin-event/v1=
+
+Append-only lifecycle, authority, coverage, review, migration, and health event.
+
+** =franklin-checkpoint/v1=
+
+Binds exact job, attempt, source, cursor, page, artifact, and adapter revisions. A checkpoint from an expired fencing token cannot advance durable state.
+
+* REVIEW Delivery and State Semantics
+
+- At-least-once dispatch.
+- No exactly-once claim.
+- Durable jobs exist outside actor mailboxes.
+- Mailboxes are bounded.
+- Idempotency is enforced at every authority write.
+- Every retry is a new attempt.
+- Fencing tokens prevent stale attempts from committing.
+- Raw artifact and retrieval event commit before candidate normalization.
+- Candidate records remain separate from canonical acceptance.
+- Authority state replays before readiness.
+- Cancellation uses one stable cancellation ID through all descendants.
+- Partial results require explicit truncation and checkpoint state.
+- Source retirement creates tombstones and successor links.
+
+* REVIEW Dispatcher Plan
+
+| Dispatcher | Work | Blocking permitted |
+|------------+------+--------------------|
+| =:control= | ingress, supervision, readiness, cancellation | no |
+| =:authority= | serialized authority writes | short bounded storage calls only |
+| =:network= | HTTP, DNS, feeds, APIs, downloads | yes, bounded |
+| =:parse= | HTML, JSON, XML, CSV, document parsing | CPU bounded |
+| =:evidence= | artifact commit, hashing, provenance | bounded storage and CPU |
+| =:coverage= | assessments, reviews, ledger, gaps | no network |
+| =:process= | browser, PDF, OCR, archive workers | supervised subprocess only |
+
+* REVIEW Supervision
+
+Root strategy: =rest-for-one= in this startup order:
+
+1. control and policy authorities
+2. identity authorities
+3. discovery authorities
+4. acquisition and lease authorities
+5. evidence authorities
+6. normalization pools
+7. assessment authorities
+8. operations actors
+
+Worker pools use =one-for-one=. Authority restart budgets are stricter than worker budgets. Configuration-invalid, schema-unsupported, journal-corrupt, and capability-invalid failures stop the affected subtree and degrade readiness instead of restarting indefinitely.
+
+* REVIEW Franklin Route Inventory
+
+The Franklin pilot must assess every route and every required subfamily from the Ohio applicability contract:
+
+1. official identity and delegated domains
+2. open data and bulk distributions
+3. GIS and geospatial systems
+4. legislation, charter, code, ordinances, and resolutions
+5. meetings, agendas, minutes, votes, and recordings
+6. budgets, audits, payroll, debt, grants, and finance
+7. procurement, contracts, bids, awards, and payments
+8. property, assessment, tax, recorder, deed, and land systems
+9. courts, dockets, filings, schedules, and clerk systems
+10. elections, candidates, campaign finance, precincts, and results
+11. public safety, incident, jail, inspection, and enforcement systems
+12. permits, licenses, planning, zoning, development, and environmental systems
+13. public-records portals, policies, retention, contacts, and fees
+14. feeds, alerts, sitemaps, APIs, exports, and change signals
+15. archives, retired domains, historical repositories, and migrations
+16. operational metadata for every discovered route
+
+No route reaches reviewed terminal state merely because one prominent portal was found.
+
+* REVIEW End-to-End Run
+
+1. Load exact jurisdiction, policy, applicability, actor, and adapter revisions.
+2. Replay authorities and verify readiness.
+3. Materialize the Franklin component registry.
+4. Expand all required route and subfamily plans.
+5. Discover official and delegated source candidates.
+6. Fingerprint candidate deployments.
+7. Propose revisioned source profiles.
+8. Independently verify official ownership or delegation.
+9. Create immutable acquisition jobs.
+10. Issue lease-fenced attempts.
+11. Commit raw artifacts and retrieval events.
+12. Normalize candidates by data family.
+13. Validate provenance and parser completeness.
+14. Reconcile counts, pages, cursors, dates, and hashes.
+15. Propose route applicability and coverage assessments.
+16. Independently review every terminal decision.
+17. Append coverage and gap events.
+18. Schedule refresh, expiry, migration, and reconciliation work.
+
+* REVIEW Acceptance Gates
+
+Franklin is not accepted merely because all jobs stopped running.
+
+Required gates:
+
+- every route and required subfamily has a reviewed terminal assessment revision
+- every =not-applicable= decision has evidence and expiry or validity conditions
+- every verified source binds official or delegated evidence
+- every accepted normalized record resolves to complete provenance
+- every source has current refresh and reconciliation strategy
+- no successful attempt hides truncation, stale fencing, parser warnings, or missing artifacts
+- replay from an empty mailbox and durable journal reproduces the same accepted authority state
+- authority crash after artifact commit but before normalization recovers without duplicate canonical records
+- source migration fixture creates successor links and preserves old locators
+- expired negative findings reopen discovery
+- independent review catches seeded false-positive official-domain and delegated-vendor candidates
+- no future website or offender-specific assumption is embedded in the ingestion schema
+
+* REVIEW Deterministic Fixture Set
+
+Minimum fixtures:
+
+1. official county homepage and redirect chain
+2. delegated vendor portal with county backlink
+3. look-alike vendor portal without delegation evidence
+4. ArcGIS service with pagination
+5. ArcGIS service with deleted or reordered layers
+6. static CSV replacement with same URL and new hash
+7. spreadsheet with multiple worksheets and merged cells
+8. ASP.NET form with viewstate and paging
+9. calendar feed with timezone and cancellation changes
+10. meeting packet with text PDF
+11. image-only PDF producing =ocr-required=
+12. browser-only source with replayable capture bundle
+13. HTTP 429 with retry-after
+14. host lease expiry and stale fencing token
+15. crash after raw artifact commit
+16. crash after normalization proposal
+17. duplicate delivery of one job
+18. source-profile revision supersession during a run
+19. official domain migration
+20. historical archive with missing intervals
+21. contradictory component identity candidates
+22. evidence-backed =not-applicable=
+23. expired negative finding
+24. partial route coverage with explicit gap
+25. independent reviewer rejection
+26. complete replay and state-hash comparison
+
+* REVIEW Implementation Slices
+
+** Slice 0: protocol correction
+
+- land =STAR-RESEARCH-PIPELINE-004=
+- define exact revision identifiers
+- split durable jobs from attempts
+- define lease fencing
+- add route assessment and independent review ownership
+
+** Slice 1: StarLang runtime kernel
+
+- establish the new StarLang repository
+- compile actor, authority, pool, dispatcher, message, capability, and supervision declarations to Common Lisp
+- add deterministic fake runtime
+- add bounded mailboxes and restart strategies
+
+** Slice 2: durable execution
+
+- journal, replay, idempotency, cancellation, leases, fencing, checkpoints, quarantine, readiness, and health
+
+** Slice 3: evidence spine
+
+- raw artifact store
+- retrieval events
+- hashing
+- provenance validation
+- candidate commit protocol
+
+** Slice 4: generic adapters
+
+- HTTP metadata
+- HTML and feeds
+- JSON and XML
+- CSV and spreadsheet
+- ArcGIS and OGC
+- static directories
+- ASP.NET forms
+- PDF process adapter
+- browser process adapter
+- archives
+
+** Slice 5: Franklin identity and discovery
+
+- county identity
+- component registry
+- domain and delegation verification
+- route expansion
+- platform census
+
+** Slice 6: Franklin full acquisition
+
+- all applicable routes
+- data-family normalization
+- independent review
+- coverage and gaps
+- refresh and reconciliation
+
+* REVIEW Blockers
+
+1. Parent government-data protocol is not revision-complete.
+2. Current actor runtime does not yet provide every required bounded-mailbox, OTP-style supervision, durable replay, fencing, capability, and readiness primitive.
+3. StarLang compiler does not yet expose the complete actor surface proposed here.
+4. A dedicated StarLang runtime repository does not yet exist in the connected repositories.
+5. Several document and browser formats require process adapters before pure Common Lisp replacements are justified.
+6. Franklin source profiles and applicability decisions have not yet been researched to reviewed terminal state.
+
+* REVIEW Non-Goals for Ecosystem Work
+
+Improving the Common Lisp ecosystem does not justify unnecessary rewrites.
+
+The project should:
+
+- upstream portable fixes when maintainers are receptive
+- create small reusable ASDF systems with narrow contracts
+- retain compatibility layers instead of hard forks when possible
+- fork only after a documented semantic or maintenance blocker
+- pin exact revisions and preserve licenses
+- publish deterministic conformance suites
+- avoid making Franklin-specific behavior part of generic libraries
+
+* REVIEW Decision
+
+Proceed with StarLang as the authored actor language and Common Lisp as the implementation substrate.
+
+Create the reusable runtime as an independent library repository before production implementation. Use the Franklin pilot as the first complete conformance target for supervision, durable execution, provenance, adapter isolation, revisioned review, and replay.

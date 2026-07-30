@@ -6,7 +6,7 @@
 #+status: ACTIVE
 #+filetags: :starintel:index:star-lang:implementation:common-lisp:active:
 #+created: [2026-07-26 Sun]
-#+last_modified: [2026-07-29 Wed]
+#+last_modified: [2026-07-30 Thu]
 
 * Final Language Decision
 
@@ -37,11 +37,25 @@ The real Common Lisp prototype implementation (65 files, ~15K LOC) now lives in 
 * Active Language Research
 
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-020-hygienic-macro-expansion.org][STAR-LANG-RESEARCH-020 Hygienic Macro Expansion and Language Extensibility]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
 
-This research audits the canonical =lost-rob0t/star-lang= source and proposes a closed, deterministic, hygienic macro-expansion phase. It is in =REVIEW= and does not change the approved implementation language or authorize procedural =.star= macros.
+The macro research audits the canonical =lost-rob0t/star-lang= source and proposes a closed, deterministic, hygienic macro-expansion phase. It is in =REVIEW= and does not change the approved implementation language or authorize procedural =.star= macros.
+
+The logic research adds a Common Lisp =star-logic= capability layer above the internal =star-prolog= library and the proposed LISA-derived =star-rules= engine. =reason= forms compile to closed normalized logic-call nodes. Backend selection occurs before execution and is pinned for replay.
+
+* Logic Runtime Decision
+
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
+- [[file:../../research/star-server/LISA-RESEARCH-001-performance-and-feature-extension.org][LISA-RESEARCH-001 LISA Performance and Feature Extension]]
+- [[file:../../design/star-server/STAR-ADR-002-hybrid-logic-runtime-model.org][STAR-ADR-002 Hybrid Logic Runtime Model]]
+- [[file:../../research/star-server/STAR-RESEARCH-004-internal-prolog-server-library-swi-nprolog.org][STAR-RESEARCH-004 Internal Prolog Server Library]]
+
+SWI-Prolog is the initial default for recursive, tabled, constrained, and named-query reasoning. N-Prolog remains an explicitly pinned compatibility backend. The current LISA engine is not approved for production routing; the proposed =star-rules= engine must pass the allocation, p99 latency, proof, isolation, and deterministic replay gates before Star-Lang selects it for incremental forward chaining.
 
 * Decision Record
 
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
+- [[file:../../design/star-server/STAR-ADR-002-hybrid-logic-runtime-model.org][STAR-ADR-002 Hybrid Logic Runtime Model]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-020-hygienic-macro-expansion.org][STAR-LANG-RESEARCH-020 Hygienic Macro Expansion and Language Extensibility]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-018-comparative-gate-and-language-selection.org][STAR-LANG-RESEARCH-018 Final Common Lisp Selection]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-001-common-lisp-comparative-baseline.org][STAR-LANG-RESEARCH-001 Common Lisp Baseline]]
@@ -68,7 +82,11 @@ Generated Python and TypeScript bindings are permitted boundary artifacts. They 
 8. freeze canonical manifest and expansion fixtures;
 9. validate direct and cl-gserver lifecycle equivalence;
 10. add end-to-end replay and recovery tests;
-11. extract stable Common Lisp packages after boundaries stabilize.
+11. extract stable Common Lisp packages after boundaries stabilize;
+12. add the normalized =logic-call= IR and canonical JSON schema;
+13. implement the =star-logic= runtime port and deterministic backend selector;
+14. connect =star-logic.prolog= to =star-prolog= without exposing native Prolog terms;
+15. add common logic conformance and performance fixtures before enabling =star-rules= routing.
 
 * Invariants
 
@@ -80,9 +98,11 @@ Generated Python and TypeScript bindings are permitted boundary artifacts. They 
 - Macro expansion is hygienic, deterministic, resource-bounded, and source-traceable.
 - Macros expand completely before semantic compilation and do not enter runtime IR.
 - Normalized IR does not contain cl-gserver object types.
+- Normalized IR does not contain native Prolog terms, LISA objects, sessions, sockets, or engine handles.
 - Versioned JSON is an interchange format, not another implementation.
 - Direct execution works without cl-gserver.
 - Actor systems remain optional Common Lisp adapters.
+- Logic backends are selected and pinned before execution; runtime load does not change engine semantics.
 - Research nodes never extend the StarIntel schema.
 - Auto-dig and Quasar consume contracts rather than defining them.
 - Alternate implementation languages remain DENIED.

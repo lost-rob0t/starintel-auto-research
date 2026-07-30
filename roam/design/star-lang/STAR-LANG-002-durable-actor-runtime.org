@@ -7,9 +7,10 @@
 #+filetags: :starintel:design:star-lang:common-lisp:actors:runtime:supervision:journal:capabilities:
 #+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
 
-| Version | Date       | Description of change                                      | Did nsaspy approve it |
-|---------+------------+------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-28 | Define the reusable durable StarLang actor runtime         | Pending               |
+| Version | Date       | Description of change                                                      | Did nsaspy approve it |
+|---------+------------+----------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define the reusable durable StarLang actor runtime                         | Pending               |
+| 0.1.1   | 2026-07-30 | Define durable artifact-delivery intents, outbox recovery, and conformance | Pending               |
 
 * Related Nodes
 
@@ -32,7 +33,7 @@ The runtime must make the safe and correct behavior declarative:
 - authority ownership
 - lease fencing
 - capabilities
-- raw artifact commit
+- raw artifact commit and durable evidence delivery
 - cancellation
 - readiness and degradation
 - deterministic testing
@@ -133,13 +134,13 @@ Runtime --> Process
 1. Parse StarLang source into lossless syntax objects.
 2. Resolve imports, packages, schema names, actor names, and authority ownership.
 3. Lower to normalized, versioned IR.
-4. Validate boundedness, capabilities, dispatcher rules, message revisions, and authority writes.
+4. Validate boundedness, capabilities, dispatcher rules, message revisions, authority writes, and durable-delivery obligations.
 5. Compute deterministic manifest and policy hashes.
 6. Generate portable Common Lisp forms and ASDF systems.
 7. Generate canonical JSON or binary wire bindings where declared.
 8. Generate deterministic fake-runtime fixtures.
-9. Generate topology, message, capability, and dependency documentation.
-10. Reject builds that contain unbounded external work or ambiguous canonical writers.
+9. Generate topology, message, capability, dependency, and recovery documentation.
+10. Reject builds that contain unbounded external work, ambiguous canonical writers, or artifact workflows without durable downstream delivery.
 
 * REVIEW Normalized IR
 
@@ -162,6 +163,7 @@ The IR must represent:
 - readiness dependencies
 - health metrics
 - adapter and port bindings
+- artifact commit, delivery-intent, outbox, acknowledgement, and recovery policy
 - implementation constraints
 - generated test obligations
 
@@ -188,6 +190,9 @@ The compiler must reject:
 - mutable manifest or policy reference
 - retrieved content used to grant capabilities
 - browser or OCR worker with ledger access
+- durable artifact commit without a declared delivery-intent or transactional downstream release
+- attempt success before its artifact delivery intent is durably recorded
+- checkpoint that references an artifact whose required retrieval event or downstream work is neither acknowledged nor explicitly pending
 
 * REVIEW Runtime Systems
 
@@ -250,6 +255,10 @@ Storage-neutral interface:
 - renew claim
 - complete attempt
 - append checkpoint
+- create evidence-delivery intent
+- claim evidence-delivery intent
+- acknowledge delivery step
+- replay pending delivery intents
 - materialize state
 - replay range
 - compare state hash
@@ -294,10 +303,16 @@ Artifact lifecycle:
 2. stream bytes while enforcing limits
 3. compute hashes
 4. extract bounded metadata
-5. atomically commit
-6. emit immutable artifact reference
-7. append retrieval event
-8. release normalization work
+5. atomically commit immutable artifact bytes and metadata
+6. create or confirm an idempotent evidence-delivery intent keyed by artifact hash, job revision, and attempt revision
+7. emit the immutable artifact reference
+8. deliver the required retrieval event and downstream work from the intent
+9. acknowledge each delivery step idempotently
+10. mark the intent complete only after all required steps are durable
+
+If the artifact store and journal share a transactional boundary, steps 5 and 6 commit together. If they do not, the backend must use a durable outbox protocol plus startup and periodic orphan-artifact recovery. A committed artifact without a complete intent is never silently ignored: recovery creates or republishes the intent, or records an explicit quarantine decision.
+
+An attempt cannot report terminal success until the evidence-delivery intent is durable. Runtime readiness remains degraded while committed artifacts are unaccounted for or while required delivery intents cannot be replayed safely.
 
 ** =star-adapter-sdk=
 
@@ -313,7 +328,7 @@ Uses versioned framed messages over stdin/stdout or local sockets. Owns process 
 
 ** =star-health=
 
-Exports structured health events and snapshots without exposing credentials or raw protected content.
+Exports structured health events and snapshots without exposing credentials or raw protected content. Health includes pending and oldest evidence-delivery intent, orphan-artifact scan results, replay failures, and quarantine counts.
 
 * REVIEW Actor Reference
 
@@ -384,9 +399,23 @@ A job identifies logical work and immutable bindings. An attempt identifies one 
   fencing-token
   started-at
   deadline)
+
+(defstruct star-evidence-delivery-intent
+  intent-id
+  artifact-reference
+  artifact-hash
+  job-id
+  job-revision
+  attempt-id
+  fencing-token
+  required-delivery-steps
+  acknowledged-delivery-steps
+  state
+  created-at
+  updated-at)
 #+end_src
 
-A retry never mutates the prior attempt.
+A retry never mutates the prior attempt. Evidence delivery is idempotent by intent and delivery-step key; retrying delivery does not create a new artifact or authority revision.
 
 * REVIEW Authority Model
 
@@ -433,9 +462,11 @@ The conformance runtime supplies:
 - in-memory journal
 - in-memory artifact store
 - programmable failures
-- crash points
+- crash points before and after artifact and delivery-intent commits
 - lease expiry control
 - message reordering and duplication
+- orphan-artifact injection
+- delivery-intent replay and acknowledgement control
 - state-hash snapshots
 
 Every production backend must pass the same semantic suite.
@@ -457,6 +488,10 @@ Typed runtime failures include:
 - journal conflict
 - artifact staging failed
 - artifact commit failed
+- evidence delivery intent failed
+- evidence delivery incomplete
+- orphan artifact detected
+- delivery replay failed
 - process crashed
 - process protocol invalid
 - network timeout
@@ -508,6 +543,7 @@ Generated Franklin deployments bind:
 - Writers emit one configured revision.
 - Incompatible schema changes require a new schema name or major revision.
 - Journal migrations are explicit and replay-tested.
+- Evidence-delivery intent schema migrations preserve pending acknowledgements and idempotency keys.
 - Actor logical paths remain stable while generations change.
 - Runtime upgrades use shadow replay before authority promotion.
 
@@ -521,6 +557,7 @@ The runtime is capability-scoped by construction, not by naming convention.
 - Normalizers receive artifact and retrieval references but no credentials.
 - Review actors receive candidate and evidence references but no mutation handle except review authority proposals.
 - Retrieved code, HTML, scripts, documents, and prompts cannot grant capabilities.
+- Outbox replay workers receive only the exact delivery capabilities declared by the intent; they cannot expand scope from artifact content.
 
 * REVIEW Observability
 
@@ -534,6 +571,9 @@ Required structured metrics:
 - restart counts and budgets
 - run and attempt latency
 - artifact stage/commit lag
+- pending evidence-delivery intent count and oldest age
+- orphan-artifact count and recovery outcome
+- delivery replay and acknowledgement latency
 - normalization and review lag
 - replay duration
 - state-hash divergence
@@ -546,19 +586,22 @@ Metrics are not canonical state and cannot substitute for durable events.
 
 1. Duplicate delivery does not duplicate authority state.
 2. Crash after journal append replays correctly.
-3. Crash after artifact commit does not lose normalization work.
-4. Expired attempts cannot commit through stale fencing tokens.
-5. Mailbox overflow follows declared policy.
-6. Rest-for-one restarts only the required suffix.
-7. Generation-stale references fail explicitly.
-8. Cancellation reaches all descendants.
-9. Replay produces the same state hash.
-10. Shadow runtime replay matches the current runtime before upgrade.
-11. Capability-invalid StarLang source fails compilation.
-12. Unbounded actor or adapter source fails compilation.
-13. Process worker cannot obtain authority-write capability.
-14. Unsupported wire revision fails without partial interpretation.
-15. Every accepted artifact and record resolves to exact runtime and manifest revisions.
+3. Crash after artifact commit but before intent acknowledgement recreates or republishes the delivery intent.
+4. Crash after retrieval-event delivery but before normalization release resumes only the missing step.
+5. No terminally successful attempt has a missing or non-durable evidence-delivery intent.
+6. Orphan-artifact recovery accounts for every committed artifact by completed intent or explicit quarantine.
+7. Expired attempts cannot commit through stale fencing tokens.
+8. Mailbox overflow follows declared policy.
+9. Rest-for-one restarts only the required suffix.
+10. Generation-stale references fail explicitly.
+11. Cancellation reaches all descendants.
+12. Replay produces the same state hash.
+13. Shadow runtime replay matches the current runtime before upgrade.
+14. Capability-invalid StarLang source fails compilation.
+15. Unbounded actor or adapter source fails compilation.
+16. Process worker cannot obtain authority-write capability.
+17. Unsupported wire revision fails without partial interpretation.
+18. Every accepted artifact and record resolves to exact runtime and manifest revisions.
 
 * REVIEW Implementation Order
 
@@ -571,9 +614,9 @@ Metrics are not canonical state and cannot substitute for durable events.
 7. in-memory =star-journal=
 8. =star-lease=
 9. =star-capability=
-10. =star-artifact=
+10. =star-artifact= with evidence-delivery intents and orphan recovery
 11. =star-adapter-sdk=
-12. SQLite journal backend
+12. SQLite journal and outbox backend
 13. =star-http-port=
 14. =star-process-port=
 15. compiler generation for actor systems
@@ -604,7 +647,7 @@ Recommended license: Apache-2.0 for runtime systems that may derive from or inte
 - The new repository is not yet present in connected GitHub repositories.
 - The compiler surface in this design is not fully implemented.
 - Sento extension points must be audited against the conformance suite before fork decision.
-- Persistence and artifact production backends require implementation and crash testing.
+- Persistence, artifact, evidence-outbox, and recovery backends require implementation and crash testing.
 
 * REVIEW Decision
 

@@ -1,0 +1,881 @@
+:PROPERTIES:
+:ID:       star-research-004-internal-prolog-server-library-swi-nprolog
+:END:
+#+title: STAR-RESEARCH-004 Internal Prolog Server Library: SWI-Prolog and N-Prolog
+#+description: Deep implementation research for a Common Lisp internal server library that supervises SWI-Prolog as the production logic backend and supports Sasagawa N-Prolog as an alternate process backend through one capability-negotiated protocol.
+#+status: REVIEW
+#+filetags: :starintel:star-server:common-lisp:prolog:swi-prolog:n-prolog:actors:supervision:library:
+
+* Source Links
+
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:../../design/STAR-00-Starintel-4th-generation-Ideas.org][STAR-00 StarIntel Fourth Generation Ideas]]
+- [[file:STAR-RESEARCH-003-budgeted-supervised-prolog-inference-actors.org][STAR-RESEARCH-003 Budgeted Supervised Prolog Inference Actors]]
+- Source ideas: =Expert-System Actor Framework=, =Actor Client Library=, =Improvements to the gserver / Prolog Based Graph Search=, =Actor Manifest support=, and =database agnostic protocols=.
+
+* Scope
+
+This research narrows the previous Prolog actor work to one implementation problem:
+
+How should =star-server= provide an internal Common Lisp library for starting, supervising, querying, cancelling, budgeting, resetting, and observing Prolog runtimes without binding the rest of StarIntel to one Prolog implementation?
+
+The primary engine is SWI-Prolog. Sasagawa Kenichi's N-Prolog implementation is evaluated as an alternate backend. This N-Prolog is the modern ARITY/PROLOG-compatible C implementation at =sasagawa888/nprolog=, not the unrelated 1984 hypothetical-implication language that used the same name.[fn:nprolog-name]
+
+* Decision
+
+Create an engine-neutral Common Lisp library named =star-prolog= with:
+
+1. a stable typed term model;
+2. a query-session protocol;
+3. actor-supervised runtime and worker lifecycles;
+4. multidimensional resource limits;
+5. structured answers, exceptions, proof events, and telemetry;
+6. capability negotiation for engine-specific behavior;
+7. a production SWI-Prolog process adapter using the Machine Query Interface;
+8. an optional later SWI-Prolog C-FFI adapter for trusted low-latency workloads;
+9. an N-Prolog process adapter implemented as a compatibility and experimental backend.
+
+Do not expose SWI-Prolog, MQI, N-Prolog, sockets, process handles, or raw Prolog source through the public StarIntel actor API.
+
+* Backend Roles
+
+** SWI-Prolog
+
+SWI-Prolog is the production backend because it already provides:
+
+- an official local Machine Query Interface intended to make Prolog usable like a library from another language;
+- local TCP or Unix-domain-socket transport;
+- generated authentication secrets;
+- synchronous and asynchronous query operations;
+- structured JSON answers;
+- query timeouts and cancellation operations;
+- a documented C embedding interface through =libswipl=;
+- multiple Prolog engines in threaded builds;
+- tabling, inference limits, saved states, modules, constraints, and mature deployment support.[fn:swi-mqi-overview][fn:swi-embedding][fn:swi-engines]
+
+** N-Prolog
+
+N-Prolog is an alternate backend for:
+
+- ARITY/PROLOG compatibility experiments;
+- small educational or historical rule packages;
+- comparison of engine semantics;
+- Raspberry Pi and distributed-computation experiments;
+- testing whether the engine-neutral StarIntel protocol is truly portable.
+
+N-Prolog is not initially a production-equivalent replacement for SWI-Prolog. Its current build produces an executable rather than a shared library, its runtime state is heavily global, it is explicitly not ISO Prolog, its distributed protocol collapses child errors into ordinary failure, and its multithreaded mode documents that bignums are not thread-safe.[fn:nprolog-readme][fn:nprolog-makefile][fn:nprolog-parallel][fn:nprolog-threading]
+
+* System Boundary
+
+=star-prolog= is an internal server library, not a public network service.
+
+The library may use local processes, Unix-domain sockets, pipes, or C FFI internally. External clients continue to call =star-server= through the normal versioned StarIntel API and actor protocols.
+
+#+begin_example
+StarIntel HTTP / Actor Protocol
+            |
+            v
+PrologDomainActor
+            |
+            v
+star-prolog engine-neutral API
+     |                       |
+     v                       v
+SWI MQI adapter        N-Prolog process adapter
+     |
+     +--> optional future SWI libswipl adapter
+#+end_example
+
+The server library owns engine selection. Callers request capabilities such as =logic.query=, =logic.tabled-query=, =logic.explain=, or =logic.clpfd= rather than selecting a binary directly unless a manifest pins an engine for reproducibility.
+
+* Proposed ASDF Systems
+
+#+begin_example
+star-prolog.protocol
+star-prolog.terms
+star-prolog.sessions
+star-prolog.supervisor
+star-prolog.pool
+star-prolog.budget
+star-prolog.rules
+star-prolog.proofs
+star-prolog.swi.mqi
+star-prolog.swi.ffi
+star-prolog.nprolog.process
+star-prolog.testing
+star-prolog
+#+end_example
+
+** =star-prolog.protocol=
+
+Defines engine-neutral classes, generic functions, conditions, state machines, and capability names.
+
+** =star-prolog.terms=
+
+Defines safe Prolog terms without accepting executable source strings.
+
+** =star-prolog.sessions=
+
+Defines nondeterministic query iteration, answer streaming, cancellation, and closure.
+
+** =star-prolog.supervisor=
+
+Maps engine processes and query sessions onto the existing Sento/cl-gserver managed-component model.
+
+** =star-prolog.pool=
+
+Leases warm trusted workers, drains unhealthy workers, and creates isolated one-shot workers for untrusted or case-sensitive runs.
+
+** =star-prolog.budget=
+
+Reserves and debits wall time, answers, bytes, inferences, memory, restarts, and engine-specific limits.
+
+** =star-prolog.rules=
+
+Resolves digest-locked rule packages, declared queries, fact mappings, and engine compatibility profiles.
+
+** =star-prolog.proofs=
+
+Normalizes proof-carrying predicate output into StarIntel proof documents.
+
+** Engine adapters
+
+Adapters implement the same protocol while exposing a capability report and engine-specific diagnostics.
+
+* Public Common Lisp Protocol
+
+#+begin_src lisp
+(defclass prolog-runtime () ())
+(defclass prolog-session () ())
+(defclass prolog-query () ())
+
+(defgeneric runtime-capabilities (runtime))
+(defgeneric runtime-identity (runtime))
+(defgeneric start-runtime (runtime))
+(defgeneric stop-runtime (runtime &key reason force))
+(defgeneric runtime-health (runtime))
+
+(defgeneric open-session (runtime &key dataset rule-package limits isolation))
+(defgeneric close-session (session &key reason))
+(defgeneric reset-session (session))
+
+(defgeneric prepare-query (session query-spec))
+(defgeneric start-query (query))
+(defgeneric next-answer (query &key timeout))
+(defgeneric cancel-query (query &key hard reason))
+(defgeneric close-query (query))
+(defgeneric query-status (query))
+(defgeneric query-usage (query))
+#+end_src
+
+Callers never receive an engine socket or native term handle. Native handles remain adapter-private and are invalid after session closure.
+
+* Safe Term Model
+
+Raw Prolog text must not be the interchange model. Define a closed Common Lisp representation:
+
+#+begin_src lisp
+(defstruct (prolog-atom (:constructor prolog-atom (name)))
+  (name "" :type string))
+
+(defstruct (prolog-variable (:constructor prolog-variable (name)))
+  (name "" :type string))
+
+(defstruct (prolog-compound (:constructor prolog-compound (functor arguments)))
+  (functor "" :type string)
+  (arguments #() :type vector))
+
+(defstruct (prolog-list (:constructor prolog-list (elements &optional tail)))
+  (elements #() :type vector)
+  tail)
+
+(defstruct (prolog-dict (:constructor prolog-dict (tag entries)))
+  tag
+  (entries #() :type vector))
+#+end_src
+
+Also support integers, bounded floats, strings, booleans through an explicit mapping, and opaque engine terms only behind adapter-specific debugging APIs.
+
+Every serializer must:
+
+- validate atom and variable names;
+- quote and escape UTF-8 correctly;
+- reject cyclic host structures unless explicitly represented;
+- impose term depth and encoded-size limits;
+- distinguish atom, string, and variable semantics;
+- preserve unbound variables by stable query-local names;
+- reject callable terms where data-only terms are required.
+
+* Query Specification
+
+A caller submits a declared query rather than arbitrary code:
+
+#+begin_src lisp
+(make-prolog-query-spec
+ :rule-package "star.rules.entity-resolution"
+ :rule-digest "sha256:..."
+ :query-id "beneficial_owner_path"
+ :parameters `(("organization_id" . ,(prolog-atom "org:example-corp"))
+               ("maximum_hops" . 6))
+ :answer-schema "starintel.answer.beneficial-owner-path/1"
+ :explain t
+ :limits '(:wall-time-ms 15000
+           :inference-count 500000
+           :answer-count 250
+           :output-bytes 8388608))
+#+end_src
+
+The adapter invokes a fixed wrapper predicate such as:
+
+#+begin_src prolog
+star_rpc:run(QueryId, Parameters, Options, Answer).
+#+end_src
+
+The wrapper resolves =QueryId= through the rule-package registry. It does not call a term supplied by the client.
+
+* Query State Machine
+
+#+begin_example
+CREATED
+  -> VALIDATED
+  -> QUEUED
+  -> STARTING
+  -> STREAMING
+  -> SUCCEEDED | FAILED | CANCELLED | BUDGET-EXHAUSTED
+  -> CLOSED
+#+end_example
+
+State transitions are journaled. An answer is an event, not a mutation of the query record.
+
+A nondeterministic query returns one normalized answer per =next-answer=. The adapter must not eagerly materialize every answer unless the query explicitly requests =find-all= and has a small answer budget.
+
+* Actor and Supervisor Topology
+
+#+begin_example
+PrologDomainSupervisor
+├── PrologRegistryActor
+├── PrologBudgetLedgerActor
+├── PrologRuntimePoolSupervisor
+│   ├── SWIRuntimeActor-1
+│   │   ├── SWIProcessMonitor
+│   │   └── SWIConnectionActor-1..N
+│   ├── SWIRuntimeActor-2
+│   └── NPrologRuntimeActor-1
+└── PrologQuerySupervisor
+    ├── PrologQueryActor-run-A
+    └── PrologQueryActor-run-B
+#+end_example
+
+Runtime actors own processes. Query actors own query state and leases. A runtime crash terminates or retries only queries leased to that runtime.
+
+Use one-for-one supervision for independent runtimes and independent query runs. Do not restart every Prolog worker because one query fails.
+
+* Worker Isolation Classes
+
+** =:one-shot-process=
+
+One operating-system process for one run. This is the baseline for case-sensitive, untrusted, or replay-critical workloads.
+
+** =:pooled-process=
+
+A warm process serves sequential sessions. A strict reset protocol must clear dynamic predicates, tables, flags, temporary modules, streams, and query-local state before reuse.
+
+** =:embedded-engine=
+
+A SWI-Prolog engine inside the Common Lisp process through a C shim. Restricted to trusted internal rule packages after the process protocol is stable.
+
+The manifest declares the minimum required isolation. The runtime may choose a stronger isolation class but never a weaker one.
+
+* SWI-Prolog Integration Options
+
+** Option A: Machine Query Interface
+
+This is the recommended first implementation.
+
+SWI's MQI is explicitly designed for another language to launch and manage a local SWI process and use it like a library. It supports local TCP or Unix-domain sockets, generated passwords, JSON answers, synchronous and asynchronous queries, result retrieval, cancellation, close, and process termination.[fn:swi-mqi-overview]
+
+Advantages:
+
+- hard process isolation;
+- no CFFI ABI work in phase one;
+- official protocol and lifecycle;
+- asynchronous answer streaming;
+- independent Prolog query threads through multiple connections;
+- straightforward debugging in standalone mode;
+- Unix-domain sockets reduce attack surface;
+- process death is observable and recoverable.
+
+Costs:
+
+- text term construction is still required by MQI;
+- JSON conversion adds overhead;
+- cancellation is best-effort unless the connection or process is closed;
+- MQI is local and unconstrained, so StarIntel must enforce its own query registry and permissions;
+- heartbeats and byte-length framing require a correct parser.
+
+** MQI Launch Contract
+
+Launch a dedicated saved-state worker:
+
+#+begin_example
+swipl -x star-prolog-worker.state mqi \
+  --write_connection_values=true \
+  --create_unix_domain_socket=true \
+  --query_timeout=15
+#+end_example
+
+The runtime actor reads the generated socket path and password from startup output, connects, authenticates, performs a version/capability handshake, and stops treating STDOUT as log output after the bootstrap values are consumed.
+
+The generated password must remain a string rather than being interned as a Prolog atom because SWI documents atoms as globally visible.[fn:swi-mqi-options]
+
+** MQI Framing
+
+MQI messages are UTF-8 Prolog terms framed by a decimal byte length followed by =.\n=, then the payload ending in =.\n=. Long-running operations may emit heartbeat dots before the response frame.[fn:swi-mqi-framing]
+
+The Common Lisp parser therefore needs explicit states:
+
+#+begin_example
+READ-HEARTBEATS
+READ-LENGTH
+READ-LENGTH-TERMINATOR
+READ-PAYLOAD
+VERIFY-PAYLOAD-TERMINATOR
+DECODE-RESPONSE
+#+end_example
+
+Never parse framing with =read-line= alone. Payload length is measured in bytes, not characters.
+
+** MQI Cancellation
+
+MQI's asynchronous cancellation injects =throw(cancel_goal)= and is best-effort because Prolog code may catch it. Closing the connection guarantees abortion of the connection's query; killing the process is the final hard boundary.[fn:swi-mqi-cancel]
+
+Map StarIntel cancellation modes as follows:
+
+| StarIntel mode | MQI action |
+|---+---|
+| cooperative | =cancel_async= |
+| session-hard | =close=, close socket, discard connection |
+| runtime-hard | terminate process, then kill after grace period |
+
+A cancelled connection is never returned to the pool until reset or replacement succeeds.
+
+** SWI Wrapper Module
+
+MQI must expose only one narrow StarIntel module:
+
+#+begin_src prolog
+:- module(star_rpc,
+          [ handshake/2,
+            open_session/4,
+            run/4,
+            reset_session/1,
+            close_session/1
+          ]).
+
+run(SessionId, QueryId, Parameters, Envelope) :-
+    session_rule_package(SessionId, Package),
+    declared_query(Package, QueryId, Signature, Predicate),
+    validate_parameters(Signature, Parameters),
+    session_limits(SessionId, Limits),
+    bounded_call(Predicate, Parameters, Limits, RawAnswer, Usage),
+    normalize_answer(SessionId, QueryId, RawAnswer, Usage, Envelope).
+#+end_src
+
+All MQI queries call =star_rpc= predicates. Do not send user-selected modules or predicate indicators through MQI.
+
+* Optional SWI =libswipl= Adapter
+
+SWI officially exposes embedding through its C interface. The runtime must be initialized with =PL_initialise()=. Threaded builds can create engines with =PL_create_engine()= or attach engines to threads.[fn:swi-embedding][fn:swi-engines]
+
+Do not bind the entire SWI C API directly from Lisp. Build a small C shim with a stable StarIntel-owned ABI:
+
+#+begin_src c
+struct star_swipl_runtime;
+struct star_swipl_query;
+
+int star_swipl_runtime_start(struct star_swipl_runtime **out,
+                             const struct star_swipl_config *config);
+int star_swipl_query_open(struct star_swipl_runtime *runtime,
+                          const uint8_t *request_json,
+                          size_t request_size,
+                          struct star_swipl_query **out);
+int star_swipl_query_next(struct star_swipl_query *query,
+                          uint8_t **answer_json,
+                          size_t *answer_size);
+int star_swipl_query_cancel(struct star_swipl_query *query);
+void star_swipl_query_close(struct star_swipl_query *query);
+void star_swipl_runtime_stop(struct star_swipl_runtime *runtime);
+#+end_src
+
+The shim owns SWI term references, foreign frames, query identifiers, engine attachment, exception extraction, and memory ownership. Common Lisp receives copied structured buffers.
+
+** Why FFI Is Deferred
+
+- one SWI runtime is initialized inside the server process;
+- native faults can crash =star-server=;
+- engine/thread ownership must be exact;
+- incorrect term-reference lifetime can corrupt the runtime;
+- foreign callbacks complicate actor scheduling;
+- hard memory isolation is lost;
+- upgrading SWI changes the native compatibility surface.
+
+The FFI backend is justified only after profiling proves MQI overhead materially limits trusted high-volume internal queries.
+
+* Saved-State Worker Packaging
+
+Build a SWI saved state containing:
+
+- =star_rpc=;
+- schema validators;
+- query registry code;
+- proof normalization;
+- budget wrappers;
+- no case data;
+- no credentials.
+
+SWI saved states package compiled Prolog code and resources for fast loading. Runtime-only objects such as streams and threads must be reconstructed after restore.[fn:swi-saved-state]
+
+Pin the saved-state hash and SWI engine version in the actor manifest and run journal.
+
+* N-Prolog Evaluation
+
+** Current Runtime Shape
+
+N-Prolog's build file links many C objects into the =mpl= executable and does not define a shared-library target.[fn:nprolog-makefile]
+
+The public header exposes a large amount of process-global state, including heap arrays, stacks, parser state, jump buffers, streams, distributed sockets, worker threads, and fixed-size runtime structures.[fn:nprolog-header]
+
+The main program directly initializes global memory, builtins, streams, handlers, the REPL, network mode, and =setjmp=/=longjmp= error paths.[fn:nprolog-main]
+
+Therefore, phase one must treat N-Prolog as an external process. Refactoring it into an embeddable =libnpl= would be a separate upstream-sized project.
+
+** Version Detection
+
+The repository's current master header identifies version 5.19, while the latest tagged release displayed by GitHub is 5.18 from May 4, 2026. The adapter must execute the runtime's version command during handshake and record the exact binary hash instead of trusting package metadata.[fn:nprolog-readme][fn:nprolog-header]
+
+** Existing Network Mode Is Not the StarIntel Protocol
+
+N-Prolog's distributed mode:
+
+- starts a child with =-n=;
+- uses TCP/IP;
+- supports up to 100 child devices;
+- terminates text messages with byte =0x16=;
+- executes distributed conjunction and disjunction;
+- currently sends =fail= for both child errors and ordinary logical failure.[fn:nprolog-parallel]
+
+This protocol is useful research material but unsuitable as the internal StarIntel server protocol because it lacks structured errors, capability negotiation, manifest identity, query IDs, budget fields, authenticated local-only transport, and proof envelopes.
+
+Do not expose =dp_create= or the distributed child protocol directly through =star-prolog=.
+
+** N-Prolog Multithreading
+
+N-Prolog includes a worker-thread queue and parallel conjunction/disjunction. Its documentation states that bignums are not thread-safe in multithreading.[fn:nprolog-threading]
+
+The StarIntel adapter should run one query at a time per N-Prolog process in phase one. Parallelism comes from multiple supervised processes, not N-Prolog threads.
+
+** N-Prolog JSON Support
+
+N-Prolog includes =term_json/2= and can convert compounds, clauses, lists, booleans, null values, and Unicode between Prolog and JSON. Its JSON mode changes string representation and requires explicit reset behavior.[fn:nprolog-json]
+
+This is sufficient to bootstrap a structured process adapter, but the StarIntel protocol must still use explicit envelopes and safe named queries.
+
+* N-Prolog Process Adapter
+
+Create a small rule package named =star_npl_rpc.pl= loaded with the runtime startup file.
+
+Use STDIN and STDOUT with a length-prefixed JSON envelope rather than scraping the interactive REPL.
+
+#+begin_src json
+{
+  "protocol": "star-prolog/1",
+  "request_id": "req:01J...",
+  "operation": "query",
+  "session_id": "session:01J...",
+  "query_id": "beneficial_owner_path",
+  "parameters": {
+    "organization_id": "org:example-corp",
+    "maximum_hops": 6
+  },
+  "limits": {
+    "wall_time_ms": 15000,
+    "answer_count": 250,
+    "output_bytes": 8388608
+  }
+}
+#+end_src
+
+Proposed framing:
+
+#+begin_example
+<8 hexadecimal length bytes>\n
+<exact UTF-8 JSON bytes>
+#+end_example
+
+The wrapper must send only protocol frames to STDOUT. Human diagnostics go to STDERR.
+
+If N-Prolog cannot cleanly separate protocol output from evaluator output, place a tiny C launcher between Common Lisp and N-Prolog that redirects and captures runtime streams.
+
+** N-Prolog Cancellation
+
+N-Prolog does not currently provide an MQI-equivalent structured asynchronous cancellation protocol. Use:
+
+1. cooperative timeout when a rule package explicitly checks limits;
+2. =SIGINT= only if tests prove the runtime returns to a clean protocol state;
+3. process termination as the reliable hard boundary.
+
+A killed N-Prolog worker is replaced, never reused.
+
+** N-Prolog Capability Profile
+
+The adapter must report only tested capabilities. Initial profile:
+
+#+begin_src json
+{
+  "engine": "nprolog",
+  "transport": "stdio-json",
+  "capabilities": [
+    "logic.query",
+    "logic.nondeterministic-query",
+    "logic.modules",
+    "logic.clpfd",
+    "encoding.unicode",
+    "encoding.json"
+  ],
+  "limitations": [
+    "not-iso-prolog",
+    "process-only",
+    "single-query-per-process",
+    "no-structured-native-error-protocol",
+    "no-verified-tabling-capability",
+    "no-verified-inference-limit-capability"
+  ]
+}
+#+end_src
+
+The absence of a capability means unavailable or not yet verified. Do not emulate tabling or proof behavior silently.
+
+* Engine-Neutral Capability Vocabulary
+
+#+begin_example
+logic.query
+logic.nondeterministic-query
+logic.modules
+logic.dynamic-facts
+logic.tabled-query
+logic.incremental-tabling
+logic.clpfd
+logic.explain
+logic.proof-carrying-query
+limit.wall-time
+limit.inferences
+limit.answers
+limit.output-bytes
+limit.memory
+transport.process
+transport.local-socket
+transport.ffi
+reset.session
+snapshot.saved-state
+#+end_example
+
+A rule package declares required and optional capabilities. Resolution fails before execution if no healthy runtime satisfies required capabilities.
+
+* Compatibility Profiles
+
+A rule package must specify an engine profile:
+
+#+begin_src json
+{
+  "id": "star.rules.example",
+  "version": "1.0.0",
+  "digest": "sha256:...",
+  "prolog": {
+    "profile": "star-prolog-portable/1",
+    "required_capabilities": [
+      "logic.query",
+      "logic.modules"
+    ],
+    "tested_engines": [
+      {"engine": "swi-prolog", "minimum_version": "9.0"},
+      {"engine": "nprolog", "minimum_version": "5.18"}
+    ]
+  }
+}
+#+end_src
+
+Portable packages may use only the StarIntel portability subset. SWI-specific packages can require tabling, dictionaries, attributed variables, or another declared extension.
+
+* Portable Prolog Subset
+
+Define =star-prolog-portable/1= conservatively:
+
+- atoms, numbers, variables, compounds, proper lists;
+- modules only through the StarIntel wrapper convention;
+- pure recursion and deterministic helpers;
+- no engine-specific directives except guarded adapter modules;
+- no arbitrary file, process, network, or foreign calls;
+- no dependence on top-level printing;
+- explicit answer predicates;
+- explicit proof arguments where explanation is required;
+- no global mutable predicates unless the session reset contract owns them.
+
+Run every portable package against both engines in CI. Engine differences become test failures or explicit profile exclusions.
+
+* Budget Enforcement
+
+The library enforces limits at multiple layers:
+
+| Limit | Engine-neutral enforcer | SWI enhancement | N-Prolog enhancement |
+|---+---+---+---|
+| wall time | query actor timer | MQI timeout and process kill | process kill |
+| answers | answer iterator | wrapper counter | wrapper counter |
+| output bytes | frame decoder | wrapper and decoder | launcher and decoder |
+| memory | OS process/cgroup | stack/table limits where available | process RSS boundary |
+| inferences | budget ledger | =call_with_inference_limit/3= | unavailable until implemented or verified |
+| restarts | supervisor | runtime actor | runtime actor |
+
+No engine may raise its own budget. Partial answers carry an explicit exhaustion marker and are never reported as a complete result set.
+
+* Error Model
+
+Normalize engine failures into conditions:
+
+#+begin_example
+prolog-validation-error
+prolog-capability-error
+prolog-rule-package-error
+prolog-query-failure
+prolog-engine-exception
+prolog-protocol-error
+prolog-timeout
+prolog-inference-limit
+prolog-answer-limit
+prolog-output-limit
+prolog-memory-limit
+prolog-cancelled
+prolog-runtime-crashed
+prolog-reset-failed
+prolog-version-mismatch
+#+end_example
+
+Logical failure is not an exception. It is a normal terminal result with zero answers.
+
+N-Prolog's native distributed behavior currently merges child errors with logical failure; the StarIntel N-Prolog adapter must not use that path because it would destroy this distinction.[fn:nprolog-parallel]
+
+* Proof Normalization
+
+The library does not infer proofs from an engine debugger trace. Rule packages that support explanation expose proof-carrying predicates:
+
+#+begin_src prolog
+beneficial_owner_path(Organization, MaximumHops,
+                      Person, Path,
+                      proof(RuleId, Inputs, Bindings)).
+#+end_src
+
+The adapter converts the proof term through the safe term model, then =star-prolog.proofs= validates:
+
+- known rule IDs;
+- known fact IDs;
+- case/dataset boundaries;
+- acyclic or explicitly recursive proof graph structure;
+- maximum proof nodes and bytes;
+- rule-package digest;
+- stable canonical hash.
+
+SWI and N-Prolog may produce the same normalized proof document even when their internal execution differs.
+
+* Pooling and Reset
+
+A process may return to the pool only after:
+
+1. all queries are closed;
+2. temporary facts are retracted;
+3. query modules are destroyed or replaced;
+4. tables and caches are cleared where required;
+5. open streams are closed;
+6. working directories are removed;
+7. the wrapper reports its original baseline digest;
+8. a reset self-test query passes.
+
+Failure at any step quarantines and terminates the process.
+
+N-Prolog workers remain one-shot until a reliable reset test exists.
+
+* Observability
+
+Every runtime and query reports:
+
+- engine family and exact version;
+- executable or shared-library hash;
+- saved-state or wrapper hash;
+- runtime actor ID;
+- process ID;
+- connection or engine ID;
+- rule-package digest;
+- query ID;
+- queue and lease duration;
+- answers and bytes emitted;
+- budget usage;
+- cancellation mode;
+- reset result;
+- terminal state.
+
+Protocol transcripts may be retained in a redacted debug mode, but raw facts or query parameters are not placed in ordinary telemetry.
+
+* Implementation Sequence
+
+** Phase 1: Engine-Neutral Core
+
+- implement term AST;
+- implement canonical JSON representation;
+- implement query and runtime state machines;
+- implement conditions and capability resolution;
+- implement fake adapter and deterministic tests.
+
+** Phase 2: SWI MQI Adapter
+
+- implement MQI launcher;
+- implement generated Unix-domain-socket bootstrap;
+- implement byte-length and heartbeat parser;
+- implement authentication;
+- implement synchronous and asynchronous operations;
+- implement cooperative and hard cancellation;
+- implement process supervision;
+- package =star_rpc= as a saved state.
+
+** Phase 3: StarIntel Integration
+
+- connect actor manifests;
+- connect budget ledger;
+- connect rule-package registry;
+- connect proof normalization;
+- connect run journal and replay metadata.
+
+** Phase 4: N-Prolog Adapter
+
+- pin a tested N-Prolog version and binary hash;
+- implement startup/version handshake;
+- implement =star_npl_rpc.pl=;
+- implement length-prefixed JSON protocol;
+- map terms through =term_json/2=;
+- execute one query per process;
+- implement hard cancellation and replacement;
+- build portable-rule conformance tests.
+
+** Phase 5: Pooling
+
+- pool trusted SWI processes;
+- implement reset verification;
+- benchmark process-per-run versus pooled processes;
+- keep N-Prolog one-shot until reset correctness is proven.
+
+** Phase 6: Optional SWI FFI
+
+- build C shim;
+- implement engine ownership and foreign frames;
+- run crash-containment and leak tests;
+- enable only for trusted internal packages;
+- retain MQI as the reference backend and fallback.
+
+* Acceptance Tests
+
+1. The same portable query returns equivalent normalized answers on SWI and N-Prolog.
+2. An unsupported capability rejects the run before a worker starts.
+3. A query parameter containing Prolog syntax remains data and is never executed.
+4. MQI framing handles multibyte UTF-8 using byte counts.
+5. MQI heartbeat dots do not corrupt frame parsing.
+6. Cooperative cancellation returns a structured cancelled state.
+7. Hard cancellation terminates only the leased worker.
+8. A crashed worker does not crash =star-server=.
+9. A pooled SWI worker passes reset verification before reuse.
+10. A reset failure quarantines the worker.
+11. N-Prolog errors remain distinguishable from logical failure through the StarIntel wrapper.
+12. N-Prolog parallel-thread features are not enabled by default.
+13. An N-Prolog worker killed for timeout is never reused.
+14. Rule packages are rejected when their digest or engine profile does not match.
+15. Proof documents have stable canonical hashes across replay.
+16. Process and saved-state hashes are recorded for every run.
+17. FFI backend tests cannot run unless the package is marked trusted.
+18. Engine selection is capability-based and deterministic under a pinned manifest.
+
+* Rejected Alternatives
+
+** Direct Common Lisp String Calls to =swipl=
+
+Rejected because ad hoc shell invocation cannot safely stream nondeterministic answers, distinguish protocol output from logs, cancel cleanly, pool workers, or preserve a stable query ABI.
+
+** Public MQI Exposure
+
+Rejected because MQI is an internal local unconstrained interface. External clients must not bypass StarIntel schemas, permissions, budgets, and actor manifests.[fn:swi-mqi-overview]
+
+** Direct CFFI as the First SWI Adapter
+
+Rejected because it places the Prolog runtime and native failure domain inside =star-server= before the protocol and tests are stable.
+
+** Treating N-Prolog Network Mode as a General Actor Transport
+
+Rejected because its current =0x16=-terminated text protocol and error-to-fail behavior are insufficient for typed StarIntel execution.[fn:nprolog-parallel]
+
+** Forking N-Prolog into =libnpl= Immediately
+
+Rejected for this research loop. The global runtime layout means this is a substantial refactor, not an adapter task.[fn:nprolog-header][fn:nprolog-main]
+
+** One Universal Lowest-Common-Denominator Prolog
+
+Rejected because it would prevent StarIntel from using SWI tabling, inference limits, saved states, and other mature capabilities. Use explicit portable and engine-specific profiles instead.
+
+* Result
+
+The correct internal library is not a thin =run-prolog-string= helper. It is a supervised logic-runtime subsystem with a typed term boundary, declared-query ABI, nondeterministic session protocol, capability negotiation, resource accounting, proof normalization, and engine adapters.
+
+SWI-Prolog MQI should be implemented first and remain the reference process backend. A small =libswipl= C shim may later provide a trusted high-throughput path. N-Prolog should be supported through a one-shot structured process adapter as a portability and experimental backend, not presented as feature-equivalent until its conformance tests prove specific capabilities.
+
+* Next Design Decision
+
+Create =STAR-SERVER-004 Prolog Runtime Library Protocol= to freeze:
+
+- ASDF systems and package names;
+- term AST and canonical serialization;
+- runtime, session, and query generic functions;
+- condition hierarchy;
+- capability vocabulary;
+- actor and supervisor child specifications;
+- MQI startup and framing protocol;
+- =star_rpc= wrapper ABI;
+- N-Prolog process envelope;
+- reset and pooling contract;
+- manifest and budget integration;
+- conformance-test suite.
+
+* Footnotes and Sources
+
+[fn:nprolog-name] N-Prolog README. The Sasagawa implementation is an ARITY/PROLOG-compatible interpreter/compiler and explicitly states that it is unrelated to the older language with the same name. https://github.com/sasagawa888/nprolog
+
+[fn:swi-mqi-overview] SWI-Prolog Machine Query Interface Overview. MQI launches and manages a dedicated local process, uses local TCP or Unix-domain sockets, requires authentication, supports six query/session commands, and returns JSON answers. https://www.swi-prolog.org/pldoc/man?section=mqi-overview
+
+[fn:swi-mqi-options] SWI-Prolog =library(mqi)= options, including generated Unix-domain sockets, generated passwords, and query timeouts. https://www.swi-prolog.org/pldoc/man?section=mqi
+
+[fn:swi-mqi-framing] SWI-Prolog MQI message format. Messages use UTF-8 byte-length framing and may contain heartbeat dots before a response. https://www.swi-prolog.org/pldoc/man?section=mqi-message-format
+
+[fn:swi-mqi-cancel] SWI-Prolog MQI asynchronous cancellation. Cooperative cancellation injects =throw(cancel_goal)=; closing the connection guarantees abortion of the connection query. https://www.swi-prolog.org/pldoc/man?section=mqi-overview
+
+[fn:swi-embedding] SWI-Prolog embedding documentation. SWI exposes embedding through the C interface and requires =PL_initialise()= before normal foreign-language operations. https://www.swi-prolog.org/pldoc/man?section=embedded
+
+[fn:swi-engines] SWI-Prolog =PL_create_engine()=. Threaded SWI builds may create independent Prolog engines and attach them to host threads. https://www.swi-prolog.org/pldoc/man?CAPI=PL_create_engine
+
+[fn:swi-saved-state] SWI-Prolog saved-state documentation. Saved states package compiled program data and resources; streams, threads, and similar runtime objects require reconstruction. https://www.swi-prolog.org/pldoc/man?section=saved-states
+
+[fn:nprolog-readme] Sasagawa N-Prolog README. It is a non-ISO superset of ARITY/PROLOG, supports Linux-oriented platforms, network mode, modules, JSON, CLP(FD), and other extensions. https://github.com/sasagawa888/nprolog
+
+[fn:nprolog-makefile] N-Prolog makefile. The current build links C object files into the =mpl= executable and does not define a shared-library target. https://github.com/sasagawa888/nprolog/blob/master/makefile
+
+[fn:nprolog-header] N-Prolog =npl.h=. The header exposes extensive global heap, stack, parser, stream, socket, thread, and runtime state; current master defines version 5.19. https://github.com/sasagawa888/nprolog/blob/master/npl.h
+
+[fn:nprolog-main] N-Prolog =main.c=. The executable initializes global runtime state, uses =setjmp=/=longjmp= control paths, runs the REPL, and owns network child behavior directly. https://github.com/sasagawa888/nprolog/blob/master/main.c
+
+[fn:nprolog-parallel] N-Prolog Distributed Parallel documentation. Network mode uses TCP text terminated by =0x16= and currently does not distinguish child errors from normal failure. https://github.com/sasagawa888/nprolog/blob/master/document/PARA1.md
+
+[fn:nprolog-threading] N-Prolog Multi-thread Parallel documentation. It uses a worker queue and warns that bignums are not thread-safe in multithreading. https://github.com/sasagawa888/nprolog/blob/master/document/PARA2.md
+
+[fn:nprolog-json] N-Prolog JSON documentation. =term_json/2= converts Prolog terms and JSON, supports Unicode, and changes string handling while JSON mode is active. https://github.com/sasagawa888/nprolog/blob/master/document/JSON.md

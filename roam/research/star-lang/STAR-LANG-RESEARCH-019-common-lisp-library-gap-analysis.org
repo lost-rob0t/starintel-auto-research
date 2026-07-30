@@ -3,13 +3,14 @@
 :END:
 #+title: STAR-LANG-RESEARCH-019 Common Lisp Library Gap Analysis
 #+description: Audit reusable Common Lisp libraries, required compatibility layers, likely forks, and new systems needed to implement the Franklin County StarLang actor runtime.
-#+status: DONE
+#+status: REVIEW
 #+filetags: :starintel:research:star-lang:common-lisp:actors:libraries:runtime:franklin-county:
 #+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
 
-| Version | Date       | Description of change                                      | Did nsaspy approve it |
-|---------+------------+------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-28 | Audit CL libraries and estimate runtime implementation     | Pending review        |
+| Version | Date       | Description of change                                                        | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Audit CL libraries and estimate runtime implementation                       | Pending review        |
+| 0.1.1   | 2026-07-30 | Keep research reviewable and require crash-safe evidence-delivery semantics | Pending review        |
 
 * Related Nodes
 
@@ -34,7 +35,7 @@ The material gaps are above those libraries:
 4. lease fencing, idempotency, replay, and checkpoint semantics
 5. revision-aware message and authority protocols
 6. capability manifests and process isolation
-7. artifact custody and provenance commit protocols
+7. artifact custody, durable evidence delivery, and provenance commit protocols
 8. StarLang compilation into those runtime constructs
 
 The recommended approach is an upstream-first compatibility layer over Sento/cl-gserver, followed by a fork only if the required semantics cannot be landed or maintained cleanly upstream.
@@ -232,7 +233,7 @@ Owns bounded queues and overload policies. It may adapt Sento queues but must ex
 
 ** =star-journal=
 
-Owns durable jobs, append-only events, replay, deduplication, checkpoints, materialized state hashes, compaction policy, and storage ports.
+Owns durable jobs, append-only events, replay, deduplication, checkpoints, materialized state hashes, compaction policy, evidence-delivery intents, and storage ports.
 
 ** =star-lease=
 
@@ -244,7 +245,7 @@ Owns network, DNS, filesystem, artifact, process, credential, clock, random, and
 
 ** =star-artifact=
 
-Owns staging, atomic commit, content addressing, hashes, metadata, retention class, artifact references, and non-retained-source records.
+Owns staging, atomic content commit, content addressing, hashes, metadata, retention class, artifact references, non-retained-source records, and durable evidence-delivery intents. It must guarantee that every committed artifact is either linked to its retrieval event and normalization work or explicitly quarantined. Backends without cross-store transactions require an idempotent outbox and orphan-artifact recovery scan.
 
 ** =star-adapter-sdk=
 
@@ -272,7 +273,7 @@ Parses StarLang, validates manifests and authority ownership, produces normalize
 
 ** =starlang-runtime=
 
-Assembles the protocol, supervisors, mailboxes, journal, leases, capabilities, adapters, health, and generated bindings into the host runtime.
+Assembles the protocol, supervisors, mailboxes, journal, leases, capabilities, artifacts, evidence delivery, adapters, health, and generated bindings into the host runtime.
 
 * Fork Decision Gates
 
@@ -321,14 +322,14 @@ These are engineering planning ranges, not delivery guarantees.
 | bounded mailbox and supervision runtime | 6-10 | strategies, generations, readiness, overload tests |
 | journal, replay, idempotency, cancellation | 6-10 | storage ports, crash recovery, state hashes |
 | leases, fencing, rate limits, circuit breakers | 4-7 | attempt protocol and concurrency scopes |
-| artifact and provenance spine | 5-8 | staging, commit, hashes, retrieval events |
+| artifact, evidence-delivery outbox, and provenance spine | 5-8 | staging, commit, recovery, hashes, retrieval events |
 | generic HTTP/HTML/JSON/XML/CSV adapters | 6-10 | streaming, limits, parser locators |
 | ArcGIS, OGC, feeds, and static-directory adapters | 5-8 | pagination and reconciliation |
 | XLSX reusable library | 5-9 | package/XML semantics and hostile fixtures |
 | PDF and browser process adapters | 5-8 | framing, capture bundles, resource limits |
 | Franklin source discovery and profile review | 8-14 | components, routes, vendors, history |
 | Franklin source-specific adapter semantics | 8-14 | depends on discovered systems |
-| normalization and reconciliation families | 10-16 | eight data-family normalizers |
+| normalization and reconciliation families | 10-16 | nine data-family normalizers |
 | CI, implementation matrix, fault injection, observability | 8-12 | continuous across all slices |
 
 A credible non-production Franklin pilot is approximately 4-6 calendar months for a focused team with parallel workstreams. A production-quality reusable runtime plus full Franklin route coverage is approximately 9-15 calendar months for a small experienced team. A single engineer should expect longer because compiler, runtime, adapters, source research, and operations cannot all progress in parallel.
@@ -360,4 +361,4 @@ A two-person team can execute the plan by reducing parallelism. The design must 
 
 Adopt mature low-level libraries. Build the missing durable actor semantics as new, reusable Common Lisp systems. Wrap Sento first and fork only after the conformance suite demonstrates that a compatibility layer is insufficient.
 
-The largest effort is not HTTP or parsing. It is the correctness layer connecting StarLang declarations to bounded supervision, durable attempts, revisioned authority state, raw evidence, provenance, replay, and independent coverage review.
+The largest effort is not HTTP or parsing. It is the correctness layer connecting StarLang declarations to bounded supervision, durable attempts, revisioned authority state, raw evidence, durable evidence delivery, provenance, replay, and independent coverage review.

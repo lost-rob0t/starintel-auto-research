@@ -1,0 +1,284 @@
+:PROPERTIES:
+:ID:       star-adr-002-hybrid-logic-runtime-model
+:END:
+#+title: STAR-ADR-002 Hybrid Logic Runtime Model
+#+description: Select SWI-Prolog as the default query and recursive-inference backend, a modernized LISA-derived engine for incremental production rules, and N-Prolog as an optional compatibility backend.
+#+status: REVIEW
+#+filetags: :starintel:adr:star-server:star-lang:logic:prolog:lisa:performance:
+#+created: [2026-07-30 Thu]
+
+| Version | Date | Description of change | Did nsaspy approve it |
+|---+---+---+---|
+| 0.1.0 | 2026-07-30 | Initial performance-based runtime decision | No |
+
+* Context
+
+StarIntel requires several distinct reasoning workloads:
+
+- recursive graph traversal and transitive closure;
+- named logical queries over immutable snapshots;
+- constraints and bounded search;
+- well-founded negation;
+- proof-producing inference;
+- persistent standing rules over changing working memory;
+- low-latency alerts from small document deltas;
+- truth-maintained conclusions and explanations;
+- deterministic replay under actor supervision and explicit budgets.
+
+The fourth-generation backlog named Prolog, LISA, CLIPS-compatible systems, Datalog, RETE engines, and custom Common Lisp systems. Research established an internal engine-neutral Common Lisp =star-prolog= library with SWI-Prolog as its production process backend and N-Prolog as an alternate compatibility backend.
+
+The remaining decision is whether Star-Lang should use Prolog, LISA, or one unified engine for all reasoning.
+
+* Decision
+
+Adopt a hybrid, capability-routed logic runtime under the internal Common Lisp =star-logic= protocol.
+
+1. SWI-Prolog is the default backend for query-oriented, recursive, tabled, constrained, and well-founded reasoning.
+2. A modernized LISA-derived Common Lisp engine named =star-rules= is the specialized backend for persistent incremental forward chaining, standing rules, agenda semantics, and low-latency event monitoring.
+3. N-Prolog is an optional explicitly pinned compatibility and experimentation backend. It is not an automatic production fallback.
+4. Star-Lang source and normalized IR depend only on =star-logic= capabilities and typed plans. They do not depend on engine-native terms, sessions, or rule objects.
+5. Backend selection occurs during semantic compilation or deployment planning and is frozen in the immutable run plan.
+6. A runtime may replace a failed instance with an equivalent pinned instance. It may not silently switch engine families.
+7. The current LISA implementation is not approved as a production backend. =star-rules= becomes eligible only after the performance and correctness gates in LISA-RESEARCH-001 pass.
+
+* Performance Basis
+
+** Current LISA
+
+The maintained LISA fork's included SBCL profile for 500 Monkey-and-Bananas runs reports approximately:
+
+- 3.297 seconds real time;
+- 1.778 seconds run time;
+- 2.348 GB allocated.
+
+An inline-focused profile reduces run CPU time by approximately 7.25% but increases wall time by approximately 13.10% and leaves total allocation essentially unchanged at approximately 2.348 GB.
+
+Source inspection explains the result:
+
+- token structures are replicated entering join networks;
+- fact changes broadcast through the network;
+- =modify-fact= performs complete retract, mutation, and reassert;
+- classic eager RETE builds and destroys partial matches during insert, update, and delete;
+- activation lookup may scan heap contents;
+- truth maintenance stores simple dependency sets rather than compact justification nodes.
+
+Current LISA is therefore not the universal engine.
+
+** Modernized production-rule engine
+
+A redesigned LISA-derived runtime can outperform a process-isolated Prolog backend when:
+
+- the working memory stays resident;
+- each input is a small delta;
+- rules are standing subscriptions rather than ad-hoc queries;
+- partial matches are reused;
+- agenda and rule-firing semantics are required;
+- process and query setup costs would dominate.
+
+This advantage depends on replacing current hot-path behavior with compact parent-linked tuples, indexed beta memories, slot-aware updates, batched deltas, lazy segment linking, direct activation indexes, and actor-owned sessions.
+
+** SWI-Prolog
+
+SWI-Prolog is selected as the default because its documented runtime provides:
+
+- goal-oriented tabled execution that memoizes answers and avoids left-recursive nontermination;
+- incremental tabling for dynamic dependencies;
+- monotonic propagation for append-only monotonic programs;
+- answer, goal-size, and table restraints;
+- well-founded semantics and constraints;
+- JITI for large static and dynamic predicates;
+- mature modules, exceptions, threading, C interfaces, and process deployment;
+- named-query execution behind the internal =star-prolog= boundary.
+
+Its tabled and indexed execution model is the best fit for recursive graph and query workloads. The process boundary also gives hard isolation and cancellation.
+
+SWI-Prolog is not assumed to beat every Common Lisp rule loop. It is the default until a specialized backend proves at least equivalent semantics and superior end-to-end performance for a declared workload.
+
+** N-Prolog
+
+N-Prolog's repository publishes microbenchmarks between approximately 1.7 and 6.8 million logical inferences per second on an older 2.9 GHz i5. These results are not comparable to LISA's production-rule profile and do not cover proof normalization, tabled recursion, incremental facts, actor control, or process protocol costs.
+
+Its current executable-centric, global-state implementation, non-ISO compatibility target, limited error distinction in distributed mode, and documented multithreaded bignum restriction prevent automatic production selection.
+
+* Runtime Selection Matrix
+
+| Workload | Selected model | Reason |
+|---+---+---|
+| recursive graph path | SWI-Prolog | tabling, termination, query-directed search |
+| transitive closure over immutable snapshot | SWI-Prolog | tabled recursive relations and JITI |
+| well-founded recursive negation | SWI-Prolog | defined semantics |
+| CLP(FD) or attributed-variable constraint query | SWI-Prolog | mature constraint integration |
+| one-shot named inference with proof | SWI-Prolog | isolated process and proof-carrying query |
+| repeated query against a warm snapshot | SWI-Prolog pool | reuse engine/package while preserving session isolation |
+| standing rules over a hot working memory | =star-rules= after gate | persistent indexed partial matches |
+| high-rate append/update alerting | =star-rules= after gate | small-delta forward propagation |
+| agenda groups and salience-driven actions | =star-rules= | production-rule semantics |
+| compatibility with ARITY/PROLOG package | N-Prolog when pinned | compatibility experiment |
+| unknown or mixed query | SWI-Prolog | broader accepted capability set |
+
+* Selection Rule
+
+A backend may be selected only when:
+
+1. it implements every required semantic capability;
+2. its package and mapping digests are compatible;
+3. it can enforce the requested budget and isolation policy;
+4. its benchmark record matches the workload class;
+5. it passes the common conformance fixtures;
+6. the resulting plan pins the backend and versions.
+
+Performance does not override semantic equivalence. A faster engine that changes negation, ordering, truth-maintenance, or proof semantics is a different capability, not an optimization.
+
+* Quantitative Gate
+
+For a specialized backend to replace SWI-Prolog for one workload class, it must:
+
+- produce the same normalized conclusion set and declared proof semantics;
+- be at least 1.5 times faster end to end on the common benchmark, including fact projection and output validation;
+- meet the workload's p99 latency target;
+- use no more peak memory than the workload budget;
+- support deterministic cancellation and replay;
+- preserve case and dataset isolation.
+
+For =star-rules= incremental monitoring, additional gates are:
+
+- p99 qualified-alert latency below 10 ms at the declared reference scale;
+- at least 10 times lower allocation than current LISA on the compatibility benchmark;
+- no unconditional full retract-plus-assert for one-slot changes;
+- no shared mutable multi-session state;
+- identical conclusion and proof hashes on repeated replay.
+
+Until these measurements exist, routing policy selects SWI-Prolog.
+
+* Star-Lang Consequences
+
+Star-Lang gains a =star-logic= capability layer.
+
+A =reason= plan node records:
+
+- semantic capability;
+- workload shape;
+- named query or rule package;
+- result and proof schemas;
+- backend-selection policy;
+- selected backend and adapter version;
+- engine build hash;
+- package and mapping digests;
+- budget and isolation;
+- replay policy.
+
+The source language does not expose =swipl=, MQI, N-Prolog, LISA, RETE nodes, CLOS fact objects, or native handles.
+
+* Star-Server Consequences
+
+=star-server= provides two supervised logic domains:
+
+#+begin_example
+LogicDomainSupervisor
+├── StarPrologDomainActor
+│   ├── SWIRuntimePool
+│   └── NPrologRuntimePool
+├── StarRulesDomainActor
+│   └── RuleSessionSupervisor
+├── LogicBudgetLedgerActor
+└── LogicTelemetryActor
+#+end_example
+
+Each run or rule session has explicit ownership. Engine failures do not cross case boundaries. Durable run journals remain outside engine memory.
+
+* Benefits
+
+- Uses the strongest execution model for each actual workload.
+- Avoids forcing recursive graph reasoning into an eager production-rule network.
+- Avoids paying a process/query boundary for every hot incremental rule delta after =star-rules= qualifies.
+- Preserves engine replacement behind typed Common Lisp protocols.
+- Makes performance decisions reproducible and reviewable.
+- Allows N-Prolog to test portability without lowering the production baseline.
+- Keeps Star-Lang deterministic by pinning selection before execution.
+
+* Costs
+
+- Two production-capable adapters must eventually be maintained.
+- Equivalent cross-engine packages require conformance tests.
+- Proof normalization must bridge different derivation models.
+- Routing policy and benchmark records become versioned artifacts.
+- =star-rules= requires substantial matcher work before production use.
+- Operators must understand which logic capability a package requests.
+
+* Risks and Controls
+
+** Semantic drift
+
+Control: capability-specific conformance fixtures, normalized output schemas, pinned engine selection, and no silent runtime rerouting.
+
+** Benchmark gaming
+
+Control: common generated datasets, raw measurements, fixed projection/validation costs, published hardware and versions, and multiple workload families.
+
+** LISA fork scope explosion
+
+Control: implement representation, indexes, slot deltas, batching, and actor ownership before advanced uncertainty, distribution, or parallelism.
+
+** Prolog state leakage
+
+Control: =star-prolog= session isolation, process-per-run for untrusted work, digest-locked packages, and case-scoped fact mapping.
+
+** Duplicate engines for the same rule
+
+Control: only declare equivalence when the conformance suite proves the same observable semantics. Otherwise packages use distinct capability IDs.
+
+* Rejected Alternatives
+
+** SWI-Prolog only
+
+Rejected as the permanent architecture because persistent production-rule sessions may achieve substantially lower delta latency by retaining indexed working memory in-process. Retained as the default until another backend proves otherwise.
+
+** LISA only
+
+Rejected because current performance is allocation heavy and production-rule semantics do not replace tabled recursive queries, constraints, or well-founded reasoning.
+
+** N-Prolog as default
+
+Rejected because the available benchmark and runtime features do not establish production equivalence to SWI-Prolog.
+
+** Automatically choose the fastest engine at runtime
+
+Rejected because current load and benchmark observations would make replay nondeterministic and could change semantics between retries.
+
+** Compile all rules to both engines and race them
+
+Rejected because it doubles resource use, complicates effect handling, and cannot decide which different answer is authoritative.
+
+** Embed SWI-Prolog directly into Star-Lang
+
+Rejected because engine-native types and lifecycle would contaminate normalized IR and prevent alternate backends.
+
+* Implementation Order
+
+1. Freeze =star-logic= protocol and normalized =logic-call= IR.
+2. Implement =star-logic.prolog= over =star-prolog= and SWI MQI.
+3. Add the common benchmark and semantic conformance harness.
+4. Establish current LISA baseline in CI.
+5. Implement =star-rules= representation and index phases.
+6. Add slot-delta and batched propagation.
+7. Add lazy segments, budgets, actor ownership, and justification graphs.
+8. Run cross-engine benchmarks.
+9. Enable =star-rules= routing only for workload classes whose gates pass.
+10. Keep N-Prolog opt-in until its adapter and compatibility suite pass.
+
+* Status
+
+This ADR is in =REVIEW=. It defines the recommended model but does not mark =star-rules= production-ready. SWI-Prolog is the implementation default for the initial vertical slice.
+
+* Sources
+
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
+- [[file:../../research/star-server/LISA-RESEARCH-001-performance-and-feature-extension.org][LISA-RESEARCH-001 LISA Performance and Feature Extension]]
+- [[file:../../research/star-server/STAR-RESEARCH-004-internal-prolog-server-library-swi-nprolog.org][STAR-RESEARCH-004 Internal Prolog Server Library]]
+- SWI-Prolog tabled execution: https://www.swi-prolog.org/pldoc/man?section=tabling
+- SWI-Prolog incremental tabling: https://www.swi-prolog.org/pldoc/man?section=tabling-incremental
+- SWI-Prolog monotonic tabling: https://www.swi-prolog.org/pldoc/man?section=tabling-monotonic
+- SWI-Prolog features: https://www.swi-prolog.org/features.html
+- Drools Phreak documentation: https://kie.apache.org/docs/10.0.x/drools/drools/rule-engine/index.html
+- Maintained LISA repository: https://github.com/youngde811/Lisa
+- N-Prolog benchmark: https://github.com/sasagawa888/nprolog/blob/master/bench/Bench.md

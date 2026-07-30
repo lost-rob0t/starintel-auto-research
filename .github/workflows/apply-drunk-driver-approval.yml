@@ -1,0 +1,69 @@
+name: Apply drunk-driver case approval
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-drunk-driver-approval.yml
+
+permissions:
+  contents: write
+
+jobs:
+  approve:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply approval state
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, *, count: int | None = None) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              found = text.count(old)
+              if count is not None and found != count:
+                  raise SystemExit(f"{path}: expected {count} occurrences of {old!r}, found {found}")
+              if found == 0:
+                  raise SystemExit(f"{path}: missing {old!r}")
+              file.write_text(text.replace(old, new), encoding="utf-8")
+
+          pipeline = "roam/design/drunk-drivers/DRUNK-DRIVER-RESOLUTION-001-fars-to-name-actor-pipeline.org"
+          scope = "roam/design/drunk-drivers/DRUNK-DRIVER-RESOLUTION-002-severe-harm-scope-gate.org"
+          index = "roam/indexes/drunk-drivers/DRUNK-DRIVER-INDEX-000-national-crash-identity-resolution.org"
+
+          replace(pipeline, "#+status: REVIEW\n", "#+status: DONE\n", count=1)
+          replace(pipeline, "| 0.1.0   | 2026-07-28 | Define the national FARS-to-name actor architecture and evaluation gate | Pending               |", "| 0.1.0   | 2026-07-28 | Define the national FARS-to-name actor architecture and evaluation gate | Yes                   |", count=1)
+          replace(pipeline, "\n* REVIEW ", "\n* DONE ")
+
+          replace(scope, "#+status: APPROVED\n", "#+status: DONE\n", count=1)
+          replace(scope, "\n* APPROVED ", "\n* DONE ")
+
+          replace(index, "* Approved Scope Policy", "* Completed Scope Policy", count=1)
+          replace(index, "Status: approved by nsaspy on 2026-07-28. This normative amendment takes precedence over any broader selection language in the actor design.", "Status: completed and approved by nsaspy on 2026-07-28. This normative amendment takes precedence over any broader selection language in the actor design.", count=1)
+          replace(index, "* Design Under Review", "* Approved Design", count=1)
+          replace(index, "Status: review under the approved severe-harm constraint. The design defines the bounded resolver actors, three separate identity proof stages, calibrated linkage, independent review, a publication gate, reversible StarIntel output, and benchmark requirements. The approved scope amendment adds the twenty-seventh actor, the Severe Harm Eligibility Gate.", "Status: approved by nsaspy on 2026-07-29 under the completed severe-harm constraint. The design defines the bounded resolver actors, three separate identity proof stages, calibrated linkage, independent review, a publication gate, reversible StarIntel output, and benchmark requirements. The completed scope amendment adds the twenty-seventh actor, the Severe Harm Eligibility Gate.", count=1)
+          replace(index, "5. Review the remaining actor design under that constraint.", "5. Treat the approved actor design as the implementation baseline under that constraint.", count=1)
+          PY
+
+          rm .github/workflows/apply-drunk-driver-approval.yml
+          git diff --check
+
+      - name: Commit approval
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            roam/design/drunk-drivers/DRUNK-DRIVER-RESOLUTION-001-fars-to-name-actor-pipeline.org \
+            roam/design/drunk-drivers/DRUNK-DRIVER-RESOLUTION-002-severe-harm-scope-gate.org \
+            roam/indexes/drunk-drivers/DRUNK-DRIVER-INDEX-000-national-crash-identity-resolution.org \
+            .github/workflows/apply-drunk-driver-approval.yml
+          git commit -m "Approve drunk-driver resolution case"
+          git push origin HEAD:main

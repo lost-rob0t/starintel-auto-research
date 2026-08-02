@@ -4,6 +4,7 @@
 #+title: STAR-LANG-RESEARCH-009 Canonical JSON and Generated Bindings
 #+description: Serialize the portable Star-Lang manifest and typed message envelopes as deterministic JSON and generate Python and TypeScript bindings from the same normalized contracts.
 #+status: REVIEW
+#+last_modified: [2026-08-02 Sun]
 #+filetags: :starintel:star-lang:json:wire-protocol:python:typescript:bindings:compiler:research:
 
 * Purpose
@@ -16,6 +17,10 @@ The compiler now projects the same manifest into:
 - schema-validated canonical JSON message envelopes
 - Python typing bindings
 - TypeScript typing bindings
+
+* Field Naming
+
+All document fields, message-payload fields, and serialized envelope keys use lower camelCase. Canonical JSON and generated bindings preserve the source spelling exactly; they do not translate kebab-case fields at generation time. A kebab-case field is rejected during parsing or semantic validation. Declaration and type identifiers remain outside this rule.
 
 * Canonical JSON
 
@@ -34,7 +39,7 @@ Floating-point values are not accepted as canonical numeric values. Financial an
 
 * Schema-Aware Envelopes
 
-Envelope serialization resolves =message_type= against the portable manifest before encoding =payload=. The encoder validates:
+Envelope serialization resolves =messageType= against the portable manifest before encoding =payload=. The encoder validates:
 
 - required fields
 - closed message field names
@@ -56,11 +61,11 @@ The generator emits Python 3 typing definitions using:
 - =Required=
 - =NotRequired=
 - =Literal=
-- exact source field strings
+- exact lower-camelCase source field strings
 - flattened inherited document fields
 - actor contract metadata
 
-Hyphenated Star-Lang field names remain exact dictionary keys instead of being silently renamed. Scalar and enumeration type names become PascalCase aliases. Decimal wire types map to =str=.
+Star-Lang field names use lower camelCase and remain exact dictionary keys; generators do not silently rename them. Scalar and enumeration type names become PascalCase aliases. Decimal wire types map to =str=.
 
 * TypeScript Bindings
 
@@ -71,7 +76,7 @@ The generator emits:
 - document interfaces
 - interface inheritance
 - message interfaces
-- quoted source field names
+- lower-camelCase source field names
 - actor contract metadata with =as const=
 
 Decimal wire types map to =string= for the same precision rule used by Python and canonical JSON.
@@ -112,13 +117,14 @@ The pass checks:
 4. list fields encode as JSON arrays
 5. decimal strings pass and numeric decimal values fail
 6. invalid enum values fail
-7. Python preserves exact source keys
+7. Python preserves exact lower-camelCase source keys
 8. Python document bindings include inherited fields
 9. TypeScript preserves interface inheritance
 10. Python and TypeScript both map decimal wire values to strings
 11. actor contracts appear in both generated languages
 12. generated manifest and envelope files parse as JSON
 13. generated Python bindings compile
+14. kebab-case field declarations fail before binding generation
 
 * Boundary
 

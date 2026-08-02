@@ -49,6 +49,26 @@ def mirror_structure(roam: Path) -> set[Path]:
 def active_org_files(roam: Path) -> list[Path]:
     return sorted((roam / "implement").rglob("*.org"))
 
+def implementation_project(path: Path, roam: Path) -> str:
+    rel = path.resolve().relative_to((roam / "implement").resolve())
+    return rel.parts[0] if len(rel.parts) > 1 else "."
+
+def active_org_files_by_project(roam: Path) -> dict[str, list[Path]]:
+    grouped: dict[str, list[Path]] = {}
+    for path in active_org_files(roam):
+        grouped.setdefault(implementation_project(path, roam), []).append(path)
+    return grouped
+
+def implementation_slot_problems(roam: Path) -> list[str]:
+    problems = []
+    for project, paths in sorted(active_org_files_by_project(roam).items()):
+        if len(paths) > 1:
+            rendered = ", ".join(str(path.relative_to(roam / "implement")) for path in paths)
+            problems.append(
+                f"implementation slot for project {project} contains {len(paths)} Org files: {rendered}"
+            )
+    return problems
+
 def canonical_from_active(active: Path, roam: Path) -> Path:
     rel = active.resolve().relative_to((roam / "implement").resolve())
     return roam / "design" / rel

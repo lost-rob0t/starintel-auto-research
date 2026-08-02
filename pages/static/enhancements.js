@@ -10,6 +10,7 @@
   ];
   const allowedThemes = new Set(THEMES.map(([value]) => value));
   const root = document.documentElement;
+  const currentScript = document.currentScript;
 
   function storedTheme() {
     try {
@@ -69,7 +70,18 @@
     header.append(control);
   }
 
+  function loadCommunityFooter() {
+    if (document.querySelector("script[data-starintel-community-footer]")) return;
+    const script = document.createElement("script");
+    const assetBase = currentScript?.src ? new URL(".", currentScript.src) : new URL(".", document.baseURI);
+    script.src = new URL("starintel-community-footer.js", assetBase).href;
+    script.defer = true;
+    script.dataset.starintelCommunityFooter = "true";
+    document.head.append(script);
+  }
+
   applyTheme(storedTheme());
+  loadCommunityFooter();
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", mountThemeSelector, { once: true });

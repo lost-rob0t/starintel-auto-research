@@ -1,0 +1,531 @@
+:PROPERTIES:
+:ID:       star-research-006-cl-discord-self-common-lisp-port
+:END:
+#+title: STAR-RESEARCH-006 cl-discord-self Common Lisp Port
+#+description: Define a maintained Common Lisp port of the discord.py-self protocol kernel and use it as the Discord session library beneath the supervised StarIntel Discord Watch actor.
+#+status: REVIEW
+#+filetags: :starintel:star-server:discord:discordwatch:common-lisp:actors:sento:cffi:curl:gateway:http:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+#+created: [2026-07-30 Thu]
+#+last_modified: [2026-07-30 Thu]
+
+| Version | Date       | Description of change                                                                      | Did nsaspy approve it |
+|---------+------------+--------------------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-30 | Select a focused Common Lisp port of discord.py-self as the Discord Watch session library. | No                    |
+
+* Source Links
+
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:../../design/STAR-00-Starintel-4th-generation-Ideas.org][STAR-00 StarIntel Fourth Generation Ideas]]
+- [[file:STAR-RESEARCH-005-discord-watch-common-lisp-port.org][STAR-RESEARCH-005 Discord Watch Common Lisp Port]]
+- [[file:QUASAR-RESEARCH-004-dual-actor-supervisor-runtime.org][QUASAR-RESEARCH-004 Dual Actor Supervisor Runtime]]
+- [[file:../../design/cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]]
+- Upstream library: https://github.com/dolfies/discord.py-self
+- TLS fingerprint issue: https://github.com/dolfies/discord.py-self/issues/500
+
+* Research Question
+
+Should StarIntel port =discord.py-self= to Common Lisp and use that library inside =star-discord-watch= instead of implementing Discord protocol behavior directly inside the actor?
+
+* Decision
+
+Yes, with a strict boundary.
+
+Create a reusable Common Lisp system named =cl-discord-self= that ports the maintained protocol kernel, transport contracts, Gateway state machine, REST rate-limit machinery, header/client context, event parsing, and the passive collection object model from =discord.py-self=.
+
+Then make =star-discord-watch= depend on =cl-discord-self= through a narrow session protocol.
+
+Do not perform a line-for-line port of the entire Python package before the actor can run. The first implementation target is the protocol and collection kernel required by Discord Watch. Commands, voice, application commands, rich sending helpers, UI components, and broad convenience APIs remain outside the initial compatibility profile.
+
+This supersedes the narrower conclusion in =STAR-RESEARCH-005= that the final native adapter should be private to the actor. The native Discord implementation should instead become a separately versioned library so protocol maintenance, fixtures, differential testing, and other authorized Discord actors can share it.
+
+* Why the Proposal Is Better
+
+Embedding Discord behavior directly inside =star-discord-watch= would mix four independent concerns:
+
+1. Discord HTTP and Gateway protocol maintenance;
+2. account-session lifecycle and state;
+3. StarIntel authorization and collection scope;
+4. StarIntel document normalization and publication.
+
+A separate library prevents Discord protocol drift from contaminating actor policy and StarIntel document code. It also permits:
+
+- a small compatibility test suite against =discord.py-self=;
+- reuse by historical-backfill, attachment, membership, reaction, and thread actors;
+- transport replacement without rewriting actors;
+- replay testing without RabbitMQ or CouchDB;
+- a bot-token compatibility profile later without changing the user-session actor contract;
+- clear attribution and license tracking for ported upstream logic.
+
+* Upstream Finding: Issue 500 Is No Longer the Original Blocker
+
+Issue 500 identified TLS and client fingerprint differences as a practical failure source. The maintainer stated that ordinary Python HTTP stacks were distinguishable and that WebSocket support was the major blocker for moving to a fingerprint-compatible transport.
+
+The current =discord.py-self= master branch has already crossed that boundary:
+
+- =discord/http.py= imports =curl_cffi= and uses it for HTTP behavior;
+- =discord/gateway.py= imports =curl_cffi.requests.AsyncWebSocket= and curl WebSocket flags;
+- =discord/tracking.py= selects browser impersonation profiles and maintains browser, client-build, client-hint, super-property, launch, and Gateway property contexts;
+- =requirements.txt= requires =curl_cffi>=0.14.0,<1=;
+- the active Gateway implementation uses curl-backed WebSockets rather than the old aiohttp-only path.
+
+Therefore the Common Lisp port should not recreate browser TLS behavior using Lisp TLS libraries. It should bind to the same native transport family and keep transport behavior behind a replaceable protocol.
+
+* Licensing
+
+=discord.py-self= is MIT licensed. A Common Lisp port may copy, translate, modify, and redistribute the code, provided the MIT notice and upstream copyright notice remain in substantial portions derived from it.
+
+The new repository or system must include:
+
+- the upstream MIT license;
+- a NOTICE or PORTING.md file identifying translated modules;
+- per-file attribution where a Lisp file substantially translates one upstream Python module;
+- a pinned upstream commit in the compatibility manifest;
+- an inventory distinguishing translated logic from original StarIntel logic.
+
+* Scope Profiles
+
+** Profile A: Discord Watch Collection Kernel
+
+Required first.
+
+- REST authentication and request headers;
+- route and rate-limit buckets;
+- retry and structured HTTP errors;
+- Gateway connect, Identify, Hello, heartbeat, heartbeat acknowledgement, Resume, reconnect, invalid-session handling, and close-code classification;
+- transport compression and decompression;
+- sequence and session checkpoints;
+- READY and READY_SUPPLEMENTAL state;
+- message create, update, and delete;
+- reaction add and remove;
+- thread creation and updates required to resolve message location;
+- guild, channel, member, user, role, attachment, embed, sticker, poll, reply, mention, and message-reference payload structures required by collected events;
+- bounded message-history fetch;
+- bounded attachment fetch;
+- raw dispatch event delivery;
+- deterministic typed conditions;
+- fixture replay.
+
+** Profile B: Broader Read-Only Client
+
+Deferred until Profile A passes.
+
+- guild and channel traversal;
+- member chunking and bounded member search;
+- read-state and relationship events;
+- audit-log retrieval when the authorized account can access it;
+- invite and directory metadata;
+- richer thread, forum, stage, and scheduled-event models;
+- optional local cache queries.
+
+** Profile C: Full discord.py-self Surface
+
+Not required by Discord Watch.
+
+- command framework;
+- task extension framework;
+- voice and media streaming;
+- message sending convenience surface;
+- application command invocation;
+- interaction automation;
+- billing, store, promotion, payment, and subscription helpers;
+- broad UI component construction;
+- exact Python API compatibility.
+
+Profile C may be considered only as a separate project. It must not block the collection actor.
+
+* Proposed ASDF Systems
+
+#+begin_src lisp
+cl-discord-self/core
+cl-discord-self/conditions
+cl-discord-self/json
+cl-discord-self/model
+cl-discord-self/events
+cl-discord-self/transport
+cl-discord-self/transport/curl
+cl-discord-self/http
+cl-discord-self/gateway
+cl-discord-self/state
+cl-discord-self/fixtures
+cl-discord-self/testing
+cl-discord-self
+
+star-discord-watch
+#+end_src
+
+* Architectural Boundary
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+package "cl-discord-self" {
+  component "Client Context" as Context
+  component "REST Router" as REST
+  component "Rate-Limit Registry" as Limits
+  component "Gateway Session" as Gateway
+  component "Event Parser" as Parser
+  component "Read-Only State Projection" as State
+  component "curl Transport Adapter" as Curl
+}
+
+package "star-discord-watch" {
+  component "Session Actor" as Session
+  component "Authorization Registry" as Authorization
+  component "Scope Filter" as Scope
+  component "Raw Event Journal" as Journal
+  component "StarIntel Normalizer" as Normalizer
+  component "Reliable Publisher" as Publisher
+}
+
+Curl --> REST
+Curl --> Gateway
+Context --> REST
+Context --> Gateway
+REST --> Limits
+Gateway --> Parser
+Parser --> State
+
+Session --> Gateway
+Session --> REST
+Parser --> Session : typed dispatch events
+Authorization --> Scope
+Session --> Scope
+Scope --> Journal
+Journal --> Normalizer
+Normalizer --> Publisher
+@enduml
+#+end_src
+
+The library never imports RabbitMQ, CouchDB, StarIntel document classes, dataset manifests, case policy, or LEO authorization logic.
+
+The actor never constructs raw Discord Identify payloads, calculates REST route keys, interprets Gateway close codes, parses compressed frames, or manages Discord rate-limit buckets.
+
+* Common Lisp Runtime Model
+
+Use Sento or the StarIntel managed component runtime above the library, but do not require every internal data object to be an actor.
+
+Recommended actors and components:
+
+- one supervised =discord-account-session= actor per credential lease;
+- one =gateway-connection= component owned by the session actor;
+- one =gateway-heartbeat= child actor or scheduled component;
+- one =rest-rate-limit-registry= actor per account session;
+- one =rest-worker-pool= with bounded concurrency;
+- one optional =state-projection= actor for guild, channel, user, and member lookup;
+- transient fetch workers for bounded history and attachment jobs.
+
+Model values such as users, messages, roles, channels, embeds, and attachments should be immutable structures, not actors.
+
+* Transport Decision
+
+Define a transport protocol before binding a native implementation:
+
+#+begin_src lisp
+(defgeneric http-request (transport request))
+(defgeneric websocket-connect (transport request event-sink))
+(defgeneric websocket-send (connection frame))
+(defgeneric websocket-receive (connection))
+(defgeneric websocket-close (connection code reason))
+(defgeneric transport-capabilities (transport))
+#+end_src
+
+The first native transport candidate is a CFFI binding to the curl-impersonate or curl-cffi native library family used by current =discord.py-self=.
+
+The binding must support:
+
+- browser-profile selection as opaque configuration;
+- HTTP/2;
+- WebSocket connect, send, receive, and close;
+- proxy configuration when supplied by the operating organization;
+- certificate verification;
+- cancellation;
+- connection deadlines;
+- response headers and raw bytes;
+- integration with a dedicated transport thread or curl multi loop;
+- exact library and browser-profile version reporting.
+
+Do not implement custom TLS fingerprint construction in Common Lisp. Treat the native transport profile as a pinned dependency and expose only named, tested profiles.
+
+A process adapter around a pinned helper binary remains an acceptable containment fallback if direct CFFI event-loop integration proves unstable. The public =cl-discord-self= API must not reveal whether the selected transport is in-process or supervised out-of-process.
+
+* Gateway State Machine
+
+#+begin_src plantuml
+@startuml
+hide empty description
+
+[*] --> Stopped
+Stopped --> Connecting : start
+Connecting --> AwaitingHello : websocket open
+Connecting --> Backoff : transport failure
+AwaitingHello --> Identifying : HELLO and new session
+AwaitingHello --> Resuming : HELLO and checkpoint
+Identifying --> Ready : READY plus supplemental state
+Resuming --> Ready : RESUMED
+Identifying --> Backoff : invalid session or close
+Resuming --> Backoff : invalid session or close
+Ready --> Ready : DISPATCH
+Ready --> Reconnecting : RECONNECT or missed heartbeat acknowledgement
+Reconnecting --> Connecting
+Backoff --> Connecting : supervised retry permits
+Ready --> Stopping : stop, revoke, or expiration
+Connecting --> Stopping : stop, revoke, or expiration
+Backoff --> Stopping : stop, revoke, or expiration
+Stopping --> Stopped
+@enduml
+#+end_src
+
+Checkpoint fields:
+
+- session ID;
+- latest sequence number;
+- resume Gateway URL;
+- account ID;
+- selected client context ID;
+- transport profile and version;
+- latest READY state digest;
+- checkpoint timestamp;
+- last accepted StarIntel event cursor.
+
+Secrets are never checkpointed.
+
+* HTTP and Rate-Limit Model
+
+Port the behavioral concepts, not Python syntax.
+
+- define immutable route objects;
+- calculate major parameters for guild, channel, webhook, and interaction routes where applicable;
+- maintain route-to-bucket remapping from response headers;
+- serialize requests sharing one server bucket;
+- distinguish global, user, shared, and route limits;
+- preserve retry-after and server time information;
+- bound automatic retries;
+- expose rate-limit telemetry without exposing authorization headers;
+- permit the actor to cancel queued requests when scope expires.
+
+A request completion is a typed result:
+
+#+begin_src lisp
+(defstruct discord-http-result
+  status
+  headers
+  body
+  route
+  bucket-id
+  attempts
+  started-at
+  completed-at)
+#+end_src
+
+* Model Strategy
+
+Do not recreate the Python inheritance tree mechanically.
+
+Use immutable Common Lisp structures and explicit constructors for wire payloads:
+
+- =discord-user=;
+- =discord-member=;
+- =discord-guild=;
+- =discord-channel=;
+- =discord-thread=;
+- =discord-message=;
+- =discord-message-reference=;
+- =discord-attachment=;
+- =discord-embed=;
+- =discord-reaction=;
+- =discord-role=;
+- =discord-sticker=;
+- =discord-poll=.
+
+Every structure preserves its raw JSON payload or a raw-event reference. Unknown fields remain available through an extension map so protocol drift does not destroy evidence.
+
+Use Discord snowflakes as strings at JSON and document boundaries. Numeric conversion is allowed internally only where timestamp or ordering math requires it.
+
+* Event Contract Used by the Actor
+
+#+begin_src lisp
+(defstruct discord-dispatch-event
+  name
+  sequence
+  session-id
+  account-id
+  received-at
+  raw-json
+  parsed-value
+  unknown-fields
+  transport-version
+  client-context-id)
+#+end_src
+
+The actor subscribes to these events and applies authorization and scope. The library does not know which events are in scope for a case.
+
+* Differential Compatibility Harness
+
+Maintain =discord.py-self= as the reference oracle during the port.
+
+For every supported fixture:
+
+1. store the raw Gateway or HTTP payload;
+2. parse it through a pinned =discord.py-self= reference runner;
+3. export a canonical compatibility record;
+4. parse the same fixture through =cl-discord-self=;
+5. compare stable identifiers, timestamps, event names, references, attachment metadata, mentions, revisions, and unknown-field retention;
+6. record intentional semantic differences.
+
+Do not compare Python object repr strings or cache implementation details.
+
+Compatibility manifest:
+
+#+begin_src json
+{
+  "profile": "discord-watch-collection-v1",
+  "upstream_repository": "dolfies/discord.py-self",
+  "upstream_commit": "pinned-sha",
+  "gateway_version": 9,
+  "curl_transport": "pinned-build",
+  "supported_events": [
+    "READY",
+    "READY_SUPPLEMENTAL",
+    "RESUMED",
+    "MESSAGE_CREATE",
+    "MESSAGE_UPDATE",
+    "MESSAGE_DELETE",
+    "MESSAGE_REACTION_ADD",
+    "MESSAGE_REACTION_REMOVE",
+    "THREAD_CREATE",
+    "THREAD_UPDATE",
+    "THREAD_DELETE"
+  ]
+}
+#+end_src
+
+* Implementation Order
+
+** Phase 1: Protocol-Neutral Core
+
+- conditions;
+- JSON preservation and unknown-field handling;
+- snowflake operations;
+- immutable event and model structures;
+- fixture runner;
+- fake transport;
+- deterministic tests.
+
+** Phase 2: Native Transport Spike
+
+- load pinned native curl transport;
+- execute a controlled HTTP request;
+- connect a controlled WebSocket fixture server;
+- send and receive text and binary frames;
+- verify cancellation and close handling;
+- verify transport version reporting;
+- verify the selected transport profile is available.
+
+No Discord account is used for this phase.
+
+** Phase 3: Gateway Kernel
+
+- Hello;
+- heartbeat and acknowledgement;
+- Identify and Resume;
+- reconnect and invalid session;
+- sequence checkpoints;
+- compressed payload handling;
+- raw dispatch delivery;
+- deterministic replay tests.
+
+** Phase 4: Read-Only HTTP Kernel
+
+- request construction;
+- route keys;
+- rate limits;
+- bounded history retrieval;
+- message lookup;
+- attachment download;
+- structured errors and cancellation.
+
+** Phase 5: Collection Models
+
+- users, members, guilds, channels, threads, messages, references, attachments, embeds, reactions, roles, stickers, and polls;
+- unknown fields;
+- canonical fixture export;
+- compatibility comparisons.
+
+** Phase 6: Actor Integration
+
+- replace the private native adapter in =star-discord-watch= with =cl-discord-self=;
+- feed typed events into scope filtering and the raw-event journal;
+- connect session checkpoints;
+- connect bounded backfill and attachments;
+- retain the Python adapter as a temporary compatibility oracle and fallback.
+
+** Phase 7: Maintenance Automation
+
+- watch upstream commits touching HTTP, Gateway, tracking, state, message, guild, channel, user, member, raw event, and type modules;
+- generate a review queue rather than automatically merging behavior;
+- run fixture compatibility tests against the pinned and candidate upstream revisions;
+- record Discord protocol drift as explicit research or implementation tasks.
+
+* Acceptance Tests
+
+1. The library loads without RabbitMQ, CouchDB, or StarIntel.
+2. A fake transport can drive the complete Gateway state machine deterministically.
+3. A HELLO starts heartbeat scheduling and a missed acknowledgement triggers reconnect.
+4. A stored session and sequence number produce Resume rather than Identify.
+5. Invalid-session handling clears or retains state according to the server payload.
+6. Message create, update, delete, reaction, and thread fixtures preserve IDs and unknown fields.
+7. Compressed and uncompressed fixtures produce the same canonical event.
+8. HTTP route buckets serialize requests correctly under fixture-provided headers.
+9. A cancelled scope cancels queued history and attachment work.
+10. Transport, profile, upstream commit, and client-context metadata appear in every session report.
+11. No token appears in logs, conditions, checkpoints, fixture exports, or actor messages.
+12. The same raw fixture produces compatible canonical records in =discord.py-self= and =cl-discord-self=.
+13. The actor can replace the Python adapter with =cl-discord-self= without changing normalization or publication code.
+14. Unknown Gateway events are journaled and surfaced without crashing the session.
+15. A protocol parser failure preserves the raw event and emits a structured drift condition.
+
+* Rejected Alternatives
+
+** Line-for-Line Full Port Before First Use
+
+Rejected because most of the Python package surface is irrelevant to passive Discord Watch collection. It increases maintenance and delays validation of the hard transport and Gateway boundaries.
+
+** Keep discord.py-self Permanently as a Python Sidecar
+
+Rejected as the end state because StarIntel would remain dependent on Python runtime supervision, Python cache semantics, and a second internal object model. It remains useful as a compatibility oracle and temporary fallback.
+
+** Implement Discord Protocol Only Inside star-discord-watch
+
+Rejected because the protocol code would be untestable and unreusable outside one actor and would couple case policy to Discord drift.
+
+** Build on Lispcord or Dithcord
+
+Rejected because their bot-oriented and incomplete foundations do not provide a maintained user-session compatibility baseline equivalent to current =discord.py-self=.
+
+** Pure Lisp TLS and WebSocket Stack
+
+Rejected for the compatibility profile because issue 500 demonstrates that transport behavior is part of the effective client contract. Use a pinned native curl transport family behind CFFI or a supervised helper process instead.
+
+* Final Recommendation
+
+Build =cl-discord-self= as a focused, attributed Common Lisp port of the current =discord.py-self= collection and protocol kernel. Use it beneath =star-discord-watch= and preserve the Python project as the differential oracle until the native profile passes fixture and bounded live acceptance tests.
+
+The first merge gate is not broad API parity. It is one supervised account session producing reliable typed =MESSAGE_CREATE= events, resumable checkpoints, bounded history fetches, and transport/version metadata through the existing StarIntel actor pipeline.
+
+* Footnotes and Citations
+
+[fn:issue-500] dolfies, “TLS fingerprinting,” =discord.py-self= issue 500: https://github.com/dolfies/discord.py-self/issues/500
+
+[fn:http] =discord.py-self= HTTP implementation: https://github.com/dolfies/discord.py-self/blob/master/discord/http.py
+
+[fn:gateway] =discord.py-self= Gateway implementation: https://github.com/dolfies/discord.py-self/blob/master/discord/gateway.py
+
+[fn:tracking] =discord.py-self= client context and tracking implementation: https://github.com/dolfies/discord.py-self/blob/master/discord/tracking.py
+
+[fn:requirements] =discord.py-self= runtime dependencies: https://github.com/dolfies/discord.py-self/blob/master/requirements.txt
+
+[fn:license] =discord.py-self= MIT license: https://github.com/dolfies/discord.py-self/blob/master/LICENSE
+
+[fn:curl-cffi] =curl_cffi= project and transport capabilities: https://github.com/lexiforest/curl_cffi

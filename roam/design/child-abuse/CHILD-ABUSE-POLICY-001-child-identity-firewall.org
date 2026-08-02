@@ -1,0 +1,292 @@
+:PROPERTIES:
+:ID:       starintel-child-abuse-policy-001
+:END:
+#+title: CHILD-ABUSE-POLICY-001 Child Identity Firewall
+#+description: Establish a non-bypassable rule that child victims are never named, searched by name, linked across cases, or exposed through StarIntel public artifacts while adult public defendants remain the only identity-resolution targets.
+#+status: APPROVED
+#+status_event: approved
+#+status_updated: 2026-07-28
+#+filetags: :starintel:design:child-abuse:privacy:children:public-records:approved:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                      | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------+-----------------------|
+| 1.0.0   | 2026-07-28 | Prohibit child names and identifying victim data everywhere | Yes                   |
+
+* Related Nodes
+
+- [[file:CHILD-ABUSE-RESOLUTION-001-adult-offender-public-case-pipeline.org][CHILD-ABUSE-RESOLUTION-001 Adult-Offender Public-Case Pipeline]]
+- [[file:../../research/child-abuse/CHILD-ABUSE-RESEARCH-000-national-severe-case-landscape.org][CHILD-ABUSE-RESEARCH-000 National Severe-Case Landscape]]
+- [[file:../../indexes/child-abuse/CHILD-ABUSE-INDEX-000-severe-case-adult-offender-research.org][CHILD-ABUSE-INDEX-000 Severe-Case Adult-Offender Research]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+
+* APPROVED Decision
+
+StarIntel must not name child victims or survivors in the child-abuse research domain.
+
+The Child Identity Firewall[fn:child-identity-firewall] is a hard system boundary, not a display preference. It applies even when a child's identity is already public in a news report, obituary, police release, court filing, fundraiser, social-media post, or government disclosure.
+
+Only publicly documented adult alleged offenders, defendants, or convicted offenders may become identity-resolution targets. A child, a person who was under eighteen at the event, or a person whose age is unresolved may never become a named target in this domain.
+
+* APPROVED Non-Negotiable Invariants
+
+1. No child name, alias, initials, nickname, birth name, or former name is stored in canonical StarIntel documents[fn:canonical-document].
+2. No child name is used in a search query, archive query, court query, filename, document identifier, log message, metric label, prompt, embedding, graph label, or exported report.
+3. No exact date of birth, home address, school, daycare, hospital room, photograph, biometric identifier, social-media account, telephone number, email address, or family contact information is retained.
+4. Children receive random case-local pseudonyms[fn:pseudonym] such as =child-victim-01=. The same child must not receive a stable identifier across separate cases or datasets.
+5. Child records cannot be merged across incidents, households, agencies, or source systems.
+6. Public exports use coarse age bands and county-or-state geography only unless a more general location is needed to prevent re-identification.
+7. Exact age, exact location, or detailed medical facts may exist only transiently when necessary for incident matching and must be generalized before persistence.
+8. Raw source text containing child identity is not committed to the repository, emitted to public artifacts, or retained in ordinary logs.
+9. Evidence excerpts replace child identifiers with =[CHILD]= before storage.
+10. The system does not construct family, school, social, household, friendship, or associate graphs around a child.
+11. Adult defendants may be connected to a case-local child pseudonym only through the minimum relation necessary to represent the public criminal case.
+12. Minor alleged offenders are treated as children and remain unnamed.
+13. Unknown age fails closed[fn:fail-closed]: no person-name resolution occurs until adult status is established by authoritative evidence.
+14. A privacy failure blocks publication even when every other evidence and confidence threshold passes.
+15. Retraction, correction, and deletion workflows must preserve the prohibition against reintroducing a child identifier.
+
+* APPROVED Target Boundary
+
+The only named identity target is an adult whose public legal role is supported as one of:
+
+- formally charged defendant;
+- indicted defendant;
+- person who pleaded guilty or no contest;
+- convicted offender;
+- sentenced offender;
+- adult identified in a final public agency finding when no criminal case exists and the source lawfully identifies that adult.
+
+The following remain nonpublic workflow candidates and cannot create a canonical named person solely from that status:
+
+- rumor;
+- anonymous accusation;
+- social-media allegation;
+- family-court accusation;
+- child-protective-services referral;
+- unsubstantiated or false report;
+- unnamed suspect;
+- arrest without a confirmed public charge;
+- adult whose role is ambiguous;
+- person named only by a copied news story with no accessible underlying record.
+
+Legal status must be preserved exactly. The words =alleged=, =charged=, =indicted=, =pleaded=, =convicted=, =acquitted=, =dismissed=, and =sentenced= are not interchangeable.
+
+* APPROVED Data-Minimization Contract
+
+Data minimization[fn:data-minimization] requires the smallest child-related record capable of supporting the adult public-case claim.
+
+A public child record may contain only:
+
+#+begin_src json
+{
+  "id": "starintel:child-case-local:<case-id>:01",
+  "dtype": "person",
+  "data": {
+    "display_name": "Child victim 01",
+    "age_band": "1-4",
+    "public_identity_prohibited": true,
+    "cross_case_linkage_prohibited": true
+  }
+}
+#+end_src
+
+Allowed age bands:
+
+- =under-1=;
+- =1-4=;
+- =5-9=;
+- =10-13=;
+- =14-17=;
+- =unknown-child=.
+
+A public event may contain:
+
+- event month or date when essential to distinguish the public case;
+- state and county;
+- broad abuse or neglect category;
+- outcome class such as fatality, near fatality, serious bodily injury, or charged sexual abuse;
+- public adult defendant identifiers;
+- agency, court, prosecutor, police, or medical-examiner source references;
+- redacted evidence locators and hashes.
+
+A public event must not contain:
+
+- a child's exact residential or school location;
+- distinctive medical narrative unnecessary to establish the case;
+- sibling identities;
+- nonoffending caregiver identities;
+- photographs or links whose primary purpose is to display the child;
+- obituary text;
+- fundraiser text;
+- quoted statements from a child;
+- details of sexual acts;
+- details likely to enable identification from a small community unless indispensable to the adult case and independently reviewed.
+
+* APPROVED Search Firewall
+
+Every retrieval request passes through the Child Identity Firewall before execution.
+
+The firewall:
+
+1. detects names, initials, direct identifiers, addresses, schools, and other child-specific terms;
+2. removes or replaces them with nonidentifying event attributes;
+3. rejects a query when safe rewriting would destroy its purpose;
+4. records a privacy rejection event without recording the prohibited value;
+5. permits adult-name confirmation only after the adult candidate was discovered from an event-based or official-record search;
+6. prohibits reverse searching from a child's identity to family members, household members, schools, social accounts, or adult associates.
+
+Permitted discovery query structure:
+
+#+begin_src text
+<month or date> <county or city> child abuse fatality charged
+<county> near fatality child abuse prosecutor
+<adult candidate name> <court or prosecutor domain> charged child abuse
+#+end_src
+
+Prohibited structure:
+
+#+begin_src text
+<child name> abuse
+<child name> parents
+<child name> school
+<child name> obituary
+<child name> fundraiser
+#+end_src
+
+* APPROVED Retrieval and Redaction Boundary
+
+Untrusted source content[fn:untrusted-content] may contain a child's identity. The retrieval worker may hold the raw response only in transient memory or an explicitly authorized restricted artifact store.
+
+Before any downstream actor receives content, the redactor must remove:
+
+- child names and initials;
+- exact birth dates;
+- addresses and precise coordinates;
+- school, daycare, and classroom identifiers;
+- child photographs and captions;
+- social handles and contact data;
+- sibling and nonoffending-child identities;
+- medical-record numbers;
+- quoted child statements;
+- sexually explicit victim details.
+
+The redacted artifact contains:
+
+- source URL;
+- publisher;
+- publication and retrieval timestamps;
+- content hash of the raw response when policy permits hashing;
+- hash of the redacted representation;
+- redaction categories and counts;
+- redacted evidence text;
+- source authority and independence classification.
+
+The public repository receives only redacted artifacts and metadata. A raw-content hash must never be used to reconstruct, redistribute, or expose the raw child-identifying content.
+
+* APPROVED Actor Enforcement
+
+The Child Identity Firewall is enforced at five points:
+
+1. **Input gate** — reject or sanitize operator inputs containing child identity.
+2. **Query gate** — reject child-name and child-associate searches.
+3. **Retrieval gate** — redact source content before extraction.
+4. **Document gate** — validate every candidate StarIntel document before persistence.
+5. **Export gate** — rescan reports, graph labels, search indexes, webpages, and electronic publications before release.
+
+No actor may claim that an upstream actor already performed the check. Each gate is independently testable and failure at any gate stops the branch.
+
+* APPROVED Validation Rules
+
+The validator rejects:
+
+- any child name or plausible child initials;
+- exact birth dates or exact child ages outside restricted transient matching;
+- direct child contact information;
+- exact child residence, school, or daycare;
+- child photographs or image references;
+- stable cross-case child identifiers;
+- child-name search queries;
+- raw source captures in public storage;
+- detailed sexual-abuse narratives involving a child;
+- unredacted quotations containing child identity;
+- graph edges that expand the child's family or social network;
+- adult publication when adult age is unresolved;
+- adult publication below the required legal-status threshold;
+- any export whose privacy scan is incomplete.
+
+Validation is deterministic[fn:deterministic] where possible and supplemented by an independent privacy reviewer for ambiguous indirect identification.
+
+* APPROVED Fixtures
+
+Required privacy fixtures:
+
+1. news story naming a deceased child and charged adult;
+2. prosecutor release using child initials;
+3. court document containing exact birth date;
+4. police report naming a school and home address;
+5. obituary naming siblings and parents;
+6. fundraiser containing photographs and medical details;
+7. article quoting a surviving child;
+8. copied articles repeating the same child name;
+9. adult defendant with the same surname as the child;
+10. adult whose age is unknown;
+11. minor alleged offender;
+12. child name embedded in a URL slug;
+13. child name embedded in image alt text;
+14. child name in a PDF attachment title;
+15. child name accidentally produced by a language model;
+16. cross-case records that appear to describe the same child;
+17. export index containing a prohibited token;
+18. log and error paths containing prohibited input.
+
+Every fixture must prove that the adult public case remains researchable while the child identity is absent from stored, indexed, and exported output.
+
+* APPROVED Metrics and Release Gate
+
+Every release reports:
+
+- child-identifier leakage count;
+- rejected unsafe queries;
+- redacted identifier count by category;
+- adult legal-status accuracy;
+- adult role-confusion rate;
+- false adult identity publications;
+- privacy-review disagreements;
+- raw-artifact retention count;
+- cross-case child-link attempts;
+- export-scan coverage.
+
+Release requirements:
+
+- zero known child-identity leaks;
+- zero child-name queries;
+- zero stable cross-case child identifiers;
+- zero public raw source artifacts containing child identity;
+- zero named minor alleged offenders;
+- complete export scan;
+- independent approval of every privacy exception, with the default being no exception.
+
+There is no acceptable leakage rate above zero.
+
+* APPROVED Completion and Supersession
+
+This policy supersedes any future design language that might otherwise permit child names because they are already public. A later policy may strengthen the protections but may not weaken them without an explicit new approval from the user and a dedicated privacy review.
+
+Any implementation that cannot enforce this policy is rejected rather than partially deployed.
+
+* Footnotes and Glossary
+
+[fn:child-identity-firewall] Child Identity Firewall: A set of mandatory checks that prevents a child's identity or identifying details from entering searches, stored documents, graphs, logs, or public exports.
+
+[fn:canonical-document] Canonical StarIntel document: A durable normalized record accepted into the main StarIntel dataset and used by search, graphs, exports, and later analysis.
+
+[fn:pseudonym] Pseudonym: A deliberately nonidentifying label used in place of a real name. A case-local pseudonym is unique only inside one case and cannot be used to connect records across cases.
+
+[fn:fail-closed] Fail closed: Stop or reject the operation when required evidence or a privacy check is missing, rather than continuing under an unsafe assumption.
+
+[fn:data-minimization] Data minimization: Collecting and retaining only the smallest amount of information needed for the stated purpose.
+
+[fn:untrusted-content] Untrusted source content: Text, images, files, or metadata retrieved from outside the system that may be inaccurate, malicious, identifying, or otherwise unsafe and must be validated before use.
+
+[fn:deterministic] Deterministic validation: A check that produces the same result from the same input and rules, without relying on model judgment or random behavior.

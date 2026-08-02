@@ -1,0 +1,185 @@
+:PROPERTIES:
+:ID:       starintel-drunk-driver-research-001
+:END:
+#+title: DRUNK-DRIVER-RESEARCH-001 Severe-Harm Eligibility Boundary
+#+description: Define a hard pre-search eligibility boundary so national impaired-driving identity resolution is limited to driver-caused deaths or a narrow nonfatal severe-impairment and serious-injury exception.
+#+status: DONE
+#+filetags: :starintel:research:drunk-drivers:fars:serious-injury:impairment:scope:causation:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                                    | Did nsaspy approve it |
+|---------+------------+--------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Establish fatal-causation and severe nonfatal exception eligibility rules | Yes                   |
+
+* Related Nodes
+
+- [[file:DRUNK-DRIVER-RESEARCH-000-national-fars-identity-resolution.org][DRUNK-DRIVER-RESEARCH-000 National FARS Identity Resolution]]
+- [[file:../../design/drunk-drivers/DRUNK-DRIVER-RESOLUTION-001-fars-to-name-actor-pipeline.org][DRUNK-DRIVER-RESOLUTION-001 FARS-to-Name Actor Pipeline]]
+- [[file:../../design/drunk-drivers/DRUNK-DRIVER-RESOLUTION-002-severe-harm-scope-gate.org][DRUNK-DRIVER-RESOLUTION-002 Severe-Harm Scope Gate]]
+- [[file:../../indexes/drunk-drivers/DRUNK-DRIVER-INDEX-000-national-crash-identity-resolution.org][DRUNK-DRIVER-INDEX-000 National Crash Identity Resolution]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+
+* Research Question
+
+How should the national impaired-driving resolver exclude ordinary arrests and low-harm crashes before spending web-search or identity-resolution resources?
+
+The requested boundary is that a case must concern a death caused by the selected driver or a comparably severe nonfatal case involving serious injury and objectively documented severe impairment.
+
+* Finding
+
+The scope should be enforced by a deterministic eligibility gate[fn:eligibility-gate] immediately after official crash-data import and before query generation, web search, archive lookup, person extraction, or name resolution.
+
+A record is eligible through exactly one of two tracks:
+
+1. =fatal-causation=: at least one person other than the selected driver died within thirty days of the crash, and available crash or public-case evidence supports that the selected driver's conduct caused or materially contributed to the fatal crash;
+2. =severe-nonfatal-exception=: no qualifying death is established, but the selected driver caused at least one suspected serious injury and severe impairment is objectively documented.
+
+The second track is deliberately conjunctive. Severe impairment without serious harm is not enough. Serious injury with only weak or imputed impairment evidence is not enough.
+
+* Official Definitions
+
+The National Highway Traffic Safety Administration Fatality Analysis Reporting System[fn:fars] includes a crash only when a motor vehicle traveling on a trafficway customarily open to the public is involved and a vehicle occupant or nonoccupant dies within thirty days of the crash.
+
+For nonfatal cases, the initial cross-state threshold should be =KABCO A=[fn:kabco] or =suspected serious injury (A)= as defined by the Model Minimum Uniform Crash Criteria[fn:mmucc]. The National Highway Traffic Safety Administration glossary describes this class as severe injuries such as skull fractures, internal injuries, broken or distorted limbs, unconsciousness, severe lacerations, severe burns, or inability to leave the scene without assistance.
+
+A documented permanent impairment, life-threatening injury, or equivalent medical or legal finding may satisfy the serious-harm side even when the source does not expose a KABCO code. Hospital transport alone is insufficient.
+
+For alcohol, =high BAC=[fn:high-bac] begins at a measured blood-alcohol concentration of 0.15 grams per deciliter under National Highway Traffic Safety Administration guidance. This is a triage threshold, not a universal legal conclusion.
+
+* Causation Boundary
+
+The project must not equate presence, impairment, arrest, or a positive alcohol value with causing a death or serious injury.
+
+The selected driver satisfies the causation requirement only when at least one source class supports the connection:
+
+- a police crash report or official crash coding attributes a contributing action to the driver;
+- a prosecutor, charging document, court record, verdict, plea, or sentencing record alleges or establishes causal responsibility;
+- a coroner, medical examiner, or crash reconstruction source connects the fatal or serious injury outcome to the crash and the selected driver's vehicle or conduct;
+- two independent reputable reports quote or accurately summarize such official evidence.
+
+The gate records the supported procedural status. An allegation may establish research eligibility while still being represented as alleged, charged, pleaded, convicted, acquitted, dismissed, or unresolved.
+
+The following do not establish causation by themselves:
+
+- the driver was present;
+- the driver had alcohol or drugs in their system;
+- the driver was arrested for impaired driving;
+- the crash contained a fatality caused by another driver, pedestrian, medical event, or unknown mechanism;
+- the selected driver died in a single-vehicle crash without harm to another person;
+- a search snippet calls the incident a drunk-driving crash without accessible supporting text.
+
+* Severe-Impairment Evidence
+
+The severe-nonfatal exception requires serious harm plus at least one strong impairment basis:
+
+- measured BAC at or above 0.15 grams per deciliter;
+- official toxicology and an official finding of drug impairment;
+- a court, prosecutor, or police source explicitly describing severe or substantial impairment supported by testing or observed incapacity;
+- an adjudicated offense whose public record establishes the severe impairment facts.
+
+The following do not satisfy the exception alone:
+
+- an imputed BAC;
+- a prior impaired-driving conviction;
+- an open-container citation;
+- refusal to test without additional impairment evidence;
+- anonymous allegation;
+- arrest-booking classification without incident facts;
+- model inference from crash behavior.
+
+* Eligibility Decision Table
+
+| Harm outcome | Causation support | Impairment support | Decision |
+|--------------+-------------------+--------------------+----------|
+| death of another person within thirty days | supported | measured, official, or legally supported impairment | =eligible:fatal-causation= |
+| death of another person within thirty days | unresolved | any | =hold:causation-review= |
+| death only of selected driver | any | any | =ineligible:self-fatality-only= |
+| suspected serious injury or permanent impairment | supported | severe impairment objectively documented | =eligible:severe-nonfatal-exception= |
+| suspected serious injury | supported | ordinary, imputed-only, or unresolved impairment | =ineligible:impairment-threshold-not-met= |
+| minor or possible injury | any | any | =ineligible:harm-threshold-not-met= |
+| property damage only | any | any | =ineligible:harm-threshold-not-met= |
+| no reliable outcome data | any | any | =hold:outcome-unresolved= |
+
+* Dataset Consequences
+
+Fatality Analysis Reporting System cases remain the primary national lane because the source already enforces the thirty-day fatality definition. The new gate must still prove that the selected driver, rather than merely the crash, is causally connected to another person's death.
+
+Crash Report Sampling System[fn:crss], state crash systems, court records, and local open-data systems may support the severe-nonfatal exception. Their sampling and injury-severity semantics must remain explicit and cannot be merged into the Fatality Analysis Reporting System census as if they were equivalent records.
+
+Ordinary driving-under-the-influence arrests, checkpoints, license actions, property-damage crashes, minor injuries, and self-fatalities are outside the identity-resolution dataset. They may remain in aggregate enforcement or public-health datasets but do not enter the named-case pipeline.
+
+* Search-Budget Consequences
+
+The eligibility gate runs before public web search.
+
+For =ineligible= results:
+
+- generate no person-name queries;
+- make no Brave Search, news archive, court, or public-record requests;
+- create no candidate person records;
+- publish no named identity link;
+- retain only the official anonymous source record and the machine-readable exclusion reason.
+
+For =hold= results:
+
+- permit bounded retrieval of official crash-outcome or causation sources only;
+- prohibit broad name discovery until the gate resolves to eligible;
+- stop when the missing eligibility proof cannot be obtained within the gate budget.
+
+* Benchmark Requirements
+
+The benchmark must contain separate controls for:
+
+1. fatal crash caused by the impaired driver;
+2. fatal crash where the impaired driver was present but did not cause the death;
+3. selected driver self-fatality only;
+4. severe nonfatal injury with measured BAC at or above 0.15;
+5. severe nonfatal injury with imputed-only alcohol evidence;
+6. minor injury with high BAC;
+7. property-damage-only high-BAC crash;
+8. serious injury caused by another driver;
+9. later dismissal or correction of causal allegations;
+10. unknown injury severity.
+
+Required gate metrics:
+
+- false-eligibility rate;
+- false-exclusion rate;
+- fatal-causation precision;
+- severe-nonfatal exception precision;
+- percentage of excluded cases stopped before search;
+- search requests avoided;
+- unresolved causation rate;
+- eligibility changes after later legal or medical evidence.
+
+No national execution is permitted if a known noncausal driver, self-fatality-only case, minor-injury case, or property-damage-only case passes the gate.
+
+* Recommendation
+
+Adopt [[file:../../design/drunk-drivers/DRUNK-DRIVER-RESOLUTION-002-severe-harm-scope-gate.org][DRUNK-DRIVER-RESOLUTION-002 Severe-Harm Scope Gate]] as a normative amendment[fn:normative-amendment] to the existing FARS-to-name actor design.
+
+The first implementation slice should add the eligibility schema, deterministic gate, Kearns fatal-causation fixture, and the negative controls above before implementing live web search.
+
+* Sources
+
+- National Highway Traffic Safety Administration, Fatality Analysis Reporting System: https://www.nhtsa.gov/crash-data-systems/fatality-analysis-reporting-system
+- National Highway Traffic Safety Administration, Glossary of Highway Safety Terms and Definitions: https://www.nhtsa.gov/resources-guide/glossary-highway-safety-terms-and-definitions
+- National Highway Traffic Safety Administration, Model Minimum Uniform Crash Criteria: https://www.nhtsa.gov/traffic-records/model-minimum-uniform-crash-criteria
+- National Highway Traffic Safety Administration, Uniform Guidelines for State Highway Safety Programs, Impaired Driving: https://www.nhtsa.gov/uniform-guidelines-state-highway-safety-programs/impaired-driving
+- National Highway Traffic Safety Administration, Crash Report Sampling System: https://www.nhtsa.gov/crash-data-systems/crash-report-sampling-system
+
+* Footnotes and Glossary
+
+[fn:eligibility-gate] Eligibility gate: A deterministic decision step that prevents a record from entering expensive or sensitive downstream processing unless mandatory scope conditions are satisfied.
+
+[fn:fars] Fatality Analysis Reporting System, or FARS: A national census of qualifying fatal motor-vehicle crashes maintained by the United States National Highway Traffic Safety Administration.
+
+[fn:kabco] KABCO: A police-reported injury-severity scale where K is fatal injury, A is suspected serious injury, B is suspected minor injury, C is possible injury, and O is no apparent injury or property damage only.
+
+[fn:mmucc] Model Minimum Uniform Crash Criteria, or MMUCC: A voluntary national guideline defining standardized crash-report variables and values for state and local traffic records.
+
+[fn:high-bac] High blood-alcohol concentration, or high BAC: A measured alcohol concentration of 0.15 grams per deciliter or greater, used by National Highway Traffic Safety Administration guidance as a high-BAC threshold associated with enhanced sanctions and substantial driving impairment.
+
+[fn:crss] Crash Report Sampling System, or CRSS: A nationally representative sample of police-reported motor-vehicle crashes ranging from property damage to fatalities.
+
+[fn:normative-amendment] Normative amendment: A later approved rule that changes or constrains how an earlier design must be interpreted and implemented.

@@ -22,12 +22,17 @@ The idea backlog remains the canonical inventory[fn:canonical-inventory] of poss
 - [[file:../../design/cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]]
 - [[file:../../design/cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]] — approved 2026-07-19
 - [[file:../../design/star-server/STAR-ADR-001-domain-gserver-zmq-approval.org][STAR-ADR-001 Domain GServer and ZeroMQ Approval]]
+- [[file:../../design/star-server/STAR-ADR-002-hybrid-logic-runtime-model.org][STAR-ADR-002 Hybrid Logic Runtime Model]] — review
 
 * Current Runtime Research
 
 - [[file:../../research/cl-gserver/SENTO-000-sento-runtime-analysis.org][SENTO-000 Sento Runtime Analysis]]
 - [[file:../../research/cl-gserver/SENTO-000-zeromq-transport-analysis.org][SENTO-000 ZeroMQ Transport Analysis]]
 - [[file:../../research/cl-gserver/SENTO-ZMQ-RESEARCH-001-pzmq-binding-audit.org][SENTO-ZMQ-RESEARCH-001 PZMQ Binding Audit]]
+- [[file:../../research/star-server/STAR-RESEARCH-003-budgeted-supervised-prolog-inference-actors.org][STAR-RESEARCH-003 Budgeted Supervised Prolog Inference Actors]]
+- [[file:../../research/star-server/STAR-RESEARCH-004-internal-prolog-server-library-swi-nprolog.org][STAR-RESEARCH-004 Internal Prolog Server Library: SWI-Prolog and N-Prolog]]
+- [[file:../../research/star-server/STAR-RESEARCH-005-discord-watch-common-lisp-port.org][STAR-RESEARCH-005 Discord Watch Common Lisp Port]]
+- [[file:../../research/star-server/LISA-RESEARCH-001-performance-and-feature-extension.org][LISA-RESEARCH-001 LISA Performance and Feature Extension]]
 
 * Investigation Workspace Research
 
@@ -35,6 +40,7 @@ The idea backlog remains the canonical inventory[fn:canonical-inventory] of poss
 - [[file:../../research/star-server/QUASAR-RESEARCH-001-transform-automation-catalog.org][QUASAR-RESEARCH-001 Transform Automation Catalog]]
 - [[file:../../research/star-server/QUASAR-RESEARCH-002-client-library-stack.org][QUASAR-RESEARCH-002 Client Library Stack]]
 - [[file:../../research/star-server/QUASAR-RESEARCH-003-situational-awareness-dashboard-shell.org][QUASAR-RESEARCH-003 Situational Awareness Dashboard Shell]]
+- [[file:../../research/star-server/QUASAR-RESEARCH-004-dual-actor-supervisor-runtime.org][QUASAR-RESEARCH-004 Dual Actor Supervisor Runtime]]
 - [[file:../../design/star-server/QUASAR-001-basic-typed-graph-editor.org][QUASAR-001 Basic Typed Graph Editor Architecture]]
 - [[file:../../design/star-server/QUASAR-002-clog-hybrid-prototype.org][QUASAR-002 CLOG Hybrid Prototype Architecture]]
 - [[file:../../design/star-server/QUASAR-003-graph-document-command-protocol.org][QUASAR-003 Graph Document and Command Protocol]] — blocked on prototype evidence
@@ -43,18 +49,24 @@ Quasar is a basic typed graph editor first. Its core is graph-document editing, 
 
 The selected prototype baseline is now SBCL, Common Lisp, CLOG, and a hybrid Cytoscape.js composite component. CLOG owns browser bootstrap and ordinary UI controls while Cytoscape retains high-frequency graph interaction in the browser. The canonical graph, graph operations, undo, action discovery, action execution, and persistence remain in a CLOG-independent Common Lisp core. React, TypeScript, Tauri, and a formal public graph protocol are deferred until prototype evidence shows they are required. The earlier TypeScript client research remains an extraction option rather than the immediate implementation baseline. The reserved protocol design is =QUASAR-003= and remains blocked until manual edits, batches, undo, persistence, session reconstruction, and one action have been exercised.
 
+The actor architecture now has two required execution tiers. Quasar's browser edition remains usable without a local service and runs only bounded, explicitly limited worker actors. A separate Common Lisp runtime provides the true persistent supervisor tree, background runs, durable journals, native integrations, and plugin lifecycle through the same UI and a versioned =ActorRuntime= protocol. Both tiers submit validated graph-operation batches through the canonical command and undo path.
+
 The operational user interface is now split into two coupled surfaces: the typed graph investigation workbench and a situational-awareness dashboard shell. The dashboard stores layouts, panel instances, variants, map state, refresh policy, and bounded projection configuration; it does not become a second canonical object model. Both surfaces share stable identifiers, selections, queries, revisions, actions, runs, evidence references, permissions, and drill-down paths.
 
 * Language and Execution Research
 
 - [[file:../star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Language Research]]
+- [[file:../star-lang/STAR-LANG-INDEX-001-implementation.org][STAR-LANG-INDEX-001 Common Lisp Implementation]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-001-common-lisp-comparative-baseline.org][STAR-LANG-RESEARCH-001 Common Lisp Comparative Baseline]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org][STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
 
-The completed Star-Lang foundation defines a bounded declarative language for durable analysis runs, explicit actor effects, Prolog capability routing, checkpoint replay, and declared condition and restart handling. The active comparison loop begins with a Common Lisp baseline but must complete equivalent Racket and Scheme prototypes before recommending a language.
+The completed Star-Lang foundation defines a bounded declarative Common Lisp language for durable analysis runs, explicit actor effects, capability routing, checkpoint replay, and declared condition and restart handling.
 
-The specification/domain loop defines digest-locked data-only libraries, additive typed-document extension, explicit source/predicate/destination relations, immutable attached datasets, actor contracts, and keyed domain-server manifests. Domain servers are the Star-Lang declaration layer over cl-gserver/Sento managed components; they own bounded aggregate authority and indexes rather than creating one actor per document. A separate numbered design must still freeze interfaces before implementation begins.
+The specification/domain loop defines digest-locked data-only libraries, additive typed-document extension, explicit source/predicate/destination relations, immutable attached datasets, actor contracts, and keyed domain-server manifests. Domain servers are the Star-Lang declaration layer over cl-gserver/Sento managed components; they own bounded aggregate authority and indexes rather than creating one actor per document.
+
+The logic integration adds an engine-neutral =star-logic= protocol above =star-prolog= and the proposed =star-rules= runtime. Star-Lang compiles =reason= forms into immutable capability-routed logic-call nodes and pins the selected backend before execution.
 
 * Research Infrastructure
 
@@ -74,7 +86,35 @@ This loop compares mature intelligence and open-source intelligence platforms, e
 
 ** TODO Loop 002: Collection Actors
 
-The next queued area is the collection-actor inventory under section 2 of the canonical idea backlog. It must not begin until Loop 001 is reviewed or explicitly superseded.
+- [[file:../../research/star-server/STAR-RESEARCH-002-awesome-osint-research-backlog.org][STAR-RESEARCH-002 Awesome OSINT Research Backlog]]
+
+This loop now has a 48-point source-derived queue covering catalog foundations, collection-actor families, analysis workflows, operator interfaces, provider validation, and continuous source-drift maintenance. The Awesome OSINT directory is treated as a discovery inventory; every provider must still be classified as an actor, manual source, dataset, workflow, visualizer, library, or rejection before implementation.
+
+** REVIEW Loop 003: Budgeted Supervised Prolog Inference Actors
+
+- [[file:../../research/star-server/STAR-RESEARCH-003-budgeted-supervised-prolog-inference-actors.org][STAR-RESEARCH-003 Budgeted Supervised Prolog Inference Actors]]
+
+This loop selects the Expert-System Actor Framework idea and defines one testable =star-server= vertical slice: a Common Lisp authority actor supervising an isolated Prolog worker, with typed Target and actor-manifest schemas, multidimensional budgets, named queries, proof documents, deterministic replay, monitoring triggers, and tightly gated LLM research integration.
+
+** REVIEW Loop 004: Internal Prolog Server Library
+
+- [[file:../../research/star-server/STAR-RESEARCH-004-internal-prolog-server-library-swi-nprolog.org][STAR-RESEARCH-004 Internal Prolog Server Library: SWI-Prolog and N-Prolog]]
+
+This continuation defines the internal =star-prolog= library boundary. SWI-Prolog MQI is the reference process backend, an optional =libswipl= C shim is deferred for trusted low-latency work, and Sasagawa N-Prolog is supported as a one-shot process backend for compatibility, portability tests, and experimental distributed logic. The library owns typed terms, declared query sessions, capability negotiation, supervision, cancellation, budgets, pooling, proof normalization, and engine conformance profiles.
+
+** REVIEW Loop 005: Star-Lang Logic Integration and LISA Performance
+
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
+- [[file:../../research/star-server/LISA-RESEARCH-001-performance-and-feature-extension.org][LISA-RESEARCH-001 LISA Performance and Feature Extension]]
+- [[file:../../design/star-server/STAR-ADR-002-hybrid-logic-runtime-model.org][STAR-ADR-002 Hybrid Logic Runtime Model]]
+
+This loop selects a hybrid performance model. SWI-Prolog remains the default recursive, tabled, constrained, and named-query backend. A redesigned LISA-derived =star-rules= engine is reserved for persistent small-delta forward chaining after strict allocation, latency, correctness, proof, isolation, and replay gates pass. N-Prolog remains an explicitly pinned compatibility backend. Star-Lang sees only =star-logic= capabilities and immutable selected-backend plan fields.
+
+** REVIEW Loop 006: Discord Watch Common Lisp Port
+
+- [[file:../../research/star-server/STAR-RESEARCH-005-discord-watch-common-lisp-port.org][STAR-RESEARCH-005 Discord Watch Common Lisp Port]]
+
+This loop selects the Discord Self-Bot Collection Actors idea and audits the existing JavaScript prototype. It defines a Common Lisp supervised collection core with machine-enforced target scope, credential leases, deterministic Discord-native IDs, raw-event and checkpoint journals, reliable RabbitMQ publishing, and replaceable Node, Python, and native Common Lisp session adapters. The final runtime is a purpose-built passive Common Lisp Gateway adapter rather than a full port of the archived Discord.js selfbot API.
 
 * Publishing and Navigation
 

@@ -1,0 +1,438 @@
+:PROPERTIES:
+:ID:       star-lang-research-021-star-logic-runtime-integration
+:END:
+#+title: STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration
+#+description: Integrate the internal star-prolog library and a production-rule backend into Star-Lang through one engine-neutral, capability-routed, replayable logic protocol.
+#+status: REVIEW
+#+last_modified: [2026-08-02 Sun]
+#+filetags: :starintel:star-lang:common-lisp:logic:prolog:lisa:actors:replay:performance:
+#+created: [2026-07-30 Thu]
+
+* Related Nodes
+
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-001-implementation.org][STAR-LANG-INDEX-001 Common Lisp Implementation]]
+- [[file:STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Language Design Foundations]]
+- [[file:STAR-LANG-RESEARCH-007-normalized-ir-and-cl-gserver-binding.org][STAR-LANG-RESEARCH-007 Normalized IR and cl-gserver Binding]]
+- [[file:../star-server/STAR-RESEARCH-003-budgeted-supervised-prolog-inference-actors.org][STAR-RESEARCH-003 Budgeted Supervised Prolog Inference Actors]]
+- [[file:../star-server/STAR-RESEARCH-004-internal-prolog-server-library-swi-nprolog.org][STAR-RESEARCH-004 Internal Prolog Server Library]]
+- [[file:../star-server/LISA-RESEARCH-001-performance-and-feature-extension.org][LISA-RESEARCH-001 LISA Performance and Feature Extension]]
+- [[file:../../design/star-server/STAR-ADR-002-hybrid-logic-runtime-model.org][STAR-ADR-002 Hybrid Logic Runtime Model]]
+
+* Research Question
+
+How should Star-Lang use =star-prolog= and an improved Common Lisp production-rule engine without coupling source programs, normalized IR, replay, or actor manifests to SWI-Prolog, N-Prolog, LISA, RETE, or any other specific engine?
+
+* Decision
+
+Add an internal Common Lisp protocol named =star-logic=. Star-Lang compiles every =reason= form into an engine-neutral =logic-call= plan node. =star-logic= resolves the required reasoning capability to a versioned backend adapter.
+
+The first adapters are:
+
+- =star-logic.prolog=, backed by =star-prolog=;
+- =star-logic.rules=, backed by the optimized LISA-derived =star-rules= runtime.
+
+SWI-Prolog is the default implementation behind =star-logic.prolog=. N-Prolog is an explicitly pinned compatibility backend. The production-rule backend is selected only for workloads that require a persistent incremental working memory and pass the performance gates defined by LISA-RESEARCH-001.
+
+The compiler or deployment planner selects the backend. The immutable run plan pins the selected backend, engine version, adapter version, rule package digest, fact-mapping digest, capability profile, optimization profile, and budget. Runtime failover may restart an equivalent pinned backend instance but may not silently change logic engines because that would invalidate deterministic replay.
+
+* Why Star-Lang Must Not Call =star-prolog= Directly
+
+=star-prolog= is an internal server library for Prolog sessions. Star-Lang is a declarative language whose =reason= form describes intent, effects, schemas, and recovery policy. Directly exposing Prolog terms or sessions in Star-Lang would:
+
+- make the normalized IR depend on one logic language;
+- prevent workload-based routing to a faster production-rule engine;
+- leak engine-specific cancellation and state semantics into source programs;
+- make replay depend on ambient engine selection;
+- encourage arbitrary query text rather than digest-locked named queries;
+- prevent future Datalog, SMT, or specialized graph backends from implementing the same capability.
+
+=star-logic= is therefore the semantic boundary. =star-prolog= is one implementation component below it.
+
+* Proposed ASDF Systems
+
+#+begin_example
+star-logic.protocol
+star-logic.types
+star-logic.capabilities
+star-logic.plans
+star-logic.router
+star-logic.manifests
+star-logic.budget
+star-logic.proofs
+star-logic.replay
+star-logic.prolog
+star-logic.rules
+star-logic.testing
+star-logic
+#+end_example
+
+The Star-Lang compiler depends only on =star-logic.protocol=, =star-logic.types=, and plan-schema definitions. It does not depend on SWI-Prolog, N-Prolog, LISA, MQI, or native engine handles.
+
+* Surface Syntax
+
+The existing =reason= form remains the source-level entry point. It gains explicit capability, workload, proof, and engine-policy fields.
+
+#+begin_src lisp
+(star:reason
+  :capability :recursive-graph-query
+  :facts documents
+  :query (star:named-query
+           :package "star.rules.entity-resolution"
+           :version "1.4.0"
+           :digest "sha256:..."
+           :id "beneficial_owner_path"
+           :parameters
+           ((organization-id (star:documentId target))
+            (maximum-hops 6)))
+  :workload (:shape :query
+             :mutation :immutable-snapshot
+             :expected-facts 250000
+             :expected-answers 100)
+  :proof (:required t
+          :format "starintel.proof-trace/1")
+  :engine (:selection :capability-default)
+  :budget (:wall-time-ms 15000
+           :inferences 500000
+           :answers 250
+           :memory-bytes 268435456)
+  :as ownership-paths)
+#+end_src
+
+An incremental monitoring rule requests a different capability:
+
+#+begin_src lisp
+(star:reason
+  :capability :incremental-forward-chaining
+  :facts alert-working-set
+  :query (star:named-query
+           :package "star.rules.monitoring"
+           :version "1.0.0"
+           :digest "sha256:..."
+           :id "new_high_risk_relationship")
+  :workload (:shape :continuous-rule-session
+             :mutation :small-deltas
+             :expected-facts 50000
+             :updates-per-second 1000)
+  :proof (:required t
+          :format "starintel.justification-graph/1")
+  :engine (:selection :capability-default)
+  :budget (:wall-time-ms 1000
+           :firings 10000
+           :delta-tuples 100000
+           :memory-bytes 536870912)
+  :as alerts)
+#+end_src
+
+Raw Prolog source, raw LISA rule forms, native engine handles, and arbitrary host expressions are forbidden in Star-Lang source.
+
+* Normalized IR
+
+Every source =reason= form compiles into a closed =logic-call= record.
+
+#+begin_src lisp
+(defstruct logic-call-ir
+  nodeId
+  source-span
+  capability
+  input-binding-ids
+  query-package-id
+  query-package-version
+  query-package-digest
+  query-id
+  parameter-expression-ids
+  workload-profile
+  result-schema-id
+  proof-policy
+  engine-policy
+  selected-backend
+  selected-backend-version
+  adapter-version
+  fact-mapping-digest
+  budget
+  isolation-policy
+  retry-policy
+  checkpoint-policy)
+#+end_src
+
+=selected-backend= is absent during source expansion. It is resolved during semantic compilation or deployment planning, then becomes mandatory before a run plan is executable.
+
+The normalized JSON form uses strings and closed records. It never serializes Common Lisp classes, SWI terms, LISA facts, or actor references.
+
+* Capability Vocabulary
+
+Initial capabilities:
+
+| Capability | Preferred backend | Intended workload |
+|---+---+---|
+| =:logic-query= | SWI-Prolog | named deterministic or nondeterministic query |
+| =:recursive-graph-query= | SWI-Prolog with tabling | transitive closure, recursive paths, cyclic graphs |
+| =:well-founded-negation= | SWI-Prolog | recursive negation with explicit semantics |
+| =:constraint-query= | SWI-Prolog | CLP(FD), attributed-variable, bounded search |
+| =:proof-query= | SWI-Prolog | proof-carrying named query |
+| =:incremental-forward-chaining= | =star-rules= | persistent working memory with small deltas |
+| =:agenda-rule-execution= | =star-rules= | salience, focus groups, reactive production rules |
+| =:truth-maintained-rules= | =star-rules= after acceptance gate | justification-based derived facts |
+| =:portable-prolog-query= | N-Prolog | explicitly pinned compatibility subset |
+
+Capability names describe semantics rather than engines. An adapter publishes a machine-readable capability report including semantic restrictions.
+
+* Backend Selection
+
+Backend selection is deterministic and policy driven.
+
+#+begin_src lisp
+(defgeneric score-logic-backend
+    (backend capability workload-profile semantic-requirements policy))
+
+(defgeneric select-logic-backend
+    (registry capability workload-profile semantic-requirements policy))
+#+end_src
+
+Selection order:
+
+1. reject adapters that do not provide every required semantic capability;
+2. reject adapters whose manifest or package compatibility constraints fail;
+3. reject adapters that cannot enforce the requested budget or isolation policy;
+4. apply explicit engine pinning when present;
+5. apply benchmark-backed routing policy;
+6. record the selected backend and reason in the immutable plan;
+7. reject ties unless the policy defines a stable tie breaker.
+
+The runtime may not rerun selection based on current machine load. Load affects which instance of the pinned backend receives the run, not which backend semantics execute it.
+
+* Backend Routing Policy
+
+Default routing:
+
+- recursive, graph, constraint, tabled, well-founded, and ad-hoc named-query workloads route to SWI-Prolog;
+- persistent small-delta rule sessions route to =star-rules= only after its benchmark gates pass;
+- N-Prolog requires an explicit package or manifest pin and a compatible capability subset;
+- unknown workloads route to SWI-Prolog rather than current LISA because SWI has the broader mature query semantics and the current LISA profile has unacceptable allocation behavior;
+- no source program may request =:fastest= without also defining semantic equivalence and benchmark identity.
+
+* Type and Fact Mapping
+
+Star-Lang values do not become engine facts by generic serialization. A digest-locked mapping package defines each projection.
+
+#+begin_example
+Star-Lang checked value
+        |
+        v
+logic fact-mapping package
+        |
+        +--> star-prolog typed terms
+        |
+        `--> star-rules compact fact tuples
+#+end_example
+
+A mapping declaration contains:
+
+- source schema and version;
+- destination predicate or fact type;
+- selected fields and conversions;
+- stable fact identifier rule;
+- dataset and case scope;
+- temporal validity mapping;
+- source document and source-span references;
+- mapping package version and digest;
+- reverse mapping for engine outputs where supported.
+
+The same StarIntel relation may map to both backends:
+
+#+begin_src lisp
+(define-logic-mapping relation-v1
+  (:source "starintel.relation/1")
+  (:prolog (relationship id source predicate target))
+  (:rules  (relationship-fact id source predicate target))
+  (:identity id)
+  (:provenance (documentId content-hash source-span)))
+#+end_src
+
+Conclusions occupy a separate namespace from source facts. No backend may mutate canonical source documents.
+
+* Query and Rule Package Manifests
+
+A logic package manifest declares:
+
+- package ID, version, digest, license, and source revision;
+- supported adapters and minimum engine versions;
+- exported named query IDs;
+- parameter and answer schemas;
+- required capabilities;
+- mapping package digests;
+- proof or justification formats;
+- mutation assumptions;
+- determinism and answer-order declarations;
+- resource profiles and benchmark fixture IDs;
+- forbidden effects;
+- compatibility tests.
+
+A package may contain separate SWI and =star-rules= implementations only when the conformance suite proves equivalent observable outputs for the declared capability. Otherwise they are separate query packages.
+
+* Actor Topology
+
+#+begin_example
+StarLangRunSupervisor
+├── PlanInterpreterActor
+├── LogicCallSupervisor
+│   ├── LogicCallActor(node-17)
+│   │   ├── FactProjectionWorker
+│   │   ├── BackendLease
+│   │   └── ProofNormalizer
+│   └── LogicCallActor(node-31)
+├── LogicBudgetLedgerActor
+└── RunJournalActor
+
+LogicBackendSupervisor
+├── StarPrologDomainActor
+│   ├── SWIRuntimePool
+│   └── NPrologRuntimePool
+└── StarRulesDomainActor
+    └── RuleSessionPool
+#+end_example
+
+The Star-Lang run actor owns plan progress and replay. The logic-call actor owns one node invocation. Backend domain actors own engine lifecycle. A backend crash cannot mutate the run plan or expand its budget.
+
+* Budget Mapping
+
+The Star-Lang budget is semantic and multidimensional. Adapters map supported dimensions to native enforcement.
+
+| Semantic dimension | SWI-Prolog mapping | =star-rules= mapping |
+|---+---+---|
+| wall time | actor timeout and worker termination | actor deadline and cooperative yield points |
+| memory | process/cgroup boundary | engine allocation/RSS limit; process isolation for untrusted sessions |
+| answers | query answer collector and table restraints | activation or conclusion count |
+| logical work | inference limit | alpha tests, beta joins, propagated tuples, or rule firings |
+| output bytes | framed-output limit | conclusion/proof serialization limit |
+| restarts | supervisor intensity | supervisor intensity |
+| proof nodes | proof normalizer limit | justification graph node limit |
+
+Backends report actual usage in a normalized =logic-usage= record. Engine-specific counters remain available under a namespaced diagnostics field.
+
+* Proof Contract
+
+=star-logic= normalizes backend explanations into a shared derivation graph:
+
+- conclusion node;
+- rule or clause application nodes;
+- source fact nodes;
+- parameter-binding nodes;
+- dependency edges;
+- engine, package, adapter, and mapping digests;
+- dataset and case scope;
+- truncation and budget markers.
+
+SWI-Prolog uses proof-carrying predicates or generated proof arguments. =star-rules= uses explicit justification records produced when activations fire. Interactive traces are diagnostics and never substitute for the stable proof contract.
+
+* Replay
+
+A completed logic node records:
+
+- plan and node IDs;
+- capability;
+- selected backend and adapter versions;
+- engine build or Nix derivation hash;
+- query/rule package digest;
+- fact-mapping digest;
+- input document and snapshot hashes;
+- parameters;
+- budget;
+- normalized answers and proof hashes;
+- terminal status and usage;
+- event-order policy.
+
+Replay modes:
+
+1. =recorded=: return the recorded checked result without starting an engine;
+2. =verify=: rerun the pinned engine and compare normalized answer and proof sets;
+3. =migrate=: run an explicitly requested new backend or package as a comparison experiment without altering the original history.
+
+Answer ordering must not affect equality unless the query manifest declares order significant.
+
+* Conditions and Restarts
+
+Required conditions:
+
+- =logic-capability-unavailable=;
+- =logic-backend-selection-failed=;
+- =logic-package-mismatch=;
+- =logic-mapping-failed=;
+- =logic-input-invalid=;
+- =logic-output-invalid=;
+- =logic-budget-exhausted=;
+- =logic-backend-crashed=;
+- =logic-query-cancelled=;
+- =logic-proof-invalid=;
+- =logic-replay-mismatch=;
+- =logic-case-boundary-violation=.
+
+Legal restarts are declared in the Star-Lang plan. Typical restarts are =retry-same-backend=, =use-recorded-result=, =accept-partial-result=, =request-human=, and =abort-analysis=. =switch-backend= is not a routine restart because it changes execution semantics; it requires an explicit migration event and a separately validated plan.
+
+* Star-Lang Implementation Changes
+
+1. Add =logic-call-ir= and its canonical JSON schema.
+2. Extend the =reason= expander to emit the closed core node.
+3. Add capability, workload, proof, engine-policy, and logic-budget validators.
+4. Add package and mapping resolvers using injected Common Lisp ports.
+5. Add deterministic backend selection during plan materialization.
+6. Add a =star-logic= runtime port to the direct interpreter.
+7. Add a cl-gserver/Sento adapter without putting actor objects in normalized IR.
+8. Add journal events for selection, lease, query lifecycle, usage, result, and proof validation.
+9. Add recorded, verify, and migration replay modes.
+10. Add conformance fixtures that run the same named capability through every claimed-compatible adapter.
+
+* Benchmark Contract
+
+The compiler cannot select an engine from folklore. Backend manifests refer to benchmark records produced by the common harness.
+
+Required workloads:
+
+- cold package load;
+- immutable recursive graph query;
+- repeated query over the same snapshot;
+- selective and low-selectivity joins;
+- one-field fact update;
+- append-only event stream;
+- negation and retraction churn;
+- truth-maintenance cascade;
+- proof generation;
+- bridge overhead for one answer and batched answers.
+
+Required metrics:
+
+- p50, p95, and p99 latency;
+- throughput;
+- bytes allocated per operation;
+- peak resident memory;
+- garbage-collection time;
+- engine startup and package load time;
+- proof bytes and proof nodes;
+- cancellation latency;
+- replay equality.
+
+Benchmark records must include hardware, OS, Common Lisp, engine, compiler flags, package digests, fact generator seed, warm-up policy, sample count, and raw results.
+
+* Acceptance Criteria
+
+1. Star-Lang source and normalized IR contain no native Prolog or LISA object.
+2. A =reason= node deterministically selects and pins one backend before execution.
+3. Replaying a completed run does not perform backend selection again.
+4. SWI-Prolog and N-Prolog adapters are reached only through =star-logic.prolog=.
+5. The production-rule adapter is reached only through =star-logic.rules=.
+6. All inputs and outputs validate against versioned schemas at the process boundary.
+7. A backend cannot widen effects, scope, or budget.
+8. Proofs refer only to facts from the declared dataset or case.
+9. Backend migration creates a comparison record rather than rewriting prior history.
+10. The common benchmark harness can compare equivalent packages without changing workload data.
+
+* Result
+
+Star-Lang should use the new Prolog server library, but indirectly. =star-logic= becomes the language-facing semantic protocol. =star-prolog= remains the mature query and recursive-inference implementation, while a redesigned LISA-derived engine supplies specialized incremental forward chaining. The immutable plan pins the decision, preserving deterministic replay and preventing performance routing from becoming semantic drift.
+
+* Sources
+
+- SWI-Prolog tabled execution: https://www.swi-prolog.org/pldoc/man?section=tabling
+- SWI-Prolog incremental tabling: https://www.swi-prolog.org/pldoc/man?section=tabling-incremental
+- SWI-Prolog monotonic tabling: https://www.swi-prolog.org/pldoc/man?section=tabling-monotonic
+- SWI-Prolog features and JITI: https://www.swi-prolog.org/features.html
+- Drools Phreak rule algorithm: https://kie.apache.org/docs/10.0.x/drools/drools/rule-engine/index.html

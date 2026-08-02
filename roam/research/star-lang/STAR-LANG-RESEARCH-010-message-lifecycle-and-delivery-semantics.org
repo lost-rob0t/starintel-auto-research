@@ -4,6 +4,7 @@
 #+title: STAR-LANG-RESEARCH-010 Message Lifecycle and Delivery Semantics
 #+description: Define correlation, causation, acknowledgement, retry, error, cancellation, and idempotency semantics for Star-Lang actor messages without claiming transport-level exactly-once delivery.
 #+status: REVIEW
+#+last_modified: [2026-08-02 Sun]
 #+filetags: :starintel:star-lang:actors:messages:delivery:idempotency:retries:cancellation:wire-protocol:research:
 
 * Purpose
@@ -45,32 +46,32 @@ Commands, events, and replies use message types declared by a Star-Lang specific
 
 Every lifecycle envelope carries:
 
-- =star_version=
+- =starVersion=
 - =kind=
-- =message_id=
-- =message_type=
+- =messageId=
+- =messageType=
 - =actor=
-- =correlation_id=
+- =correlationId=
 - =attempt=
 - =payload=
 
 Optional members include:
 
 - =sender=
-- =causation_id=
-- =idempotency_key=
+- =causationId=
+- =idempotencyKey=
 - =dataset=
-- =reply_to=
-- =sent_at=
+- =replyTo=
+- =sentAt=
 - =deadline=
 
 Commands require an idempotency key. Replies, acknowledgements, errors, and cancellation require a causation identifier.
 
 * Correlation and Causation
 
-A root command or event defaults its =correlation_id= to its own =message_id=.
+A root command or event defaults its =correlationId= to its own =messageId=.
 
-Derived envelopes preserve that correlation identifier and set =causation_id= to the immediate source message identifier. This permits both views:
+Derived envelopes preserve that correlation identifier and set =causationId= to the immediate source message identifier. This permits both views:
 
 - correlation groups the entire logical operation
 - causation reconstructs the direct message chain
@@ -84,7 +85,7 @@ Acknowledgement status has four values:
 - =accepted=: the actor has accepted responsibility for the command; work is not necessarily complete
 - =completed=: the actor completed the operation successfully
 - =rejected=: the actor will not process the operation
-- =retry=: the operation was not completed and may be retried after =retry_after_ms=
+- =retry=: the operation was not completed and may be retried after =retryAfterMs=
 
 =accepted= is deliberately nonterminal. Treating queue receipt as completion would lose work when an actor crashes after accepting a command.
 
@@ -118,12 +119,12 @@ Cancellation is a request, not proof that work stopped. The receiving actor must
 The core idempotency scope is:
 
 #+begin_example
-(actor, message-type, idempotency-key)
+(actor, messageType, idempotencyKey)
 #+end_example
 
 This prevents unrelated actors or command types from colliding on a shared key.
 
-A retry keeps the same idempotency key and correlation identifier while incrementing =attempt= and assigning a new delivery =message_id=. Consumers may then return a stored terminal outcome instead of repeating side effects.
+A retry keeps the same idempotency key and correlation identifier while incrementing =attempt= and assigning a new delivery =messageId=. Consumers may then return a stored terminal outcome instead of repeating side effects.
 
 The protocol does not dictate one storage engine. Native actors may use durable Common Lisp runtime state; external actors may use their own database or a StarIntel domain server.
 

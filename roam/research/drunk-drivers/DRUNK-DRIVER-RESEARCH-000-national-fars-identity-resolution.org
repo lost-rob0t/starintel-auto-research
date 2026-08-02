@@ -1,0 +1,437 @@
+:PROPERTIES:
+:ID:       starintel-drunk-driver-research-000
+:END:
+#+title: DRUNK-DRIVER-RESEARCH-000 National FARS Identity Resolution
+#+description: Research how to link anonymous national fatal-crash records to publicly named impaired-driving cases without forcing uncertain identities.
+#+status: DONE
+#+filetags: :starintel:research:drunk-drivers:fars:entity-resolution:web-research:courts:public-records:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change                                                   | Did nsaspy approve it |
+|---------+------------+-------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Evaluate national crash sources and a public-record identity-resolution pipeline | Yes                   |
+
+* Related Nodes
+
+- [[file:../../indexes/drunk-drivers/DRUNK-DRIVER-INDEX-000-national-crash-identity-resolution.org][DRUNK-DRIVER-INDEX-000 National Crash Identity Resolution]]
+- [[file:../../design/drunk-drivers/DRUNK-DRIVER-RESOLUTION-001-fars-to-name-actor-pipeline.org][DRUNK-DRIVER-RESOLUTION-001 FARS-to-Name Actor Pipeline]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:../auto-research/STAR-RESEARCH-002-deep-research-execution-adapter-analysis.org][STAR-RESEARCH-002 Deep Research Execution Adapter Analysis]]
+
+* Research Question
+
+Can StarIntel use public web, news, court, prosecutor, police, open-data, and archival sources to resolve anonymous Fatality Analysis Reporting System records[fn:fars] to named impaired-driving defendants while keeping false identifications below an operationally acceptable level?
+
+A successful system must do more than find a page containing a name. It must separately establish:
+
+1. that a source describes the same crash;
+2. that the named person occupied the relevant driver role;
+3. that the source supports the claimed legal status;
+4. that the identity remains sufficiently corroborated after contradictory evidence is considered.
+
+* Executive Finding
+
+The task is feasible for a substantial subset of fatal crashes, but it must be designed as probabilistic record linkage[fn:record-linkage] with explicit abstention[fn:abstention], not as a search-and-name scraper.
+
+The national backbone should be the National Highway Traffic Safety Administration Fatality Analysis Reporting System. FARS is a census of qualifying fatal motor-vehicle crashes and includes crash, vehicle, person, driver, roadway, location, alcohol, speed, injury, and related variables. Its public data intentionally excludes personal names and similar direct identifiers.
+
+The missing name can often be recovered from public sources because a FARS crash produces a distinctive fingerprint: date, approximate time, state, county, coordinates, road, vehicle combination, collision type, fatality count, victim ages, measured blood-alcohol concentration, speed, and case progression. Unusual combinations can uniquely identify a public police release, prosecutor statement, court record, or local-news report.
+
+The system must prefer precision over coverage. A correct unresolved result is better than a plausible but wrong name.
+
+* Known-Case Feasibility Test
+
+The existing Kearns, Utah seed provides a deterministic fixture.
+
+Without placing the driver's name in the query, the following characteristics identify the public case:
+
+- January 14, 2024;
+- Kearns, Utah;
+- Kia Sorento and Volkswagen Jetta;
+- head-on collision;
+- estimated 77 miles per hour in a 35-mile-per-hour zone;
+- reported blood-alcohol concentration of 0.241;
+- five-year-old fatal victim.
+
+Public reporting then identifies Charmayne Huerta Guzman and follows the case from arrest and upgraded charges through guilty plea and sentencing.
+
+This proves that at least some FARS-like rows contain enough quasi-identifiers[fn:quasi-identifier] to locate a named public case. It does not prove that all crashes can be named or that one matching article is sufficient verification.
+
+* National Input Landscape
+
+** Fatality Analysis Reporting System
+
+FARS is the primary source because it covers every qualifying fatal crash nationwide. Relevant tables and variables include:
+
+- crash identifiers and event dates;
+- state, county, city, latitude, and longitude;
+- road and intersection characteristics;
+- vehicle make, model, model year, and body type;
+- driver and occupant roles;
+- fatality and injury counts;
+- police-reported alcohol involvement;
+- alcohol test status and measured results;
+- speeding and traffic-law variables;
+- driver license status and prior driving-while-intoxicated convictions.
+
+The current NHTSA Crash API[fn:api] exposes case lists, case details, vehicle, person, and location queries, code definitions, and raw dataset access for modern FARS releases.
+
+FARS must remain the immutable anonymous record. A later named identity is a separate StarIntel person linked by a reviewed resolution claim.
+
+** Crash Report Sampling System
+
+The Crash Report Sampling System[fn:crss] is useful for method development on nonfatal police-reported crashes, but it is a statistical sample and removes direct personal identifiers. It should not be mixed with the FARS census without preserving source and sampling semantics.
+
+** National Driver Register
+
+The National Driver Register and Problem Driver Pointer System contain direct driver identity and serious license-action pointers, but they are restricted systems, not public bulk identity feeds. They are outside this design.
+
+** FBI arrest data
+
+Federal Bureau of Investigation Crime Data Explorer and National Incident-Based Reporting System data can provide impaired-driving arrest counts and demographic distributions. Public releases generally do not supply names and therefore provide validation and enforcement context rather than direct identity resolution.
+
+* Public Source Landscape
+
+** Tier 1: authoritative incident and legal sources
+
+- state police and highway patrol releases;
+- county sheriff and municipal police releases;
+- district attorney and prosecutor releases;
+- state court docket pages and filed documents;
+- published appellate opinions;
+- official medical-examiner or coroner releases where public.
+
+These sources receive the highest authority weight but still require crash-role matching. A prosecutor page naming a victim, witness, or other driver must not be mistaken for the impaired driver.
+
+** Tier 2: established local reporting
+
+Local newspapers and television stations frequently quote probable-cause affidavits, charging documents, prosecutors, and police. They are essential because state trial-court access is fragmented and some official pages disappear.
+
+A single local report may create a candidate, but identity verification should normally require an official source or an independent second report matching distinctive crash facts.
+
+** Tier 3: discovery and archive systems
+
+- Brave Search for current web and news discovery;
+- GDELT for historical story discovery and date-bounded searches;
+- Internet Archive Wayback CDX for recovering known dead pages;
+- Common Crawl indexes for locating older captures after a URL or domain is known.
+
+Archives recover evidence; they do not upgrade the authority of the original publisher.
+
+** Tier 4: open-data catalogs
+
+- Data.gov Catalog API;
+- ArcGIS Hub Search;
+- Socrata Discovery API;
+- CKAN package search;
+- Police Data Accessibility Project.
+
+These systems help discover state and local crash, police, court, and public-safety datasets. They require a source registry because schemas and publication practices differ by jurisdiction.
+
+** Tier 5: public-record request escalation
+
+MuckRock can help locate earlier requests, agencies, released files, and request workflows. Automatic research may draft an escalation plan, but it must not submit a public-record request without explicit operator authorization.
+
+* Search Strategy
+
+The resolver should create a portfolio of small, high-information queries instead of one long query whose terms may be ignored.
+
+** Date and place family
+
+- exact date plus city and fatal crash;
+- month, county, and impaired-driving terms;
+- date range plus intersection or road name;
+- state plus victim age and fatality count.
+
+** Vehicle family
+
+- exact make/model pair;
+- uncommon model plus city and crash type;
+- vehicle year, body type, and county;
+- first vehicle plus second vehicle plus fatality.
+
+** Numeric family
+
+- quoted measured blood-alcohol concentration;
+- estimated speed and speed limit;
+- victim age;
+- unusual occupant or fatality count.
+
+Measured values are high-information features. Imputed blood-alcohol values must not be searched as if they were measured facts.
+
+** Official-domain family
+
+- site-restricted police, sheriff, prosecutor, court, and government queries;
+- case-lifecycle terms such as charged, indicted, pleaded, convicted, and sentenced;
+- candidate-name follow-up only after the candidate was discovered from a crash query.
+
+** Time-window family
+
+- crash date plus or minus seven days for initial reports;
+- seven to forty-five days for toxicology and upgraded charges;
+- two to twelve months for indictment, plea, or trial;
+- one to three years for sentencing and appellate decisions.
+
+* Three-Proof Resolution Model
+
+** Proof 1: event match
+
+Determine whether a candidate source describes the same physical crash. Compare:
+
+- event date and time;
+- distance between coordinates or matching road/intersection;
+- county and city;
+- vehicle combination;
+- collision type;
+- fatality and injury profile;
+- victim ages;
+- speed and speed limit;
+- measured alcohol result.
+
+** Proof 2: driver-role match
+
+Determine whether the named person is the specific driver represented by the anonymous FARS person record. Extract explicit roles such as:
+
+- suspected impaired driver;
+- other driver;
+- passenger;
+- pedestrian;
+- victim;
+- witness;
+- vehicle owner;
+- police officer;
+- prosecutor;
+- judge.
+
+A person mentioned near the word "driver" is not sufficient. The source must connect the person to the relevant vehicle or conduct.
+
+** Proof 3: identity and legal-status match
+
+Normalize names, aliases, age-at-event, residence, court identifiers, and source language. Preserve the status actually supported:
+
+- suspected;
+- arrested;
+- charged;
+- indicted;
+- pleaded guilty;
+- convicted;
+- sentenced;
+- acquitted;
+- dismissed;
+- deceased before prosecution.
+
+Do not publish a person as convicted when the available evidence only supports an arrest.
+
+* Probabilistic Linkage
+
+The scoring method should follow the Fellegi-Sunter model[fn:fellegi-sunter] or an equivalent calibrated log-likelihood approach.
+
+For each comparison feature, estimate:
+
+- the probability of agreement when records refer to the same crash;
+- the probability of agreement when they refer to different crashes;
+- the information contribution of agreement, disagreement, or missing data.
+
+Rare agreements, such as the same unusual vehicle pair and exact measured blood-alcohol result, receive more weight than common agreements such as the same state.
+
+Candidate generation uses blocking[fn:blocking] to avoid comparing every crash to every article. Initial blocks may include:
+
+- state and event-date window;
+- county and month;
+- geospatial radius and date;
+- vehicle make/model and year;
+- victim age and event month.
+
+The final score must be calibrated on labeled examples. Handwritten weights are acceptable only for the first deterministic prototype and must be replaced or justified by benchmark evidence.
+
+* Resolution States
+
+- =unresolved=: no reliable candidate;
+- =candidates-found=: one or more names discovered;
+- =event-matched=: source and FARS crash likely describe the same event;
+- =driver-role-matched=: candidate is explicitly the relevant driver;
+- =identity-probable=: evidence is strong but below publication threshold;
+- =identity-verified=: publication gate requirements met;
+- =identity-rejected=: candidate contradicted or mismatched;
+- =superseded=: a later resolution replaces the current one;
+- =retracted=: previously published resolution withdrawn.
+
+Every transition records evidence identifiers, actor, configuration hash, timestamp, and reason.
+
+* Verification Policy
+
+A candidate may reach =identity-verified= through either path:
+
+1. one authoritative police, prosecutor, or court source explicitly identifies the relevant driver and matches the date, jurisdiction, and multiple crash characteristics; or
+2. two independent reputable sources identify the same driver role and match several distinctive crash attributes, with at least one source citing official records.
+
+A single search-result snippet is never verification. A single article without direct official attribution remains =identity-probable= unless the article itself publishes and accurately locates a court document.
+
+The first benchmark target is at least 99 percent precision, with a preferred target of 99.5 percent, for automatically published identities. Coverage is secondary.
+
+* Alcohol-Data Semantics
+
+The actor pipeline must distinguish:
+
+- measured blood-alcohol concentration;
+- reported positive/negative test without a numeric result;
+- police-reported alcohol involvement;
+- imputed blood-alcohol values;
+- unknown or not reported.
+
+The ten FARS imputation values represent multiple statistical draws. They must not be averaged into a fake measured result and must not be used as an exact web-search key. Imputed values may support population analysis, not direct identity proof.
+
+* Source Independence
+
+Two URLs are not automatically two independent sources.
+
+The resolver should detect:
+
+- syndicated copies;
+- television affiliates repeating the same wire story;
+- articles quoting the same police release;
+- prosecutor releases copied into news stories;
+- updates that replace earlier versions;
+- pages sharing identical or near-identical text.
+
+Independent corroboration requires distinct reporting or direct access to separate underlying records. Shared origin should be recorded in source lineage.
+
+* Contradiction Handling
+
+Contradictions stop automatic publication when they concern:
+
+- event date beyond an allowed reporting discrepancy;
+- location or county;
+- vehicle assignment;
+- driver role;
+- victim count or identity;
+- measured alcohol result;
+- candidate age;
+- case number;
+- dismissal, acquittal, or later correction.
+
+Minor spelling variants and rounded speeds may be normalized. Material conflicts remain visible and lower the resolution state.
+
+* Publication and Retraction
+
+The named person record and the FARS anonymous person remain separate.
+
+The writer emits:
+
+- a named =person= document;
+- an entity-resolution =claim=;
+- a =resolved_as= relation from anonymous person to named person;
+- source and evidence records;
+- an independent-review result;
+- a resolution-run artifact containing scores and configuration.
+
+A retraction creates a new revision that marks the resolution retracted and links the former claim through lineage. Historical evidence is preserved rather than silently deleted.
+
+* Benchmark Design
+
+Use at least 100 labeled FARS cases, expanding to 200 before national-scale execution.
+
+Strata:
+
+- child fatalities;
+- multiple fatalities;
+- ordinary two-vehicle crashes;
+- single-vehicle crashes;
+- rural crashes;
+- urban crashes;
+- measured blood-alcohol cases;
+- alcohol-imputed or unknown cases;
+- cases with prosecution;
+- cases where the relevant driver died and no prosecution occurred;
+- diverse states and years.
+
+Fixture 001 is the Kearns, Utah case. Include negative controls with similar dates, vehicle types, and counties to test false matches.
+
+Metrics:
+
+- candidate discovery rate;
+- event-match precision and recall;
+- driver-role precision and recall;
+- verified-name precision;
+- verified-name recall;
+- abstention rate;
+- calibration error;
+- source independence;
+- contradictory-evidence capture;
+- requests, elapsed time, bytes, and cost per verified identity;
+- archive-recovery yield;
+- reviewer disagreement;
+- retraction rate after later case updates.
+
+No rollout should claim national identity coverage until the benchmark reports false positives and confidence calibration.
+
+* Recommended Actor Boundary
+
+The complete actor design is specified in =DRUNK-DRIVER-RESOLUTION-001=. The research supports a staged pipeline with:
+
+- FARS ingestion and crash fingerprinting;
+- jurisdiction and source-registry resolution;
+- bounded search and archive discovery;
+- page capture and structured extraction;
+- candidate generation and probabilistic linkage;
+- official corroboration and independent review;
+- publication, lifecycle monitoring, and benchmark calibration.
+
+The Resolution Run Supervisor owns budgets, cancellation, terminal state, and retry policy. Search and extraction actors never write canonical identities directly.
+
+* Negative Findings
+
+- No public national bulk source of named impaired drivers was found.
+- FARS intentionally omits personal names.
+- The National Driver Register cannot be used as a public identity feed.
+- CourtListener does not provide complete state trial-court coverage.
+- State and local court access remains fragmented.
+- Search-engine rank is not evidence of identity.
+- Two copied articles do not constitute independent corroboration.
+- Imputed blood-alcohol values cannot identify an individual crash as if they were measured.
+- A model confidence score without calibrated benchmark evidence is not sufficient for publication.
+- Full automatic naming of every FARS crash is neither realistic nor desirable.
+
+* Sources
+
+Official and primary technical sources were preferred.
+
+- NHTSA Fatality Analysis Reporting System: https://www.nhtsa.gov/crash-data-systems/fatality-analysis-reporting-system
+- NHTSA Crash API: https://crashviewer.nhtsa.dot.gov/CrashAPI
+- NHTSA alcohol-impaired-driving data and surveillance: https://www.nhtsa.gov/book/countermeasures-that-work/alcohol-impaired-driving/data-surveillance
+- Brave Search API query documentation: https://api-dashboard.search.brave.com/app/documentation/web-search/query
+- Brave Search API product page: https://brave.com/search/api/
+- GDELT Cloud API: https://docs.gdeltcloud.com/api-reference/introduction
+- Common Crawl index: https://index.commoncrawl.org/
+- Internet Archive Wayback CDX server: https://github.com/internetarchive/wayback/blob/master/wayback-cdx-server/README.md
+- CourtListener Search API: https://wiki.free.law/c/courtlistener/help/api/rest/v4/search
+- CourtListener coverage: https://www.courtlistener.com/help/coverage/
+- United States court directory: https://www.usa.gov/courts
+- Police Data Accessibility Project: https://www.pdap.io/
+- MuckRock API: https://help.muckrock.com/19ef8892696381e88627c50e4ee90ed4
+- Data.gov Catalog API: https://resources.data.gov/catalog-api/
+- ArcGIS Hub Search API: https://hub.arcgis.com/api/search/definition/
+- Socrata Discovery API: https://support.socrata.com/hc/en-us/articles/226377827-API-Release-Notes-for-8-30-2016-Discovery-API-Imports-API-and-SNI
+- CKAN Action API: https://docs.ckan.org/en/latest/api/
+- Fellegi and Sunter record-linkage paper: https://www.tandfonline.com/doi/abs/10.1080/01621459.1969.10501049
+- dedupe record-linkage documentation: https://docs.dedupe.io/en/stable/API-documentation.html
+- KSL guilty-plea report: https://www.ksl.com/article/51405110/kearns-woman-pleads-guilty-to-dui-crash-that-killed-5-year-old-girl
+- KSL sentencing report: https://www.ksl.com/article/51428663/there-was-nothing-i-could-do-recalls-father-of-young-victim-killed-by-dui-driver
+
+* Footnotes and Glossary
+
+[fn:fars] Fatality Analysis Reporting System, or FARS: A United States national census of qualifying fatal motor-vehicle crashes assembled by the National Highway Traffic Safety Administration from state records.
+
+[fn:record-linkage] Record linkage: A statistical process for deciding whether records from different systems refer to the same real-world event or entity.
+
+[fn:abstention] Abstention: A deliberate unresolved result used when the available evidence is not strong enough to make a safe automatic decision.
+
+[fn:quasi-identifier] Quasi-identifier: A fact that is not a direct name or identifier but can become distinctive when combined with other facts, such as date, county, vehicle model, victim age, and speed.
+
+[fn:api] Application Programming Interface, or API: A documented machine-to-machine interface used to request structured data or actions.
+
+[fn:crss] Crash Report Sampling System, or CRSS: A nationally representative sample of police-reported motor-vehicle crashes used to estimate nonfatal and fatal crash patterns.
+
+[fn:fellegi-sunter] Fellegi-Sunter model: A statistical record-linkage method that compares how likely each field agreement is among true matches versus nonmatches and combines those values into a decision score.
+
+[fn:blocking] Blocking: A candidate-generation technique that restricts comparisons to records sharing broad features, such as state and date, so the system does not compare every possible pair.

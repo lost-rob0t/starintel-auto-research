@@ -1,0 +1,995 @@
+:PROPERTIES:
+:ID:       starintel-drunk-driver-resolution-001
+:END:
+#+title: DRUNK-DRIVER-RESOLUTION-001 FARS-to-Name Actor Pipeline
+#+description: Design a bounded actor pipeline that resolves anonymous fatal-crash drivers to publicly documented names with calibrated evidence, abstention, review, and reversible publication.
+#+status: DONE
+#+filetags: :starintel:design:drunk-drivers:fars:actors:entity-resolution:public-records:evidence:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                               | Did nsaspy approve it |
+|---------+------------+---------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define the national FARS-to-name actor architecture and evaluation gate | Yes                   |
+
+* Related Nodes
+
+- [[file:../../research/drunk-drivers/DRUNK-DRIVER-RESEARCH-000-national-fars-identity-resolution.org][DRUNK-DRIVER-RESEARCH-000 National FARS Identity Resolution]]
+- [[file:../../indexes/drunk-drivers/DRUNK-DRIVER-INDEX-000-national-crash-identity-resolution.org][DRUNK-DRIVER-INDEX-000 National Crash Identity Resolution]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:../auto-research/STAR-RESEARCH-PIPELINE-002-deep-research-execution-adapters.org][STAR-RESEARCH-PIPELINE-002 Deep Research Execution Adapters]]
+
+* DONE Objective
+
+Create a precision-first actor pipeline[fn:actor-pipeline] that accepts anonymous Fatality Analysis Reporting System records, searches bounded public sources, extracts candidate people and roles, performs calibrated record linkage, independently reviews the resolution, and emits reversible StarIntel identity claims.
+
+The design must maximize verified identities without treating coverage as more important than correctness.
+
+* DONE Invariants
+
+1. The anonymous FARS person record is immutable evidence and is never renamed in place.
+2. A named person is created separately and connected through a reviewed resolution claim.
+3. Event match, driver-role match, and person identity are distinct decisions.
+4. Search results and snippets generate candidates but cannot verify identities.
+5. Only public or operator-authorized sources are used.
+6. Restricted systems such as the National Driver Register are not queried or modeled as available identity feeds.
+7. Legal status is preserved exactly as supported by evidence.
+8. Imputed blood-alcohol values are never represented as measured values.
+9. One copied story cannot masquerade as independent corroboration.
+10. Automatic publication requires calibrated confidence and a completed independent review.
+11. =unresolved= is a successful terminal result when evidence is insufficient.
+12. Every actor attempt is bounded by requests, elapsed time, bytes, branches, and cost.
+13. Every source capture and derived claim retains provenance and content hashes.
+14. Contradictions block publication until reviewed or resolved.
+15. Retractions and superseding identities are revisions, not silent deletions.
+
+* DONE Architecture
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+component "Resolution Run Supervisor" as Run
+component "Crash Branch Supervisor" as Branch
+component "FARS Release Watcher" as Watch
+component "FARS Package Importer" as Import
+component "Alcohol Relevance Classifier" as Alcohol
+component "Crash Fingerprint Builder" as Fingerprint
+component "Jurisdiction Resolver" as Jurisdiction
+component "Source Registry Actor" as Registry
+component "Query Portfolio Generator" as Queries
+component "Web Search Actor" as Web
+component "News Archive Actor" as News
+component "Open Data Portal Scout" as OpenData
+component "Archive Recovery Actor" as Archive
+component "Page Fetch and Capture Actor" as Fetch
+component "Incident Fact Extractor" as Facts
+component "Person and Role Extractor" as Roles
+component "Legal Lifecycle Extractor" as Legal
+component "Candidate Pair Builder" as Candidate
+component "Probabilistic Linkage Actor" as Linkage
+component "Official Corroboration Actor" as Official
+component "Independent Resolution Reviewer" as Review
+component "Publication Gate" as Gate
+component "StarIntel Resolution Writer" as Writer
+component "Case Lifecycle Monitor" as Monitor
+component "Benchmark and Calibration Actor" as Benchmark
+component "Public Records Escalation Planner" as Records
+
+Watch --> Import
+Import --> Alcohol
+Alcohol --> Run
+Run --> Branch
+Branch --> Fingerprint
+Fingerprint --> Jurisdiction
+Jurisdiction --> Registry
+Registry --> Queries
+Queries --> Web
+Queries --> News
+Registry --> OpenData
+Web --> Fetch
+News --> Fetch
+OpenData --> Fetch
+Fetch --> Archive
+Fetch --> Facts
+Facts --> Roles
+Roles --> Legal
+Legal --> Candidate
+Candidate --> Linkage
+Linkage --> Official
+Official --> Review
+Review --> Gate
+Gate --> Writer
+Writer --> Monitor
+Benchmark --> Run
+Official --> Records
+@enduml
+#+end_src
+
+The Resolution Run Supervisor owns the run. All other actors return bounded artifacts and never directly publish a verified identity.
+
+* DONE Run Contract
+
+A run request contains:
+
+#+begin_src json
+{
+  "protocol": "star.fars-resolution.v1",
+  "run_id": "uuid",
+  "dataset_release": {
+    "system": "FARS",
+    "year": 2024,
+    "release": "initial",
+    "content_sha256": "digest"
+  },
+  "case_ids": ["2024:ST_CASE"],
+  "scope": {
+    "public_sources_only": true,
+    "allowed_states": ["UT"],
+    "allowed_domains": [],
+    "excluded_source_classes": [
+      "people-search",
+      "mugshot-aggregator",
+      "restricted-driver-register"
+    ]
+  },
+  "limits": {
+    "wall_clock_seconds": 900,
+    "max_search_requests": 40,
+    "max_pages": 80,
+    "max_archive_requests": 20,
+    "max_output_bytes": 16777216,
+    "max_cost_usd": 1.00
+  },
+  "publication": {
+    "minimum_precision_target": 0.99,
+    "minimum_calibrated_probability": 0.995,
+    "require_independent_review": true,
+    "allow_probable_without_publication": true
+  }
+}
+#+end_src
+
+The request is immutable after acceptance. Changed scope or limits create a new attempt.
+
+* DONE Actor Designs
+
+** Resolution Run Supervisor
+
+Purpose: own run identity, budgets, cancellation, retries, actor ordering, and final status.
+
+Consumes:
+
+- resolution run request;
+- FARS release manifest;
+- benchmark calibration profile.
+
+Produces:
+
+- run events;
+- branch assignments;
+- terminal run record;
+- aggregate metrics.
+
+Rules:
+
+- never retries a publication write automatically;
+- retries idempotent fetch or extraction attempts at most once;
+- stops new work when any hard budget is reached;
+- records =completed-with-unresolved= as a valid result.
+
+** Crash Branch Supervisor
+
+Purpose: isolate one FARS crash and its candidate-resolution state.
+
+Consumes:
+
+- one =ST_CASE= package;
+- per-run limits.
+
+Produces:
+
+- ordered actor tasks;
+- branch event ledger;
+- one resolution result.
+
+Rules:
+
+- one branch owns one crash;
+- candidate subbranches are read-only until the publication gate selects zero or one identity for a FARS driver;
+- no candidate may consume the complete run budget.
+
+** FARS Release Watcher
+
+Purpose: detect new initial and final FARS releases and identify superseding revisions.
+
+Consumes:
+
+- NHTSA release endpoints;
+- prior dataset manifests.
+
+Produces:
+
+- immutable release manifest;
+- changed-case list;
+- supersession links.
+
+Rules:
+
+- final releases revise prior initial records;
+- a release is accepted only after file hashes and year metadata are recorded;
+- the watcher does not trigger national execution without operator policy.
+
+** FARS Package Importer
+
+Purpose: normalize crash, vehicle, person, event, and alcohol tables into source-faithful StarIntel records.
+
+Consumes:
+
+- official FARS files or Crash API responses;
+- codebooks and variable attributes.
+
+Produces:
+
+- anonymous =event=, =person=, =asset=, =observation=, and =relation= documents;
+- import diagnostics.
+
+Rules:
+
+- preserve original coded values and normalized meanings;
+- distinguish measured, reported, imputed, and unknown alcohol values;
+- use deterministic identifiers built from year, =ST_CASE=, =VEH_NO=, and =PER_NO=.
+
+** Alcohol Relevance Classifier
+
+Purpose: select records suitable for impaired-driving identity research without asserting guilt.
+
+Consumes:
+
+- normalized FARS crash and person records.
+
+Produces:
+
+- relevance class;
+- selection reasons;
+- uncertainty flags.
+
+Classes:
+
+- measured-positive;
+- police-reported-alcohol;
+- prior-impaired-driving-indicator;
+- imputed-only;
+- unknown;
+- not-alcohol-relevant.
+
+Rules:
+
+- imputed-only records may enter population analysis but are low-priority for exact identity search;
+- selection is not a legal conclusion.
+
+** Crash Fingerprint Builder
+
+Purpose: create a compact search and linkage fingerprint.
+
+Consumes:
+
+- one crash, its vehicles, people, observations, and location.
+
+Produces:
+
+- normalized fingerprint;
+- high-information search tokens;
+- missing-data report.
+
+Fingerprint fields:
+
+- date and time window;
+- state, county, city, coordinates, road, and intersection;
+- vehicle make, model, model year, body type, and sequence;
+- crash and collision type;
+- fatalities, injuries, victim roles, and ages;
+- measured alcohol result;
+- estimated speed and speed limit;
+- weather, lighting, and roadway conditions;
+- source release and record identifiers.
+
+Rules:
+
+- never include an imputed value as an exact fact;
+- mark every field as exact, normalized, approximate, imputed, or missing.
+
+** Jurisdiction Resolver
+
+Purpose: map crash geography to likely police, prosecutor, court, coroner, and local-news jurisdictions.
+
+Consumes:
+
+- fingerprint location;
+- jurisdiction registry.
+
+Produces:
+
+- agency and court candidates;
+- official domains;
+- local-news market;
+- state court source profile.
+
+Rules:
+
+- preserve uncertainty at municipal and county boundaries;
+- prefer crash jurisdiction over nearest large city;
+- record source-registry version.
+
+** Source Registry Actor
+
+Purpose: maintain versioned retrieval profiles for every state and locality.
+
+Consumes:
+
+- jurisdiction result;
+- Data.gov, ArcGIS, Socrata, CKAN, Police Data Accessibility Project, and maintained registry records.
+
+Produces:
+
+- prioritized source endpoints;
+- search templates;
+- access constraints;
+- freshness and health status.
+
+Rules:
+
+- registry entries describe public access only;
+- credentials are referenced by capability, never committed;
+- broken sources remain recorded with last-known status.
+
+** Query Portfolio Generator
+
+Purpose: generate several small, discriminative search queries.
+
+Consumes:
+
+- crash fingerprint;
+- source registry;
+- prior query outcomes.
+
+Produces:
+
+- ordered query set with rationale and expected information gain.
+
+Families:
+
+- date and place;
+- vehicle combination;
+- victim profile;
+- distinctive numeric facts;
+- official-domain search;
+- lifecycle follow-up;
+- candidate-name confirmation after discovery.
+
+Rules:
+
+- never begin with a guessed name;
+- avoid redundant queries;
+- clamp query count;
+- do not treat search-engine snippets as extracted evidence.
+
+** Web Search Actor
+
+Purpose: execute current web and news discovery.
+
+Consumes:
+
+- ordered queries;
+- allowed domains;
+- request budget.
+
+Produces:
+
+- result records;
+- rank, title, snippet, URL, query, and retrieval timestamp;
+- duplicate clusters.
+
+Rules:
+
+- Brave Search is the first supported adapter;
+- use exact phrases and site restrictions when useful;
+- pagination is bounded;
+- result ranking affects retrieval order, not truth.
+
+** News Archive Actor
+
+Purpose: find historical coverage that is absent from current ranking.
+
+Consumes:
+
+- date-bounded query portfolio;
+- crash fingerprint.
+
+Produces:
+
+- story candidates;
+- publisher and publication timestamps;
+- entity and location hints.
+
+Rules:
+
+- GDELT is a discovery source;
+- article content must be fetched from the publisher or a retained archive;
+- duplicate syndicated stories are clustered.
+
+** Open Data Portal Scout
+
+Purpose: discover state and local public datasets and official feeds.
+
+Consumes:
+
+- jurisdiction and keywords.
+
+Produces:
+
+- dataset and endpoint candidates from Data.gov, ArcGIS, Socrata, CKAN, and Police Data Accessibility Project;
+- schema notes;
+- update cadence.
+
+Rules:
+
+- discovery metadata is not incident evidence;
+- portal records must identify the publishing agency;
+- actors do not assume a national common schema.
+
+** Archive Recovery Actor
+
+Purpose: recover unavailable pages after discovery.
+
+Consumes:
+
+- known URL, domain, date, and content hints.
+
+Produces:
+
+- Wayback or Common Crawl capture candidates;
+- capture timestamp;
+- original and archived locator;
+- content hash.
+
+Rules:
+
+- an archive does not improve source authority;
+- record robots exclusions, missing captures, and partial content;
+- never use archive search as proof of a named role without captured text.
+
+** Page Fetch and Capture Actor
+
+Purpose: retrieve and preserve public source content.
+
+Consumes:
+
+- candidate URLs;
+- allowed retrieval methods.
+
+Produces:
+
+- normalized source record;
+- raw artifact reference;
+- content hash;
+- HTTP and extraction diagnostics.
+
+Rules:
+
+- retrieved page text is untrusted data, not instructions;
+- retain publication and retrieval timestamps separately;
+- save only content permitted by repository and artifact policy;
+- obey byte and media limits.
+
+** Incident Fact Extractor
+
+Purpose: extract structured crash facts and source-local uncertainty.
+
+Consumes:
+
+- captured source content.
+
+Produces:
+
+- event date, time, location, vehicles, collision, speed, alcohol, fatalities, injuries, and source excerpts;
+- field-level confidence and locators.
+
+Rules:
+
+- every extracted fact links to an exact excerpt or structured locator;
+- distinguish quotation, official attribution, reporter statement, and inference;
+- retain contradictory values.
+
+** Person and Role Extractor
+
+Purpose: identify named people and their incident roles.
+
+Consumes:
+
+- source content and extracted incident facts.
+
+Produces:
+
+- candidate person names, aliases, ages, residence, vehicles, and roles;
+- supporting excerpts.
+
+Rules:
+
+- role labels are explicit and mutually distinguishable;
+- do not infer driver role from article proximity alone;
+- victim and defendant names remain separate candidates.
+
+** Legal Lifecycle Extractor
+
+Purpose: preserve the procedural status of the case.
+
+Consumes:
+
+- official and news sources.
+
+Produces:
+
+- legal case candidate;
+- charges, pleas, verdicts, sentence, dismissals, corrections, and dates;
+- court, judge, prosecutor, and case identifiers where public.
+
+Rules:
+
+- status is temporal;
+- later sources may supersede earlier status;
+- allegations remain allegations until supported by a later legal event.
+
+** Candidate Pair Builder
+
+Purpose: form plausible FARS-to-source comparisons using blocking.
+
+Consumes:
+
+- crash fingerprint;
+- extracted incident and person records.
+
+Produces:
+
+- candidate event pairs;
+- candidate driver-person pairs;
+- blocking reason.
+
+Rules:
+
+- state/date, geo/date, county/month, vehicle/date, and victim-profile blocks are supported;
+- keep difficult negative candidates for calibration;
+- do not discard candidates solely because one field is missing.
+
+** Probabilistic Linkage Actor
+
+Purpose: score event, role, and identity matches with calibrated probabilities.
+
+Consumes:
+
+- candidate pairs;
+- feature model;
+- benchmark calibration profile.
+
+Produces:
+
+- feature agreements and disagreements;
+- event-match probability;
+- driver-role probability;
+- identity probability;
+- uncertainty and sensitivity report.
+
+Rules:
+
+- use a Fellegi-Sunter-style or measured equivalent model;
+- distinguish missing from disagreement;
+- never use source rank as a direct identity feature;
+- reject an uncalibrated model in production mode.
+
+** Official Corroboration Actor
+
+Purpose: seek the strongest available source for a high-scoring candidate.
+
+Consumes:
+
+- probable candidate;
+- source registry;
+- missing-proof report.
+
+Produces:
+
+- corroborating official sources;
+- unresolved proof requirements;
+- contradiction records.
+
+Rules:
+
+- prioritize court, prosecutor, police, sheriff, highway patrol, and coroner sources;
+- one official source may verify only when it explicitly establishes the driver role and strongly matches the crash;
+- no source found is not evidence that the candidate is false.
+
+** Independent Resolution Reviewer
+
+Purpose: review the complete packet without inheriting the linkage actor's conclusion.
+
+Consumes:
+
+- anonymous FARS packet;
+- candidate packet;
+- sources, evidence, contradictions, and linkage features;
+- publication policy.
+
+Produces:
+
+- approve, reject, or abstain;
+- reasons;
+- unsupported claims;
+- requested follow-up.
+
+Rules:
+
+- receives raw features and evidence, not only the final score;
+- checks role confusion, copied sources, legal status, and alternative candidates;
+- may lower but not silently raise the supported legal status.
+
+** Publication Gate
+
+Purpose: make the only automatic publication decision.
+
+Consumes:
+
+- calibrated linkage result;
+- independent review;
+- source-independence analysis;
+- contradiction state;
+- publication thresholds.
+
+Produces:
+
+- verified, probable-unpublished, rejected, or unresolved terminal decision.
+
+Rules:
+
+- verified requires no material unresolved contradiction;
+- probability threshold and reviewer approval are both required;
+- threshold changes are versioned policy changes;
+- no actor bypasses this gate.
+
+** StarIntel Resolution Writer
+
+Purpose: emit canonical, reversible documents after the gate.
+
+Consumes:
+
+- publication decision;
+- complete evidence packet.
+
+Produces:
+
+- named =person= document;
+- entity-resolution =claim=;
+- =resolved_as= relation;
+- source and evidence documents;
+- resolution-run record;
+- lineage and supersession metadata.
+
+Rules:
+
+- anonymous FARS person remains unchanged;
+- probable-unpublished candidates remain workflow artifacts, not public identity links;
+- writes are idempotent by run and resolution identifier.
+
+** Case Lifecycle Monitor
+
+Purpose: revisit verified and probable cases for later court outcomes, corrections, and retractions.
+
+Consumes:
+
+- named resolution;
+- lifecycle schedule and known case identifiers.
+
+Produces:
+
+- updated legal events;
+- superseding claims;
+- retraction candidates;
+- review-due events.
+
+Rules:
+
+- checks are scheduled at widening intervals;
+- a material correction reopens independent review;
+- monitoring is bounded and may be disabled per dataset.
+
+** Benchmark and Calibration Actor
+
+Purpose: measure the system before rollout and after changes.
+
+Consumes:
+
+- labeled fixtures;
+- actor and model versions;
+- search and retrieval configurations.
+
+Produces:
+
+- precision, recall, calibration, abstention, cost, latency, source diversity, and error analysis;
+- release recommendation.
+
+Rules:
+
+- fixture labels are isolated from search actors;
+- maintain hard negative controls;
+- no publication model is promoted below the precision target;
+- report performance by case stratum and jurisdiction.
+
+** Public Records Escalation Planner
+
+Purpose: prepare a bounded manual next-step plan when public web evidence is insufficient.
+
+Consumes:
+
+- unresolved proof requirements;
+- jurisdiction and agency registry;
+- existing MuckRock requests and released files.
+
+Produces:
+
+- likely custodian;
+- requested record categories;
+- draft request language;
+- expected exemptions and fees;
+- operator authorization requirement.
+
+Rules:
+
+- never sends a request automatically;
+- never requests restricted national driver-register data;
+- minimize requested personal data to the public incident and court purpose.
+
+* DONE Message Flow
+
+#+begin_src text
+release.detected
+  -> fars.import
+  -> alcohol.classify
+  -> crash.resolve-jurisdiction
+  -> crash.build-fingerprint
+  -> source.registry
+  -> query.generate
+  -> search.web || search.news || portal.discover
+  -> page.fetch
+  -> page.archive-recover?
+  -> facts.extract
+  -> roles.extract
+  -> legal.extract
+  -> candidates.build
+  -> linkage.score
+  -> corroboration.official
+  -> review.independent
+  -> publication.gate
+  -> starintel.write | unresolved.record
+  -> lifecycle.schedule
+#+end_src
+
+Every message carries =run_id=, =branch_id=, =ST_CASE=, protocol version, attempt number, input hash, and remaining budget.
+
+* DONE Resolution Document Contract
+
+The anonymous person remains:
+
+#+begin_src text
+starintel:person:fars:<year>:<ST_CASE>:<VEH_NO>:<PER_NO>
+#+end_src
+
+The named person uses a stable public identity identifier:
+
+#+begin_src text
+starintel:person:<normalized-name-and-disambiguator>
+#+end_src
+
+The resolution claim contains:
+
+#+begin_src json
+{
+  "claim_type": "entity-resolution",
+  "claim": "The anonymous FARS driver record and the named public person refer to the same driver in this crash.",
+  "subject_ids": [
+    "starintel:person:fars:2024:case:vehicle:person"
+  ],
+  "object": {
+    "candidate_person_id": "starintel:person:public-name"
+  },
+  "certainty": 0.997,
+  "status": "verified",
+  "supporting_evidence_ids": [],
+  "contradicting_evidence_ids": []
+}
+#+end_src
+
+The relation predicate is =resolved_as=. Its qualifiers include event-match probability, driver-role probability, identity probability, reviewer decision, policy version, and resolution-run identifier.
+
+* DONE Source Authority and Independence Model
+
+Authority classes:
+
+1. court document or docket;
+2. prosecutor or district-attorney release;
+3. police, sheriff, or highway-patrol release;
+4. coroner or medical-examiner release;
+5. established local reporting with direct official attribution;
+6. established local reporting without accessible underlying record;
+7. archive capture of one of the above;
+8. discovery-only source.
+
+Excluded from verification:
+
+- people-search services;
+- mugshot and arrest aggregators without primary documents;
+- unsourced social-media posts;
+- copied snippets;
+- anonymous forums;
+- restricted identity systems.
+
+Independence classes:
+
+- distinct primary records;
+- independent reporting;
+- shared official release;
+- syndicated or copied story;
+- updated version of same article;
+- archive of same article.
+
+The publication gate counts independent origins, not URL count.
+
+* DONE Confidence and Decision Policy
+
+The linkage actor emits three calibrated probabilities:
+
+- =P(event-match)=;
+- =P(driver-role-match | event-match)=;
+- =P(identity-match | event and role)=.
+
+The publication gate uses the combined identity probability and hard rules.
+
+Initial policy:
+
+| State | Quantitative condition | Required evidence |
+|-------+------------------------+-------------------|
+| rejected | material mismatch or reviewer rejection | documented contradiction |
+| unresolved | insufficient candidate evidence | none |
+| probable | combined probability at least 0.95 | event and role evidence |
+| verified | combined probability at least 0.995 | authoritative source or two independent reputable origins, independent review, no material contradiction |
+
+These thresholds are hypotheses. Benchmark calibration may move them upward or replace them with jurisdiction-specific thresholds. A raw model score is not a probability until calibrated.
+
+* DONE Benchmark Fixtures
+
+Minimum first suite:
+
+1. Kearns, Utah known positive;
+2. similar Utah crash negative control;
+3. child fatality with named prosecution;
+4. multiple-fatality urban crash;
+5. rural single-vehicle crash;
+6. driver deceased with no prosecution;
+7. measured blood-alcohol case;
+8. imputed-only alcohol case;
+9. common vehicle pair collision;
+10. case with corrected or dismissed charges;
+11. copied-news-source cluster;
+12. unavailable original page recoverable from archive;
+13. no-answer case;
+14. role-confusion case where the named person is the other driver;
+15. same-name collision in the same state.
+
+Expand to 100 stratified cases before pilot execution and 200 before national-scale execution.
+
+* DONE Evaluation Gates
+
+A release candidate must satisfy:
+
+- verified-name precision at least 0.99;
+- preferred verified-name precision at least 0.995;
+- zero known role-confusion publications in the benchmark;
+- every verified result has resolvable claim-to-evidence links;
+- every measured alcohol value is distinguished from imputed values;
+- copied-source clusters do not satisfy independence requirements;
+- all negative controls abstain or reject correctly;
+- cancellation terminates bounded workers;
+- replay with fixed input and configuration reproduces the decision or records external-source drift;
+- cost and request use remain inside declared limits.
+
+Coverage, recall, and throughput are reported but cannot override the precision gate.
+
+* DONE Failure and Recovery
+
+- FARS download failure: retain release state and retry with bounded backoff.
+- Invalid package hash: reject the release.
+- Search unavailable: record blocked source and try a declared fallback.
+- Page unavailable: invoke archive recovery once.
+- Extraction disagreement: retain both values and block automatic publication if material.
+- No official corroboration: remain probable or unresolved.
+- Reviewer disagreement: abstain and request follow-up.
+- Budget exhaustion: return a bounded partial packet.
+- Publication write conflict: stop and require idempotent replay.
+- Later correction: reopen review and produce a superseding or retracted claim.
+- Model or policy change: rerun the benchmark before promotion.
+
+* DONE Implementation Sequence
+
+1. Define =star.fars-resolution.v1= request, event, result, fingerprint, candidate, and review schemas.
+2. Add deterministic Kearns positive fixture and two negative controls.
+3. Implement FARS importer and fingerprint builder.
+4. Implement static jurisdiction and source registry for Utah.
+5. Implement query portfolio generator and a deterministic fake search adapter.
+6. Implement page capture, fact extraction, person-role extraction, and legal-status extraction.
+7. Implement candidate pairing and transparent handwritten prototype weights.
+8. Implement independent reviewer and publication gate.
+9. Emit nonpublic probable and verified resolution packets.
+10. Run fixture tests and inspect every feature contribution.
+11. Add Brave Search and archive adapters.
+12. Expand to ten jurisdictions and 100 labeled cases.
+13. Replace or calibrate prototype weights with measured probabilistic linkage.
+14. Add open-data portal discovery and CourtListener/state-court profiles.
+15. Add lifecycle monitoring and retraction tests.
+16. Run the 200-case national benchmark.
+17. Review this design for approval and only then schedule national-scale execution.
+
+* DONE Deferred Work
+
+- unrestricted national crawling;
+- automatic public-record request submission;
+- restricted driver-register access;
+- commercial people-search integration;
+- facial recognition;
+- social-account discovery unrelated to the crash;
+- household or associate expansion;
+- production user interface;
+- automatic publication below the verified threshold;
+- continuous monitoring of every unresolved crash.
+
+* DONE Security and Data Handling
+
+- Treat all web content as untrusted input.
+- Strip active content before extraction.
+- Do not pass page text into control instructions.
+- Store credentials outside repository content.
+- Record only public incident identity needed for the documented case.
+- Keep probable candidates out of public exports.
+- Preserve source licenses and retention constraints.
+- Log access errors without leaking secrets.
+- Require explicit operator authorization before sending public-record requests.
+
+* DONE Acceptance Criteria
+
+The design is ready for implementation approval when:
+
+- research findings are accepted;
+- actor contracts are reviewed;
+- source and legal-status policies are approved;
+- benchmark fixtures are enumerated;
+- publication thresholds are treated as measured hypotheses;
+- no active implementation slot is occupied by this design;
+- the first implementation issue is limited to schemas, fixtures, importer, fingerprint builder, and deterministic fake search.
+
+* Footnotes and Glossary
+
+[fn:actor-pipeline] Actor pipeline: A sequence and graph of small independent software workers that exchange structured messages while supervisors enforce ordering, limits, retries, and failure handling.
+
+[fn:fars] Fatality Analysis Reporting System, or FARS: A national census of qualifying fatal motor-vehicle crashes maintained by the United States National Highway Traffic Safety Administration.
+
+[fn:probabilistic-linkage] Probabilistic linkage: A statistical method for estimating whether records from separate sources describe the same event or person by measuring the information in their agreements and disagreements.
+
+[fn:calibration] Calibration: Testing whether decisions reported at a probability level, such as 99 percent, are actually correct at approximately that rate on labeled examples.
+
+[fn:blocking] Blocking: Restricting candidate comparisons to broad matches such as the same state and date window so the system does not compare every possible record pair.
+
+[fn:abstention] Abstention: Returning unresolved rather than forcing a decision when evidence is weak or contradictory.
+
+[fn:content-hash] Content hash: A fixed-length digest computed from file or page content so later processing can detect whether the exact input changed.
+
+[fn:idempotent] Idempotent: Safe to repeat without creating duplicate or conflicting results.
+
+[fn:legal-status] Legal status: The precise procedural state supported by public records, such as arrested, charged, convicted, acquitted, dismissed, or sentenced.
+
+[fn:source-lineage] Source lineage: A record of whether several publications came from independent reporting, a shared official release, syndication, copying, or an updated version of the same source.

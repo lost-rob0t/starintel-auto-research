@@ -3,8 +3,15 @@
 :END:
 #+title: STAR-LANG-RESEARCH-009 Canonical JSON and Generated Bindings
 #+description: Serialize the portable Star-Lang manifest and typed message envelopes as deterministic JSON and generate Python and TypeScript bindings from the same normalized contracts.
-#+status: REVIEW
-#+filetags: :starintel:star-lang:json:wire-protocol:python:typescript:bindings:compiler:research:
+#+status: APPROVED
+#+last_modified: [2026-08-02 Sun]
+#+filetags: :starintel:star-lang:json:wire-protocol:python:typescript:bindings:compiler:research:approved:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                                | Did nsaspy approve it |
+|---------+------------+----------------------------------------------------------------------+-----------------------|
+| 0.2.1   | 2026-08-02 | Record nsaspy approval of revised float and exact-decimal model      | Yes                   |
+| 0.2.0   | 2026-08-02 | Reopen numeric model: allow floats for geo and approximate measures  | Superseded            |
 
 * Purpose
 
@@ -17,6 +24,22 @@ The compiler now projects the same manifest into:
 - Python typing bindings
 - TypeScript typing bindings
 
+* Field Naming
+
+All document fields, message-payload fields, and serialized envelope keys use lower camelCase. Canonical JSON and generated bindings preserve the source spelling exactly; they do not translate kebab-case fields at generation time. A kebab-case field is rejected during parsing or semantic validation. Declaration and type identifiers remain outside this rule.
+
+* Numeric Model
+
+Star-Lang distinguishes approximate binary floating-point values from exact base-10 decimal values.
+
+- =integer= is exact and serializes as a JSON number.
+- =float= is an approximate finite IEEE-754 binary64 value and serializes as a JSON number. It is appropriate for latitude, longitude, altitude, accuracy, measurements, scores, and scientific data where approximate arithmetic is expected.
+- =decimal= is an exact base-10 value and serializes as a canonical JSON string. It is appropriate for money, rates, quantities with contractual scale, and values that must not change through binary floating-point conversion.
+
+Float serialization rejects NaN, positive infinity, and negative infinity because JSON has no interoperable representation for them. Finite float values use a deterministic shortest round-trip decimal representation. Negative zero is canonicalized to =0= so equivalent values do not produce different canonical bytes.
+
+The current Star-CL geo schema uses decimal latitude, longitude, altitude, and accuracy fields. Those approximate geospatial fields should migrate to =float= while =decimal= remains available for exact fixed-precision domains.
+
 * Canonical JSON
 
 Canonical output uses:
@@ -25,22 +48,24 @@ Canonical output uses:
 - declaration order for arrays
 - UTF-8 strings with JSON escaping
 - integers as JSON numbers
+- finite float values as canonical JSON numbers
 - booleans as JSON booleans
-- exact decimal values as JSON strings
+- exact decimal values as canonical JSON strings
 - omitted absent optional envelope members
 - qualified Star-Lang identifiers as wire type names
 
-Floating-point values are not accepted as canonical numeric values. Financial and other decimal fields use strings so runtimes do not silently round values while crossing language boundaries.
+Numeric encoding follows the declared schema type. A JSON number is valid for an =integer= or =float= field but not for an exact =decimal= field. A decimal string is valid for =decimal= but must not be silently accepted for =float=.
 
 * Schema-Aware Envelopes
 
-Envelope serialization resolves =message_type= against the portable manifest before encoding =payload=. The encoder validates:
+Envelope serialization resolves =messageType= against the portable manifest before encoding =payload=. The encoder validates:
 
 - required fields
 - closed message field names
 - list shapes
 - integer and boolean values
-- precision-safe decimal strings
+- finite float values for float-typed fields
+- precision-safe decimal strings for decimal-typed fields
 - enumeration membership
 - scalar aliases
 - map and reference object shapes
@@ -56,11 +81,11 @@ The generator emits Python 3 typing definitions using:
 - =Required=
 - =NotRequired=
 - =Literal=
-- exact source field strings
+- exact lower-camelCase source field strings
 - flattened inherited document fields
 - actor contract metadata
 
-Hyphenated Star-Lang field names remain exact dictionary keys instead of being silently renamed. Scalar and enumeration type names become PascalCase aliases. Decimal wire types map to =str=.
+Star-Lang field names use lower camelCase and remain exact dictionary keys; generators do not silently rename them. Scalar and enumeration type names become PascalCase aliases. Float wire types map to Python =float=; decimal wire types map to =str=.
 
 * TypeScript Bindings
 
@@ -71,12 +96,12 @@ The generator emits:
 - document interfaces
 - interface inheritance
 - message interfaces
-- quoted source field names
+- lower-camelCase source field names
 - actor contract metadata with =as const=
 
-Decimal wire types map to =string= for the same precision rule used by Python and canonical JSON.
+Float wire types map to TypeScript =number=. Decimal wire types map to =string= for the same exactness rule used by Python and canonical JSON.
 
-* FEC Conformance Output
+* FEC and Geo Conformance Output
 
 The FEC fixture produces four CI artifacts:
 
@@ -85,14 +110,14 @@ The FEC fixture produces four CI artifacts:
 - =star_lang_fec.py=
 - =star_lang_fec.ts=
 
-CI parses both JSON files and compiles the generated Python source. The TypeScript source receives deterministic structural assertions in the Common Lisp test suite until a pinned TypeScript compiler is added.
+The Star-CL fixture additionally exercises geo latitude, longitude, altitude, and accuracy fields as floats. CI parses generated JSON, compiles the generated Python source, and verifies deterministic TypeScript structure until a pinned TypeScript compiler is added.
 
 * Compiler Boundary
 
 The flow is:
 
 #+begin_example
-fec-core.star
+source.star
   -> normalized specification IR
   -> semantic validation
   -> portable manifest
@@ -107,18 +132,24 @@ No generator reads the original source independently. All language adapters cons
 The pass checks:
 
 1. repeated manifest serialization is byte-identical
-2. qualified FEC type names survive serialization
+2. qualified type names survive serialization
 3. envelope object keys are canonicalized
 4. list fields encode as JSON arrays
-5. decimal strings pass and numeric decimal values fail
-6. invalid enum values fail
-7. Python preserves exact source keys
-8. Python document bindings include inherited fields
-9. TypeScript preserves interface inheritance
-10. Python and TypeScript both map decimal wire values to strings
-11. actor contracts appear in both generated languages
-12. generated manifest and envelope files parse as JSON
-13. generated Python bindings compile
+5. geo latitude, longitude, altitude, and accuracy float values encode as JSON numbers
+6. finite float values round-trip through canonical binary64 serialization
+7. NaN and positive or negative infinity fail validation
+8. negative zero canonicalizes to JSON =0=
+9. decimal strings pass and JSON-number decimal values fail
+10. float fields reject decimal strings unless an explicit conversion is requested
+11. invalid enum values fail
+12. Python preserves exact lower-camelCase source keys
+13. Python document bindings include inherited fields
+14. TypeScript preserves interface inheritance
+15. Python and TypeScript map float values to native numeric types and decimal values to strings
+16. actor contracts appear in both generated languages
+17. generated manifest and envelope files parse as JSON
+18. generated Python bindings compile
+19. kebab-case field declarations fail before binding generation
 
 * Boundary
 
@@ -131,6 +162,7 @@ This pass does not:
 - publish an SDK package
 - start native or external actors
 - select the final Star-Lang host implementation
+- define arbitrary-precision binary floating-point types beyond binary64
 - bypass the comparative language and promotion gates
 
 The next wire pass should define acknowledgements, errors, correlation, cancellation, and idempotency semantics before transport adapters are treated as production interfaces.

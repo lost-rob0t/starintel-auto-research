@@ -2,7 +2,7 @@
 from __future__ import annotations
 import argparse, json, sys
 from pathlib import Path
-from _roamlib import TREE_NAMES, active_org_files, apply_event, ensure_roam, mirror_structure, project_root, read_jsonl, upsert_header
+from _roamlib import TREE_NAMES, active_org_files, apply_event, ensure_roam, implementation_slot_problems, mirror_structure, project_root, read_jsonl, upsert_header
 
 def write_jsonl(path: Path, values: list[dict]) -> None:
     with path.open("w", encoding="utf-8") as handle:
@@ -26,9 +26,7 @@ def main() -> int:
     root, roam = project_root(), ensure_roam()
     if args.check:
         problems = structure_diff(roam)
-        active = active_org_files(roam)
-        if len(active) > 1:
-            problems.append(f"implementation slot contains {len(active)} Org files")
+        problems.extend(implementation_slot_problems(roam))
         for ledger in (".implemented", ".rejected"):
             for event in read_jsonl(roam / ledger):
                 path = event.get("design_path")
@@ -40,6 +38,9 @@ def main() -> int:
         print("roam structure and ledgers are valid")
         return 0
     mirror_structure(roam)
+    slot_problems = implementation_slot_problems(roam)
+    if slot_problems:
+        raise SystemExit("\n".join(slot_problems))
     ledger_paths = [roam / ".implemented", roam / ".rejected"]
     ledgers = {p: read_jsonl(p) for p in ledger_paths}
     events = sorted([e for vals in ledgers.values() for e in vals], key=lambda e: e.get("timestamp", ""))
@@ -68,13 +69,10 @@ def main() -> int:
                 event["synced"] = True
         write_jsonl(path, vals)
     if not args.no_clear:
-        active = active_org_files(roam)
-        if len(active) > 1:
-            raise SystemExit("cannot clear invalid implementation slot")
-        if active:
-            rel = str(active[0].relative_to(root))
+        for active_path in active_org_files(roam):
+            rel = str(active_path.relative_to(root))
             if any(e.get("active_path") == rel and e.get("event_id") in synced for e in events):
-                active[0].unlink()
+                active_path.unlink()
     mirror_structure(roam)
     print(f"synchronized {len(synced)} status event(s)")
     return 0

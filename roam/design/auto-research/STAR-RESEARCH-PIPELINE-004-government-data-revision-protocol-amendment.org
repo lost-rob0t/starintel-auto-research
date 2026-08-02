@@ -1,0 +1,281 @@
+:PROPERTIES:
+:ID:       starintel-auto-research-government-data-revision-protocol-004
+:END:
+#+title: STAR-RESEARCH-PIPELINE-004 Government Data Revision Protocol Amendment
+#+description: Amend the government-data actor protocol with immutable revisions, independently reviewed contracts, atomic gates, canonical hashes, job-attempt separation, lease fencing, and protocol-v1 migration.
+#+status: REVIEW
+#+filetags: :starintel:design:auto-research:government-data:protocol:actors:revisions:review:gates:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                                   | Did nsaspy approve it |
+|---------+------------+-------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define revision-aware amendment to government-data actor protocol       | Pending               |
+| 0.2.0   | 2026-07-28 | Separate review decisions and add atomic coverage gates                 | Pending               |
+| 0.3.0   | 2026-07-28 | Linearize review heads and define canonical gate validity/hash          | Pending               |
+| 0.3.1   | 2026-07-28 | Pin source-record contract versions and reviews throughout protocol     | Pending               |
+
+* Related Nodes
+
+- [[file:STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:../government-data/STAR-GOVDATA-DESIGN-001-ohio-coverage-program.org][STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program]]
+- [[file:../government-data/STAR-GOVDATA-DESIGN-002-ohio-source-profile-contract.org][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]]
+- [[file:../government-data/STAR-GOVDATA-DESIGN-003-ohio-adapter-pack.org][STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack]]
+
+* REVIEW Objective
+
+Amend =PIPELINE-003= so ownership, messages, routing, scheduling, leases, replay, review, and completion execute revisioned jurisdiction coverage without mutable IDs, multi-writer state, ambiguous reviews, time-insensitive gates, or unpinned record semantics.
+
+* REVIEW Normative Identity
+
+Envelope protocol: =star.government-data.v1.1=.
+
+Payload schemas and source-record contracts are separately versioned:
+
+- =payload-schema-id= / =payload-schema-version= describe one command/event/result body
+- =source-contract-id= / =source-contract-version= define canonical profile, deployment, search, gap, decision, assessment, review, and gate record semantics
+- =applicability-contract-id= / version define route/subfamily applicability
+
+A payload =schema-version= never changes the envelope protocol.
+
+* REVIEW Problems Corrected
+
+Protocol v1 carries logical profile IDs, omits canonical revision families and authorities, risks multi-writer review state, has no linear review head, has no deterministic gate hash/validity, merges jobs with later-issued leases, lacks fencing, and cannot pin source/applicability/policy/manifest/runtime semantics into historical decisions.
+
+* REVIEW Normative Status
+
+This amendment defines protocol v1.1. =PIPELINE-003= and this amendment require approval together. Protocol v1 becomes migration/read-only after cutover.
+
+* REVIEW Authorities
+
+Add:
+
+- Source Deployment Authority
+- Search Plan Authority
+- Gap Authority
+- Route Assessment Authority
+- Coverage Gate Authority
+- Independent Review Authority
+
+Identity/profile authorities retain subject ownership. Independent Review owns review decisions only. Coverage Gate owns aggregate gates only. Coverage Ledger owns observations/derived views only.
+
+Root readiness includes replay for identity, deployment, profile, search, gap, assessment, gate, review, registry, artifact, rate/lease, and ledger authorities.
+
+* REVIEW Durable Families
+
+- government unit/component records
+- deployment/profile revisions
+- source-contract and applicability-contract revisions or immutable version snapshots
+- search-plan, gap, subfamily-decision, route-assessment revisions
+- review-decision revisions
+- jurisdiction/wave/state gate revisions
+- policy and manifest/runtime snapshots
+- adapter jobs/attempts
+- retrieval events, artifacts, evidence, checkpoints
+
+Every subject transition is a new subject revision. Every review transition is a separate review revision.
+
+* REVIEW Command Envelope
+
+#+begin_src lisp
+(defstruct government-data-command-v1.1
+  protocol payload-schema-id payload-schema-version
+  command-id run-id parent-command-id operation
+  government-id component-id
+  source-contract-id source-contract-version
+  deployment-revision-id source-profile-revision-id
+  search-plan-revision-id subfamily-decision-revision-id
+  gap-revision-id route-assessment-revision-id
+  review-revision-id coverage-gate-revision-id
+  applicability-contract-id applicability-contract-version
+  policy-snapshot-id adapter-manifest-set-hash runtime-environment-set-hash
+  payload limits capabilities artifact-policy
+  deadline idempotency-key cancel-id configuration-hash reply-to)
+#+end_src
+
+Canonical reads pin exact revisions and contract versions. Logical IDs appear only for creation/serialized write routing.
+
+New operations include review and gate decide/invalidate/expire operations plus subject propose/decide operations.
+
+* REVIEW Event and Result Envelopes
+
+#+begin_src lisp
+(defstruct government-data-event-v1.1
+  protocol payload-schema-id payload-schema-version
+  event-id sequence timestamp run-id command-id
+  actor-id actor-generation kind government-id component-id
+  source-contract-id source-contract-version
+  deployment-revision-id source-profile-revision-id
+  search-plan-revision-id subfamily-decision-revision-id
+  gap-revision-id route-assessment-revision-id
+  review-revision-id coverage-gate-revision-id
+  policy-snapshot-id configuration-hash payload)
+
+(defstruct government-data-result-v1.1
+  protocol payload-schema-id payload-schema-version
+  command-id run-id status government-id component-id
+  source-contract-id source-contract-version
+  deployment-revision-id source-profile-revision-id
+  search-plan-revision-id subfamily-decision-revision-id
+  gap-revision-id route-assessment-revision-id
+  review-revision-id coverage-gate-revision-id
+  adapter-id adapter-version adapter-manifest-hash runtime-environment-hash
+  job-revision-id attempt-id
+  started-at completed-at checkpoint-ids artifact-ids evidence-ids
+  proposal-ids counts limits-used retry-state truncation warnings failure
+  input-hash output-hash policy-snapshot-id configuration-hash)
+#+end_src
+
+Only owning authorities allocate canonical revision IDs.
+
+* REVIEW Independent Review and Linear Head
+
+#+begin_src lisp
+(defstruct government-data-review-decision-revision
+  review-id review-revision-id prior-review-revision-id
+  supersedes-review-revision-ids
+  subject-kind subject-revision-id decision
+  expected-prior-review-revision-id
+  reviewer-id reviewer-generation
+  independence-policy-id conflict-check-result
+  evidence-ids notes decided-at created-at)
+#+end_src
+
+Subject kinds include source contract, deployment, profile, applicability contract, policy, manifest set, runtime set, search plan, gap, subfamily decision, assessment, and gate.
+
+One stable review ID exists per subject revision. Review commits CAS against the expected head. One unsuperseded head determines current review; forks/timestamp resolution are forbidden. Absence means unreviewed. Subject owners cannot self-review.
+
+* REVIEW Atomic Coverage Gate
+
+#+begin_src lisp
+(defstruct government-data-coverage-gate-revision
+  gate-id gate-revision-id prior-gate-revision-id
+  supersedes-gate-revision-ids
+  gate-kind scope-id run-id wave-id
+  source-contract-id source-contract-version
+  source-contract-review-revision-id
+  applicability-contract-id applicability-contract-version
+  applicability-contract-review-revision-id
+  policy-snapshot-id policy-review-revision-id
+  adapter-manifest-set-hash manifest-set-review-revision-id
+  runtime-environment-set-hash runtime-set-review-revision-id
+  route-assessment-revision-ids route-assessment-review-revision-ids
+  required-subject-review-revision-ids blocker-ids status
+  basis-schema-version hash-algorithm basis-as-of basis-hash
+  freshness-deadline valid-through
+  decided-at decider-id created-at)
+#+end_src
+
+Only a reviewed currently valid passed jurisdiction gate drives catalog =DONE=.
+
+Canonical basis:
+
+1. Pin reviewed source contract, applicability contract, policy, manifest set, and runtime set.
+2. Sort revision pairs by applicability route order, then subject kind, logical ID, revision ID.
+3. UTF-8 normalize strings, use UTC RFC 3339 timestamps, explicit nulls, key-sorted maps.
+4. Default SHA-256 over canonical bytes.
+5. Evaluate freshness at =basis-as-of=.
+6. =freshness-deadline= is the earliest bound reassessment/expiry.
+7. =valid-through= is the earliest source/applicability contract, policy, subject, review, manifest/runtime, or freshness validity limit.
+
+Current completion becomes false immediately after =valid-through= or bound review invalidation, without waiting for an expiry write. Expired revisions are still recorded for history.
+
+* REVIEW Job and Attempt Separation
+
+A durable job pins source/applicability contract versions, exact profile/proposal/search revisions, policy, adapter/manifest/runtime versions, bounds, artifacts, and idempotency. It contains no future lease.
+
+#+begin_src lisp
+(defstruct government-data-adapter-job-revision
+  job-id job-revision-id prior-job-revision-id
+  source-contract-id source-contract-version
+  applicability-contract-id applicability-contract-version
+  policy-snapshot-id adapter-id adapter-version
+  adapter-manifest-hash runtime-environment-hash
+  source-profile-revision-id candidate-proposal-id search-plan-revision-id
+  operation limits artifact-policy input-hash idempotency-key)
+
+(defstruct government-data-adapter-attempt
+  attempt-id attempt-number job-revision-id prior-attempt-id
+  rate-lease-id rate-lease-generation rate-lease-fence
+  rate-lease-key-hash worker-generation started-at deadline input-hash)
+#+end_src
+
+Dispatcher validates job, acquires lease, then creates attempt. Retry creates a new attempt/fence. Semantic scope or contract change creates a new job revision.
+
+* REVIEW Checkpoint
+
+#+begin_src lisp
+(defstruct government-data-checkpoint-v1.1
+  protocol payload-schema-id payload-schema-version
+  command-id job-revision-id attempt-id
+  source-contract-id source-contract-version
+  source-profile-revision-id deployment-revision-id
+  adapter-id adapter-version adapter-manifest-hash runtime-environment-hash
+  partition cursor page newest-source-time oldest-source-time
+  object-count byte-count request-count artifact-ids evidence-ids
+  completed-partitions outstanding-partitions
+  prior-checkpoint-id checkpoint-hash policy-snapshot-id configuration-hash)
+#+end_src
+
+Checkpoints cannot outrun committed artifacts/evidence. Resume uses a new attempt.
+
+* REVIEW Routing and Ownership
+
+| Work | Key |
+|------|-----|
+| subject writes | logical subject ID for serialization |
+| subfamily decisions | unit + route + subfamily + source/applicability contract |
+| assessments | unit + route + source/applicability contract |
+| gates | gate kind + scope + source/applicability contract + policy |
+| reviews | subject kind + subject revision ID |
+| cursor | profile revision + partition |
+| schedules | reviewed profile + source contract + policy |
+| materialization | scope + reviewed gate revision |
+
+No authority writes another authority’s canonical state.
+
+* REVIEW Scheduler, Lease, Artifact, and Checkpoint Rules
+
+Schedules pin reviewed profile/deployment revisions, source contract, policy, manifest/runtime, checkpoint, due reason, and freshness. Changed heads/contracts force replan.
+
+Rate/Lease issues ID, key hash, generation, fence, issue/expiry/close. Every request carries the attempt fence.
+
+Commit order: validate job; issue lease; create attempt; request; reserve/stream/hash artifact; commit artifact/retrieval; commit evidence/proposals; checkpoint; close lease; terminal result.
+
+Success is invalid with truncation, uncommitted artifacts, unreconciled counts, or expired fence.
+
+* REVIEW Migration
+
+- v1 logical-ID commands cannot create current decisions
+- explicit migration selects exact subject and contract versions
+- old source versions become immutable revisions
+- observations do not become assessments/gates
+- old gaps and review fields require new revisions/reviews
+- no completion without a reviewed v1.1 gate
+- mixed v1/v1.1 is migration/read-only after cutover
+
+* REVIEW Fixtures
+
+- envelope/payload/source-contract version mismatch rejection
+- source-contract migration causing new job/assessment/gate revisions
+- review CAS conflict and self-review rejection
+- canonical basis/hash equivalence and mismatch fixtures
+- gate expiry without waiting for write
+- changed route/review after old gate without replay mutation
+- observations without reviewed gate cannot complete
+- retry/new fence and stale-fence rejection
+- artifact/checkpoint ordering
+- explicit v1 subject/review/gate migration
+
+* REVIEW Acceptance Criteria
+
+1. Envelope, payload, source-contract, and applicability versions are distinct and pinned.
+2. Every decision pins exact revisions.
+3. Reviews are linear/CAS-protected.
+4. Subject/review/assessment/gate owners are disjoint.
+5. Gate hash and validity are deterministic.
+6. Current completion expires immediately when invalid.
+7. Ledger cannot synthesize completion.
+8. Jobs/attempts are separate and fenced.
+9. Checkpoints cannot outrun evidence.
+10. Migration cannot create unreviewed completion.

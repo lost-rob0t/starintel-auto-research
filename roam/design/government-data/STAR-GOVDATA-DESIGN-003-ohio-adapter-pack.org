@@ -1,0 +1,202 @@
+:PROPERTIES:
+:ID:       starintel-government-data-ohio-adapter-pack-003
+:END:
+#+title: STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack
+#+description: Define reusable and Ohio-specific adapters with self-describing jobs, lease-fenced attempts, replayable artifacts, and proposal-only outputs.
+#+status: REVIEW
+#+filetags: :starintel:design:government-data:ohio:adapters:actors:common-lisp:
+#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED
+
+| Version | Date       | Description of change                                                | Did nsaspy approve it |
+|---------+------------+----------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-07-28 | Define Ohio adapters and bounds                                     | Pending               |
+| 0.2.0   | 2026-07-28 | Pin jobs to contracts, manifests, evidence, and policies            | Pending               |
+| 0.2.1   | 2026-07-28 | Separate durable jobs from lease-bound attempts                     | Pending               |
+| 0.3.0   | 2026-07-28 | Pin explicit source-contract identity in manifests, jobs, and results | Pending             |
+
+* Related Nodes
+
+- [[file:STAR-GOVDATA-DESIGN-001-ohio-coverage-program.org][STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program]]
+- [[file:STAR-GOVDATA-DESIGN-002-ohio-source-profile-contract.org][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]]
+- [[file:../auto-research/STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+- [[file:../auto-research/STAR-RESEARCH-PIPELINE-004-government-data-revision-protocol-amendment.org][STAR-RESEARCH-PIPELINE-004 Government Data Revision Protocol Amendment]]
+
+* REVIEW Objective
+
+Define the smallest adapter set that profiles Ohio without one scraper per jurisdiction. Ohio-specific adapters are allowed only for stable Ohio semantics; generic platform/format adapters remain preferred.
+
+* REVIEW Boundary
+
+Adapters are short-lived stateless/checkpoint-bounded workers. They receive one immutable lease-bound attempt and return retrieval events, evidence, artifacts, checkpoints, typed failures, and proposals.
+
+They may not write canonical identities, deployments, profiles, decisions, gaps, assessments, reviews, or gates; choose contracts; self-review; exceed bounds/leases; create credentials; accept terms; bypass controls; or retain unauthorized protected data.
+
+* REVIEW Capability Manifest
+
+#+begin_src lisp
+(defstruct government-data-adapter-manifest
+  adapter-id adapter-version manifest-hash runtime-environment-hash
+  adapter-protocol-version
+  input-schema-version result-schema-version event-schema-version
+  checkpoint-schema-version artifact-bundle-version
+  supported-source-contract-ids
+  source-contract-min-version source-contract-max-version
+  applicability-contract-min-version applicability-contract-max-version
+  platform-families source-families operations input-formats output-formats
+  network-capabilities browser-capabilities authentication-capabilities
+  pagination-capabilities cursor-capabilities
+  deterministic-p default-bounds retry-policy fixture-ids)
+#+end_src
+
+Registry rejects mutable versions, unsupported source contracts, schema-range gaps, undeclared methods, missing bounds, unsupported result protocols, or missing deterministic fixtures.
+
+* REVIEW Durable Job
+
+#+begin_src lisp
+(defstruct adapter-job-revision
+  job-id job-revision-id prior-job-revision-id
+  run-id command-id parent-command-id
+  source-contract-id source-contract-version
+  unit-ref component-ref route subfamily data-family
+  source-profile-revision-id candidate-proposal-id
+  deployment-revision-id search-plan-revision-id
+  applicability-contract-id applicability-contract-version
+  policy-snapshot-id
+  adapter-id adapter-version adapter-manifest-hash runtime-environment-hash
+  operation locator-ids allowed-hosts allowed-redirect-hosts
+  cursor-checkpoint-id
+  request-limit byte-limit object-limit depth-limit redirect-limit wall-time-limit
+  credential-capability-id cancellation-id deadline
+  artifact-policy idempotency-key input-hash)
+#+end_src
+
+The runtime source contract is =star.govdata.source-profile@1.0.0= for this design. Discovery binds a proposal or search-plan revision. Profile-backed work binds an exact profile revision. Contract/policy/adapter/bounds/cursor changes create a new job revision.
+
+A job contains no future lease.
+
+* REVIEW Lease-Bound Attempt
+
+#+begin_src lisp
+(defstruct adapter-attempt
+  attempt-id attempt-number job-revision-id prior-attempt-id
+  rate-lease-id rate-lease-generation rate-lease-fence rate-lease-key-hash
+  started-at attempt-deadline worker-generation attempt-input-hash)
+#+end_src
+
+Dispatcher validates job and source-contract compatibility, acquires a lease, then creates the attempt. Retry creates a new attempt/fence; it does not mutate the job. Every request validates the current fence.
+
+* REVIEW Result
+
+#+begin_src lisp
+(defstruct adapter-result
+  source-contract-id source-contract-version
+  job-id job-revision-id attempt-id
+  adapter-id adapter-version adapter-manifest-hash runtime-environment-hash
+  status input-hash output-hash
+  retrieval-event-ids evidence-ids raw-artifact-ids
+  profile-proposal-ids deployment-proposal-ids gap-proposal-ids
+  checkpoint-ids next-checkpoint-id
+  truncation request-count byte-count object-count redirect-count
+  started-at finished-at warnings failure)
+#+end_src
+
+Statuses: success, partial, no-change, blocked, unsupported, OCR-required, manual-review-required, failed, cancelled.
+
+Success is invalid with source-contract mismatch, truncation, missing artifacts, unreconciled counts, or expired lease. Partial requires explicit truncation and checkpoint or reviewed non-resumable explanation. Results return proposals, never canonical IDs.
+
+* REVIEW Determinism and Commit Order
+
+For identical job revision, retained inputs, source contract, manifest/runtime, and policy, normalized evidence/proposals are deterministic.
+
+1. validate protocol/payload/source/applicability contracts and immutable job
+2. acquire lease/fence
+3. create attempt
+4. issue bounded request after fence check
+5. reserve/stream artifact
+6. verify bytes/hash
+7. commit retrieval/artifact
+8. emit evidence/proposals
+9. commit checkpoint
+10. close lease
+11. terminal result
+
+Checkpoint cannot outrun committed artifacts/evidence. Crash after artifact commit resumes from artifact.
+
+* REVIEW Generic Adapters
+
+| Adapter | Platforms/formats | Ohio use |
+|---------+-------------------+----------|
+| =http-metadata= | HTTP, redirects, headers, DNS/TLS | authority/locator evidence |
+| =html-structured= | HTML, tables, pagination, JSON-LD | directories/reports |
+| =sitemap-feed= | sitemap, RSS, Atom, iCalendar | meetings/alerts/changes |
+| =static-directory= | directory indexes/static paths | OGRIP/archives |
+| =csv-xlsx= | CSV/TSV/XLS/XLSX | elections/finance |
+| =pdf-text= | text PDF/authenticated documents | law/reports/agendas/audits/contracts |
+| =arcgis-rest= | ArcGIS REST/items | GIS |
+| =ogc-service= | WMS/WFS/WMTS | GIS |
+| =aspnet-form= | bounded public forms | dockets/legacy search |
+| =embedded-json= | public configuration/endpoints | dashboards |
+| =browser-public= | allowlisted JavaScript systems | last structured option |
+| =archive-resolver= | redirects/archives/retired links | migration/history |
+
+Image-only PDF returns OCR-required; it does not silently OCR.
+
+* REVIEW Browser Boundary
+
+Browser jobs pin engine/version, runtime, viewport/locale when material, locator, navigation, public form parameters, origins/download types, and network-capture policy. Results produce the full capture bundle required by =DESIGN-002=. Screenshot-only evidence is invalid.
+
+* REVIEW Ohio-Specific Adapters
+
+- =ohio-laws=: current/prior/future-effective laws and authenticated documents
+- =ohio-legislature=: bills, sponsors, committees, actions, votes, calendars, journals, acts
+- =ohio-buys=: public solicitations/awards/contracts/attachments; login/write separated
+- =ohio-checkbook=: exports, participation scope, periods, reconciliation; never finance completeness
+- =ohio-sos=: election/result states, campaign finance, boards, public products; voter records need privacy review
+- =ohio-courts=: Supreme Court systems/statistics/directories; local courts remain separate profiles
+
+* REVIEW OGRIP Composition
+
+#+begin_example
+http-metadata
+  -> static-directory
+  -> arcgis-rest or ogc-service
+  -> bounded bulk-file metadata
+  -> archive-resolver
+#+end_example
+
+Oversized files produce metadata plus file-too-large, never silent partial download.
+
+* REVIEW Default Bounds
+
+| Worker | Requests | Bytes | Objects | Wall time | Concurrency |
+|--------+----------+-------+---------+-----------+-------------|
+| metadata | 10 | 5 MB | 100 | 120 s | 2/host |
+| HTML | 50 | 25 MB | 2,000 | 300 s | 2/host |
+| API | 100 | 50 MB | 10,000 | 600 s | lease-controlled |
+| document | 25 | 100 MB | 250 | 600 s | 2/host |
+| static directory | 100 | 25 MB metadata | 25,000 | 600 s | 2/host |
+| browser | 20 navigations | 50 MB | 1,000 | 600 s | 1/host |
+
+Raising bounds creates new policy/job revisions.
+
+* REVIEW Rate and Fingerprint Rules
+
+Lease dimensions include host, vendor, deployment/tenant, key, profile, adapter, government, and browser pool. Host aliases share deployment limits. Attempts carry lease ID/generation/fence; jobs do not.
+
+Fingerprints are probabilistic evidence. They never prove authority, scope, or completeness.
+
+* REVIEW Franklin Order
+
+For each subfamily: load pinned source/applicability contracts and search plan; verify authority; inventory structured paths; probe platform signatures/APIs/vendors; use browser only when required; return proposals only. One unsupported/browser-required result cannot justify a negative decision.
+
+* REVIEW Typed Failures and Fixtures
+
+Failures include unsupported platform/source-contract, authority/delegation missing, auth/CAPTCHA/rate/stale lease, redirect out of scope, unstable pagination, file too large, content mismatch, partial period, schema changed, retired, browser/OCR/privacy review required, artifact/checkpoint failure, cancelled.
+
+Fixtures cover source-contract mismatch/migration, exact manifest/runtime, all generic adapters, effective law, read/write separation, Checkbook non-completeness, oversized files, public forms, partial periods, ArcGIS viewer/REST, CAPTCHA, OCR, browser replay, redirect escape, stale fence, retry/new attempt, artifact crash, truncation, and idempotent duplicate jobs.
+
+* REVIEW Implementation and Acceptance
+
+After =PIPELINE-003/004= approval: validators/fake adapter; artifact/retrieval/checkpoint path; generic adapters; Ohio adapters as needed; browser bridge last.
+
+Acceptance requires generic preference; exact protocol/source/applicability/policy/manifest/runtime bindings; jobs without future leases; fenced attempts; proposal-only results; no hidden truncation/artifact loss; replayable browser/OCR boundaries; and no route completion from failures.

@@ -24,6 +24,8 @@ Status: approved by nsaspy on 2026-07-19. Implementation has not started and the
 - [[file:../../design/government-data/STAR-GOVDATA-DESIGN-001-ohio-coverage-program.org][STAR-GOVDATA-DESIGN-001 Ohio Government Data Coverage Program]]
 - [[file:../../design/government-data/STAR-GOVDATA-DESIGN-002-ohio-source-profile-contract.org][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]]
 - [[file:../../design/government-data/STAR-GOVDATA-DESIGN-003-ohio-adapter-pack.org][STAR-GOVDATA-DESIGN-003 Ohio Adapter Pack]]
+- [[file:../../design/government-data/STAR-GOVDATA-DESIGN-004-franklin-county-starlang-actor-system.org][STAR-GOVDATA-DESIGN-004 Franklin County StarLang Actor System]]
+- [[file:../../design/star-lang/STAR-LANG-002-durable-actor-runtime.org][STAR-LANG-002 Durable Actor Runtime]]
 
 =STAR-RESEARCH-PIPELINE-002= keeps ADARD as the control plane and places deep-research engines and browser actors behind one bounded worker-adapter contract.
 
@@ -33,6 +35,10 @@ Status: approved by nsaspy on 2026-07-19. Implementation has not started and the
 
 The Ohio design pack applies the amended architecture to the first state. It defines the sixteen-route contract, immutable subject and review records, Franklin County, fingerprint-driven validation, and all-88-county gates.
 
+=STAR-GOVDATA-DESIGN-004= specifies the complete Franklin actor topology, message flow, supervision, data-family normalizers, evidence custody, assessment authorities, replay gates, and deterministic fixtures.
+
+=STAR-LANG-002= defines the reusable Common Lisp-hosted StarLang runtime required to execute that system without embedding Franklin-specific behavior in the language runtime.
+
 All designs remain under review. None enters the implementation slot until approved and the slot is available.
 
 * Research Basis
@@ -41,6 +47,7 @@ All designs remain under review. None enters the implementation slot until appro
 - [[file:../../research/auto-research/STAR-RESEARCH-001-logic-engine-selection-for-adard.org][STAR-RESEARCH-001 Logic Engine Selection for ADARD]]
 - [[file:../../research/auto-research/STAR-RESEARCH-002-deep-research-execution-adapter-analysis.org][STAR-RESEARCH-002 Deep Research Execution Adapter Analysis]]
 - [[file:../../research/auto-research/STAR-RESEARCH-003-us-government-data-acquisition-landscape.org][STAR-RESEARCH-003 U.S. Government Data Acquisition Landscape]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-019-common-lisp-library-gap-analysis.org][STAR-LANG-RESEARCH-019 Common Lisp Library Gap Analysis]]
 
 * Government Data Acquisition Track
 
@@ -52,9 +59,11 @@ Government units remain durable records and job keys rather than permanent actor
 
 Ohio is the first state design. Franklin County is the first complete county pilot.
 
+The later violent-offender website is not part of the acquisition design. Franklin ingestion remains source-neutral and preserves source status, allegations, charges, dispositions, time, provenance, uncertainty, and review state without assigning offender labels.
+
 * REVIEW Protocol Alignment Resolution
 
-The Ohio review exposed protocol-v1 gaps in =PIPELINE-003=. Those gaps are now formalized in =PIPELINE-004= rather than left as implicit Ohio exceptions.
+The Ohio review exposed protocol-v1 gaps in =PIPELINE-003=. Those gaps are formalized in =PIPELINE-004= rather than left as implicit Ohio exceptions.
 
 The amendment requires:
 
@@ -66,15 +75,56 @@ The amendment requires:
 - revision-aware events, results, checkpoints, routing, and scheduling
 - durable job and lease-bound attempt separation with fencing tokens
 
-The amendment must be approved and reconciled with =PIPELINE-003= before Ohio implementation.
+The amendment must be approved and reconciled with =PIPELINE-003= before Ohio or Franklin implementation.
+
+* Franklin County Actor Track
+
+The Franklin domain is authored in StarLang and compiled to Common Lisp.
+
+Actor groups:
+
+1. control and policy
+2. jurisdiction and component identity
+3. discovery and platform fingerprinting
+4. acquisition dispatch, leases, generic adapters, Ohio adapters, and process workers
+5. raw artifacts, retrieval events, hashes, metadata, and provenance
+6. eight data-family normalization pools
+7. applicability, route assessment, independent review, coverage, and gaps
+8. scheduling, migration detection, reconciliation, quarantine, health, and metrics
+
+The system is a supervised deployment, not one permanent actor per office, source, route, record, or person.
+
+* StarLang Runtime Track
+
+Common Lisp remains the sole StarLang implementation language.
+
+The runtime design adds reusable ASDF systems for:
+
+- actor protocol
+- Sento compatibility
+- bounded mailboxes
+- supervision
+- durable journals
+- leases and fencing
+- capabilities
+- artifact custody
+- adapter SDK
+- HTTP and process ports
+- canonical JSON
+- XLSX extraction
+- compiler and runtime assembly
+
+The recommended repository boundary is a new dedicated =lost-rob0t/star-lang= repository after its name, license, maintainers, dependency locking, CI, and release policy are approved. =starintel-auto-research= remains the design/evidence repository; =starintel-server= later consumes released runtime systems.
 
 * Language and Execution Research
 
 - [[file:../star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Language Research]]
+- [[file:../star-lang/STAR-LANG-INDEX-001-implementation.org][STAR-LANG-INDEX-001 Common Lisp Implementation]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-000-language-design-foundations.org][STAR-LANG-RESEARCH-000 Star-Lang Language Design Foundations]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-001-common-lisp-comparative-baseline.org][STAR-LANG-RESEARCH-001 Common Lisp Comparative Baseline]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-019-common-lisp-library-gap-analysis.org][STAR-LANG-RESEARCH-019 Common Lisp Library Gap Analysis]]
 
-Neither language node is an approved implementation design.
+The Common Lisp language decision is approved. The durable actor runtime design and Franklin deployment remain under review.
 
 * Approved Runtime Decisions Used by the Pipeline
 
@@ -96,22 +146,26 @@ The first adaptive-research implementation remains repository-local and does not
 8. Review =PIPELINE-002= using measurable ADARD records.
 9. If approved, implement protocol, registry, fake adapter, and supervised process runner.
 10. Add real adapters only after conformance and replay tests.
-11. Complete the Star-Lang comparison before a language implementation proposal.
 
-* Government Data Track Dependency Order
+* Government Data and Franklin Dependency Order
 
 1. Review and accept =STAR-RESEARCH-003=.
 2. Review =PIPELINE-003= together with the normative =PIPELINE-004= amendment.
 3. Review the Ohio designs against the combined parent protocol.
-4. Implement protocol schemas, authority boundaries, manifest validation, and deterministic fake actors only after approval and slot availability.
-5. Implement immutable subject revisions, independent review decisions, atomic coverage gates, artifacts, provenance, and ledgers.
-6. Implement the Census/CISA identity spine.
-7. Implement bounded generic adapters.
-8. Execute Ohio Waves 0–1 against deterministic fixtures before bounded live probes.
-9. Execute Franklin County against the sixteen-route contract and atomic gate.
-10. Run the fingerprint-driven diverse-county pilot.
-11. Add Ohio-specific/browser adapters after replay, one-writer, lease-fence, cancellation, and evidence tests.
-12. Measure coverage, unresolved routes, review cost, replay, truncation, and gate expiry before statewide/national scheduling.
+4. Review =STAR-LANG-002= and the Franklin actor system.
+5. Approve the new runtime repository boundary and contribution policy.
+6. Implement actor protocol schemas, authority boundaries, normalized IR, manifest validation, and deterministic fake actors.
+7. Implement bounded mailboxes, supervision, journal/replay, lease fencing, cancellation, capabilities, artifacts, and provenance.
+8. Implement immutable subject revisions, independent review decisions, atomic coverage gates, and ledgers.
+9. Implement the Census/CISA identity spine.
+10. Implement bounded generic adapters and process ports.
+11. Execute Ohio Waves 0–1 against deterministic fixtures before bounded live probes.
+12. Execute the Franklin fake deployment and require state-hash replay equivalence.
+13. Research and review Franklin source profiles under the sixteen-route contract.
+14. Execute bounded Franklin live acquisition only after the prior gates pass.
+15. Run the fingerprint-driven diverse-county pilot.
+16. Add Ohio-specific/browser adapters after replay, one-writer, lease-fence, cancellation, and evidence tests.
+17. Measure coverage, unresolved routes, review cost, replay, truncation, and gate expiry before statewide/national scheduling.
 
 No live wave begins until the exact authorities and fixtures required by its gate exist.
 
@@ -123,7 +177,6 @@ No live wave begins until the exact authorities and fixtures required by its gat
 - dynamic model routing and cost optimization
 - distributed branch workers
 - unrestricted browser crawling
-- Star-Lang implementation
 - operator dashboard
 
 * Navigation Rule

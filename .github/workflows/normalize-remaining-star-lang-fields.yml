@@ -1,0 +1,98 @@
+name: Normalize remaining Star-Lang field tokens
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/normalize-remaining-star-lang-fields.yml
+
+permissions:
+  contents: write
+
+jobs:
+  normalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Replace remaining field tokens
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("roam/research/star-lang")
+          docs = sorted(root.glob("STAR-LANG-RESEARCH-*.org"))
+
+          def camel(name: str) -> str:
+              parts = re.split(r"[-_]", name)
+              return parts[0] + "".join(part[:1].upper() + part[1:] for part in parts[1:] if part)
+
+          field_names = {
+              "star-version", "spec-version", "schema-version", "library-version",
+              "message-type", "message-id", "parent-message-id", "correlation-id",
+              "causation-id", "idempotency-key", "deduplication-key", "reply-to",
+              "trace-id", "span-id", "parent-span-id", "request-id", "response-id",
+              "command-id", "operation-id", "delivery-id", "receipt-id", "settlement-id",
+              "producer-id", "consumer-id", "transport-id", "actor-id", "actor-name",
+              "source-actor", "destination-actor", "dataset-id", "document-id", "case-id",
+              "entity-id", "domain-id", "server-id", "node-id", "host-id", "tool-id",
+              "tool-name", "call-id", "session-id", "task-id", "job-id", "route-key",
+              "partition-key", "sequence-number", "attempt-count", "retry-count",
+              "created-at", "sent-at", "received-at", "updated-at", "added-at",
+              "date-added", "date-updated", "expires-at", "deadline-at", "not-before",
+              "valid-from", "valid-to", "effective-date", "content-type", "error-code",
+              "error-message", "error-kind", "retry-after", "retry-after-ms",
+              "nack-reason", "result-type", "payload-digest", "contract-digest",
+              "manifest-digest", "source-ref", "source-url", "raw-source",
+              "source-document", "output-document", "lease-id", "lease-until",
+              "mailbox-name", "redelivery-count", "visible-at", "input-message-id",
+              "input-kind", "dispatcher-result", "next-outcome-index",
+              "target-message-id", "target-correlation-id"
+          }
+
+          forms = {}
+          for kebab in field_names:
+              forms[kebab] = camel(kebab)
+              forms[kebab.replace("-", "_")] = camel(kebab)
+
+          changed = []
+          for path in docs:
+              original = path.read_text(encoding="utf-8")
+              text = original
+              for old in sorted(forms, key=len, reverse=True):
+                  pattern = re.compile(r"(?<![A-Za-z0-9_-])" + re.escape(old) + r"(?![A-Za-z0-9_-])")
+                  text = pattern.sub(forms[old], text)
+              if text != original:
+                  path.write_text(text, encoding="utf-8")
+                  changed.append(path)
+
+          failures = []
+          for path in docs:
+              text = path.read_text(encoding="utf-8")
+              for old in forms:
+                  pattern = re.compile(r"(?<![A-Za-z0-9_-])" + re.escape(old) + r"(?![A-Za-z0-9_-])")
+                  match = pattern.search(text)
+                  if match:
+                      line = text.count("\n", 0, match.start()) + 1
+                      failures.append(f"{path}:{line}: {old}")
+
+          if failures:
+              raise SystemExit("\n".join(failures))
+
+          print("Normalized:")
+          for path in changed:
+              print(path)
+          PY
+
+          rm .github/workflows/normalize-remaining-star-lang-fields.yml
+          git config user.name "starintel-research-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add roam/research/star-lang .github/workflows/normalize-remaining-star-lang-fields.yml
+          git commit -m "docs(star-lang): normalize remaining camelCase fields"
+          git push origin HEAD:main

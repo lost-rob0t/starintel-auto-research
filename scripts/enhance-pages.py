@@ -21,12 +21,31 @@ PLANTUML_BLOCK_RE = re.compile(
 TAG_RE = re.compile(r"<[^>]+>")
 XML_DECLARATION_RE = re.compile(r"\A\s*<\?xml[^>]*>\s*", re.IGNORECASE)
 DOCTYPE_RE = re.compile(r"\A\s*<!DOCTYPE.*?>\s*", re.IGNORECASE | re.DOTALL)
+IMPLICIT_COMPONENT_TARGET_RE = re.compile(
+    r'(?m)^(?P<prefix>\s*[A-Za-z_][A-Za-z0-9_]*\s+-->\s+)'
+    r'"(?P<label>[^"\n]+)"\s*$'
+)
 
 
 def decode_source(fragment: str) -> str:
     """Convert Org's highlighted HTML source back into PlantUML text."""
     without_tags = TAG_RE.sub("", fragment)
     return html.unescape(without_tags).strip() + "\n"
+
+
+def normalize_plantuml(source: str) -> str:
+    """Normalize shorthand that newer PlantUML versions reject.
+
+    Component diagrams historically accepted relations from an alias to an
+    undeclared quoted label, such as ``Control --> "Ingress"``. Current
+    PlantUML treats that form as a syntax error. Bracket component notation is
+    equivalent and remains portable: ``Control --> [Ingress]``.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        return f"{match.group('prefix')}[{match.group('label')}]"
+
+    return IMPLICIT_COMPONENT_TARGET_RE.sub(replace, source)
 
 
 def render_plantuml(source: str, executable: str) -> str:
@@ -92,12 +111,13 @@ def enhance_file(path: Path, executable: str) -> int:
     def replace(match: re.Match[str]) -> str:
         nonlocal rendered
         source = decode_source(match.group("source"))
+        render_source = normalize_plantuml(source)
         try:
-            svg = render_plantuml(source, executable)
+            svg = render_plantuml(render_source, executable)
         except RuntimeError as error:
             raise RuntimeError(f"{path}: PlantUML render failed: {error}") from error
         rendered += 1
-        return diagram_html(source, svg)
+        return diagram_html(render_source, svg)
 
     document = PLANTUML_BLOCK_RE.sub(replace, document)
     document = inject_assets(document)

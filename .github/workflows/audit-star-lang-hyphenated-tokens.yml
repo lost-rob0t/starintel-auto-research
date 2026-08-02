@@ -1,0 +1,69 @@
+name: Audit Star-Lang hyphenated research tokens
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/audit-star-lang-hyphenated-tokens.yml
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build token audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          from collections import defaultdict
+
+          root = Path("roam/research/star-lang")
+          docs = sorted(root.glob("STAR-LANG-RESEARCH-*.org"))
+
+          patterns = {
+              "field-declaration": re.compile(r"^\s*\(([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?=\s).*:(?:required|optional)"),
+              "plist-keyword": re.compile(r":([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b"),
+              "inline-code": re.compile(r"=([a-z][a-z0-9]*(?:-[a-z0-9]+)+)="),
+              "quoted-token": re.compile(r'"([a-z][a-z0-9]*(?:-[a-z0-9]+)+)"'),
+          }
+
+          found = {kind: defaultdict(list) for kind in patterns}
+          for path in docs:
+              for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                  for kind, pattern in patterns.items():
+                      for match in pattern.finditer(line):
+                          token = match.group(1)
+                          location = f"{path.name}:{line_no}: {line.strip()}"
+                          if location not in found[kind][token]:
+                              found[kind][token].append(location)
+
+          report = []
+          report.append("Star-Lang hyphenated token audit\n")
+          report.append("Generated from roam/research/star-lang/STAR-LANG-RESEARCH-*.org\n")
+          for kind in ("field-declaration", "plist-keyword", "inline-code", "quoted-token"):
+              report.append(f"\n## {kind}\n")
+              for token in sorted(found[kind]):
+                  report.append(f"\n### {token}\n")
+                  for location in found[kind][token]:
+                      report.append(f"- {location}\n")
+
+          out = Path("star-lang-hyphenated-token-audit.txt")
+          out.write_text("".join(report), encoding="utf-8")
+          PY
+
+          rm .github/workflows/audit-star-lang-hyphenated-tokens.yml
+          git config user.name "starintel-research-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add star-lang-hyphenated-token-audit.txt .github/workflows/audit-star-lang-hyphenated-tokens.yml
+          git commit -m "chore: record Star-Lang hyphenated token audit"
+          git push origin HEAD:main

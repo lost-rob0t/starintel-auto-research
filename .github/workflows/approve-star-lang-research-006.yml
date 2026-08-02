@@ -1,0 +1,52 @@
+name: Approve STAR-LANG-RESEARCH-006
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/approve-star-lang-research-006.yml
+
+permissions:
+  contents: write
+
+jobs:
+  approve:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Mark STAR-LANG-RESEARCH-006 approved
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("roam/research/star-lang/STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = {
+              "#+status: REVIEW": "#+status: APPROVED",
+              "#+filetags: :starintel:research:star-lang:specifications:schemas:imports:actors:domain-servers:graphs:common-lisp:": "#+filetags: :starintel:research:star-lang:specifications:schemas:imports:actors:domain-servers:graphs:common-lisp:approved:",
+              "#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED": "#+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE REJECTED\n#+last_modified: [2026-08-02 Sun]",
+              "|---------+------------+---------------------------------------------------------------------------------------+-----------------------|\n| 0.1.0   | 2026-07-21 | Define locked spec libraries, relation semantics, domain servers, and a CL prototype | No                    |": "|---------+------------+---------------------------------------------------------------------------------------+-----------------------|\n| 0.1.1   | 2026-08-02 | Record nsaspy approval of the specification and domain-server design                 | Yes                   |\n| 0.1.0   | 2026-07-21 | Define locked spec libraries, relation semantics, domain servers, and a CL prototype | Superseded            |",
+          }
+
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f"Expected exactly one match for: {old!r}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          rm .github/workflows/approve-star-lang-research-006.yml
+
+          git config user.name "starintel-approval-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add roam/research/star-lang/STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org .github/workflows/approve-star-lang-research-006.yml
+          git commit -m "docs(star-lang): approve research 006"
+          git push origin HEAD:main

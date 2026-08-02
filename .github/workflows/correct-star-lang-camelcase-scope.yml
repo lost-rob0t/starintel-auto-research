@@ -1,0 +1,232 @@
+name: Correct Star-Lang camelCase migration scope
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/correct-star-lang-camelcase-scope.yml
+
+permissions:
+  contents: write
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Revert broad migration and apply field-only rule
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git revert --no-commit b965fce1c9c70e1098539ca8e003f55f4e48f756
+          rm -f .github/workflows/migrate-star-lang-fields-to-camelcase.yml
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("roam/research/star-lang")
+          docs = sorted(root.glob("STAR-LANG-RESEARCH-*.org"))
+
+          def camel(name: str) -> str:
+              parts = name.split("-")
+              return parts[0] + "".join(part[:1].upper() + part[1:] for part in parts[1:])
+
+          # Field identifiers carried by Star-Lang envelopes. These are converted
+          # only inside data/envelope source blocks, never in DSL/config blocks or prose.
+          envelope_fields = {
+              "star-version", "spec-version", "schema-version", "library-version",
+              "message-type", "message-id", "parent-message-id", "correlation-id",
+              "causation-id", "idempotency-key", "deduplication-key", "reply-to",
+              "trace-id", "span-id", "parent-span-id", "request-id", "response-id",
+              "command-id", "operation-id", "delivery-id", "receipt-id", "settlement-id",
+              "producer-id", "consumer-id", "transport-id", "actor-id", "actor-name",
+              "source-actor", "destination-actor", "dataset-id", "document-id", "case-id",
+              "entity-id", "candidate-id", "committee-id", "filing-id", "report-id",
+              "transaction-id", "amendment-id", "previous-id", "original-id", "domain-id",
+              "server-id", "node-id", "host-id", "tool-id", "tool-name", "call-id",
+              "session-id", "task-id", "job-id", "route-key", "partition-key",
+              "sequence-number", "attempt-count", "retry-count", "created-at", "sent-at",
+              "received-at", "updated-at", "added-at", "date-added", "date-updated",
+              "expires-at", "deadline-at", "not-before", "valid-from", "valid-to",
+              "effective-date", "content-type", "error-code", "error-message", "error-kind",
+              "retry-after", "nack-reason", "result-type", "payload-digest", "contract-digest",
+              "manifest-digest", "source-ref", "source-url", "raw-source", "source-document",
+              "output-document", "lease-id", "lease-until", "mailbox-name"
+          }
+
+          # A source block is considered envelope/data syntax only when it contains
+          # a strong envelope marker. This prevents changing DSL options such as
+          # :max-attempts, restart names, query-plan keys, declaration names, or handlers.
+          envelope_markers = {
+              ":star-command", ":star-version", ":message-type", ":message-id",
+              ":correlation-id", ":causation-id", ":idempotency-key", ":reply-to",
+              '"message-id"', '"message-type"', '"correlation-id"', '"reply-to"'
+          }
+
+          field_decl = re.compile(r"^(\s*)\(([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?=\s)")
+          # Same-line serialized keys only. [ \t]* deliberately cannot cross a newline.
+          quoted_key = re.compile(r'"([a-z][a-z0-9]*(?:-[a-z0-9]+)+)"(?=[ \t]*(?:\.|:))')
+          block_re = re.compile(r"(#\+begin_src[^\n]*\n)(.*?)(#\+end_src)", re.I | re.S)
+
+          changed = []
+          for path in docs:
+              original = path.read_text(encoding="utf-8")
+              text = original
+
+              # User-defined document/message field declarations.
+              out = []
+              for line in text.splitlines(keepends=True):
+                  if ":required" in line or ":optional" in line:
+                      match = field_decl.match(line)
+                      if match:
+                          old = match.group(2)
+                          line = line[:match.start(2)] + camel(old) + line[match.end(2):]
+                  out.append(line)
+              text = "".join(out)
+
+              # JSON/alist field keys, restricted to the same physical line.
+              text = quoted_key.sub(lambda m: '"' + camel(m.group(1)) + '"', text)
+
+              # Envelope plist keys, restricted to identified data blocks.
+              def rewrite_block(match: re.Match) -> str:
+                  head, body, tail = match.groups()
+                  if not any(marker in body for marker in envelope_markers):
+                      return match.group(0)
+                  for old in sorted(envelope_fields, key=len, reverse=True):
+                      body = re.sub(r":" + re.escape(old) + r"\b", ":" + camel(old), body)
+                  return head + body + tail
+
+              text = block_re.sub(rewrite_block, text)
+
+              # Research 009 previously mandated exact kebab-case keys.
+              text = text.replace(
+                  "Hyphenated Star-Lang field names remain exact dictionary keys instead of being silently renamed.",
+                  "Star-Lang field names use lower camelCase and remain exact dictionary keys; generators do not silently rename them."
+              )
+              text = text.replace("exact source field strings", "exact lower-camelCase source field strings")
+              text = text.replace("quoted source field names", "lower-camelCase source field names")
+              text = text.replace("Python preserves exact source keys", "Python preserves exact lower-camelCase source keys")
+              text = text.replace("=message_type=", "=messageType=")
+
+              if path.name == "STAR-LANG-RESEARCH-008-core-surface-and-wire-protocol.org":
+                  marker = "* Concrete Surface\n"
+                  naming = (
+                      "* Field Naming\n\n"
+                      "Star-Lang document fields, message-payload fields, and wire-envelope keys use lower camelCase. "
+                      "Examples include =candidateId=, =messageId=, =correlationId=, and =replyTo=. "
+                      "The compiler preserves these names exactly through normalized IR, manifests, serialization, and generated bindings.\n\n"
+                      "DSL forms and named declarations are not fields. Forms and identifiers such as =spec-library=, "
+                      "=ingest-page=, scalar/type names, predicates, actors, compiler options, and restart names may remain kebab-case. "
+                      "Kebab-case field declarations are invalid and must produce a structured compiler diagnostic.\n\n"
+                  )
+                  if naming not in text:
+                      if marker not in text:
+                          raise SystemExit("Could not locate Concrete Surface marker in research 008")
+                      text = text.replace(marker, naming + marker, 1)
+
+                  old_table = (
+                      "| Version | Date       | Description of change                                      | Did nsaspy approve it |\n"
+                      "|---------+------------+------------------------------------------------------------+-----------------------|\n"
+                      "| 0.1.1   | 2026-08-02 | Record nsaspy approval of core surface and wire protocol   | Yes                   |\n"
+                      "| 0.1.0   | 2026-07-22 | Define core surface and initial language-neutral protocol  | Superseded            |"
+                  )
+                  new_table = (
+                      "| Version | Date       | Description of change                                                | Did nsaspy approve it |\n"
+                      "|---------+------------+----------------------------------------------------------------------+-----------------------|\n"
+                      "| 0.1.2   | 2026-08-02 | Adopt lower camelCase fields across surface and wire contracts       | Yes                   |\n"
+                      "| 0.1.1   | 2026-08-02 | Record nsaspy approval of core surface and wire protocol             | Superseded            |\n"
+                      "| 0.1.0   | 2026-07-22 | Define core surface and initial language-neutral protocol            | Superseded            |"
+                  )
+                  if old_table not in text:
+                      raise SystemExit("Unexpected research 008 version table after revert")
+                  text = text.replace(old_table, new_table, 1)
+
+              if path.name == "STAR-LANG-RESEARCH-009-canonical-json-and-generated-bindings.org":
+                  marker = "* Canonical JSON\n"
+                  naming = (
+                      "* Field Naming\n\n"
+                      "All document fields, message-payload fields, and serialized envelope keys use lower camelCase. "
+                      "Canonical JSON and generated bindings preserve the source spelling exactly; they do not translate kebab-case fields at generation time. "
+                      "A kebab-case field is rejected during parsing or semantic validation. Declaration and type identifiers remain outside this rule.\n\n"
+                  )
+                  if naming not in text:
+                      if marker not in text:
+                          raise SystemExit("Could not locate Canonical JSON marker in research 009")
+                      text = text.replace(marker, naming + marker, 1)
+                  text = text.replace(
+                      "13. generated Python bindings compile\n",
+                      "13. generated Python bindings compile\n14. kebab-case field declarations fail before binding generation\n",
+                      1,
+                  )
+
+              if text != original:
+                  if "#+last_modified:" not in text:
+                      lines = text.splitlines(keepends=True)
+                      insert_at = next((i + 1 for i, line in enumerate(lines) if line.startswith("#+status:")), None)
+                      if insert_at is not None:
+                          lines.insert(insert_at, "#+last_modified: [2026-08-02 Sun]\n")
+                          text = "".join(lines)
+                  path.write_text(text, encoding="utf-8")
+                  changed.append(path)
+
+          if not changed:
+              raise SystemExit("Field-only migration changed no documents")
+
+          # Audit the precise field surfaces owned by this decision.
+          failures = []
+          for path in docs:
+              text = path.read_text(encoding="utf-8")
+              for number, line in enumerate(text.splitlines(), start=1):
+                  if ":required" in line or ":optional" in line:
+                      match = field_decl.match(line)
+                      if match:
+                          failures.append(f"{path}:{number}: kebab-case field declaration {match.group(2)}")
+                  if quoted_key.search(line):
+                      failures.append(f"{path}:{number}: kebab-case serialized key")
+
+              for block in block_re.finditer(text):
+                  body = block.group(2)
+                  if any(marker in body for marker in envelope_markers):
+                      for old in envelope_fields:
+                          if re.search(r":" + re.escape(old) + r"\b", body):
+                              failures.append(f"{path}: envelope field remains :{old}")
+
+              if "Hyphenated Star-Lang field names" in text or "=message_type=" in text:
+                  failures.append(f"{path}: obsolete field-naming prose")
+
+          # Guard the non-field identifiers that the broad pass incorrectly touched.
+          required_unchanged = {
+              "STAR-LANG-RESEARCH-000-language-design-foundations.org": [
+                  ":max-attempts", "=retry-after=", ":stable-order :document-id"
+              ],
+              "STAR-LANG-RESEARCH-007-normalized-ir-and-cl-gserver-binding.org": [
+                  '"combine-names-into-emails"', '"combine-names-handler"', '"employment-emails"'
+              ],
+          }
+          by_name = {path.name: path.read_text(encoding="utf-8") for path in docs}
+          for name, needles in required_unchanged.items():
+              for needle in needles:
+                  if needle not in by_name[name]:
+                      failures.append(f"{name}: non-field identifier changed or missing: {needle}")
+
+          if failures:
+              raise SystemExit("\n".join(failures))
+
+          print("Correctly migrated field-bearing research documents:")
+          for path in changed:
+              print(path)
+          PY
+
+          rm -f .github/workflows/correct-star-lang-camelcase-scope.yml
+
+          git config user.name "starintel-research-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add roam/research/star-lang .github/workflows
+          git commit -m "docs(star-lang): scope camelCase migration to fields"
+          git push origin HEAD:main

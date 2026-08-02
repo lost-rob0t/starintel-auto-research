@@ -13,7 +13,7 @@ Product line: **the world's most dangerous search engine**—dangerous because i
 Read only what is needed:
 
 1. `AGENTS.md`
-2. The one active design under `roam/implement/`
+2. The active design for the selected project under `roam/implement/<project>/`
 3. Directly linked design and research nodes
 4. The relevant project index under `roam/indexes/`
 5. Relevant source and tests
@@ -51,9 +51,9 @@ roam/indexes/star-server/
 
 `scripts/sync.py` maintains this structure without deleting directories.
 
-## One-Design Implementation Slot
+## Per-Project Implementation Slots
 
-`roam/implement/` may contain many empty mirrored directories, but exactly zero or one Org design file across the whole tree.
+`roam/implement/` may contain many empty mirrored directories. Each immediate project subtree may contain exactly zero or one Org design file. Independent projects may have active designs concurrently.
 
 Select a design:
 
@@ -68,13 +68,20 @@ roam/design/star-server/STAR-SERVER-001.org
 → roam/implement/star-server/STAR-SERVER-001.org
 ```
 
-Inspect:
+Inspect all project slots:
 
 ```bash
 python scripts/implement.py --status
 ```
 
-Do not manually place a second file in `roam/implement/`.
+Inspect or clear one project slot:
+
+```bash
+python scripts/implement.py --status --project star-lang
+python scripts/implement.py --clear --project star-lang
+```
+
+Do not manually place a second Org file inside the same `roam/implement/<project>/` subtree.
 
 ## Completing or Rejecting a Design
 
@@ -82,6 +89,7 @@ Mark an implemented design:
 
 ```bash
 python scripts/mark-design.py implemented \
+  --project star-server \
   --summary "What was implemented" \
   --file source/example.lisp \
   --test "nix flake check: passed" \
@@ -92,10 +100,13 @@ Mark a rejected design:
 
 ```bash
 python scripts/mark-design.py rejected \
+  --project star-server \
   --reason "Why the design was rejected" \
   --evidence "Benchmark or repository finding" \
   --replacement "Replacement design, if any"
 ```
+
+When exactly one project has an active design, `--project` may be omitted. When multiple projects are active, it is required to identify the design being completed or rejected.
 
 Then synchronize:
 
@@ -115,7 +126,7 @@ Synchronization:
 - appends an idempotent Org implementation or rejection record
 - rewrites implemented designs to document what was actually implemented
 - preserves rejected canonical designs and their rejection record
-- removes only the active working copy after its status is synchronized
+- removes only active working copies whose status events were synchronized
 - never deletes the canonical design
 
 A later implementation may supersede a rejection; both historical records remain in the design file and ledgers.
@@ -317,7 +328,7 @@ python3 scripts/check-pages-links.py _site
 
 Report:
 
-- active design and final status
+- active project design(s) and final status
 - files changed
 - behavior changed
 - tests and exact results

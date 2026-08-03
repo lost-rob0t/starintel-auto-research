@@ -1,0 +1,670 @@
+:PROPERTIES:
+:ID:       star-research-007-starintel-ontology-foundations
+:END:
+#+title: STAR-RESEARCH-007 StarIntel Ontology Foundations
+#+description: Active research into a minimal, versioned ontology, qualified assertion model, predicate registry, provenance contract, temporal model, identity vocabulary, inference lifecycle, and external mapping boundary for StarIntel.
+#+status: DRAFT
+#+filetags: :starintel:star-server:ontology:assertions:provenance:identity:time:prolog:graph:research:draft:
+
+* Source Links
+
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:STAR-RESEARCH-003-budgeted-supervised-prolog-inference-actors.org][STAR-RESEARCH-003 Budgeted Supervised Prolog Inference Actors]]
+- [[file:../../design/star-server/STAR-ADR-002-hybrid-logic-runtime-model.org][STAR-ADR-002 Hybrid Logic Runtime Model]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/72][Auto Research issue 72]]
+- [[https://www.w3.org/TR/owl2-overview/][OWL 2 Web Ontology Language]]
+- [[https://www.w3.org/TR/shacl/][Shapes Constraint Language]]
+- [[https://www.w3.org/TR/prov-o/][PROV Ontology]]
+- [[https://www.w3.org/TR/json-ld11/][JSON-LD 1.1]]
+- [[https://www.w3.org/TR/skos-reference/][Simple Knowledge Organization System]]
+- [[https://www.w3.org/TR/owl-time/][Time Ontology in OWL]]
+- [[https://www.w3.org/TR/rdf12-concepts/][RDF 1.2 Concepts and Abstract Data Model]]
+- [[https://followthemoney.tech/docs/][FollowTheMoney documentation]]
+- [[https://followthemoney.tech/docs/statements/][FollowTheMoney statement model]]
+- [[https://docs.oasis-open.org/cti/stix/v2.1/stix-v2.1.html][STIX 2.1]]
+- [[https://caseontology.org/ontology/start.html][CASE and UCO ontology documentation]]
+
+* Research Scope
+
+This research loop defines the ontology[fn:ontology] layer that StarIntel[fn:starintel] currently expresses only indirectly through typed documents, relation records, graph edges, Prolog[fn:prolog] rules, actor outputs, and human conventions.
+
+The central question is:
+
+#+begin_quote
+What minimal, versioned semantic contract should StarIntel own internally so that entities, predicates, assertions, evidence, time, identity, datasets, inference, and graph projections retain stable machine-readable meaning without forcing the runtime to become an RDF-native system?
+#+end_quote
+
+The investigation covers:
+
+- the internal class hierarchy;
+- the predicate registry;
+- qualified assertions;
+- claims and evidence;
+- provenance;
+- temporal semantics;
+- identity resolution;
+- asserted and inferred fact separation;
+- dataset and named-graph semantics;
+- validation;
+- external vocabulary mappings;
+- versioning and migration;
+- the Common Lisp, CouchDB, Prolog, actor, and graph integration boundary.
+
+This research does not select a triple store[fn:triple-store], replace CouchDB[fn:couchdb], or require SPARQL[fn:sparql] as the application query language.
+
+* Current Architectural Reading
+
+StarIntel already contains most of the machinery surrounding an ontology:
+
+| Ontology concern | Current StarIntel mechanism | Current limitation |
+|---+---+---|
+| individual entity | typed StarIntel document | identity and class meaning are partly conventional |
+| class | =dtype=, Common Lisp class, or document schema | no canonical cross-language hierarchy |
+| data property | document field | field semantics are not centrally governed |
+| object property | relation predicate or graph edge | direction, inverse, domain, range, and time are inconsistent or implicit |
+| assertion | document value or relation document | source claim, analyst judgment, and derived conclusion may collapse together |
+| context | dataset | collection, investigation, import batch, security scope, and index namespace are overloaded |
+| evidence | source references and evidence documents | support, contradiction, extraction, and confidence need a shared assertion contract |
+| inference | Prolog or rule-engine result | durable provenance and truth maintenance are incomplete |
+| graph | graph projection and editor | graph edges can appear semantically stronger than their underlying evidence |
+| execution | actor and dataset manifests | operational contracts are not domain ontology definitions |
+
+The architecture is therefore best described as a typed document system plus a property graph[fn:property-graph] plus logic engines. It is not yet a governed ontology system.
+
+* Initial Decision Hypothesis
+
+Use a StarIntel-native qualified assertion document model as the source of truth.
+
+The first implementation should contain:
+
+1. a small explicit class hierarchy;
+2. a versioned predicate registry;
+3. immutable assertion documents with evidence and temporal qualifiers;
+4. separate asserted, inferred, contradicted, retracted, and stale states;
+5. JSON Schema[fn:json-schema] for structural validation;
+6. Prolog constraints for semantic validation and inference;
+7. durable proof and dependency records for derived assertions;
+8. explicit dataset and investigation context;
+9. external mappings through JSON-LD[fn:json-ld], FollowTheMoney[fn:followthemoney], STIX[fn:stix], CASE/UCO[fn:case-uco], and selected W3C vocabularies;
+10. no mandatory RDF[fn:rdf] store or OWL[fn:owl] reasoner.
+
+This hypothesis remains open to rejection if conformance fixtures show that a different internal representation is substantially safer or simpler.
+
+* Proposed Ontology Modules
+
+The initial internal ontology should be split into modules so domain meaning does not become tangled with runtime operations.
+
+** =star-core=
+
+Minimum real-world classes:
+
+#+begin_example
+Entity
+├── Agent
+│   ├── Person
+│   └── Organization
+├── Place
+├── Asset
+│   ├── Account
+│   ├── Website
+│   └── Infrastructure
+├── Event
+├── Identifier
+└── Document
+#+end_example
+
+=Target=, =Lead=, =Finding=, =Subject=, and =Source= must not automatically become subclasses of =Entity=. They are commonly roles or workflow designations held inside an investigation.
+
+** =star-assertion=
+
+Minimum classes:
+
+- Claim;
+- Assertion;
+- Evidence;
+- SourceRecord;
+- Observation;
+- Derivation;
+- Contradiction;
+- Retraction.
+
+** =star-relations=
+
+The relation module owns canonical predicates and their semantics. Candidate starting predicates include:
+
+- =employed-by=;
+- =owns=;
+- =controls=;
+- =member-of=;
+- =funded-by=;
+- =located-at=;
+- =authored-by=;
+- =participated-in=;
+- =communicates-with=;
+- =has-identifier=;
+- =account-controlled-by=;
+- =supports=;
+- =contradicts=;
+- =derived-from=.
+
+** =star-investigation=
+
+Minimum workflow classes and roles:
+
+- Investigation;
+- TargetRole;
+- Lead;
+- Finding;
+- Hypothesis;
+- AnalystDecision;
+- ReviewState.
+
+** =star-runtime=
+
+Runtime concepts remain separate:
+
+- Actor;
+- Capability;
+- Route;
+- Port;
+- Permission;
+- ResourceLimit;
+- HealthPolicy;
+- RestartPolicy.
+
+Actor manifests[fn:actor-manifest] and dataset manifests[fn:dataset-manifest] may reference ontology terms, but they do not define the domain ontology.
+
+* Predicate Registry Requirements
+
+Every predicate must be represented by a versioned registry entry.
+
+A minimum predicate record requires:
+
+- stable identifier;
+- canonical name;
+- plain-language definition;
+- semantic direction;
+- subject domain;
+- object range;
+- inverse predicate, when valid;
+- symmetric flag;
+- transitive flag;
+- temporal behavior;
+- required and optional qualifiers;
+- deprecated aliases;
+- external mappings;
+- ontology version introduced;
+- ontology version deprecated;
+- migration rule;
+- validation rule package;
+- example and counterexample.
+
+#+begin_src json
+{
+  "dtype": "starintel.ontology.predicate/1",
+  "id": "predicate:employed-by",
+  "ontology_version": "0.1.0",
+  "name": "employed-by",
+  "definition": "A person performs work for an organization under an employment relationship.",
+  "subject_domain": ["class:person"],
+  "object_range": ["class:organization"],
+  "inverse": "predicate:employs",
+  "symmetric": false,
+  "transitive": false,
+  "temporal": {
+    "valid_time": "interval-or-open-interval",
+    "observed_time": "required",
+    "recorded_time": "required"
+  },
+  "qualifiers": {
+    "required": [],
+    "optional": ["role", "department", "employment_type"]
+  },
+  "external_mappings": [
+    {
+      "vocabulary": "schema.org",
+      "term": "worksFor",
+      "mapping": "close"
+    },
+    {
+      "vocabulary": "FollowTheMoney",
+      "term": "Employment",
+      "mapping": "structural"
+    }
+  ],
+  "status": "draft"
+}
+#+end_src
+
+A graph editor may display the inverse direction for readability, but persistence must preserve the canonical semantic direction.
+
+* Qualified Assertion Model
+
+A relationship is not merely a thin edge. It is an assertion object carrying the conditions under which the relationship is believed, observed, inferred, challenged, or withdrawn.
+
+Minimum fields:
+
+- assertion identifier;
+- subject identifier;
+- predicate identifier and version;
+- object identifier or typed literal;
+- assertion mode;
+- source references;
+- asserted-by agent or process;
+- observed time;
+- valid time;
+- recorded time;
+- confidence;
+- extraction method;
+- review status;
+- contradiction references;
+- derivation and proof references;
+- dataset context;
+- investigation context;
+- access scope;
+- integrity digest.
+
+#+begin_src json
+{
+  "dtype": "starintel.assertion/1",
+  "id": "assertion:sha256:example",
+  "ontology": {
+    "id": "starintel-core",
+    "version": "0.1.0"
+  },
+  "statement": {
+    "subject": "person:alice-example",
+    "predicate": "predicate:employed-by",
+    "predicate_version": "1.0.0",
+    "object": {
+      "kind": "entity",
+      "id": "organization:acme"
+    }
+  },
+  "mode": "asserted",
+  "source_refs": ["source:corporate-biography-2026-01"],
+  "asserted_by": "actor:web-extractor",
+  "time": {
+    "observed_at": "2026-08-03T04:58:00Z",
+    "recorded_at": "2026-08-03T05:00:00Z",
+    "valid_from": "2024-02-01",
+    "valid_until": null,
+    "valid_until_open": true
+  },
+  "confidence": {
+    "value": 0.82,
+    "method": "source-and-extractor-assessment/1"
+  },
+  "extraction": {
+    "method": "html-structured-data",
+    "run": "run:ontology-research-example"
+  },
+  "review": {
+    "status": "unreviewed"
+  },
+  "context": {
+    "dataset": "dataset:case-example",
+    "investigation": "investigation:example"
+  },
+  "integrity": {
+    "canonical_digest": "sha256:..."
+  }
+}
+#+end_src
+
+The model must distinguish at least these assertion modes:
+
+- =asserted= — directly attributed to a source, analyst, or authorized process;
+- =inferred= — produced from prior assertions by a named rule package;
+- =hypothesized= — proposed for investigation but not admitted as fact;
+- =contradicted= — challenged by one or more assertion records;
+- =retracted= — withdrawn by its asserting authority or invalidated process;
+- =stale= — derived from changed, removed, expired, or incompatible inputs.
+
+* Temporal Model
+
+Three times are mandatory because they answer different questions:
+
+| Field | Question |
+|---+---|
+| =observed_at= | When did a source, collector, or analyst observe the information? |
+| =valid_from= / =valid_until= | During what real-world interval was the statement true? |
+| =recorded_at= | When did StarIntel persist the assertion? |
+
+A fourth time may be needed for source publication or source-event time, but it must not replace the three fields above.
+
+Historical and current relationships must never be collapsed merely because they share subject, predicate, and object.
+
+The research must test whether a compact StarIntel interval model is sufficient and map it to OWL-Time[fn:owl-time] only at export boundaries.
+
+* Claims, Evidence, and Provenance
+
+A source document does not directly become an unquestioned entity fact.
+
+The required chain is:
+
+#+begin_example
+Source record
+    supports or contradicts
+Claim
+    represented by
+Assertion
+    may be reviewed or used by
+Inference run
+    emits
+Derived assertion and proof
+#+end_example
+
+PROV-O[fn:prov-o] is a useful external mapping because it separates entities, activities, and agents and supports qualified provenance relations. StarIntel still requires investigation-specific states, confidence, contradiction, and review semantics beyond the smallest PROV-O core.
+
+FollowTheMoney statements are a high-value comparison because they attach metadata to individual property values rather than only to the assembled entity. StarIntel must test whether assertion documents can losslessly ingest and emit those statements.
+
+* Identity and Entity Resolution
+
+Identity resolution[fn:identity-resolution] must never silently convert similarity into equality.
+
+Minimum vocabulary:
+
+- =same-record-as=;
+- =duplicate-ingestion-of=;
+- =exact-entity-match=;
+- =probable-entity-match=;
+- =possible-entity-match=;
+- =not-same-entity-as=;
+- =has-identifier=;
+- =identifier-issued-by=;
+- =account-controlled-by=;
+- =account-mentions=;
+- =merge-supported-by=;
+- =merge-reversed-by=.
+
+A merge operation must preserve:
+
+- the source records;
+- the comparison features;
+- the selected match algorithm and version;
+- confidence;
+- analyst decisions;
+- conflicting attributes;
+- the ability to reverse the merge;
+- a redirect or equivalence history without destroying original identifiers.
+
+The ontology must avoid using an unrestricted =same-as= predicate for probable matches.
+
+* Asserted and Inferred Fact Lifecycle
+
+Every derived assertion requires:
+
+- rule-package identifier;
+- rule-package version and digest;
+- query identifier;
+- exact input assertion identifiers;
+- knowledge-base snapshot;
+- engine and engine version;
+- execution run;
+- proof trace or normalized explanation;
+- confidence transformation method;
+- materialization status;
+- stale condition;
+- retraction propagation behavior.
+
+#+begin_src prolog
+assertion(
+    'assertion:sha256:example',
+    'person:alice-example',
+    'predicate:employed-by',
+    entity('organization:acme'),
+    asserted
+).
+
+assertion_valid_time(
+    'assertion:sha256:example',
+    date(2024, 2, 1),
+    open_end
+).
+
+assertion_source(
+    'assertion:sha256:example',
+    'source:corporate-biography-2026-01'
+).
+
+predicate_domain('predicate:employed-by', 'class:person').
+predicate_range('predicate:employed-by', 'class:organization').
+
+semantic_violation(Assertion, domain_mismatch) :-
+    assertion(Assertion, Subject, Predicate, _, _),
+    predicate_domain(Predicate, RequiredClass),
+    \+ entity_is_a(Subject, RequiredClass).
+#+end_src
+
+Deleting or retracting an input assertion must not leave a derived assertion looking current. The research must compare eager retraction, lazy stale marking, and full snapshot rebuild.
+
+* Dataset and Context Semantics
+
+The current word =dataset= risks representing several different concepts:
+
+- collection;
+- investigation workspace;
+- named assertion graph;
+- import batch;
+- source corpus;
+- permission boundary;
+- search index;
+- Prolog module;
+- export unit.
+
+The ontology should define these concepts separately even when a simple deployment maps several of them to one identifier.
+
+Minimum context records:
+
+- Collection;
+- Investigation;
+- AssertionGraph;
+- ImportBatch;
+- SourceCorpus;
+- AccessScope;
+- PhysicalIndex.
+
+RDF named graphs[fn:named-graph] are relevant as an interchange model, but they do not by themselves define whether a graph is an investigation, source, access boundary, or import batch.
+
+* Validation Strategy
+
+Validation requires two layers.
+
+** Structural validation
+
+JSON Schema should verify:
+
+- required fields;
+- field types;
+- identifier syntax;
+- version syntax;
+- allowed assertion modes;
+- timestamp syntax;
+- object or literal representation;
+- integrity metadata shape.
+
+** Semantic validation
+
+Prolog constraints should verify:
+
+- predicate domain and range;
+- inverse consistency;
+- invalid self-relations;
+- impossible or suspicious temporal order;
+- missing referenced entities;
+- incompatible ontology versions;
+- invalid assertion-state transitions;
+- ownership percentages outside allowed bounds;
+- inferred assertions missing proofs;
+- probable matches incorrectly treated as exact identity.
+
+SHACL[fn:shacl] should be evaluated as an external validation and exchange mapping. It must not become an internal dependency unless it materially outperforms the native JSON Schema plus Prolog design.
+
+* External Standards Matrix
+
+| Standard or model | What it contributes | Initial StarIntel role | Main caution |
+|---+---+---+---|
+| OWL 2 | formal classes, properties, restrictions, and entailment | semantic reference and export mapping | open-world reasoning and tooling may not match operational validation needs |
+| SHACL | graph constraints and validation reports | optional interchange validator | assumes RDF graph representation |
+| PROV-O | entities, activities, agents, and qualified provenance | provenance mapping vocabulary | does not fully define investigation review and confidence states |
+| JSON-LD 1.1 | JSON serialization with linked-data context | preferred RDF-compatible export format | contexts can conceal semantic changes if not version-pinned |
+| SKOS | controlled concepts, labels, mappings, and taxonomy links | vocabulary and taxonomy mapping | SKOS concepts are not automatically ontology classes |
+| OWL-Time | temporal instants, intervals, and ordering relations | temporal export mapping | broader than the minimum internal interval contract |
+| RDF 1.2 | graph data model, named graphs, and triple terms | research target for assertion export | Candidate Recommendation as of 2026-08-03; not a stable hard dependency yet |
+| FollowTheMoney | investigative entity hierarchy, interstitial relations, value-level statements | high-priority import and export mapping | intentionally pragmatic rather than a fully formal standard |
+| STIX 2.1 | cyber-threat objects, relationships, markings, and exchange | cyber domain mapping | narrow threat-intelligence domain and opinionated object lifecycle |
+| CASE/UCO | cyber-investigation ontology, provenance, actions, and observable facets | digital-evidence mapping | large ontology surface and RDF/OWL operational cost |
+| Schema.org | broad public web vocabulary | opportunistic import mapping | weak constraints and inconsistent publisher usage |
+
+The external mapping layer must record mapping strength:
+
+- exact;
+- close;
+- broader;
+- narrower;
+- structural transform;
+- lossy transform;
+- unsupported.
+
+* RDF 1.2 Status Note
+
+RDF 1.2 Concepts was published as a W3C Candidate Recommendation Snapshot on 2026-04-07. It introduces triple terms, which are directly relevant to attaching metadata to statements. The feature is promising for exporting qualified StarIntel assertions without older reification patterns.
+
+It remains unsuitable as a mandatory internal dependency until:
+
+- the Recommendation status is stable;
+- at least two usable libraries support the required syntax and semantics;
+- round-trip tests preserve StarIntel assertion identity and qualifiers;
+- triple-term support does not force a storage or query-engine migration.
+
+* Initial Risk Ranking
+
+| Priority | Gap | Failure mode |
+|---+---+---|
+| critical | predicate semantics | reversed or incompatible edges silently produce false graph paths |
+| critical | claim, evidence, and assertion separation | source allegations appear as accepted facts |
+| critical | identity-resolution vocabulary | probable matches contaminate every downstream relation |
+| critical | temporal model | historical and current relationships collapse together |
+| high | asserted versus inferred lifecycle | conclusions survive after their evidence changes |
+| high | ontology versioning | old and new predicate meanings coexist without migration |
+| high | dataset semantics | permissions, provenance, and investigation context are confused |
+| medium | external mappings | imports and exports lose qualifiers or overstate equivalence |
+| medium | class hierarchy | rules repeatedly enumerate concrete types and drift across languages |
+
+* Conformance Fixture Queue
+
+The research is not complete until the model handles these fixtures:
+
+1. two sources disagree about a person's current employer;
+2. one employment assertion is historical and one is current;
+3. an extractor produces a probable identity match that an analyst later rejects;
+4. two duplicate source records refer to one real organization;
+5. an inferred ownership path depends on a source assertion that is retracted;
+6. one predicate is renamed and reversed in a later ontology version;
+7. a FollowTheMoney statement round-trips through StarIntel without losing value-level provenance;
+8. a STIX relationship round-trips without confusing STIX object lifecycle fields with real-world valid time;
+9. a CASE/UCO action and provenance chain maps without turning every digital object facet into a StarIntel core class;
+10. an RDF 1.2 triple-term export reimports with the same assertion identifier and qualifiers;
+11. one dataset identifier currently used as an import batch and an investigation is migrated into separate context objects;
+12. a graph projection displays an inverse label while persistence retains canonical predicate direction.
+
+* Research Work Queue
+
+** ACTIVE Track A: Repository semantic inventory
+
+- enumerate maintained document implementations;
+- locate relation schemas and predicate declarations;
+- locate current provenance and evidence fields;
+- identify every meaning currently assigned to =dataset=;
+- identify current entity merge and fingerprint behavior;
+- inspect graph projection and editor assumptions;
+- inspect Prolog fact encoders and proof outputs.
+
+** TODO Track B: Candidate contract prototypes
+
+- define =star-core= class records;
+- define predicate-registry schema;
+- define assertion schema;
+- define claim and evidence schema;
+- define context records;
+- define identity decision and reversible merge records;
+- define rule package and derivation records.
+
+** TODO Track C: Round-trip adapters
+
+- StarIntel document to Prolog facts;
+- Prolog result to derived assertion;
+- StarIntel assertion to JSON-LD;
+- FollowTheMoney statements to and from StarIntel assertions;
+- STIX relationships to and from StarIntel assertions;
+- CASE/UCO provenance to and from StarIntel provenance;
+- RDF 1.2 triple-term experiment.
+
+** TODO Track D: Validation and migration
+
+- structural JSON Schema fixtures;
+- semantic Prolog constraint fixtures;
+- ontology compatibility matrix;
+- predicate alias and migration rules;
+- stale derivation and retraction tests;
+- cross-language conformance fixtures.
+
+* Design Gate
+
+This research may promote a design only after demonstrating one lossless vertical slice:
+
+#+begin_example
+StarIntel assertion document
+    → validated Prolog facts
+    → derived assertion with proof and dependencies
+    → graph projection
+    → external export mapping
+    → import back into the same semantic assertion
+#+end_example
+
+The vertical slice must include conflicting evidence, valid time, observed time, recorded time, probable identity, retraction, and stale inference behavior.
+
+* Footnotes and Glossary
+
+[fn:ontology] Ontology: A machine-readable definition of the kinds of things recognized in a domain, the relations between them, the constraints on those relations, and the conclusions that may be derived from them.
+
+[fn:starintel] StarIntel: The local-first intelligence platform being designed in this repository to collect, normalize, connect, search, analyze, and export structured documents through actor-based components.
+
+[fn:prolog] Prolog: A logic programming language in which facts and rules are queried to derive answers and proof-oriented explanations.
+
+[fn:triple-store] Triple store: A database specialized for storing and querying subject-predicate-object statements used by the Resource Description Framework.
+
+[fn:couchdb] CouchDB: A document database that stores JSON records, tracks revisions, and exposes replication and HTTP interfaces.
+
+[fn:sparql] SPARQL: A query and update language for graphs represented with the Resource Description Framework.
+
+[fn:property-graph] Property graph: A graph model in which nodes and edges can carry named attributes; common graph databases and visualization libraries use this model.
+
+[fn:json-schema] JSON Schema: A standard vocabulary for describing and validating the required structure, types, and constraints of JSON data.
+
+[fn:json-ld] JSON-LD: JavaScript Object Notation for Linked Data, a W3C format that adds machine-readable identifiers and vocabulary mappings to JSON documents.
+
+[fn:followthemoney] FollowTheMoney: An investigative data model and software toolkit focused on people, companies, assets, financial relationships, documents, and related records.
+
+[fn:stix] STIX: Structured Threat Information Expression, an OASIS language for exchanging cyber-threat and cyber-observable information.
+
+[fn:case-uco] CASE/UCO: Cyber-investigation Analysis Standard Expression and Unified Cyber Ontology, related ontology projects for representing digital evidence, cyber objects, investigative actions, and provenance.
+
+[fn:rdf] RDF: Resource Description Framework, a W3C graph data model based on subject-predicate-object statements and datasets of named graphs.
+
+[fn:owl] OWL: Web Ontology Language, a W3C language for defining classes, properties, restrictions, and formally specified logical consequences.
+
+[fn:actor-manifest] Actor manifest: A data record describing an actor's identity, accepted messages, emitted messages, capabilities, permissions, resource limits, and runtime behavior.
+
+[fn:dataset-manifest] Dataset manifest: A declarative record describing dataset inputs, outputs, flows, indexes, actor bindings, and processing rules.
+
+[fn:owl-time] OWL-Time: A W3C ontology for describing temporal instants, intervals, durations, positions, and ordering relations.
+
+[fn:prov-o] PROV-O: The W3C Provenance Ontology, which represents entities, activities, agents, and the relationships describing how information was generated or influenced.
+
+[fn:identity-resolution] Identity resolution: The process of deciding whether multiple records, identifiers, accounts, or observations refer to the same real-world entity.
+
+[fn:named-graph] Named graph: An RDF graph assigned an identifier so statements can be grouped into a distinct context inside an RDF dataset.
+
+[fn:shacl] SHACL: Shapes Constraint Language, a W3C language for describing and validating constraints over RDF graphs.

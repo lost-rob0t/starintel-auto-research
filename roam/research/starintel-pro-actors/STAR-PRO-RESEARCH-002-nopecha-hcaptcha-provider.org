@@ -1,0 +1,102 @@
+:PROPERTIES:
+:ID:       star-pro-research-002-nopecha-hcaptcha-provider
+:END:
+#+title: STAR-PRO-RESEARCH-002 NopeCHA hCaptcha Provider
+#+description: Current NopeCHA hCaptcha Token API research for a guarded StarIntel Pro Actors provider adapter.
+#+status: REVIEW
+#+filetags: :starintel:research:starintel-pro-actors:captcha:hcaptcha:nopecha:
+
+* Scope
+
+This note evaluates the NopeCHA Token API[fn:token-api] as an hCaptcha provider behind the StarIntel broker. It excludes the separate image-recognition API because the broker contract returns complete short-lived verification tokens rather than click coordinates or classifications.
+
+* Provider Summary
+
+NopeCHA advertises token generation for hCaptcha Publisher, Pro, and Enterprise. The documented hCaptcha operation accepts a site key, page URL, optional enterprise =rqdata=, optional proxy, optional cookies, and a browser user-agent string.
+
+The service uses a subscription credit model. Credits refill every twenty-three hours and unused daily capacity does not accumulate. Current documentation is inconsistent about hCaptcha token cost: the dedicated hCaptcha page says five credits per request, while the general overview says ten credits. The adapter must therefore discover or configure the effective charge instead of hard-coding either value.
+
+* Current Contract
+
+| Capability | Current public contract |
+|------------+-------------------------|
+| Create | =POST https://api.nopecha.com/token/= |
+| Retrieve | =GET https://api.nopecha.com/token/?key=...&id=...= |
+| Authentication | subscription key in request body or query |
+| Challenge type | =type: hcaptcha= |
+| Enterprise input | =data.rqdata= |
+| Optional context | proxy, cookie array, and user agent |
+| Pending response | error number 14 with =Incomplete job= |
+| Result | token returned in the =data= field |
+
+The public contract does not document cancellation, provider callbacks, or an idempotency key. The key-in-query retrieval form creates additional log-exposure risk because uniform resource locators[fn:url] are commonly recorded by clients, proxies, and servers.
+
+* Strengths
+
+- Explicit support for regular and enterprise hCaptcha.
+- Optional proxy, cookie, and user-agent context for authorized sessions requiring network identity continuity.
+- Official Python and Node.js clients.
+- Subscription tiers expose stated concurrency limits.
+- The token API has a small request and response surface.
+
+* Weaknesses and Open Risks
+
+- Published credit consumption disagrees across official pages.
+- Daily credit refill makes cost accounting quota-based rather than purely per solve.
+- No documented cancellation endpoint.
+- No documented callback or long-poll endpoint.
+- Authentication in query parameters is incompatible with strict secret hygiene unless the adapter prevents URL logging.
+- Cookies accepted by the provider may contain session secrets and must be represented only by ephemeral secret references.
+- The provider notes that some enterprise flows require the solve proxy to match the client submission proxy.
+- The dedicated documentation says area-selection challenges are not supported by the Token API.
+
+* StarIntel Decision
+
+Approve a secondary NopeCHA adapter after the reference NoneCap adapter. The adapter must remain disabled until the operator configures:
+
+- the effective credit charge per hCaptcha token;
+- subscription refill time and daily quota;
+- allowed maximum concurrency;
+- whether proxy and cookie context are permitted for the selected target policy.
+
+The adapter must place the provider key in a redacted query construction path and must disable request-line logging for the retrieval call. A future provider change that supports header authentication should replace query authentication immediately.
+
+* Budget Model
+
+The broker reserves one logical solve plus a configurable provider-credit ceiling. The adapter reports:
+
+- provider credits charged or estimated;
+- local daily quota remaining when known;
+- request duration;
+- polling count;
+- provider job identifier;
+- terminal normalized status.
+
+A quota refill is not treated as free capacity. It is still an operator-owned paid subscription budget.
+
+* Test Requirements
+
+- Contract tests for pending error 14, successful =data= token, malformed responses, authentication failure, and provider timeout.
+- Tests proving request URLs and logs never contain the real subscription key.
+- Tests proving cookie, proxy, =rqdata=, and token values never enter durable actor events.
+- Quota tests across the twenty-three-hour refill boundary.
+- Live canary testing only against an operator-owned hCaptcha page.
+
+* Sources
+
+- [[https://developers.nopecha.com/token/hcaptcha/][NopeCHA hCaptcha Token API]], accessed 2026-08-05.
+- [[https://developers.nopecha.com/guides/token/][NopeCHA Token API quickstart]], accessed 2026-08-05.
+- [[https://developers.nopecha.com/formatting/proxy/][NopeCHA proxy format]], accessed 2026-08-05.
+- [[https://developers.nopecha.com/][NopeCHA overview and credit model]], accessed 2026-08-05.
+- [[https://nopecha.com/pricing][NopeCHA pricing]], accessed 2026-08-05.
+
+* Related Nodes
+
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Adapter]]
+
+* Footnotes and Glossary
+
+[fn:token-api] Token API: A network service that accepts challenge metadata and returns a completed verification token rather than returning individual image answers.
+
+[fn:url] Uniform resource locator: The textual address of a network resource, including its scheme, host, path, and optional query parameters.

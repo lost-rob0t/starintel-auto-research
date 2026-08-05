@@ -1,0 +1,182 @@
+:PROPERTIES:
+:ID:       star-pro-captcha-002-nopecha-adapter
+:END:
+#+title: STAR-PRO-CAPTCHA-002 NopeCHA Adapter
+#+description: Provider-specific StarIntel Pro Actor design for guarded hCaptcha token generation through the NopeCHA Token API.
+#+status: REVIEW
+#+filetags: :starintel:design:starintel-pro-actors:captcha:hcaptcha:nopecha:adapter:
+
+* Decision
+
+Implement =NopeChaAdapterActor= as a secondary provider adapter behind [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]]. It is enabled only when the operator configures the subscription quota, effective hCaptcha credit charge, and permitted use of proxy or cookie context.
+
+The actor accepts no arbitrary page request. It accepts only a broker-normalized =captchaProviderSubmit= message that has already passed authorization and target-policy checks.
+
+* Provider Contract
+
+| Broker operation | NopeCHA operation |
+|------------------+-------------------|
+| =submitSolve= | =POST https://api.nopecha.com/token/= |
+| =pollSolve= | =GET https://api.nopecha.com/token/?key=...&id=...= |
+| =cancelSolve= | unsupported |
+| =getBalanceOrQuota= | local subscription ledger plus provider status where available |
+| =reportOutcome= | unsupported by the researched token contract |
+| =healthSnapshot= | configured probe plus local circuit and quota state |
+
+The provider key appears in the create body and retrieval query. The adapter must disable request-body and request-line logging for these calls and must sanitize exception objects before they reach the actor event stream.
+
+* Actor State
+
+The actor owns:
+
+- provider credential reference;
+- configured token endpoint;
+- configured daily quota and refill interval;
+- configured credit charge per hCaptcha request;
+- active jobs keyed by broker =attemptId=;
+- provider job identifiers;
+- local concurrency count;
+- polling schedule;
+- local quota reservations and reconciliation;
+- circuit-breaker state;
+- no durable tokens, cookies, proxy credentials, or =rqdata=.
+
+* Submission Mapping
+
+| Broker field | NopeCHA field |
+|--------------+---------------|
+| =challenge.type= | =type: hcaptcha= |
+| =challenge.siteKey= | =sitekey= |
+| =challenge.pageUrl= | =url= |
+| dereferenced =rqdataRef= | =data.rqdata= |
+| =challenge.userAgent= | =useragent= |
+| dereferenced proxy reference | =proxy= dictionary |
+| dereferenced cookie reference | =cookie= array |
+
+Cookie context is disabled by default. A target policy must explicitly permit it because cookies may contain authenticated session material.[fn:session-material]
+
+* Polling
+
+A create response returns a provider job identifier in =data=. Poll with the identifier until:
+
+- a token appears in =data=;
+- provider error 14 reports =Incomplete job=, in which case polling continues with bounded backoff;
+- another provider error occurs;
+- the broker deadline expires;
+- cancellation is requested locally.
+
+The provider does not document cancellation. Local cancellation stops polling and deletes local secret material, but the provider job may continue and may consume credits. The normalized cancellation result must set =providerCancellationSupported: false= and =chargePossible: true=.
+
+* Quota Accounting
+
+The provider uses daily subscription credits that refresh every twenty-three hours. Current official pages disagree on whether an hCaptcha token costs five or ten credits. Therefore =creditsPerHcaptchaToken= is required configuration and is never inferred silently.
+
+Before submission, reserve the configured credit amount from the local quota ledger. On terminal completion:
+
+- reconcile against provider evidence when available;
+- otherwise retain the configured estimate;
+- release the reservation only when the provider contract proves no charge occurred;
+- roll quota windows using the configured provider refill timestamp, not local midnight.
+
+* Error Mapping
+
+| Provider condition | Normalized failure |
+|--------------------+--------------------|
+| error 14 =Incomplete job= | not a failure; continue polling |
+| invalid or missing key | =providerAuthenticationFailed=; open circuit |
+| insufficient quota | =providerInsufficientBalance= |
+| malformed input | =providerRejectedRequest= |
+| unsupported hCaptcha form | =unsupportedChallenge= |
+| network or 500-series failure | =providerUnavailable= |
+| deadline exhausted | =deadlineExceeded= with =chargePossible: true= |
+| local cancellation | =cancelled= with =providerCancellationSupported: false= |
+
+Unknown numeric provider errors are preserved as redacted =providerCode= and fail closed.
+
+* Authentication Hygiene
+
+Because retrieval requires the key in the query string:
+
+- construct the uniform-resource-locator[fn:url] only inside the HTTP client call;
+- disable request-target logging;
+- never attach the final URL to an error condition;
+- scrub query parameters from tracing spans;
+- use a custom redacted request description in telemetry;
+- add regression tests that search every log and event sink for the real key.
+
+* Actor Manifest Sketch
+
+#+begin_src json
+{
+  "actorId": "star.pro.captcha.nopecha",
+  "label": "NopeCHA hCaptcha Adapter",
+  "actorVersion": "0.1.0",
+  "protocolVersion": "star.captcha.provider/1",
+  "roles": ["captchaProviderAdapter"],
+  "accepts": [
+    "captchaProviderSubmit",
+    "captchaProviderPoll",
+    "captchaProviderCancel",
+    "captchaProviderBalanceRequest"
+  ],
+  "produces": [
+    "captchaProviderAccepted",
+    "captchaProviderState",
+    "captchaProviderSucceeded",
+    "captchaProviderFailed",
+    "captchaProviderHealth"
+  ],
+  "capabilities": [
+    "captcha.hcaptcha.standard",
+    "captcha.hcaptcha.invisible",
+    "captcha.hcaptcha.enterprise",
+    "captcha.provider.subscriptionQuota"
+  ],
+  "implementation": {
+    "package": "starintel-pro-actors",
+    "entrypoint": "STARINTEL-PRO-ACTORS.CAPTCHA.NOPECHA:START"
+  },
+  "permissions": {
+    "network": ["https://api.nopecha.com"],
+    "secrets": [
+      "provider:nopecha",
+      "ephemeral:captcha",
+      "ephemeral:proxy",
+      "ephemeral:cookie"
+    ]
+  },
+  "configuration": {
+    "tokenUrl": "https://api.nopecha.com/token/",
+    "credentialRef": "secret://runtime/provider/nopecha/default",
+    "maxConcurrency": 2,
+    "creditsPerHcaptchaToken": 5,
+    "quotaRefillHours": 23,
+    "cookiesEnabled": false
+  }
+}
+#+end_src
+
+The example credit value is not a default. Manifest validation requires the operator to set it from the active subscription contract.
+
+* Testing
+
+- Mock token create and polling.
+- Test error 14 as a pending state.
+- Test conflicting configured credit values and quota-window rollover.
+- Test cancellation without provider cancellation support.
+- Test standard and enterprise field mapping.
+- Test proxy and cookie policy denials before secret dereferencing.
+- Test that keys never appear in URLs recorded by logs, traces, errors, or fixtures.
+- Test token, cookie, proxy, and =rqdata= redaction.
+- Add an opt-in one-request live canary against an operator-owned hCaptcha page.
+
+* Related Nodes
+
+- [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA hCaptcha Provider]]
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+
+* Footnotes and Glossary
+
+[fn:session-material] Session material: Cookies or related values that allow a server to associate requests with an authenticated or previously established browser session.
+
+[fn:url] Uniform resource locator: A structured network address whose query section can accidentally expose credentials when logged.

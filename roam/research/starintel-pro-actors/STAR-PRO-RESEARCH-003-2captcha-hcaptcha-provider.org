@@ -1,0 +1,101 @@
+:PROPERTIES:
+:ID:       star-pro-research-003-2captcha-hcaptcha-provider
+:END:
+#+title: STAR-PRO-RESEARCH-003 2Captcha hCaptcha Provider
+#+description: Current 2Captcha hCaptcha support audit and guarded adapter requirements for StarIntel Pro Actors.
+#+status: REVIEW
+#+filetags: :starintel:research:starintel-pro-actors:captcha:hcaptcha:2captcha:
+
+* Scope
+
+This note evaluates whether 2Captcha currently provides a stable hCaptcha task contract suitable for a StarIntel provider adapter. The answer is provisional because the public documentation is internally inconsistent as of 2026-08-05.
+
+* Provider Summary
+
+2Captcha exposes a version-two JSON application-programming interface[fn:api] built around =createTask=, =getTaskResult=, balance, feedback, proxy, callback, and sandbox operations. Its current overview describes automated model solving with human-worker escalation for difficult cases.
+
+Official 2Captcha browser-service material still advertises automatic hCaptcha handling. Official client-package documentation also retains an =hcaptcha= method. However, the current API-v2 task navigation and proxy support page do not visibly list hCaptcha, and the dedicated hCaptcha API page was not reliably retrievable during this research pass.
+
+This is a provider-contract drift warning, not proof that hCaptcha has been removed. It means StarIntel must not register a 2Captcha hCaptcha capability until a sandbox call or written provider confirmation proves the current task type and response fields.
+
+* Stable Generic API Contract
+
+| Capability | Current public contract |
+|------------+-------------------------|
+| Create | =POST https://api.2captcha.com/createTask= |
+| Retrieve | =POST https://api.2captcha.com/getTaskResult= |
+| Balance | =POST https://api.2captcha.com/getBalance= |
+| Feedback | =reportCorrect= and =reportIncorrect= operations |
+| Optional delivery | callback URL registered by the caller |
+| Authentication | =clientKey= in the JSON request body |
+| Result states | =processing= and =ready= plus structured errors |
+
+Historical and client-library material identifies =HCaptchaTaskProxyless= and =HCaptchaTask= as likely task names. Those names are treated as unverified assumptions and must not be compiled into an enabled production manifest without live proof.
+
+* Strengths
+
+- Mature generic asynchronous task API.
+- Balance, feedback, callback, proxy, and sandbox concepts are documented.
+- Broad official client-library coverage.
+- Result envelopes include cost, timestamps, worker or provider Internet Protocol address[fn:ip-address], and solve count for many task types.
+- Existing operational familiarity may make it useful as a fallback if support is confirmed.
+
+* Weaknesses and Open Risks
+
+- Current hCaptcha task documentation is not discoverable from the main API navigation.
+- The current proxy page does not list hCaptcha among supported proxy task types.
+- Historical software-development-kit[fn:sdk] support can outlive provider support.
+- Human-worker escalation has privacy implications because challenge content may be presented to workers.
+- Callback delivery expands the inbound attack surface and should not be enabled in the first adapter version.
+- Generic error and task envelopes vary by challenge type.
+
+* StarIntel Decision
+
+Design the adapter but mark its manifest capability =experimental= and disabled by default. Enabling requires all of the following:
+
+1. A successful provider sandbox or low-cost live canary against an operator-owned hCaptcha test page.
+2. Captured request and response fixtures for the current task type.
+3. Confirmation of enterprise =rqdata= handling if enterprise support is advertised.
+4. Confirmation of proxy support and token-binding requirements.
+5. A configured maximum cost per solve.
+
+If any gate fails, the adapter starts without advertising =captcha.hcaptcha.solve= and the broker cannot route requests to it.
+
+* Initial Adapter Restrictions
+
+- Polling only; do not expose callbacks in version one.
+- No cookies in version one.
+- Proxy credentials only through an ephemeral secret reference.
+- Ignore unknown provider response fields while preserving a redacted copy in test fixtures.
+- Treat =ERROR_ZERO_BALANCE=, invalid key, unsupported task, and malformed task as circuit-opening or permanent failures according to the provider error table.
+- Do not automatically retry task creation after an ambiguous transport failure unless the local deduplication journal proves no provider identifier was received.
+
+* Test Requirements
+
+- A disabled-by-default capability test.
+- A contract discovery test that fails closed when hCaptcha is unsupported.
+- Mock tests for create, processing, ready, zero balance, unsupported task, malformed task, and timeout.
+- Cost and timestamp normalization tests.
+- Secret and token redaction tests.
+- No callback listener in the initial implementation.
+
+* Sources
+
+- [[https://2captcha.com/api-docs][2Captcha API v2 overview]], accessed 2026-08-05.
+- [[https://2captcha.com/api-docs/quick-start][2Captcha API quickstart]], accessed 2026-08-05.
+- [[https://2captcha.com/api-docs/create-task][2Captcha createTask reference]], accessed 2026-08-05.
+- [[https://2captcha.com/api-docs/proxy][2Captcha proxy reference]], accessed 2026-08-05.
+- [[https://2captcha.com/scraper/browser-api][2Captcha browser API]], accessed 2026-08-05.
+
+* Related Nodes
+
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-pro-captcha-003-2captcha-adapter][STAR-PRO-CAPTCHA-003 2Captcha Adapter]]
+
+* Footnotes and Glossary
+
+[fn:api] Application programming interface: A documented network boundary through which software submits requests and receives structured responses.
+
+[fn:ip-address] Internet Protocol address: A numeric network address identifying the endpoint from which a request was made.
+
+[fn:sdk] Software-development kit: A provider-maintained package containing client code, types, examples, and helpers for integrating an external service.

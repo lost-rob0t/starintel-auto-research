@@ -1,0 +1,369 @@
+:PROPERTIES:
+:ID:       star-captcha-000-broker-router
+:END:
+#+title: STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Provider Router
+#+description: StarIntel server design for capability-gated CAPTCHA routing to separately deployed paid provider actors without persisting tokens or provider secrets.
+#+status: REVIEW
+#+filetags: :starintel:design:star-server:captcha:hcaptcha:actors:routing:authorization:
+
+* Decision
+
+Implement a provider-neutral =CaptchaBrokerActor= inside =starintel-server=.[fn:star-server] Implement each paid provider adapter as a separately deployed actor in =starintel-pro-actors=.[fn:pro-actors]
+
+The broker owns authorization, target policy, normalized request validation, provider selection, deduplication, budget reservation, cancellation, health-based routing, audit metadata, and ephemeral token delivery. Provider actors own vendor-specific authentication, network requests, polling, error translation, provider job state, and provider billing observations.
+
+The broker is not a general public CAPTCHA-solving endpoint. It accepts messages only from authenticated StarIntel principals with the =captcha:solve= capability and an approved target-policy record.
+
+* Boundary
+
+#+begin_example
+Authorized requester
+        |
+        | captchaSolveRequest
+        v
+CaptchaBrokerActor  -- policy --> TargetPolicyRegistryActor
+        |
+        +-- budget ------------> BudgetLedgerActor
+        |
+        +-- secrets -----------> EphemeralSecretStoreActor
+        |
+        +-- routing -----------> CaptchaProviderRegistryActor
+                                    |
+                                    +--> NoneCapAdapterActor
+                                    +--> NopeCHAAdapterActor
+                                    +--> TwoCaptchaAdapterActor
+#+end_example
+
+The =CaptchaBrokerActor= and supporting registry actors run under a dedicated supervisor in the server actor system.[fn:supervisor] Provider actors register through the public plugin surface and may run in the same process, another process, or another machine.
+
+* Non-Goals
+
+- Detecting CAPTCHA widgets on arbitrary pages.
+- Extracting challenge internals from third-party JavaScript.
+- Creating fingerprints, cookies, accounts, or proxies.
+- Bypassing authorization, rate limits, bans, or payment controls.
+- Persisting solve tokens.
+- Exposing a raw provider pass-through route.
+- Sending the same challenge to several providers without explicit speculative-execution policy.
+
+* Actor Tree
+
+#+begin_example
+/user/services/captcha
+├── CaptchaBrokerActor
+├── CaptchaProviderRegistryActor
+├── CaptchaPolicyActor
+├── CaptchaDeduplicationActor
+├── CaptchaBudgetActor
+├── CaptchaTelemetryActor
+└── CaptchaRunSupervisor
+    ├── CaptchaRunActor(request-A)
+    └── CaptchaRunActor(request-B)
+#+end_example
+
+Use one-for-one restart behavior for independent solve runs. A failing provider adapter or solve run must not restart unrelated runs. The registry, policy, budget, deduplication, and telemetry actors are durable domain services and are not children of a per-run actor.
+
+* Wire Contract
+
+All wire-level fields use camelCase, matching the current Actor Manifest decision.[fn:actor-manifest]
+
+** Solve Request
+
+#+begin_src json
+{
+  "messageType": "captchaSolveRequest",
+  "requestId": "01KZ...",
+  "challengeType": "hcaptcha",
+  "challengeMode": "standard",
+  "siteKey": "site-key-value",
+  "pageUrl": "https://owned.example/verification",
+  "rqdataRef": null,
+  "userAgent": null,
+  "proxyCredentialRef": null,
+  "cookieBundleRef": null,
+  "providerPolicy": {
+    "mode": "automatic",
+    "allowedProviders": ["nonecap", "nopecha"],
+    "preferredProvider": "nonecap",
+    "allowFallback": false,
+    "allowSpeculativeExecution": false
+  },
+  "authorization": {
+    "principalId": "actor:authorized-collector",
+    "capability": "captcha:solve",
+    "purpose": "ownedSiteQualityAssurance",
+    "targetPolicyId": "captcha-policy:owned-example"
+  },
+  "budget": {
+    "maxProviderAttempts": 1,
+    "maxCostMicrounits": 2000,
+    "deadline": "2026-08-06T00:00:00Z"
+  },
+  "replyTo": "actor://requester/replies"
+}
+#+end_src
+
+=challengeMode= is one of =standard=, =invisible=, or =enterprise=. Enterprise mode requires =rqdataRef=. A provider adapter may reject an unsupported mode before any paid request is created.
+
+=pageUrl= must pass canonical uniform-resource-locator[fn:url] parsing and target-policy checks. Host authorization uses exact host or suffix-safe domain matching. Substring matching is prohibited.
+
+** Provider Submission
+
+The broker sends a provider actor a normalized request that contains no raw long-lived credential:
+
+#+begin_src json
+{
+  "messageType": "captchaProviderSubmit",
+  "requestId": "01KZ...",
+  "attemptId": "01KZ...-01",
+  "providerId": "nonecap",
+  "challenge": {
+    "type": "hcaptcha",
+    "mode": "enterprise",
+    "siteKey": "site-key-value",
+    "pageUrl": "https://owned.example/verification",
+    "rqdataRef": "secret://ephemeral/captcha/rqdata/01KZ...",
+    "userAgent": "Mozilla/5.0 ...",
+    "proxyCredentialRef": "secret://ephemeral/proxy/01KZ...",
+    "cookieBundleRef": null
+  },
+  "providerCredentialRef": "secret://runtime/provider/nonecap/default",
+  "deadline": "2026-08-06T00:00:00Z",
+  "replyTo": "actor://captcha/run/01KZ..."
+}
+#+end_src
+
+** Normalized Result
+
+#+begin_src json
+{
+  "messageType": "captchaSolveSucceeded",
+  "requestId": "01KZ...",
+  "attemptId": "01KZ...-01",
+  "providerId": "nonecap",
+  "providerJobId": "solve_01KZ...",
+  "tokenRef": "secret://ephemeral/captcha/token/01KZ...",
+  "tokenExpiresAt": "2026-08-06T00:01:45Z",
+  "providerCharge": {
+    "currency": "providerCredits",
+    "amount": 1,
+    "estimatedMicrounits": 500
+  },
+  "timing": {
+    "submittedAt": "2026-08-05T23:59:01Z",
+    "completedAt": "2026-08-05T23:59:05Z",
+    "queueMs": 600,
+    "solveMs": 3400
+  }
+}
+#+end_src
+
+Only the opaque =tokenRef= leaves the broker. The token itself is read once by the authorized requester and deleted when consumed or expired.
+
+* Durable and Ephemeral State
+
+** Durable state
+
+The broker may persist:
+
+- request identifier;
+- principal identifier;
+- approved purpose and target-policy identifier;
+- normalized target host, not full sensitive query data;
+- provider identifier and provider job identifier;
+- state transitions;
+- timestamps and durations;
+- retries and cancellation outcome;
+- cost and budget observations;
+- redacted structured error;
+- downstream accepted or rejected outcome.
+
+** Ephemeral state
+
+The following values are never persisted:
+
+- provider API keys;
+- solve tokens;
+- proxy usernames or passwords;
+- cookie bundles;
+- raw =rqdata=;
+- authorization headers;
+- full provider request bodies containing secrets.
+
+* Authorization Policy
+
+A request is accepted only when all checks pass:
+
+1. The principal is authenticated.
+2. The principal possesses =captcha:solve=.
+3. The target-policy record is active.
+4. The normalized page host matches the policy.
+5. The declared purpose is allowed by the policy.
+6. The requested provider is allowed by policy.
+7. Proxy and cookie context are allowed by policy.
+8. The request is within per-principal, per-target, and global budgets.
+9. The deadline allows enough time for the configured provider timeout.
+10. No matching completed or active request exists in the deduplication journal.
+
+A denial emits =captchaSolveRejected= with a machine-readable reason and no provider call.
+
+* Deduplication and Delivery
+
+The broker uses =requestId= as the logical idempotency key.[fn:idempotency] The deduplication actor stores a state machine:
+
+#+begin_example
+reserved -> submitted -> providerPending -> succeeded
+                               |             failed
+                               |             cancelled
+                               +-----------> uncertain
+#+end_example
+
+An ambiguous transport failure during provider creation enters =uncertain=. The broker does not blindly resubmit because a provider job may have been created and charged. Recovery first queries by the recorded provider identifier where possible or requires operator resolution when the provider lacks lookup support.
+
+Duplicate RabbitMQ[fn:rabbitmq] deliveries attach to the existing run or replay its terminal normalized result. They do not create another provider attempt.
+
+* Provider Registry and Routing
+
+Every provider actor registers a capability document containing:
+
+- =providerId=;
+- adapter version;
+- challenge types and modes;
+- proxy, cookie, cancellation, feedback, and callback support;
+- authentication mode;
+- configured concurrency;
+- current health;
+- current balance or quota visibility;
+- contract confidence: =verified=, =experimental=, or =disabled=.
+
+The broker routes only to =verified= providers unless the target policy explicitly permits an =experimental= provider.
+
+Automatic routing considers:
+
+- operator allowlist and preference;
+- capability match;
+- health and open circuit breakers[fn:circuit-breaker];
+- available concurrency;
+- remaining provider and local budget;
+- recent downstream acceptance rate;
+- recent latency;
+- estimated cost;
+- disclosure policy.
+
+Cost never overrides authorization or disclosure policy.
+
+* Cancellation
+
+The requester may send =captchaSolveCancel= with =requestId=. The run actor:
+
+1. marks the local run as cancellation requested;
+2. asks the provider adapter to cancel when supported;
+3. deletes any unconsumed token;
+4. emits =captchaSolveCancelled= or =captchaCancellationUnsupported=;
+5. records whether the provider may still complete or charge the job.
+
+Server shutdown drains or cancels active runs within a configured deadline. Provider actors must not be abandoned silently.
+
+* Failure Taxonomy
+
+Normalized failure classes are:
+
+- =policyDenied=;
+- =invalidRequest=;
+- =unsupportedChallenge=;
+- =providerDisabled=;
+- =providerAuthenticationFailed=;
+- =providerInsufficientBalance=;
+- =providerConcurrencyLimited=;
+- =providerRejectedRequest=;
+- =providerUnsolvable=;
+- =providerTimeout=;
+- =providerUnavailable=;
+- =ambiguousSubmission=;
+- =deadlineExceeded=;
+- =cancelled=;
+- =internalError=.
+
+Each failure includes =retryable=, =chargePossible=, =providerCode=, and a redacted message.
+
+* Actor Manifest Requirements
+
+The server actor manifest declares:
+
+- =actorId=: =star.actor.captchaBroker=;
+- =roles=: =captchaBroker= and =authorizedExternalServiceRouter=;
+- =accepts=: solve, cancel, provider registration, provider health, and outcome-report messages;
+- =produces=: accepted, rejected, state, success, failure, cancellation, budget, and telemetry messages;
+- =capabilities=: =captcha:route=, =secret:lease=, =budget:reserve=, and =policy:evaluate=;
+- no provider network hosts or provider credentials.
+
+Each provider actor manifest declares its own allowed network host and required secret reference. Actor Manifest must not contain =documentIds=.[fn:document-ids]
+
+* Testing
+
+The server implementation is tested first with a fake provider actor.
+
+Required tests:
+
+- authorization allow and deny cases;
+- exact-host and suffix-safe domain matching;
+- camelCase schema validation;
+- duplicate RabbitMQ delivery;
+- ambiguous provider submission;
+- provider health and circuit breaker routing;
+- budget exhaustion;
+- fallback disabled and enabled cases;
+- cancellation supported and unsupported cases;
+- token one-read and expiration behavior;
+- complete log, event, and persistence redaction;
+- shutdown with active runs;
+- provider registration downgrade from verified to disabled.
+
+No continuous-integration test calls a paid provider.
+
+* Implementation Placement
+
+=starintel-server=:
+
+- normalized message schemas;
+- broker and run actors;
+- policy registry;
+- provider registry;
+- deduplication journal;
+- budget integration;
+- ephemeral secret-store interface;
+- normalized events and telemetry.
+
+=starintel-pro-actors=:
+
+- NoneCap adapter;
+- NopeCHA adapter;
+- experimental 2Captcha adapter;
+- provider-specific mock fixtures;
+- opt-in live canary commands.
+
+* Related Nodes
+
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-manifest-001-document-contracts][STAR-MANIFEST-001 Actor and Dataset Manifest Document Contracts]]
+- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 hCaptcha Provider Selection]]
+
+* Footnotes and Glossary
+
+[fn:star-server] StarIntel Server: The Common Lisp service that owns control, routing, persistence, search, authorization, and core actor hosting.
+
+[fn:pro-actors] StarIntel Pro Actors: Separately deployed optional actors that integrate paid providers or specialized collectors without making the server core vendor-specific.
+
+[fn:supervisor] Supervisor: An actor responsible for starting, monitoring, stopping, and restarting child actors according to a declared failure policy.
+
+[fn:actor-manifest] Actor Manifest: A camelCase declarative document describing an actor's identity, accepted and produced messages, implementation, capabilities, permissions, limits, and lifecycle.
+
+[fn:url] Uniform resource locator: A structured web address containing a scheme, host, path, and optional query and fragment components.
+
+[fn:idempotency] Idempotency: The guarantee that repeating one logical operation does not create duplicate external work or charges.
+
+[fn:rabbitmq] RabbitMQ: A message broker used by StarIntel to deliver queued messages between producers and consumers.
+
+[fn:circuit-breaker] Circuit breaker: A failure-control mechanism that temporarily stops sending work to an unhealthy dependency and later probes whether it has recovered.
+
+[fn:document-ids] documentIds: A Dataset Manifest field listing dataset members; it is prohibited in Actor Manifest because actors declare behavior rather than concrete document membership.

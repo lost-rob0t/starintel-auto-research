@@ -1,0 +1,184 @@
+:PROPERTIES:
+:ID:       star-pro-captcha-001-nonecap-adapter
+:END:
+#+title: STAR-PRO-CAPTCHA-001 NoneCap Adapter
+#+description: Provider-specific StarIntel Pro Actor design for authorized hCaptcha solving through the NoneCap v1 API.
+#+status: REVIEW
+#+filetags: :starintel:design:starintel-pro-actors:captcha:hcaptcha:nonecap:adapter:
+
+* Decision
+
+Implement =NoneCapAdapterActor= in =starintel-pro-actors= as the reference implementation of the provider protocol defined by [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]].
+
+The actor accepts only normalized broker messages. It has no public solve route and does not independently decide whether a target is authorized.
+
+* Provider Contract
+
+The adapter maps broker operations to NoneCap:
+
+| Broker operation | NoneCap operation |
+|------------------+-------------------|
+| =submitSolve= | =POST /v1/solves?wait=N= |
+| =pollSolve= | =GET /v1/solves/{id}?wait=N= |
+| =cancelSolve= | =DELETE /v1/solves/{id}= |
+| =getBalanceOrQuota= | =GET /v1/me= |
+| =reportOutcome= | per-solve feedback endpoint |
+| =healthSnapshot= | lightweight account or configured health probe plus local circuit state |
+
+The default base uniform-resource-locator[fn:url] is =https://api.nonecap.com=. It is configuration, not request input.
+
+* Actor State
+
+The actor owns:
+
+- provider credential reference;
+- configured base URL;
+- configured maximum concurrency;
+- active provider jobs keyed by broker =attemptId=;
+- provider solve identifiers;
+- cancellation state;
+- local rate and concurrency counters;
+- circuit-breaker state;
+- recent latency and error measurements;
+- no durable solve tokens.
+
+* Submission Mapping
+
+| Broker field | NoneCap field |
+|--------------+---------------|
+| =challenge.mode= =standard= or =invisible= | =type: hcaptcha= |
+| =challenge.mode= =enterprise= | =type: hcaptcha_enterprise= |
+| =challenge.siteKey= | =sitekey= |
+| =challenge.pageUrl= | =url= |
+| dereferenced =rqdataRef= | =rqdata= |
+| =challenge.userAgent= | =user_agent= |
+| dereferenced proxy reference | =proxy= object |
+
+The provider application-programming-interface[fn:api] key is sent only as a bearer authorization header. The adapter must never place it in a URL, request body fixture, actor event, or exception string.
+
+Use create long polling with a bounded =wait= selected from the remaining broker deadline. If the provider returns HTTP 202, record the solve identifier and continue through retrieve long polling.
+
+* State Mapping
+
+| NoneCap state | Normalized state |
+|---------------+------------------|
+| =pending= | =providerPending= |
+| =solving= | =providerPending= |
+| =solved= | =succeeded= |
+| =failed= | =failed= |
+| =cancelled= | =cancelled= |
+| =expired= | =failed= with =providerTimeout= or =providerUnsolvable= according to provider error |
+
+When =solved=, write the returned token directly into the broker-owned ephemeral secret store[fn:ephemeral-secret-store]. Return only =tokenRef=.
+
+* Error Mapping
+
+| Provider response | Normalized failure |
+|-------------------+--------------------|
+| 400 =invalid_request= | =invalidRequest= or =providerRejectedRequest= |
+| 401 =unauthorized= | =providerAuthenticationFailed=; open circuit |
+| 402 =insufficient_credits= | =providerInsufficientBalance=; open circuit |
+| 403 =account_locked= | =providerDisabled=; open circuit |
+| 404 unknown solve | =providerRejectedRequest= unless local state proves retention expiry |
+| 409 cancel conflict | return terminal state after retrieval |
+| 422 validation error | =providerRejectedRequest=; not retryable |
+| 429 concurrency limit | =providerConcurrencyLimited=; retry after local queue delay |
+| 500-series failure | =providerUnavailable=; bounded retry if deadline permits |
+
+Unknown error codes are preserved only as redacted =providerCode= values and map to =providerUnavailable= or =providerRejectedRequest= according to HTTP class.
+
+* Idempotency
+
+NoneCap does not document a create idempotency key.[fn:idempotency] Therefore:
+
+- one actor-owned attempt journal entry is reserved before submission;
+- the provider solve identifier is recorded immediately when received;
+- duplicate =captchaProviderSubmit= messages attach to the existing attempt;
+- an ambiguous connection failure before a solve identifier places the attempt in =ambiguousSubmission=;
+- the adapter never creates a replacement job automatically from =ambiguousSubmission=.
+
+* Cancellation and Shutdown
+
+On cancellation, call =DELETE /v1/solves/{id}= for =pending= or =solving= jobs. A conflict means the job is already terminal, so retrieve it once and report the actual final state.
+
+During graceful shutdown:
+
+1. stop accepting new submissions;
+2. cancel active jobs when policy allows;
+3. delete unconsumed token leases;
+4. flush redacted terminal metadata;
+5. terminate before the server shutdown deadline.
+
+* Actor Manifest Sketch
+
+#+begin_src json
+{
+  "actorId": "star.pro.captcha.nonecap",
+  "label": "NoneCap hCaptcha Adapter",
+  "actorVersion": "0.1.0",
+  "protocolVersion": "star.captcha.provider/1",
+  "roles": ["captchaProviderAdapter"],
+  "accepts": [
+    "captchaProviderSubmit",
+    "captchaProviderPoll",
+    "captchaProviderCancel",
+    "captchaProviderBalanceRequest",
+    "captchaProviderOutcomeReport"
+  ],
+  "produces": [
+    "captchaProviderAccepted",
+    "captchaProviderState",
+    "captchaProviderSucceeded",
+    "captchaProviderFailed",
+    "captchaProviderHealth"
+  ],
+  "capabilities": [
+    "captcha.hcaptcha.standard",
+    "captcha.hcaptcha.invisible",
+    "captcha.hcaptcha.enterprise",
+    "captcha.provider.cancel",
+    "captcha.provider.feedback",
+    "captcha.provider.balance"
+  ],
+  "implementation": {
+    "package": "starintel-pro-actors",
+    "entrypoint": "STARINTEL-PRO-ACTORS.CAPTCHA.NONECAP:START"
+  },
+  "permissions": {
+    "network": ["https://api.nonecap.com"],
+    "secrets": ["provider:nonecap", "ephemeral:captcha", "ephemeral:proxy"]
+  },
+  "configuration": {
+    "baseUrl": "https://api.nonecap.com",
+    "credentialRef": "secret://runtime/provider/nonecap/default",
+    "maxConcurrency": 5,
+    "defaultWaitSeconds": 30
+  }
+}
+#+end_src
+
+* Testing
+
+- Mock every documented HTTP status and solve state.
+- Verify long-poll deadline calculation.
+- Verify standard, invisible, and enterprise field mapping.
+- Verify exact redaction of bearer key, proxy credentials, token, and =rqdata=.
+- Verify duplicate submissions and ambiguous submission handling.
+- Verify cancellation races.
+- Verify unknown additive response fields are ignored safely.
+- Add an opt-in live canary against an operator-owned test page with a strict one-solve budget.
+
+* Related Nodes
+
+- [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001 NoneCap hCaptcha Provider]]
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+
+* Footnotes and Glossary
+
+[fn:url] Uniform resource locator: A structured network address used to identify the provider endpoint.
+
+[fn:api] Application programming interface: The provider's documented network operations and structured request and response formats.
+
+[fn:ephemeral-secret-store] Ephemeral secret store: A protected short-lived store that returns opaque references for sensitive values such as solve tokens.
+
+[fn:idempotency] Idempotency: The guarantee that repeating the same logical request does not create an additional provider job or charge.

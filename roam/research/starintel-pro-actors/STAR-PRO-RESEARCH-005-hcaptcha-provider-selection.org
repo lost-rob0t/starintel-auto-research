@@ -1,0 +1,106 @@
+:PROPERTIES:
+:ID:       star-pro-research-005-hcaptcha-provider-selection
+:END:
+#+title: STAR-PRO-RESEARCH-005 hCaptcha Provider Selection
+#+description: Comparative provider selection for the StarIntel hCaptcha broker, including capability confidence, operational fit, cost model, and implementation order.
+#+status: REVIEW
+#+filetags: :starintel:research:starintel-pro-actors:captcha:hcaptcha:provider-selection:
+
+* Question
+
+Which provider adapters should the StarIntel CAPTCHA broker support first, and which provider should be the reference implementation?
+
+* Evaluation Criteria
+
+The comparison uses these criteria:
+
+- current authoritative hCaptcha support;
+- enterprise =rqdata= support;
+- cancellation and result-delivery model;
+- authentication and secret exposure;
+- concurrency and cost model;
+- structured errors and observability[fn:observability];
+- contract stability;
+- testability without uncontrolled spending;
+- compatibility with broker authorization and ephemeral token delivery.
+
+* Provider Matrix
+
+| Provider | hCaptcha confidence | Enterprise | Cancellation | Billing model | Adapter state |
+|----------+---------------------+------------+--------------+---------------+---------------|
+| NoneCap | High | Documented | Documented | successful challenge rounds | Reference |
+| NopeCHA | High | Documented | Not documented | subscription credits refreshed every 23 hours | Secondary |
+| 2Captcha | Medium-low | Unconfirmed in current docs | Not documented | per task or result cost | Experimental and disabled |
+| CapSolver | None in current docs | Not applicable | Not applicable | Not applicable | Rejected for hCaptcha |
+| Anti-Captcha | None in current docs | Not applicable | Not applicable | Not applicable | Rejected for hCaptcha |
+| CapMonster Cloud | None in current docs | Not applicable | Not applicable | Not applicable | Rejected for hCaptcha |
+
+* Decision
+
+Use NoneCap as the reference adapter because its public contract is explicitly hCaptcha-focused, includes enterprise input, long polling, cancellation, terminal states, timing metadata, and structured credit reporting.
+
+Implement NopeCHA second because it provides explicit regular and enterprise hCaptcha support but requires more local policy around subscription quotas, key-in-query retrieval, absent cancellation, and inconsistent credit documentation.
+
+Create a 2Captcha adapter design now so the provider-neutral boundary is tested against a materially different API shape. Keep its hCaptcha capability disabled until a live contract probe or provider confirmation resolves the current documentation gap.
+
+Do not create adapters for CapSolver, Anti-Captcha, or CapMonster Cloud in this pass.
+
+* Routing Policy
+
+Provider selection is not an unrestricted cheapest-provider race. The broker applies this order:
+
+1. Reject requests that fail authorization, target policy, budget, or secret requirements.
+2. Honor an operator-pinned provider when that provider is healthy and advertises the requested capability.
+3. Otherwise select from policy-approved providers by capability, health, remaining budget, concurrency, and recent acceptance rate.
+4. Automatic fallback requires explicit policy because each fallback may disclose challenge metadata to another third party and may incur another charge.
+5. Never send the same unresolved challenge to multiple providers concurrently unless the operator explicitly approves speculative execution and its cost and disclosure consequences.
+
+* Common Contract Required From Every Adapter
+
+Each adapter must implement:
+
+- =describe-capabilities=;
+- =submit-solve=;
+- =poll-solve=;
+- =cancel-solve=, returning =unsupported= where the provider lacks cancellation;
+- =get-balance-or-quota=;
+- =report-outcome=, returning =unsupported= where unavailable;
+- =health-snapshot=;
+- =normalize-error=.
+
+The adapter returns no raw token through durable messages. It writes the token into the broker-owned ephemeral secret store[fn:ephemeral-secret-store] and returns only a short-lived secret reference.
+
+* Acceptance Metrics
+
+A provider remains eligible only while it meets configured thresholds for:
+
+- successful token delivery;
+- downstream acceptance rate on operator-owned systems;
+- p50 and p95 latency[fn:percentile];
+- provider error rate;
+- ambiguous-charge rate;
+- cancellation success where supported;
+- cost per accepted token;
+- secret-redaction conformance.
+
+Metrics must be segmented by provider, challenge mode, target policy, and proxy mode without storing target secrets.
+
+* Sources
+
+- [[id:star-pro-research-001-nonecap-hcaptcha-provider][NoneCap provider research]].
+- [[id:star-pro-research-002-nopecha-hcaptcha-provider][NopeCHA provider research]].
+- [[id:star-pro-research-003-2captcha-hcaptcha-provider][2Captcha provider research]].
+- [[id:star-pro-research-004-hcaptcha-provider-gap-audit][Provider gap audit]].
+
+* Related Nodes
+
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Provider Router]]
+
+* Footnotes and Glossary
+
+[fn:observability] Observability: The ability to understand a running system from structured logs, metrics, traces, health states, and recorded outcomes.
+
+[fn:ephemeral-secret-store] Ephemeral secret store: A protected temporary store that keeps sensitive values for a short lifetime and returns opaque references instead of exposing those values in ordinary messages.
+
+[fn:percentile] Percentile: A latency boundary below which a stated percentage of observations fall; p95 means ninety-five percent of observed requests completed at or below that duration.

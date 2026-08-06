@@ -145,14 +145,11 @@ jobs:
           python3 scripts/check-pages-links.py _site
           grep -Fxq 'auto-research.starintel.actor' _site/CNAME
           test -s _site/deployment.json
-          git ls-files --error-unmatch _site >/dev/null 2>&1 && {
-            echo "::error::_site must not be tracked"
+          if git ls-files '_site/**' '.cache/**' | grep -q .; then
+            echo "::error::Generated _site or .cache output must not be tracked"
+            git ls-files '_site/**' '.cache/**'
             exit 1
-          } || true
-          git ls-files --error-unmatch .cache >/dev/null 2>&1 && {
-            echo "::error::.cache must not be tracked"
-            exit 1
-          } || true
+          fi
 
       - name: Verify CAPTCHA publication artifacts
         shell: bash
@@ -162,7 +159,7 @@ jobs:
             notes/indexes/starintel-pro-actors/STAR-PRO-INDEX-001-captcha-service-actors.html \
             notes/design/star-server/STAR-CAPTCHA-000-broker-router.html \
             notes/design/star-server/STAR-CAPTCHA-001-detection-resolution-orchestrator.html \
-            notes/research/starintel-pro-actors/STAR-PRO-RESEARCH-006-generalized-captcha-capability-taxonomy.html
+            notes/research/starintel-pro-actors/STAR-PRO-RESEARCH-006-captcha-challenge-provider-landscape.html
           do
             test -s "_site/$page" || {
               echo "::error file=$page::Expected published CAPTCHA page is missing"

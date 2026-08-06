@@ -1,0 +1,611 @@
+:PROPERTIES:
+:ID:       star-captcha-001-detection-resolution-orchestrator
+:END:
+#+title: STAR-CAPTCHA-001 CAPTCHA Detection and Resolution Orchestrator
+#+description: StarIntel actor design for bounded source observations, versioned challenge detection, authorized solve orchestration, provider-neutral source-runtime application, and downstream verification.
+#+status: REVIEW
+#+filetags: :starintel:design:star-server:captcha:detection:orchestration:actors:uml:
+
+* Decision
+
+Implement =CaptchaDetectActor= as the source-facing orchestration actor for the CAPTCHA subsystem.[fn:actor] It accepts bounded observations from a source actor, uses a versioned detector registry, requests missing evidence through that same source actor, retains positive and negative evidence, selects only the challenge blocking the current authorized source action, submits one normalized solve request, receives an opaque result reference, and returns provider-neutral application instructions.
+
+The source actor retains ownership of its browser, Hypertext Transfer Protocol session, mobile runtime, cookies, network identity, and target-specific control flow.[fn:source-actor] It applies the result inside its own runtime, returns post-application evidence, and receives a terminal completed or failed message.
+
+Provider completion is not target acceptance. The detector verifies one of =accepted=, =rejected=, =expired=, =replaced=, or =inconclusive= and reports that outcome to the broker.
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Detection contract | Collection/runtime maintainer | PENDING | Snapshot schemas, positive and negative fixtures, collision cases, and bounded evidence requests | Detector registry requirements below |
+| Source-runtime boundary | Actor-service maintainer | PENDING | Local and RabbitMQ delivery, timeout, crash, application, and verification tests | Current-interface example below |
+| Architecture | StarIntel server maintainer | PENDING | Detector, broker, registry, source, and secret-reference boundaries reviewed together | [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]] |
+| Security | Security reviewer | PENDING | Authorization, purpose, disclosure, session isolation, redaction, and observation-scope review | Security invariants below |
+| Operations | Operator | PENDING | Deadlines, retry limits, cancellation, monitoring, and manual-review policy | Lifecycle and test requirements below |
+| Implementation | Repository maintainer | NOT STARTED | Passing Common Lisp tests, fixtures, complete-site generation, and publication checks | |
+
+No state in this table implies approval.
+
+* Input Contract
+
+The primary request is =captchaInspectAndResolve=.
+
+#+begin_src json
+{
+  "messageType": "captchaInspectAndResolve",
+  "requestId": "01KZ...",
+  "sourceActorName": "captcha-aware-source",
+  "sourceSessionRef": "session://source/01KZ...",
+  "blockedAction": {
+    "kind": "submitLogin",
+    "actionRef": "source-action://01KZ..."
+  },
+  "observation": {
+    "pageUrl": "https://owned.example/login",
+    "httpStatus": 200,
+    "responseHeadersRef": "artifact://ephemeral/headers/01KZ...",
+    "domSnapshotRef": "artifact://ephemeral/dom/01KZ...",
+    "networkTraceRef": "artifact://ephemeral/network/01KZ...",
+    "screenshotRef": "artifact://ephemeral/screenshot/01KZ...",
+    "accessibilityTreeRef": null,
+    "platformHints": []
+  },
+  "resolutionPolicy": {
+    "mode": "detectAndSolve",
+    "minimumDetectionConfidence": 0.90,
+    "allowMultipleCandidates": false,
+    "maxDetectionPasses": 2,
+    "maxSolveAttempts": 1,
+    "verifyAfterApply": true
+  },
+  "authorization": {
+    "principalId": "actor:authorized-collector",
+    "capability": "captcha:solve",
+    "purpose": "ownedSiteQualityAssurance",
+    "targetPolicyId": "captcha-policy:owned-example"
+  },
+  "deadline": "2026-08-06T18:00:00Z"
+}
+#+end_src
+
+Supported modes are:
+
+- =detectOnly=: classify and return evidence without contacting the broker;
+- =detectAndSolve=: classify, solve, apply, and verify;
+- =resumeExistingRun=: continue a previously journaled run using its =requestId= and source context.
+
+The detector rejects a missing, non-string, or unsupported =messageType=. It never lets a missing type reach =string==.
+
+* Bounded Observations
+
+The detector may consume references to:
+
+- current uniform resource locator, status, and content type;
+- selected response headers;
+- bounded Document Object Model snapshot;[fn:dom]
+- script source uniform resource locators;
+- selected element attributes;
+- browser console events;
+- bounded network-request metadata;
+- screenshot;
+- accessibility tree;
+- source actor platform hints;
+- target-policy and authorization records.
+
+Raw pages, authenticated sessions, cookies, proxy credentials, authorization headers, and browser objects remain in the source runtime or ephemeral secret store.
+
+* Detector Registry Contract
+
+Every detector declares:
+
+- stable detector ID;
+- detector version;
+- issuer;
+- family;
+- variant;
+- integration version;
+- required observations;
+- positive signatures;
+- negative signatures;
+- extracted normalized fields;
+- confidence computation;
+- collision cases;
+- fixture set;
+- retrieval date;
+- state: =verified=, =experimental=, or =disabled=.
+
+The registry is open-world. Initial seeds cover Google reCAPTCHA v2, v3, and Enterprise; hCaptcha standard, invisible, passive, and Enterprise; Cloudflare Turnstile and Challenge Platform; Arkose Labs FunCaptcha; GeeTest v3 and v4; Amazon Web Services Web Application Firewall CAPTCHA and Challenge; DataDome; Friendly Captcha; ALTCHA; MTCaptcha; Prosopo Procaptcha; Tencent; Yandex SmartCaptcha; text, arithmetic, question, image, coordinate, bounding-box, draw-around, audio, slider, rotation, drag-and-drop, proof-of-work, behavioral, device, mobile-native, custom, and unknown challenges.
+
+Unknown remains unknown until sufficient evidence exists.
+
+* Candidate Evidence
+
+A detection pass returns every candidate, including discarded candidates and reasons.
+
+#+begin_src json
+{
+  "messageType": "captchaDetected",
+  "requestId": "01KZ...",
+  "detectionId": "captcha-detection:01KZ...",
+  "selectedCandidateId": "candidate-1",
+  "candidates": [
+    {
+      "candidateId": "candidate-1",
+      "detectorId": "google-recaptcha-v2-checkbox",
+      "detectorVersion": "2026-08-06.1",
+      "issuer": "googleRecaptcha",
+      "challengeFamily": "token",
+      "challengeVariant": "checkbox",
+      "integrationVersion": "v2",
+      "confidence": 0.98,
+      "positiveEvidenceRefs": [
+        "artifact://ephemeral/dom/01KZ...#element-42",
+        "artifact://ephemeral/network/01KZ...#request-7"
+      ],
+      "negativeEvidenceRefs": [],
+      "missingContext": [],
+      "state": "selected",
+      "discardReason": null
+    },
+    {
+      "candidateId": "candidate-2",
+      "detectorId": "generic-image-grid",
+      "detectorVersion": "2026-08-06.1",
+      "issuer": "unknown",
+      "challengeFamily": "imageSelect",
+      "challengeVariant": "grid",
+      "integrationVersion": null,
+      "confidence": 0.42,
+      "positiveEvidenceRefs": ["artifact://ephemeral/screenshot/01KZ..."],
+      "negativeEvidenceRefs": ["artifact://ephemeral/dom/01KZ...#recaptcha-marker"],
+      "missingContext": [],
+      "state": "discarded",
+      "discardReason": "weakerCollisionWithDirectIssuerEvidence"
+    }
+  ]
+}
+#+end_src
+
+Selection is deterministic:
+
+1. discard disabled detectors;
+2. retain all positive and negative evidence;
+3. discard candidates below the configured threshold;
+4. group compatible evidence into one candidate;
+5. reject contradictory issuer or integration-version evidence;
+6. identify which candidate blocks the current source action;
+7. never solve every visible widget;
+8. if multiple blocking candidates remain and policy forbids them, return =multipleChallengesDetected=;
+9. otherwise rank by direct signature strength, action binding, active visibility, network activity, and document order;
+10. retain every discarded candidate and reason.
+
+* Missing-Evidence Request
+
+#+begin_src json
+{
+  "messageType": "captchaInspectionSnapshotRequest",
+  "requestId": "01KZ...",
+  "requestedObservationKinds": [
+    "selectedDomAttributes",
+    "recentNetworkMetadata",
+    "accessibilityTree"
+  ],
+  "selectors": ["activeChallengeContainer"],
+  "maxBytes": 262144,
+  "deadline": "2026-08-06T17:59:30Z"
+}
+#+end_src
+
+The source actor may deny unsupported or overbroad observation requests. The detector then records the denial and returns =detectionInsufficient= instead of widening access.
+
+* Detector Sequence
+
+#+begin_src plantuml
+@startuml
+participant "SourceActor" as Source
+participant "CaptchaDetectActor" as Detect
+participant "DetectorRegistryActor" as Registry
+
+Source -> Detect : captchaInspectAndResolve
+Detect -> Registry : classify(observation refs, blocked action)
+Registry --> Detect : candidates, evidence, missing observations
+alt missing evidence within pass limit
+  Detect -> Source : captchaInspectionSnapshotRequest
+  Source --> Detect : captchaInspectionSnapshot or captchaObservationDenied
+  Detect -> Registry : classify(updated evidence)
+else sufficient evidence
+  Detect -> Detect : select one blocking candidate
+end
+Detect --> Source : captchaDetected or terminal detection failure
+@enduml
+#+end_src
+
+* Detect, Solve, Apply, Verify Sequence
+
+#+begin_src plantuml
+@startuml
+participant "SourceActor" as Source
+participant "CaptchaDetectActor" as Detect
+participant "CaptchaBrokerActor" as Broker
+participant "SolverActor" as Solver
+participant "EphemeralSecretStoreActor" as Secrets
+
+Source -> Detect : captchaInspectAndResolve
+Detect -> Broker : captchaSolveRequest(normalized challenge)
+Broker -> Solver : exact capability request
+Solver -> Secrets : store sensitive typed result
+Solver --> Broker : captchaProviderSucceeded(resultRef)
+Broker --> Detect : captchaSolveSucceeded(resultRef)
+Detect -> Source : captchaResolutionReady(provider-neutral instructions)
+Source -> Secrets : one-read result inside owned runtime
+Source -> Source : apply to owned session and resume blocked action
+Source --> Detect : captchaResolutionApplied(post-apply evidence ref)
+Detect -> Detect : verify accepted/rejected/expired/replaced/inconclusive
+Detect -> Broker : captchaOutcomeReport
+Detect --> Source : captchaResolutionCompleted or captchaResolutionFailed
+@enduml
+#+end_src
+
+* Local and RabbitMQ Paths
+
+#+begin_src plantuml
+@startuml
+start
+:Resolve destination with get-dest-actor;
+if (Local actor registered?) then (yes)
+  :tell local destination;
+else (no)
+  :Publish typed actor message through established RabbitMQ routing;
+  :Require requestId idempotency and at-least-once duplicate handling;
+endif
+:Receive normalized reply through the same logical run;
+stop
+@enduml
+#+end_src
+
+The design does not invent a second actor registry or transport. Local examples use =get-dest-actor= and =tell=. Cross-process implementation must use the current StarIntel RabbitMQ actor/message path and preserve the same message types and idempotency key.
+
+* Detector State Machine
+
+#+begin_src plantuml
+@startuml
+[*] --> observing
+observing --> requestingEvidence : required observation missing
+requestingEvidence --> observing : snapshot received
+requestingEvidence --> insufficient : denied or pass limit reached
+observing --> detected : one blocking candidate selected
+observing --> ambiguous : conflicting or multiple blocking candidates
+detected --> completed : detectOnly
+detected --> solveRequested : detectAndSolve
+solveRequested --> solvePending
+solvePending --> applyReady : opaque resultRef received
+solvePending --> failed : broker terminal failure
+applyReady --> applying : source acknowledges application
+applyReady --> expired : result lease expires
+applying --> verifying : post-apply evidence received
+verifying --> completed : accepted
+verifying --> rejected : rejected
+verifying --> expired : expired
+verifying --> replaced : challenge replaced
+verifying --> inconclusive : insufficient verification evidence
+rejected --> observing : bounded redetection with new evidence
+insufficient --> [*]
+ambiguous --> [*]
+failed --> [*]
+expired --> [*]
+replaced --> [*]
+inconclusive --> [*]
+completed --> [*]
+@enduml
+#+end_src
+
+* Provider-Neutral Apply Instructions
+
+#+begin_src json
+{
+  "messageType": "captchaResolutionReady",
+  "requestId": "01KZ...",
+  "detectionId": "captcha-detection:01KZ...",
+  "resultRef": "secret://ephemeral/captcha/result/01KZ...",
+  "resultKind": "token",
+  "apply": {
+    "strategy": "widgetResponse",
+    "responseField": "g-recaptcha-response",
+    "callbackRef": null,
+    "cookieName": null,
+    "requiresSameBrowserSession": true,
+    "requiresSameNetworkIdentity": false
+  },
+  "expiresAt": "2026-08-06T18:01:45Z"
+}
+#+end_src
+
+Provider-specific task names and response fields remain inside adapters. The detector derives application instructions from the normalized challenge and result contracts.
+
+* Current-Interface Common Lisp Example
+
+The following example uses only the current =starintel-server= actor-service primitives: =define-actor=, =register-actor=, =get-dest-actor=, =tell=, =log-actor-event=, and the current =star:*actors-start-hook*= registration pattern.[fn:define-actor]
+
+It deliberately models source-runtime application as an injected ordinary function, not as an invented StarIntel API. A concrete browser, HTTP, or mobile source actor supplies that function and returns a bounded post-application evidence reference.
+
+#+begin_src lisp
+(in-package :star.actors)
+
+(defparameter *captcha-source-name* "captcha-aware-source")
+(defparameter *captcha-detect-name* "captcha-detect")
+(defparameter *captcha-broker-name* "captcha-broker")
+
+(defvar *captcha-detect-runs* (make-hash-table :test #'equal))
+(defvar *captcha-source-apply-function* nil)
+
+(defun object-value (object key)
+  (and (listp object)
+       (jsown:val-safe object key)))
+
+(defun valid-message-type (message)
+  (let ((value (object-value message "messageType")))
+    (and (stringp value)
+         (plusp (length value))
+         value)))
+
+(defun actor-destination (name)
+  (or (get-dest-actor name)
+      (error "Required actor is not registered: ~a" name)))
+
+(defun report-invalid-message (actor-name message)
+  (log-actor-event
+   actor-name
+   :event-type "invalidMessage"
+   :details "Missing, non-string, or unsupported messageType"
+   :source-id (or (object-value message "requestId") "unknown")))
+
+(defun send-to (actor-name message)
+  (tell (actor-destination actor-name) message))
+
+(defun make-inspection-request (blocked-page)
+  (jsown:new-js
+   ("messageType" "captchaInspectAndResolve")
+   ("requestId" (jsown:val blocked-page "requestId"))
+   ("sourceActorName" *captcha-source-name*)
+   ("sourceSessionRef" (jsown:val blocked-page "sourceSessionRef"))
+   ("blockedAction" (jsown:val blocked-page "blockedAction"))
+   ("observation" (jsown:val blocked-page "observation"))
+   ("resolutionPolicy"
+    (jsown:new-js
+     ("mode" "detectAndSolve")
+     ("minimumDetectionConfidence" 0.9)
+     ("allowMultipleCandidates" nil)
+     ("maxDetectionPasses" 2)
+     ("maxSolveAttempts" 1)
+     ("verifyAfterApply" t)))
+   ("authorization" (jsown:val blocked-page "authorization"))
+   ("deadline" (jsown:val blocked-page "deadline"))))
+
+(defun source-snapshot-reply (request)
+  (jsown:new-js
+   ("messageType" "captchaInspectionSnapshot")
+   ("requestId" (jsown:val request "requestId"))
+   ("sourceActorName" *captcha-source-name*)
+   ("observationRefs" (list))))
+
+(defun source-apply-and-report (message)
+  (unless (functionp *captcha-source-apply-function*)
+    (error "Concrete source runtime did not configure an apply function"))
+  (let ((evidence-ref (funcall *captcha-source-apply-function* message)))
+    (unless (and (stringp evidence-ref) (plusp (length evidence-ref)))
+      (error "Source runtime must return a post-application evidence reference"))
+    (send-to
+     *captcha-detect-name*
+     (jsown:new-js
+      ("messageType" "captchaResolutionApplied")
+      ("requestId" (jsown:val message "requestId"))
+      ("detectionId" (jsown:val message "detectionId"))
+      ("sourceActorName" *captcha-source-name*)
+      ("applicationState" "applied")
+      ("postApplyObservationRef" evidence-ref)))))
+
+(defun receive-captcha-source (message)
+  (let ((type (valid-message-type message)))
+    (cond
+      ((null type)
+       (report-invalid-message *captcha-source-name* message))
+      ((string= type "sourcePageBlocked")
+       (send-to *captcha-detect-name* (make-inspection-request message)))
+      ((string= type "captchaInspectionSnapshotRequest")
+       (send-to *captcha-detect-name* (source-snapshot-reply message)))
+      ((string= type "captchaResolutionReady")
+       (handler-case
+           (source-apply-and-report message)
+         (error (condition)
+           (send-to
+            *captcha-detect-name*
+            (jsown:new-js
+             ("messageType" "captchaResolutionApplicationFailed")
+             ("requestId" (object-value message "requestId"))
+             ("error" (princ-to-string condition)))))))
+      ((member type '("captchaResolutionCompleted"
+                      "captchaResolutionFailed")
+               :test #'string=)
+       (log-actor-event
+        *captcha-source-name*
+        :event-type type
+        :details "CAPTCHA orchestration reached a terminal state"
+        :source-id (or (object-value message "requestId") "unknown")))
+      (t
+       (report-invalid-message *captcha-source-name* message)))))
+
+(defun make-snapshot-request (message)
+  (jsown:new-js
+   ("messageType" "captchaInspectionSnapshotRequest")
+   ("requestId" (jsown:val message "requestId"))
+   ("requestedObservationKinds"
+    (list "selectedDomAttributes" "recentNetworkMetadata"))
+   ("maxBytes" 262144)
+   ("deadline" (jsown:val message "deadline"))))
+
+(defun make-normalized-solve-request (snapshot run)
+  (declare (ignore snapshot))
+  (jsown:new-js
+   ("messageType" "captchaSolveRequest")
+   ("requestId" (jsown:val run "requestId"))
+   ("challenge" (jsown:val run "detectedChallenge"))
+   ("authorization" (jsown:val run "authorization"))
+   ("deadline" (jsown:val run "deadline"))))
+
+(defun make-resolution-ready (message run)
+  (jsown:new-js
+   ("messageType" "captchaResolutionReady")
+   ("requestId" (jsown:val message "requestId"))
+   ("detectionId" (jsown:val run "detectionId"))
+   ("resultRef" (jsown:val message "resultRef"))
+   ("resultKind" (jsown:val message "resultKind"))
+   ("apply" (jsown:val message "apply"))
+   ("expiresAt" (jsown:val message "expiresAt"))))
+
+(defun terminal-source-message (type request-id &optional outcome)
+  (jsown:new-js
+   ("messageType" type)
+   ("requestId" request-id)
+   ("verificationOutcome" outcome)))
+
+(defun receive-captcha-detect (message)
+  (let* ((type (valid-message-type message))
+         (request-id (object-value message "requestId"))
+         (run (and request-id (gethash request-id *captcha-detect-runs*))))
+    (cond
+      ((null type)
+       (report-invalid-message *captcha-detect-name* message))
+      ((string= type "captchaInspectAndResolve")
+       ;; A real detector registry supplies DETECTEDCHALLENGE and DETECTIONID.
+       ;; This example stores only actor-owned redacted orchestration state.
+       (setf (gethash request-id *captcha-detect-runs*) message)
+       (send-to (jsown:val message "sourceActorName")
+                (make-snapshot-request message)))
+      ((and (string= type "captchaInspectionSnapshot") run)
+       (send-to *captcha-broker-name*
+                (make-normalized-solve-request message run)))
+      ((and (string= type "captchaSolveSucceeded") run)
+       (send-to (jsown:val run "sourceActorName")
+                (make-resolution-ready message run)))
+      ((and (string= type "captchaResolutionApplied") run)
+       (send-to
+        *captcha-broker-name*
+        (jsown:new-js
+         ("messageType" "captchaOutcomeReport")
+         ("requestId" request-id)
+         ("outcome" "inconclusive")
+         ("evidenceRef" (jsown:val message "postApplyObservationRef"))))
+       (send-to (jsown:val run "sourceActorName")
+                (terminal-source-message
+                 "captchaResolutionCompleted" request-id "inconclusive"))
+       (remhash request-id *captcha-detect-runs*))
+      ((and (member type '("captchaSolveFailed"
+                           "captchaResolutionApplicationFailed")
+                    :test #'string=)
+            run)
+       (send-to (jsown:val run "sourceActorName")
+                (terminal-source-message
+                 "captchaResolutionFailed" request-id nil))
+       (remhash request-id *captcha-detect-runs*))
+      (t
+       (report-invalid-message *captcha-detect-name* message)))))
+
+(define-actor (*captcha-aware-source* *sys*)
+  #'receive-captcha-source)
+
+(define-actor (*captcha-detect* *sys*)
+  #'receive-captcha-detect)
+
+(nhooks:add-hook
+ star:*actors-start-hook*
+ (lambda ()
+   (register-actor *captcha-source-name* *captcha-aware-source*)
+   (register-actor *captcha-detect-name* *captcha-detect*)))
+#+end_src
+
+The example intentionally reports =inconclusive= because it has no issuer-specific verifier. Production code must replace that branch with a versioned verification rule and may emit =accepted=, =rejected=, =expired=, =replaced=, or =inconclusive= only from evidence.
+
+The =define-actor= macro creates each actor start function and adds it to the current actor start hook. The explicit later hook registers the started actors in the current actor index, matching the repository's existing event-actor pattern.
+
+* Verification Contract
+
+After source application, the detector records exactly one outcome:
+
+| Outcome | Required evidence |
+|---------+-------------------|
+| =accepted= | Protected action succeeded or issuer/target returned positive acceptance evidence |
+| =rejected= | Issuer/target rejected the result or the same challenge remains with rejection evidence |
+| =expired= | Result lease or issuer result expired before acceptance |
+| =replaced= | A new challenge instance replaced the solved instance |
+| =inconclusive= | Available evidence cannot prove acceptance or rejection |
+
+Navigation alone is not acceptance when the target action can fail silently. Verification rules are versioned by issuer, integration version, source-runtime type, and blocked action.
+
+* Failure and Retry Rules
+
+Terminal failures include =invalidMessage=, =detectionInsufficient=, =observationDenied=, =multipleChallengesDetected=, =unsupportedChallenge=, =sourceActorUnavailable=, =sourceContextRequired=, =solveFailed=, =resultExpired=, =resultApplicationFailed=, =verificationFailed=, =deadlineExceeded=, and =cancelled=.
+
+Retries are bounded by =maxDetectionPasses= and =maxSolveAttempts=. A retry requires new evidence, a replaced challenge, or an explicitly retryable broker failure. The detector never loops merely because a widget remains visible.
+
+* Security Invariants
+
+- Authenticate the request before solving and preserve the broker's =captcha:solve=, target-policy, purpose, disclosure, and allowlist checks.
+- Request only bounded evidence required by the selected detector rules.
+- Preserve evidence denials rather than widening observation scope.
+- Keep result values, cookies, proxy credentials, authorization headers, page data, enterprise data, and authenticated-session material out of actor and RabbitMQ messages.
+- Use opaque references with short expiry and one-read behavior.
+- Return provider-neutral apply instructions.
+- Apply only in the source actor's own runtime.
+- Redact errors before durable event logging.
+- Delete unconsumed results on terminal failure or cancellation.
+
+* Test Matrix
+
+Required tests include:
+
+- all three modes;
+- normalized challenge families, unknown challenges, and custom challenges;
+- missing or invalid =messageType=;
+- positive and negative detector evidence;
+- missing evidence and denied observation requests;
+- multiple candidates and conflicting evidence;
+- selecting only the challenge blocking the current action;
+- exact capability and source-context requests to the broker;
+- local and RabbitMQ delivery with duplicate messages;
+- source failure before and after result readiness;
+- token, assessment, cookie, proof, text, coordinates, selection, interaction-plan, and custom typed results;
+- same-session and same-network requirements;
+- accepted, rejected, expired, replaced, and inconclusive verification;
+- one-read result behavior;
+- bounded redetection;
+- provider drift and capability-localized drift;
+- complete redaction;
+- cancellation and shutdown with active runs;
+- no paid provider in continuous integration.
+
+* Related Nodes
+
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Capability Router]].
+- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]].
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors]].
+
+* Footnotes and Glossary
+
+[fn:actor] Actor: A small independent software unit that owns its state and processes messages one at a time.
+
+[fn:source-actor] Source actor: The actor performing collection or interaction with a target and therefore owning the active browser, request, mobile, or first-party runtime.
+
+[fn:dom] Document Object Model: The browser's structured representation of page elements, attributes, and text.
+
+[fn:define-actor] =define-actor=: The current Common Lisp macro in =starintel-server/source/actors.lisp= that defines an actor variable, creates its start function with =actor-of=, and adds that start function to the actor start hook.
+
+- *Bounded observation* — A size-, field-, and purpose-limited source artifact reference requested for one detector pass.
+- *Downstream verification* — Evidence from the source runtime proving whether the target accepted, rejected, expired, or replaced the applied result.
+- *Opaque result reference* — A short-lived identifier that authorizes a bounded secret read without carrying the sensitive result in a message.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-06 | Corrected detector modes, evidence retention, candidate selection, source-runtime application, verification outcomes, diagrams, terminal messages, invalid messageType handling, and current Common Lisp actor registration example | repository audit agent | Current starintel-server source/actors.lisp and source/actor-systems/event-actor.lisp plus PR source diff |

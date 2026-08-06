@@ -2,10 +2,66 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
+
+TEXT_SUFFIXES = {
+    ".css",
+    ".html",
+    ".js",
+    ".json",
+    ".map",
+    ".svg",
+    ".txt",
+    ".xml",
+}
+PROHIBITED_DOMAIN_RE = re.compile(r"(?i)(?:https?:)?//[^\s\"'<>]*github\.io(?:[/:?#]|$)")
+
+
+@dataclass(frozen=True)
+class SecretPattern:
+    name: str
+    pattern: re.Pattern[str]
+
+
+SECRET_PATTERNS = (
+    SecretPattern(
+        "private-key-block",
+        re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
+    ),
+    SecretPattern("aws-access-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    SecretPattern(
+        "github-token",
+        re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{50,255})\b"),
+    ),
+    SecretPattern(
+        "slack-token",
+        re.compile(r"\bxox(?:b|p|a|r|s)-[A-Za-z0-9-]{20,}\b"),
+    ),
+    SecretPattern("stripe-live-secret", re.compile(r"\bsk_live_[A-Za-z0-9]{20,}\b")),
+    SecretPattern(
+        "nonecap-live-key",
+        re.compile(r"\bnc_live_[A-Za-z0-9_-]{24,}\b"),
+    ),
+    SecretPattern(
+        "embedded-basic-auth",
+        re.compile(
+            r"(?i)\bhttps?://[^\s/:@]{2,64}:[^\s/@]{8,128}@[^\s/]+"
+        ),
+    ),
+    SecretPattern(
+        "unredacted-bearer-token",
+        re.compile(
+            r"(?i)\bAuthorization\s*:\s*Bearer\s+"
+            r"(?:eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
+            r"|[A-Za-z0-9_-]{48,})\b"
+        ),
+    ),
+)
 
 
 class PageParser(HTMLParser):
@@ -59,15 +115,67 @@ def internal_target(site: Path, source: Path, reference: str) -> tuple[Path, str
 
 
 def check_json_urls(site: Path, path: Path, errors: list[str]) -> None:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        errors.append(f"{path.relative_to(site)}: invalid JSON: {error}")
+        return
     records = data.get("nodes", []) if isinstance(data, dict) else data
+    if not isinstance(records, list):
+        errors.append(f"{path.relative_to(site)}: expected a list of URL records")
+        return
     for record in records:
+        if not isinstance(record, dict):
+            continue
         url = record.get("url")
         if not url:
             continue
-        target = (site / unquote(urlsplit(url).path)).resolve()
+        target = (site / unquote(urlsplit(str(url)).path)).resolve()
         if not target.exists():
             errors.append(f"{path.relative_to(site)}: missing JSON target {url}")
+
+
+def line_number(text: str, offset: int) -> int:
+    return text.count("\n", 0, offset) + 1
+
+
+def scan_generated_text(site: Path, errors: list[str]) -> int:
+    scanned = 0
+    for path in sorted(site.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.name not in {"CNAME", "deployment.json"} and path.suffix.lower() not in TEXT_SUFFIXES:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        scanned += 1
+        relative = path.relative_to(site)
+        for match in PROHIBITED_DOMAIN_RE.finditer(text):
+            errors.append(
+                f"{relative}:{line_number(text, match.start())}: prohibited github.io publication link"
+            )
+        for secret in SECRET_PATTERNS:
+            for match in secret.pattern.finditer(text):
+                errors.append(
+                    f"{relative}:{line_number(text, match.start())}: "
+                    f"possible raw secret ({secret.name})"
+                )
+    return scanned
+
+
+def validate_cname(site: Path, errors: list[str]) -> None:
+    cname = site / "CNAME"
+    if not cname.is_file():
+        errors.append("missing generated file: CNAME")
+        return
+    value = cname.read_text(encoding="utf-8").strip()
+    if value != "auto-research.starintel.actor":
+        errors.append(
+            "CNAME: expected auto-research.starintel.actor, "
+            f"found {value!r}"
+        )
 
 
 def main() -> int:
@@ -76,10 +184,12 @@ def main() -> int:
         print(f"site directory does not exist: {site}", file=sys.stderr)
         return 2
 
-    parsed_pages = {path.resolve(): parse_html(path) for path in site.rglob("*.html")}
+    parsed_pages = {
+        path.resolve(): parse_html(path) for path in sorted(site.rglob("*.html"))
+    }
     errors: list[str] = []
 
-    for source, parser in parsed_pages.items():
+    for source, parser in list(parsed_pages.items()):
         for attribute, reference in parser.references:
             try:
                 resolved = internal_target(site, source, reference)
@@ -112,13 +222,19 @@ def main() -> int:
         else:
             check_json_urls(site, path, errors)
 
+    validate_cname(site, errors)
+    scanned_files = scan_generated_text(site, errors)
+
     if errors:
-        print("Broken Pages links:", file=sys.stderr)
-        for error in sorted(errors):
+        print("Generated Pages validation failures:", file=sys.stderr)
+        for error in sorted(set(errors)):
             print(f"- {error}", file=sys.stderr)
         return 1
 
-    print(f"Checked {len(parsed_pages)} HTML pages: all internal links resolve")
+    print(
+        f"Checked {len(parsed_pages)} HTML pages and {scanned_files} generated "
+        "text files: links, custom domain, and secret scan passed"
+    )
     return 0
 
 

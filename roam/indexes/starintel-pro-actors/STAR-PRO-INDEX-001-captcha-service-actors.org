@@ -1,68 +1,193 @@
 :PROPERTIES:
 :ID:       star-pro-index-001-captcha-service-actors
 :END:
-#+title: STAR-PRO-INDEX-001 CAPTCHA Service Actors
-#+description: Index for the StarIntel CAPTCHA broker, hCaptcha provider research, provider-adapter designs, implementation boundaries, and approval state.
+#+title: STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors
+#+description: Canonical index for StarIntel CAPTCHA challenge detection, exact-capability broker routing, source-runtime application and verification, provider research, adapter designs, operations, and implementation order.
 #+status: REVIEW
-#+filetags: :starintel:index:starintel-pro-actors:captcha:hcaptcha:providers:
+#+filetags: :starintel:index:starintel-pro-actors:captcha:detection:providers:actors:uml:
 
-* Purpose
+* Scope
 
-This index connects the StarIntel[fn:starintel] CAPTCHA[fn:captcha] broker design to the separately deployed provider adapters in =starintel-pro-actors=.[fn:pro-actors] The broker remains generic infrastructure in =starintel-server=.[fn:star-server] Paid provider integrations remain optional professional actors and are never compiled into the server core.
+This index connects the provider-neutral StarIntel[fn:starintel] CAPTCHA[fn:captcha] subsystem across research, design, implementation, provider adapters, publication, and future operational work.
 
-The subsystem is restricted to operator-owned systems, accessibility workflows, quality assurance, and explicitly authorized automation. It is not a public solve relay and must reject requests without an approved target policy.
+Core detection, authorization, exact matching, budgets, idempotency, secret references, cancellation, and downstream verification belong to =starintel-server=.[fn:star-server] External providers, local recognition engines, local browser workers, and manual-review actors belong to separately deployable =starintel-pro-actors= capabilities.[fn:pro-actors]
 
-* Architecture Decision
+The subsystem is restricted to operator-owned systems, accessibility workflows, quality assurance, and explicitly authorized automation. It exposes no public raw solve endpoint.
 
-- Broker, authorization, routing, budgets, deduplication, secret references, cancellation, and normalized events belong to =starintel-server=.
-- Provider credentials, vendor-specific request formats, polling, error translation, and billing telemetry belong to =starintel-pro-actors=.
-- Tokens remain ephemeral secrets. They are not StarIntel documents and are not persisted in RabbitMQ, CouchDB, logs, actor events, or research datasets.
-- Provider adapters advertise capabilities dynamically. The broker must not assume that a vendor still supports hCaptcha merely because an old software-development kit contains an obsolete task type.
+* Approval Table
 
-* Broker Design
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Scope and coverage | Project maintainer | PENDING | Canonical document inventory, implementation order, and research-gap review | Canonical documents and research gaps below |
+| Research basis | Research reviewer | PENDING | Current primary-source verification for every provider capability | [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006]] and provider research nodes |
+| Architecture | StarIntel server maintainer | PENDING | Broker, detector, source-runtime, and result-reference contracts reviewed together | [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]] and [[id:star-captcha-001-detection-resolution-orchestrator][STAR-CAPTCHA-001]] |
+| Security | Security reviewer | PENDING | Authorization, disclosure, session, network, redaction, and ephemeral-secret review | Security sections in the core designs and provider nodes |
+| Operations | Operator | PENDING | Allowlists, budgets, live-canary limits, monitoring, cancellation, and rollback policy | Operational work remains a tracked gap |
+| Implementation | Repository maintainer | NOT STARTED | Passing implementation, fixtures, complete-site generation, CI, and publication checks | |
 
-- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Provider Router]]
+Approval state in this index summarizes required review; it does not approve linked documents.
 
-* Provider Research
+* Architecture Decisions
 
-- [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001 NoneCap hCaptcha Provider]]
-- [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA hCaptcha Provider]]
-- [[id:star-pro-research-003-2captcha-hcaptcha-provider][STAR-PRO-RESEARCH-003 2Captcha hCaptcha Provider]]
-- [[id:star-pro-research-004-hcaptcha-provider-gap-audit][STAR-PRO-RESEARCH-004 hCaptcha Provider Gap Audit]]
-- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 hCaptcha Provider Selection]]
+- Challenge issuer, challenge family, challenge variant, integration version, solver actor, and external provider are independent axes.
+- The catalog is open-world and preserves =custom= and =unknown= states until evidence supports a narrower classification.
+- Detection belongs in =CaptchaDetectActor= and its versioned detector registry, not inside provider adapters.
+- The broker performs authorization, purpose, disclosure, target-policy, allowlist, source-context, network, budget, idempotency, and exact-capability checks before selection.
+- The source actor owns its browser, HTTP, mobile, or first-party runtime and applies results inside that context.
+- Provider completion is not target acceptance; downstream verification records =accepted=, =rejected=, =expired=, =replaced=, or =inconclusive=.
+- Tokens, cookies, answers, coordinates, selections, proofs, and interaction plans remain ephemeral secrets represented by opaque references.
+- A capability contract can drift or fail independently without disabling unrelated provider capabilities.
+- Paid, human-worker, cookie-bearing, proxy-bearing, authenticated-session, or same-network work requires explicit policy.
 
-* Provider Adapter Designs
+* Subsystem Component Diagram
 
-- [[id:star-pro-captcha-001-nonecap-adapter][STAR-PRO-CAPTCHA-001 NoneCap Adapter]]
-- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Adapter]]
-- [[id:star-pro-captcha-003-2captcha-adapter][STAR-PRO-CAPTCHA-003 2Captcha Adapter]]
+#+begin_src plantuml
+@startuml
+package "starintel-server" {
+  [CaptchaDetectActor]
+  [DetectorRegistryActor]
+  [CaptchaBrokerActor]
+  [ProviderRegistryActor]
+  [CaptchaPolicyActor]
+  [CaptchaBudgetActor]
+  [CaptchaRunSupervisor]
+  [EphemeralSecretStoreActor]
+}
+package "source runtimes" {
+  [Browser / Crawler / API / Mobile Actor]
+}
+package "starintel-pro-actors" {
+  [Local Browser Solver]
+  [Local OCR / Image / Audio Solvers]
+  [Manual Operator Solver]
+  [NoneCap Adapter]
+  [NopeCHA Token Adapter]
+  [NopeCHA Recognition Adapter]
+  [2Captcha Adapter]
+  [Future Exact-Capability Adapters]
+}
 
-No CapSolver, Anti-Captcha, or CapMonster Cloud hCaptcha adapter is designed in this pass because their current public documentation does not advertise an hCaptcha token task. A future adapter requires fresh official documentation and a live contract test before its capability may be registered.
+[Browser / Crawler / API / Mobile Actor] --> [CaptchaDetectActor] : bounded observations
+[CaptchaDetectActor] --> [DetectorRegistryActor]
+[CaptchaDetectActor] --> [CaptchaBrokerActor] : normalized request
+[CaptchaBrokerActor] --> [CaptchaPolicyActor]
+[CaptchaBrokerActor] --> [CaptchaBudgetActor]
+[CaptchaBrokerActor] --> [ProviderRegistryActor]
+[CaptchaBrokerActor] --> [CaptchaRunSupervisor]
+[CaptchaRunSupervisor] --> [Local Browser Solver]
+[CaptchaRunSupervisor] --> [Local OCR / Image / Audio Solvers]
+[CaptchaRunSupervisor] --> [Manual Operator Solver]
+[CaptchaRunSupervisor] --> [NoneCap Adapter]
+[CaptchaRunSupervisor] --> [NopeCHA Token Adapter]
+[CaptchaRunSupervisor] --> [NopeCHA Recognition Adapter]
+[CaptchaRunSupervisor] --> [2Captcha Adapter]
+[CaptchaRunSupervisor] --> [Future Exact-Capability Adapters]
+[CaptchaRunSupervisor] --> [EphemeralSecretStoreActor]
+[CaptchaDetectActor] --> [Browser / Crawler / API / Mobile Actor] : apply instructions + verify
+@enduml
+#+end_src
+
+* Canonical Core Designs
+
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Capability Router]] — authorization, exact capability matching, routing, lifecycle, idempotency, cancellation, budgets, secret references, and telemetry.
+- [[id:star-captcha-001-detection-resolution-orchestrator][STAR-CAPTCHA-001 CAPTCHA Detection and Resolution Orchestrator]] — bounded source observations, detector registry, candidate evidence, source-runtime application, and downstream verification.
+
+* Canonical Cross-Provider Research
+
+- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]] — canonical open-world taxonomy, typed result union, provider capability schema, state vocabulary, and capability-local drift model.
+- [[id:star-pro-research-004-hcaptcha-provider-gap-audit][STAR-PRO-RESEARCH-004 Multi-Provider Capability Gap Audit]] — legacy hCaptcha-centered gap analysis retained as provider-gap evidence; current conclusions must defer to STAR-PRO-RESEARCH-006 where they conflict.
+- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 Capability-Based Solver Selection]] — selection analysis that must use exact capability eligibility before ranking.
+
+* Canonical Provider Research
+
+- [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001 NoneCap hCaptcha Provider]] — narrow hCaptcha contract, lifecycle, billing, cancellation, retention, and ambiguity analysis.
+- [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA Provider]] — Token API and Recognition API surfaces; browser-extension marketing is not a server capability contract.
+- [[id:star-pro-research-003-2captcha-hcaptcha-provider][STAR-PRO-RESEARCH-003 2Captcha Provider]] — broad family-specific task catalog and human-worker disclosure; hCaptcha uncertainty is localized.
+
+* Canonical Provider Adapter Designs
+
+- [[id:star-pro-captcha-001-nonecap-adapter][STAR-PRO-CAPTCHA-001 NoneCap Adapter]] — standard, invisible, and Enterprise hCaptcha capabilities only after exact fixtures pass.
+- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Multi-Family Adapter]] — separate Token and Recognition capability registrations and typed results.
+- [[id:star-pro-captcha-003-2captcha-adapter][STAR-PRO-CAPTCHA-003 2Captcha Multi-Family Adapter]] — family-specific request mappers, validators, human-worker disclosure, and capability-local drift.
+
+* Planned Canonical Children
+
+These are research or design gaps, not implied runtime capabilities:
+
+- Anti-Captcha provider research and adapter design.
+- CapSolver provider research and adapter design.
+- CapMonster Cloud provider research and adapter design.
+- Local browser solver actor design.
+- Local optical-character-recognition, image-recognition, and audio-transcription actor designs.
+- Manual operator actor design and operational queue runbook.
+- Ephemeral CAPTCHA secret/result store specification.
+- CAPTCHA operations runbook covering budgets, provider allowlists, monitoring, cancellation, shutdown, and bounded canaries.
+- Detector registry specification with fixture and drift policy.
+- Implementation test plan and current actor manifest design.
+
+No planned child may be added as a static manifest capability before its contract state and runtime registration are validated.
 
 * Implementation Order
 
-1. Approve the normalized broker protocol and policy model.
-2. Implement the =starintel-server= broker with a fake provider actor.
-3. Implement the NoneCap adapter as the reference adapter because its current interface is hCaptcha-specific and exposes cancellation and long polling.
-4. Implement the NopeCHA adapter behind subscription-aware budget accounting.
-5. Keep the 2Captcha adapter disabled by default until a live sandbox or support confirmation proves the current hCaptcha task contract.
-6. Add provider health, circuit breaking, cost accounting, and explicit operator selection before enabling automatic fallback.
+1. Approve the normalized descriptor, typed result union, capability state vocabulary, disclosure classes, and opaque result-reference contract.
+2. Implement fake detector, broker, source actor, secret store, and solver actors against current =define-actor=, =register-actor=, =get-dest-actor=, =tell=, and =log-actor-event= interfaces.
+3. Add exact eligibility tests, policy denials, budgets, duplicate delivery, ambiguous create, cancellation, expiration, one-read result, verification outcomes, drift, redaction, and shutdown tests.
+4. Implement source-runtime application and verification with no broker-owned browser session.
+5. Implement NoneCap only for fixture-backed hCaptcha capabilities.
+6. Implement NopeCHA Token and Recognition adapters as separate capability surfaces.
+7. Implement 2Captcha family-by-family; isolate any invalid hCaptcha contract from unrelated tasks.
+8. Add local browser, local recognition, local audio, and manual-review actors.
+9. Add Anti-Captcha, CapSolver, or CapMonster Cloud only to close measured exact-capability gaps.
+10. Add operational monitoring, circuit breakers, accepted-result cost telemetry, and opt-in owned-system canaries.
+
+* Required Test Coverage
+
+The implementation must cover normalized families, unknown and custom challenges, exact capability matching, forbidden version and result-kind widening, source-session and network requirements, policy and disclosure denial, provider allowlists, exhausted budgets, health and concurrency, duplicate deliveries, ambiguous creation, cancellation, expiration, one-read results, detector evidence requests, multiple and conflicting candidates, all verification outcomes, bounded redetection, source actor failure, capability-local provider drift, redaction, and shutdown with active runs.
+
+Continuous integration must use fakes and fixtures and must never invoke a paid provider. Live probes remain opt-in, credential-gated, cost-bounded, capability-specific, and restricted to operator-owned or explicitly authorized systems.
+
+* Supersession and Duplicate Policy
+
+- This file is the one canonical CAPTCHA index.
+- STAR-PRO-RESEARCH-006 is the canonical cross-provider taxonomy and capability-state document.
+- Provider-specific research and adapter designs retain their own stable IDs and must link back here.
+- New research extends an existing canonical node or explicitly identifies a superseded replacement; agents must not create a second canonical CAPTCHA index or duplicate provider node.
+- Legacy hCaptcha terminology in filenames is historical. Titles and current contents must state the broader role where the document has been generalized.
+
+* Research Gaps
+
+- Exact current Arkose, DataDome, Tencent, CapSolver, and CapMonster task fixtures remain incomplete.
+- The repository-wide approval and changelog repair has not yet produced an observed full validation run.
+- The complete generated site and every PlantUML block still require an observed current-head build.
+- Current StarIntel actor runtime code examples require compilation or load validation against the checked-out =starintel-server= source.
+- Target-branch publication must be verified after merge; a local or pull-request site build is not publication.
 
 * Non-Goals
 
-- CAPTCHA detection inside arbitrary web pages.
 - Browser fingerprint fabrication.
-- Automatic extraction of target-specific challenge internals.
-- A public HTTP endpoint that accepts arbitrary URLs.
-- Persisting challenge tokens or proxy credentials.
-- Selecting a provider solely by lowest advertised price.
+- A public arbitrary-target solve endpoint.
+- Automatic authorization based on challenge type.
+- Persisting provider credentials, raw results, session cookies, proxy credentials, or authenticated browser material.
+- Treating every anti-bot block as a CAPTCHA.
+- Guessing an issuer when evidence is insufficient.
+- Ranking by price before hard authorization, context, disclosure, exact-capability, and contract checks.
 
 * Footnotes and Glossary
 
-[fn:starintel] StarIntel: A local-first, actor-based platform that collects, normalizes, links, searches, and analyzes public or authorized data while preserving provenance.
+[fn:starintel] StarIntel: A local-first actor-based platform that collects, normalizes, links, searches, and analyzes authorized data while preserving provenance.
 
-[fn:captcha] CAPTCHA, or Completely Automated Public Turing test to tell Computers and Humans Apart: A challenge used by a service to distinguish ordinary human interaction from automated requests.
+[fn:captcha] CAPTCHA: Completely Automated Public Turing test to tell Computers and Humans Apart; this index also covers adjacent browser, device, behavioral, proof-of-work, and Web Application Firewall challenges.
 
-[fn:pro-actors] StarIntel Pro Actors: Optional paid-service, collection, and enrichment actors deployed separately from the generic StarIntel server.
+[fn:pro-actors] StarIntel Pro Actors: Separately deployable paid-service, browser, recognition, manual-review, and enrichment actors outside the generic server core.
 
-[fn:star-server] StarIntel Server: The Common Lisp control, routing, persistence, search, and actor-hosting service at the center of StarIntel.
+[fn:star-server] StarIntel Server: The Common Lisp control, routing, persistence, authorization, search, and actor-hosting service.
+
+- *Canonical document* — The single maintained source node for a subject; other nodes link to it or explicitly identify supersession.
+- *Exact capability* — A solver contract matched on issuer, family, variant, version, required fields, result kind, source and network binding, execution class, disclosure class, and current contract state.
+- *Opaque result reference* — A short-lived identifier that permits a bounded secret read without putting sensitive result material in an actor message or document.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-06 | Rebuilt the index as the canonical repository map for broker, detector, provider research, adapter design, planned operations, implementation order, approval state, gaps, and supersession | repository audit agent | Canonical ID inventory and PR source diff |

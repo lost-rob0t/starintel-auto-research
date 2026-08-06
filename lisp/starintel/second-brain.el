@@ -16,6 +16,49 @@
       (error "Cannot locate the Starintel repository root"))
     (file-name-as-directory (file-truename root))))
 
+(defconst starintel-second-brain-research-approval-template
+  "* Approval Table\n\n| Approval area | Required authority | State | Evidence required | Evidence reference |\n|---------------+--------------------+-------+-------------------+--------------------|\n| Research basis | Research reviewer | PENDING | Current primary-source verification | |\n| Architecture | Project maintainer | PENDING | Resolved design implications and contradictions | |\n| Security | Security reviewer | PENDING | Authorization, disclosure, and secret-handling review | |\n| Operations | Operator | PENDING | Operational policy, budgets, monitoring, and rollback review | |\n| Implementation | Repository maintainer | NOT STARTED | Passing implementation, CI, and publication checks | |\n\n")
+
+(defconst starintel-second-brain-index-approval-template
+  "* Approval Table\n\n| Approval area | Required authority | State | Evidence required | Evidence reference |\n|---------------+--------------------+-------+-------------------+--------------------|\n| Scope and coverage | Project maintainer | PENDING | Canonical direct-child inventory and research-gap review | |\n| Durable links | Org-roam reviewer | PENDING | Unique IDs and resolved canonical links | |\n| Supersession | Project maintainer | PENDING | Replacements and implementation order verified | |\n| Publication | Repository maintainer | NOT STARTED | Passing synchronization, generation, and link validation | |\n\n")
+
+(defun starintel-second-brain-research-head ()
+  "Return the canonical header and structure for a new research node."
+  (concat
+   ":PROPERTIES:\n:ID:       %(org-id-new)\n:END:\n"
+   "#+title: ${title}\n"
+   "#+description: \n"
+   "#+status: DRAFT\n"
+   "#+filetags: :starintel:research:draft:\n"
+   "#+created: %U\n\n"
+   starintel-second-brain-research-approval-template
+   "* Findings\n\n"
+   "* Sources\n\n"
+   "* Footnotes and Glossary\n\n"
+   "* Changelog\n\n"
+   "| Date | Change | Author or actor | Evidence |\n"
+   "|------+--------+-----------------+----------|\n"
+   "| %<%Y-%m-%d> | Created research node | Org-roam capture | Initial capture |\n"))
+
+(defun starintel-second-brain-index-head ()
+  "Return the canonical header and structure for a new index node."
+  (concat
+   ":PROPERTIES:\n:ID:       %(org-id-new)\n:END:\n"
+   "#+title: ${title}\n"
+   "#+description: \n"
+   "#+status: DRAFT\n"
+   "#+filetags: :starintel:index:\n"
+   "#+created: %U\n\n"
+   starintel-second-brain-index-approval-template
+   "* Scope\n\n"
+   "* Canonical Documents\n\n"
+   "* Research Gaps\n\n"
+   "* Footnotes and Glossary\n\n"
+   "* Changelog\n\n"
+   "| Date | Change | Author or actor | Evidence |\n"
+   "|------+--------+-----------------+----------|\n"
+   "| %<%Y-%m-%d> | Created index node | Org-roam capture | Initial capture |\n"))
+
 (defun starintel-second-brain-configure (&optional root autosync)
   "Configure Org-roam for this repository.
 When AUTOSYNC is non-nil, enable `org-roam-db-autosync-mode'."
@@ -31,7 +74,7 @@ When AUTOSYNC is non-nil, enable `org-roam-db-autosync-mode'."
           starintel-pages-site-title
           "Starintel Second Brain — Entirely built and managed by AI agents"
           org-roam-capture-templates
-          '(("n" "Inbox note" plain "%?"
+          `(("n" "Inbox note" plain "%?"
              :target
              (file+head
               "inbox/%<%Y%m%d%H%M%S>-${slug}.org"
@@ -41,13 +84,13 @@ When AUTOSYNC is non-nil, enable `org-roam-db-autosync-mode'."
              :target
              (file+head
               "research/inbox/%<%Y%m%d%H%M%S>-${slug}.org"
-              ":PROPERTIES:\n:ID:       %(org-id-new)\n:END:\n#+title: ${title}\n#+description: \n#+filetags: :starintel:research:draft:\n#+status: DRAFT\n#+created: %U\n\n* Findings\n\n* Sources\n\n* Footnotes and Glossary\n")
+              ,(starintel-second-brain-research-head))
              :unnarrowed t)
             ("i" "Index note" plain "%?"
              :target
              (file+head
               "indexes/inbox/%<%Y%m%d%H%M%S>-${slug}.org"
-              ":PROPERTIES:\n:ID:       %(org-id-new)\n:END:\n#+title: ${title}\n#+description: \n#+filetags: :starintel:index:\n#+created: %U\n\n")
+              ,(starintel-second-brain-index-head))
              :unnarrowed t)))
     (when autosync
       (org-roam-db-autosync-mode 1))

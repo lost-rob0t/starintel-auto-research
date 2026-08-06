@@ -1,0 +1,38 @@
+name: Repository Audit Snapshot
+
+on:
+  push:
+    branches:
+      - agent/repository-captcha-audit
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Record repository state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git branch --show-current
+          git remote -v
+          find .. -name AGENTS.md -print | sort
+          git ls-files -z \
+            ':!_site/**' \
+            ':!.cache/**' \
+            | tar --null --files-from=- --create --gzip --file=repository-audit-snapshot.tar.gz
+
+      - name: Upload repository snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-audit-snapshot
+          path: repository-audit-snapshot.tar.gz
+          if-no-files-found: error
+          retention-days: 1

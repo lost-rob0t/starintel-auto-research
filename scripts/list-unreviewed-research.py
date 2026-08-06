@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 REPOSITORY = "lost-rob0t/starintel-auto-research"
 BRANCH = "main"
-SITE_BASE = "https://lost-rob0t.github.io/starintel-auto-research"
+SITE_BASE = "https://auto-research.starintel.actor"
 TERMINAL_STATUSES = frozenset({"DONE", "REJECTED"})
 KEYWORD_RE = re.compile(r"^\s*#\+([A-Za-z0-9_-]+):\s*(.*?)\s*$", re.IGNORECASE)
 

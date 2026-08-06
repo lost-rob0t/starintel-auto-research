@@ -1,101 +1,177 @@
 :PROPERTIES:
 :ID:       star-pro-research-003-2captcha-hcaptcha-provider
 :END:
-#+title: STAR-PRO-RESEARCH-003 2Captcha hCaptcha Provider
-#+description: Current 2Captcha hCaptcha support audit and guarded adapter requirements for StarIntel Pro Actors.
+#+title: STAR-PRO-RESEARCH-003 2Captcha Multi-Family Provider
+#+description: Current 2Captcha API research for a broad asynchronous StarIntel adapter with exact per-family capability gates and a separate hCaptcha contract probe.
 #+status: REVIEW
-#+filetags: :starintel:research:starintel-pro-actors:captcha:hcaptcha:2captcha:
+#+filetags: :starintel:research:starintel-pro-actors:captcha:2captcha:multi-family:uml:
 
 * Scope
 
-This note evaluates whether 2Captcha currently provides a stable hCaptcha task contract suitable for a StarIntel provider adapter. The answer is provisional because the public documentation is internally inconsistent as of 2026-08-05.
+This note evaluates 2Captcha as a broad asynchronous solver provider. The previous hCaptcha-only framing hid the strongest reason to consider the provider: its current API catalog spans token systems, Web Application Firewall challenges, image recognition, coordinates, grid, rotate, draw-around, drag-and-drop, and multiple vendor-specific families.
 
-* Provider Summary
+hCaptcha remains a separate contract-drift question. The adapter may support other verified families while leaving hCaptcha disabled.
 
-2Captcha exposes a version-two JSON application-programming interface[fn:api] built around =createTask=, =getTaskResult=, balance, feedback, proxy, callback, and sandbox operations. Its current overview describes automated model solving with human-worker escalation for difficult cases.
+* Approval Table
 
-Official 2Captcha browser-service material still advertises automatic hCaptcha handling. Official client-package documentation also retains an =hcaptcha= method. However, the current API-v2 task navigation and proxy support page do not visibly list hCaptcha, and the dedicated hCaptcha API page was not reliably retrievable during this research pass.
+| Approval area | Required reviewer | State | Evidence required |
+|---------------+-------------------+-------+-------------------|
+| Generic API | Pro-actors maintainer | PENDING | =createTask=, =getTaskResult=, balance, feedback, and error fixtures |
+| Family capabilities | CAPTCHA maintainer | PENDING | One current official fixture for every advertised task family |
+| hCaptcha capability | CAPTCHA maintainer | PENDING | Current official task contract or bounded live/sandbox fixture |
+| Human-worker disclosure | Security reviewer and operator | PENDING | Disclosure class and target-policy approval |
+| Live enablement | Operator | NOT STARTED | Per-family cost ceilings and owned-system canaries |
 
-This is a provider-contract drift warning, not proof that hCaptcha has been removed. It means StarIntel must not register a 2Captcha hCaptcha capability until a sandbox call or written provider confirmation proves the current task type and response fields.
-
-* Stable Generic API Contract
+* Stable Generic Contract
 
 | Capability | Current public contract |
 |------------+-------------------------|
 | Create | =POST https://api.2captcha.com/createTask= |
 | Retrieve | =POST https://api.2captcha.com/getTaskResult= |
 | Balance | =POST https://api.2captcha.com/getBalance= |
-| Feedback | =reportCorrect= and =reportIncorrect= operations |
-| Optional delivery | callback URL registered by the caller |
-| Authentication | =clientKey= in the JSON request body |
-| Result states | =processing= and =ready= plus structured errors |
+| Feedback | family-specific correct/incorrect reporting |
+| Optional delivery | callback uniform resource locator |
+| Authentication | =clientKey= in JavaScript Object Notation body |
+| States | =processing= and =ready= plus structured errors |
 
-Historical and client-library material identifies =HCaptchaTaskProxyless= and =HCaptchaTask= as likely task names. Those names are treated as unverified assumptions and must not be compiled into an enabled production manifest without live proof.
+Version one of the StarIntel adapter uses polling, not callbacks, so no inbound provider listener is required.
 
-* Strengths
+* Current Catalog Coverage
 
-- Mature generic asynchronous task API.
-- Balance, feedback, callback, proxy, and sandbox concepts are documented.
-- Broad official client-library coverage.
-- Result envelopes include cost, timestamps, worker or provider Internet Protocol address[fn:ip-address], and solve count for many task types.
-- Existing operational familiarity may make it useful as a fallback if support is confirmed.
+The official API catalog currently includes or advertises families such as:
 
-* Weaknesses and Open Risks
+- Google reCAPTCHA v2, v3, and Enterprise;
+- Cloudflare Turnstile;
+- Arkose Labs FunCaptcha;
+- GeeTest;
+- Amazon challenge families;
+- DataDome and Imperva/Incapsula families;
+- Friendly Captcha, MTCaptcha, ALTCHA, Prosopo, CaptchaFox, Tencent, Yandex SmartCaptcha, and regional/vendor challenges;
+- normal image-to-text, text questions, rotate, coordinates, grid, draw-around, and drag-and-drop.
 
-- Current hCaptcha task documentation is not discoverable from the main API navigation.
-- The current proxy page does not list hCaptcha among supported proxy task types.
-- Historical software-development-kit[fn:sdk] support can outlive provider support.
-- Human-worker escalation has privacy implications because challenge content may be presented to workers.
-- Callback delivery expands the inbound attack surface and should not be enabled in the first adapter version.
-- Generic error and task envelopes vary by challenge type.
+Each task page has its own required fields and result schema. The runtime must not infer that one generic =createTask= shape makes all tasks interchangeable.
+
+* hCaptcha Contract State
+
+Historical client and browser materials have used task names such as =HCaptchaTaskProxyless= and =HCaptchaTask=. The current main task navigation has been inconsistent. StarIntel therefore keeps hCaptcha =experimental= until one of these exists:
+
+1. a current official task page with request and result schema;
+2. a provider sandbox fixture; or
+3. a bounded live fixture against an operator-owned hCaptcha page.
+
+Other verified 2Captcha capabilities do not depend on this gate.
+
+* Per-Family Adapter UML
+
+#+begin_src plantuml
+@startuml
+participant "CaptchaBrokerActor" as Broker
+participant "TwoCaptchaAdapterActor" as Adapter
+participant "2Captcha API" as API
+participant "EphemeralSecretStoreActor" as Secrets
+
+Broker -> Adapter : captchaProviderSubmit\ncapabilityId + challengeRef
+Adapter -> Adapter : load exact task mapper
+alt mapper verified
+  Adapter -> API : POST /createTask
+  API --> Adapter : taskId or error
+  loop until ready or deadline
+    Adapter -> API : POST /getTaskResult
+    API --> Adapter : processing / ready / error
+  end
+  Adapter -> Adapter : validate family-specific result schema
+  Adapter -> Secrets : store typed result
+  Adapter --> Broker : succeeded(resultRef, resultKind)
+else mapper missing or drifted
+  Adapter --> Broker : unsupportedChallenge / invalidContract
+end
+@enduml
+#+end_src
+
+* Capability Registration
+
+The adapter stores one contract record per task family:
+
+- =capabilityId=;
+- provider task type;
+- required normalized fields;
+- request mapper version;
+- expected result kind and required result fields;
+- proxy and session requirements;
+- disclosure class;
+- cost model;
+- official contract retrieval date;
+- request/result fixture fingerprint;
+- state: =verified=, =experimental=, =degraded=, =invalidContract=, or =disabled=.
+
+One family drifting disables only that capability, not the whole provider, unless authentication, balance, or generic API health fails.
+
+* Result Kinds
+
+2Captcha can return different normalized kinds:
+
+| Provider task family | StarIntel result kind |
+|----------------------+-----------------------|
+| Token systems | =token= |
+| WAF or clearance systems | =token= or =cookie= |
+| Normal/text CAPTCHA | =textAnswer= |
+| Coordinates or draw-around | =coordinates= |
+| Grid | =selectionSet= |
+| Rotate or drag-and-drop | =interactionPlan= or typed family result |
+| Score-producing systems | =assessment= or =token= according to current contract |
+
+The adapter validates the exact expected kind before storing the result.
+
+* Human-Worker and Disclosure Model
+
+2Captcha describes automated solving with human-worker escalation for difficult tasks. The adapter registration therefore declares =executionClass: humanAssistedVendor= unless a capability contract proves otherwise.
+
+Target policy must explicitly allow this disclosure class. Authenticated cookies, private page content, personal data, and full browser snapshots are not sent by default. Only the minimum normalized challenge context and bounded artifacts required by the approved capability are disclosed.
+
+* Idempotency, Cancellation, and Ambiguity
+
+The generic contract does not provide a create idempotency key or universal cancellation operation. The adapter journals the attempt before creation, records =taskId= immediately, attaches duplicate messages to the existing task, and never retries an ambiguous create automatically.
+
+Local cancellation stops polling and deletes local result material. The provider task may continue and may charge. The normalized result reports =providerCancellationSupported: false= unless a specific task contract later proves otherwise.
+
+* Contract Drift
+
+A missing required result field, unexpected result kind, or task-not-supported response moves only the affected capability to =invalidContract=. The actor stops routing new work for that capability and emits a contract-drift event with redacted fixture metadata.
 
 * StarIntel Decision
 
-Design the adapter but mark its manifest capability =experimental= and disabled by default. Enabling requires all of the following:
-
-1. A successful provider sandbox or low-cost live canary against an operator-owned hCaptcha test page.
-2. Captured request and response fixtures for the current task type.
-3. Confirmation of enterprise =rqdata= handling if enterprise support is advertised.
-4. Confirmation of proxy support and token-binding requirements.
-5. A configured maximum cost per solve.
-
-If any gate fails, the adapter starts without advertising =captcha.hcaptcha.solve= and the broker cannot route requests to it.
-
-* Initial Adapter Restrictions
-
-- Polling only; do not expose callbacks in version one.
-- No cookies in version one.
-- Proxy credentials only through an ephemeral secret reference.
-- Ignore unknown provider response fields while preserving a redacted copy in test fixtures.
-- Treat =ERROR_ZERO_BALANCE=, invalid key, unsupported task, and malformed task as circuit-opening or permanent failures according to the provider error table.
-- Do not automatically retry task creation after an ambiguous transport failure unless the local deduplication journal proves no provider identifier was received.
+Design and implement 2Captcha as a broad exact-capability adapter candidate. Do not wait for hCaptcha confirmation before using other verified families. Do not enable any family solely because it appears in an old software-development kit or marketing page.
 
 * Test Requirements
 
-- A disabled-by-default capability test.
-- A contract discovery test that fails closed when hCaptcha is unsupported.
-- Mock tests for create, processing, ready, zero balance, unsupported task, malformed task, and timeout.
-- Cost and timestamp normalization tests.
-- Secret and token redaction tests.
-- No callback listener in the initial implementation.
+- Generic create, processing, ready, balance, feedback, and error mocks.
+- One mapper/validator fixture per enabled family.
+- Text, token, cookie, coordinates, selection, and interaction-plan result tests.
+- hCaptcha disabled and successful/failed contract-probe tests.
+- Per-family drift disables only that capability.
+- Duplicate delivery, ambiguous create, and local cancellation.
+- Disclosure-policy denial before challenge context dereference.
+- Provider key and result redaction.
+- No callback listener in version one.
+- Per-family opt-in owned-system canaries.
 
 * Sources
 
-- [[https://2captcha.com/api-docs][2Captcha API v2 overview]], accessed 2026-08-05.
-- [[https://2captcha.com/api-docs/quick-start][2Captcha API quickstart]], accessed 2026-08-05.
-- [[https://2captcha.com/api-docs/create-task][2Captcha createTask reference]], accessed 2026-08-05.
-- [[https://2captcha.com/api-docs/proxy][2Captcha proxy reference]], accessed 2026-08-05.
-- [[https://2captcha.com/scraper/browser-api][2Captcha browser API]], accessed 2026-08-05.
+- [[https://2captcha.com/api-docs][2Captcha API and task catalog]], accessed 2026-08-06.
+- [[https://2captcha.com/api-docs/create-task][2Captcha =createTask= reference]], accessed 2026-08-06.
+- [[https://2captcha.com/api-docs/recaptcha-v2][2Captcha reCAPTCHA v2 task]], accessed 2026-08-06.
+- [[https://2captcha.com/api-docs/cloudflare-turnstile][2Captcha Turnstile task]], accessed 2026-08-06.
+- [[https://2captcha.com/api-docs/geetest][2Captcha GeeTest task]], accessed 2026-08-06.
+- [[https://2captcha.com/api-docs/normal-captcha][2Captcha image-to-text task]], accessed 2026-08-06.
 
 * Related Nodes
 
+- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]]
+- [[id:star-pro-captcha-003-2captcha-adapter][STAR-PRO-CAPTCHA-003 2Captcha Multi-Family Adapter]]
 - [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
-- [[id:star-pro-captcha-003-2captcha-adapter][STAR-PRO-CAPTCHA-003 2Captcha Adapter]]
 
 * Footnotes and Glossary
 
-[fn:api] Application programming interface: A documented network boundary through which software submits requests and receives structured responses.
+[fn:asynchronous] Asynchronous task: Work created first and retrieved later by a provider-assigned identifier.
 
-[fn:ip-address] Internet Protocol address: A numeric network address identifying the endpoint from which a request was made.
-
-[fn:sdk] Software-development kit: A provider-maintained package containing client code, types, examples, and helpers for integrating an external service.
+[fn:contract-drift] Contract drift: A provider request or response shape changing so that a previously verified adapter mapping is no longer valid.

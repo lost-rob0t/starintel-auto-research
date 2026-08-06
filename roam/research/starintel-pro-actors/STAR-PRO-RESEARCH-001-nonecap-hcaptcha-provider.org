@@ -2,21 +2,29 @@
 :ID:       star-pro-research-001-nonecap-hcaptcha-provider
 :END:
 #+title: STAR-PRO-RESEARCH-001 NoneCap hCaptcha Provider
-#+description: Current provider and application-programming-interface research for a guarded NoneCap hCaptcha adapter in StarIntel Pro Actors.
+#+description: Current provider-contract research for a narrow NoneCap hCaptcha capability behind the provider-neutral StarIntel CAPTCHA broker.
 #+status: REVIEW
-#+filetags: :starintel:research:starintel-pro-actors:captcha:hcaptcha:nonecap:
+#+filetags: :starintel:research:starintel-pro-actors:captcha:hcaptcha:nonecap:uml:
 
 * Scope
 
-This note evaluates NoneCap as a provider behind the authorized CAPTCHA broker defined by [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]]. It records the public contract observed on 2026-08-05 and does not approve unrestricted use against third-party systems.
+This note evaluates NoneCap as one narrow solver provider behind [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]]. It does not define the overall CAPTCHA taxonomy and does not imply that hCaptcha is the only challenge StarIntel actors encounter.
+
+NoneCap currently advertises active =hcaptcha= and =hcaptcha_enterprise= solve types. Its documentation reserves names for reCAPTCHA, Turnstile, and FunCaptcha, but reserved names are not active capabilities and must not be registered.[fn:capability]
+
+* Approval Table
+
+| Approval area | Required reviewer | State | Evidence required |
+|---------------+-------------------+-------+-------------------|
+| Provider contract | Pro-actors maintainer | PENDING | Current =v1= request, result, cancel, account, and feedback fixtures |
+| hCaptcha mapping | CAPTCHA maintainer | PENDING | Standard and Enterprise context tests |
+| Secret handling | Security reviewer | PENDING | Bearer key, proxy, enterprise data, and result redaction tests |
+| Cost and retention | Operator | PENDING | Round-based billing and thirty-day provider retention accepted |
+| Live enablement | Operator | NOT STARTED | One bounded canary against an operator-owned test page |
 
 * Provider Summary
 
-NoneCap is an hCaptcha-only hosted application programming interface[fn:api] operated by Lunium AB in Sweden. Its public site describes the service as open beta and supports regular, invisible, and enterprise hCaptcha, including the enterprise =rqdata= value.[fn:rqdata]
-
-The provider uses JavaScript Object Notation[fn:json] over Hypertext Transfer Protocol Secure[fn:https] with bearer-token authentication.[fn:bearer-token] Its current major API version is =v1=.
-
-* Current Contract
+NoneCap is an hCaptcha-focused hosted application programming interface[fn:api] operated by Lunium AB in Sweden. The public =v1= contract uses JavaScript Object Notation over Hypertext Transfer Protocol Secure with bearer authentication.[fn:bearer]
 
 | Capability | Current public contract |
 |------------+-------------------------|
@@ -27,88 +35,110 @@ The provider uses JavaScript Object Notation[fn:json] over Hypertext Transfer Pr
 | Cancel | =DELETE /v1/solves/{id}= |
 | List | =GET /v1/solves= with cursor pagination |
 | Account balance | =GET /v1/me= |
-| Feedback | per-solve and batch feedback endpoints |
+| Feedback | =POST /v1/feedback= |
 | Authentication | =Authorization: Bearer <key>= |
-| Challenge types | =hcaptcha= and =hcaptcha_enterprise= |
+| Active challenge types | =hcaptcha= and =hcaptcha_enterprise= |
 
-A solve may be =pending=, =solving=, =solved=, =failed=, =cancelled=, or =expired=. The API returns queue and resolution timing data and reports the number of credits charged after a successful solve.
+A solve may be =pending=, =solving=, =solved=, =failed=, =cancelled=, or =expired=. The contract returns queue and resolution timing and reports credits charged after terminal completion.
 
-The documented default concurrency limit is five jobs on the trial tier, with higher limits on paid tiers. A request above the active limit receives an HTTP[fn:http] 429 response with =concurrency_limit_exceeded=.
+* Coverage Boundary
 
-* Billing and Retention
+| Issuer | Family | Variant | State |
+|--------+--------+---------+-------|
+| hCaptcha | token | standard | VERIFIED BY DOCUMENTATION; implementation approval pending |
+| hCaptcha | token | invisible | Represented by normal hCaptcha context; fixture required |
+| hCaptcha | token | Enterprise | VERIFIED BY DOCUMENTATION; requires enterprise data |
+| Google reCAPTCHA | token/score | all | RESERVED ONLY; do not register |
+| Cloudflare Turnstile | token | all | RESERVED ONLY; do not register |
+| Arkose FunCaptcha | puzzle/token | all | RESERVED ONLY; do not register |
+| Every other issuer | any | any | UNSUPPORTED |
 
-NoneCap charges by successful hCaptcha challenge round rather than by submitted broker request. A challenge may require more than one round, so broker reservations must permit a bounded variable charge. Failed, expired, and cancelled solves are documented as uncharged.
+The broker must route to NoneCap only after the exact hCaptcha capability matches. NoneCap is not a generic fallback.
 
-The provider states that solve records are retained for approximately thirty days. The adapter therefore must assume that target URLs, site keys, timestamps, provider status, and billing metadata leave the local StarIntel boundary. Tokens, proxy credentials, and =rqdata= must never be copied into durable StarIntel events.
+* Provider Interaction UML
+
+#+begin_src plantuml
+@startuml
+participant "CaptchaBrokerActor" as Broker
+participant "NoneCapAdapterActor" as Adapter
+participant "NoneCap v1 API" as API
+participant "EphemeralSecretStoreActor" as Secrets
+
+Broker -> Adapter : captchaProviderSubmit\nexact hCaptcha capability
+Adapter -> API : POST /v1/solves?wait=N
+alt terminal solve
+  API --> Adapter : solved / failed / cancelled / expired
+else still pending
+  API --> Adapter : 202 + solve id
+  loop bounded long poll
+    Adapter -> API : GET /v1/solves/{id}?wait=N
+    API --> Adapter : pending or terminal
+  end
+end
+alt solved
+  Adapter -> Secrets : store token once
+  Adapter --> Broker : captchaProviderSucceeded(resultRef)
+else terminal failure
+  Adapter --> Broker : captchaProviderFailed(normalized error)
+end
+@enduml
+#+end_src
+
+* Billing, Retention, and Disclosure
+
+NoneCap charges successful hCaptcha challenge rounds. A challenge can require multiple rounds, so budget reservation is a bounded variable amount. Failed, expired, and cancelled solves are documented as uncharged.
+
+Solve records are retained by the provider for approximately thirty days. Target uniform resource locators, site keys, timing, status, and billing metadata therefore leave the local boundary. Provider keys, returned tokens, proxy credentials, and Enterprise data must never enter durable StarIntel messages.
 
 * Strengths
 
-- The provider specializes in hCaptcha instead of exposing a broad and unstable task catalog.
-- Long polling reduces wasteful status requests.
-- Explicit cancellation maps cleanly onto actor cancellation and supervised shutdown.
-- Terminal states and structured errors are straightforward to normalize.
-- Per-solve timing and charge data support cost and service-level telemetry.[fn:telemetry]
-- Bearer authentication keeps the credential out of every request body.
+- Narrow and explicit hCaptcha contract.
+- Long polling and cancellation map cleanly to actor runs.
+- Structured states, errors, timing, balance, and feedback.
+- Bearer authentication avoids key-in-query exposure.
 
-* Weaknesses and Open Risks
+* Risks
 
-- The service is new and remains in open beta.
-- The status page currently lacks enough history to establish a meaningful reliability baseline.
-- The create endpoint does not document an idempotency key.[fn:idempotency]
-- The reserved =nc_test_= key prefix is described as future test mode, not a currently available sandbox.
-- Provider-side retention creates a data-governance dependency.
-- Pricing is based on challenge rounds, making preflight cost estimation approximate.
+- Service maturity and reliability history remain limited.
+- Create does not document a provider idempotency key.[fn:idempotency]
+- Provider retention creates a disclosure dependency.
+- Variable challenge rounds make cost estimation approximate.
+- Reserved future types could be mistaken for active capabilities.
 
 * StarIntel Decision
 
-Approve NoneCap as the reference provider adapter, subject to all broker authorization and secret-handling requirements.
-
-The adapter must:
-
-- resolve the API key from a secret reference;
-- accept only broker-normalized requests;
-- use the broker request identifier as its local deduplication key;
-- prefer =wait= long polling;
-- cancel active solves when requested;
-- return the token through an ephemeral secret lease;
-- emit cost, timing, provider state, and redacted error metadata;
-- never expose a raw public solve endpoint.
+Retain NoneCap as the hCaptcha reference adapter, not the global CAPTCHA reference provider. Enable only exact hCaptcha capabilities after contract fixtures, security review, operator budget, and live-canary approval.
 
 * Test Requirements
 
-- Mock contract tests for every HTTP status and provider solve state.
-- Duplicate-delivery tests proving one local request does not create multiple provider jobs.
-- Cancellation tests covering pending, solving, and already-terminal jobs.
-- Secret-redaction tests for API keys, tokens, proxies, and =rqdata=.
-- A live canary only against an operator-owned hCaptcha test page.
-- The live suite remains disabled until explicit credentials and a cost ceiling are supplied.
+- Every HTTP status and solve state.
+- Standard and Enterprise mapping.
+- Duplicate delivery and ambiguous submission.
+- Long-poll deadline calculation.
+- Cancellation race and already-terminal conflict.
+- Bearer key, result token, proxy, and Enterprise-data redaction.
+- Reserved challenge names never become runtime capabilities.
+- Opt-in bounded live canary on an operator-owned page only.
 
 * Sources
 
-- [[https://nonecap.com/][NoneCap service and pricing overview]], accessed 2026-08-05.
-- [[https://nonecap.com/api-reference/][NoneCap hCaptcha API reference]], accessed 2026-08-05.
-- [[https://nonecap.com/terms/][NoneCap terms of service]], accessed 2026-08-05.
-- [[https://nonecap.com/status/][NoneCap status page]], accessed 2026-08-05.
+- [[https://nonecap.com/][NoneCap service overview]], accessed 2026-08-06.
+- [[https://nonecap.com/api-reference/][NoneCap hCaptcha API reference]], accessed 2026-08-06.
+- [[https://nonecap.com/terms/][NoneCap terms]], accessed 2026-08-06.
+- [[https://nonecap.com/status/][NoneCap status]], accessed 2026-08-06.
 
 * Related Nodes
 
-- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]]
 - [[id:star-pro-captcha-001-nonecap-adapter][STAR-PRO-CAPTCHA-001 NoneCap Adapter]]
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
 
 * Footnotes and Glossary
 
-[fn:api] Application programming interface: A documented set of network operations and data structures through which one software system requests work from another.
+[fn:api] Application programming interface: A documented network boundary through which software submits requests and receives structured responses.
 
-[fn:rqdata] rqdata: A fresh hCaptcha Enterprise challenge value bound to the current verification context and commonly required when requesting an enterprise token.
+[fn:bearer] Bearer authentication: A method where possession of a secret token in the authorization header authenticates the caller.
 
-[fn:json] JavaScript Object Notation: A text format for representing objects, arrays, strings, numbers, booleans, and null values.
+[fn:capability] Capability: A precise issuer, challenge family, variant, context requirement, and result kind that an actor advertises as supported.
 
-[fn:https] Hypertext Transfer Protocol Secure: HTTP carried over encrypted Transport Layer Security so network requests and responses are protected in transit.
-
-[fn:bearer-token] Bearer token: A secret credential placed in an authorization header; possession of the token is sufficient to authenticate the request.
-
-[fn:http] Hypertext Transfer Protocol: The request-and-response protocol used by web clients and servers.
-
-[fn:telemetry] Telemetry: Structured operational measurements such as duration, queue time, failures, retries, and cost.
-
-[fn:idempotency] Idempotency: The property that repeating the same logical request does not create additional externally visible work or charges.
+[fn:idempotency] Idempotency: The property that repeating one logical request does not create an additional provider job or charge.

@@ -1,31 +1,29 @@
 :PROPERTIES:
 :ID:       star-pro-captcha-003-2captcha-adapter
 :END:
-#+title: STAR-PRO-CAPTCHA-003 2Captcha Adapter
-#+description: Experimental disabled-by-default StarIntel Pro Actor design for a 2Captcha hCaptcha adapter gated by live contract discovery.
+#+title: STAR-PRO-CAPTCHA-003 2Captcha Multi-Family Adapter
+#+description: Exact-capability StarIntel Pro Actor design for the broad 2Captcha asynchronous task API, with per-family mappers, typed results, disclosure controls, contract drift, and a separate hCaptcha probe.
 #+status: REVIEW
-#+filetags: :starintel:design:starintel-pro-actors:captcha:hcaptcha:2captcha:experimental:
+#+filetags: :starintel:design:starintel-pro-actors:captcha:2captcha:adapter:multi-family:uml:
 
 * Decision
 
-Implement the =TwoCaptchaAdapterActor= only as an experimental, disabled-by-default adapter. The generic 2Captcha version-two application-programming-interface[fn:api] is current, but the hCaptcha task contract is not consistently present in the current public navigation. The actor must not advertise an hCaptcha capability until a contract probe succeeds.
+Implement =TwoCaptchaAdapterActor= as a broad asynchronous provider adapter. Each challenge family is an independently verified capability. The adapter is no longer globally disabled merely because hCaptcha documentation is uncertain.
 
-This design exists to test provider neutrality and preserve an implementation path. It is not approval to enable the adapter against arbitrary sites.
+hCaptcha remains disabled until a current contract probe passes. Verified reCAPTCHA, Turnstile, Arkose, GeeTest, Amazon, image/text, coordinates, grid, rotate, draw-around, drag-and-drop, or other family mappers may be enabled independently.
 
-* Startup Contract Probe
+The adapter accepts only broker-normalized messages and has no public solve route.
 
-On explicit operator request, the adapter performs a bounded probe against an operator-owned hCaptcha test page or a provider sandbox:
+* Approval Table
 
-1. submit the configured hCaptcha task type;
-2. confirm a provider job identifier is returned;
-3. retrieve the terminal result;
-4. confirm the token field and optional response-key fields;
-5. record a redacted fixture and contract fingerprint;
-6. advertise =captcha.hcaptcha.*= only after the probe passes.
-
-The probe has a strict maximum cost and may not run automatically on every startup.
-
-The default candidate task names are configuration values, not trusted constants. Historical names include =HCaptchaTaskProxyless= and =HCaptchaTask=.
+| Approval area | Required reviewer | State | Evidence required |
+|---------------+-------------------+-------+-------------------|
+| Generic task engine | Pro-actors maintainer | PENDING | Create, poll, balance, feedback, error, and timeout fixtures |
+| Capability mappers | CAPTCHA maintainer | PENDING | Current official request/result fixture per enabled family |
+| hCaptcha mapper | CAPTCHA maintainer | PENDING | Current official or bounded live/sandbox fixture |
+| Disclosure | Security reviewer and operator | PENDING | Human-assisted provider policy and minimum disclosed context |
+| Cost and operations | Operator | PENDING | Per-family cost, concurrency, callback-disabled, and canary limits |
+| Live enablement | Operator | NOT STARTED | One owned-system canary per capability |
 
 * Generic Provider Contract
 
@@ -33,82 +31,170 @@ The default candidate task names are configuration values, not trusted constants
 |------------------+---------------------|
 | =submitSolve= | =POST /createTask= |
 | =pollSolve= | =POST /getTaskResult= |
-| =cancelSolve= | unsupported in the researched generic contract |
+| =cancelSolve= | unsupported unless a family contract later proves it |
 | =getBalanceOrQuota= | =POST /getBalance= |
-| =reportOutcome= | =reportCorrect= or =reportIncorrect= when applicable |
+| =reportOutcome= | family-specific correct/incorrect operations |
 | =healthSnapshot= | balance probe plus local circuit and contract state |
 
-Callbacks are excluded from version one. Polling keeps the inbound server surface closed and makes provider behavior consistent with the other adapters.
+Callbacks are excluded from version one. Polling keeps the inbound server surface closed.
 
-* Capability States
+* Adapter Architecture UML
 
-The adapter exposes one of these states:
+#+begin_src plantuml
+@startuml
+component "CaptchaBrokerActor" as Broker
+component "TwoCaptchaAdapterActor" as Adapter
+component "Task Mapper Registry" as Mappers
+component "Result Validator Registry" as Validators
+component "Attempt Journal" as Journal
+component "2Captcha API" as API
+component "EphemeralSecretStoreActor" as Secrets
 
-- =disabled=: no probe has passed or the operator disabled the provider;
-- =probing=: a bounded contract probe is active;
-- =verified=: the configured task and result mapping passed;
-- =degraded=: recent provider failures exceed policy thresholds;
-- =invalidContract=: provider responses no longer match the verified fixture.
+Broker --> Adapter : submit exact capability
+Adapter --> Mappers : map normalized descriptor
+Mappers --> Adapter : verified task object
+Adapter --> Journal : reserve before create
+Adapter --> API : createTask
+API --> Adapter : taskId
+Adapter --> Journal : record taskId
+Adapter --> API : getTaskResult loop
+API --> Adapter : processing / ready / error
+Adapter --> Validators : validate family result
+Validators --> Secrets : store typed result
+Adapter --> Broker : normalized resultRef
+@enduml
+#+end_src
 
-Only =verified= advertises solve capabilities to the broker.
+* Contract Records
 
-* Submission Mapping
+Each enabled family has a versioned record containing:
 
-After verification, the adapter maps the broker request to the discovered task object. The expected historical mapping is:
+- =capabilityId=;
+- provider task type;
+- normalized required fields;
+- provider request mapping;
+- expected result kind and required fields;
+- proxy, cookie, user-agent, and network-binding requirements;
+- execution/disclosure class;
+- cost model;
+- official retrieval date;
+- request/result fixture fingerprint;
+- state: =verified=, =experimental=, =degraded=, =invalidContract=, or =disabled=.
 
-| Broker field | Candidate 2Captcha field |
-|--------------+--------------------------|
-| =challenge.pageUrl= | =websiteURL= |
-| =challenge.siteKey= | =websiteKey= |
-| standard or invisible mode | configured task type plus discovered invisible flag where supported |
-| enterprise =rqdataRef= | no mapping until explicitly verified |
-| proxy reference | configured proxy task fields after verification |
+A generic provider account being healthy does not make every task mapper valid.
 
-The actor rejects enterprise mode unless the live contract probe proves an =rqdata= field and an accepted enterprise result.
+* Candidate Capability Families
+
+The design can host exact mappers for:
+
+- reCAPTCHA v2, v3, and Enterprise;
+- Cloudflare Turnstile;
+- Arkose Labs FunCaptcha;
+- GeeTest variants;
+- Amazon and Web Application Firewall challenge families;
+- DataDome and Imperva/Incapsula families;
+- Friendly Captcha, MTCaptcha, ALTCHA, Prosopo, CaptchaFox, Tencent, Yandex SmartCaptcha, and other documented vendor tasks;
+- image-to-text, text questions, rotate, coordinates, grid, draw-around, and drag-and-drop;
+- hCaptcha only after its independent probe passes.
+
+This is an adapter framework, not an assertion that every listed mapper is already approved or implemented.
 
 * Result Mapping
 
-The generic provider states are expected to be =processing= and =ready=. On =ready=, the contract fixture identifies the token field. The adapter copies the token directly into the ephemeral secret store[fn:ephemeral-secret-store] and returns only an opaque reference.
+| Task output | Normalized result kind |
+|-------------+------------------------|
+| issuer response token | =token= |
+| WAF clearance value | =token= or =cookie= |
+| text answer | =textAnswer= |
+| selected image cells | =selectionSet= |
+| points, rectangles, or polygons | =coordinates= |
+| rotate, slider, or drag actions | =interactionPlan= |
+| score/assessment data | =assessment= where the contract truly returns it |
+| family-specific object | =customTypedResult= with versioned schema |
 
-Cost, creation time, completion time, provider Internet Protocol address[fn:ip-address], and solve count are normalized when present. Unknown additive fields are ignored after redaction. Missing required verified fields move the adapter to =invalidContract= and stop new routing.
+The validator rejects a result kind that does not match the capability registration.
 
-* Error Mapping
+* Per-Family Sequence UML
 
-The adapter uses the current 2Captcha error table at implementation time. Minimum normalized handling:
+#+begin_src plantuml
+@startuml
+participant "CaptchaBrokerActor" as Broker
+participant "TwoCaptchaAdapterActor" as Adapter
+participant "2Captcha API" as API
+participant "EphemeralSecretStoreActor" as Secrets
 
-- invalid key -> =providerAuthenticationFailed= and open circuit;
-- zero balance -> =providerInsufficientBalance= and open circuit;
-- unsupported or incorrect task -> =unsupportedChallenge= and mark contract invalid;
-- bad proxy -> =providerRejectedRequest=;
-- unsolvable challenge -> =providerUnsolvable=;
-- request limit -> =providerConcurrencyLimited=;
-- network or server failure -> =providerUnavailable=;
-- ambiguous create failure -> =ambiguousSubmission=;
-- local deadline -> =deadlineExceeded= with =chargePossible= determined conservatively.
+Broker -> Adapter : captchaProviderSubmit(capabilityId)
+Adapter -> Adapter : require verified mapper + validator
+Adapter -> API : POST /createTask
+alt create accepted
+  API --> Adapter : taskId
+  loop bounded polling
+    Adapter -> API : POST /getTaskResult
+    API --> Adapter : processing / ready / error
+  end
+  Adapter -> Adapter : validate expected fields and result kind
+  Adapter -> Secrets : write result once
+  Adapter --> Broker : succeeded(resultRef)
+else unsupported or malformed
+  API --> Adapter : structured error
+  Adapter -> Adapter : invalidate affected capability when contract drifted
+  Adapter --> Broker : failed(normalized error)
+end
+@enduml
+#+end_src
+
+* hCaptcha Contract Probe
+
+On explicit operator request, the adapter performs a bounded probe against an operator-owned test page or provider sandbox:
+
+1. use configured candidate task type and fields;
+2. require a provider task identifier;
+3. retrieve the terminal result;
+4. confirm token field and variant behavior;
+5. record redacted fixtures and contract fingerprint;
+6. advertise the exact hCaptcha capability only after success.
+
+The probe has a strict maximum cost and never runs automatically on each startup. Historical names are configuration candidates, not trusted constants.
+
+* Human-Assisted Disclosure
+
+The provider may use human workers. The actor declares =executionClass: humanAssistedVendor=. The broker routes only when target policy permits this class.
+
+The adapter discloses only fields and bounded artifacts required by the exact task mapper. It does not send full authenticated pages, unrestricted browser snapshots, or cookies unless an approved capability and policy explicitly require them.
 
 * Idempotency and Cancellation
 
-The provider does not expose a documented create idempotency key or cancellation operation in the researched generic contract.
+The generic contract does not document create idempotency or universal cancellation. Journal before =createTask=, record =taskId= immediately, attach duplicate deliveries to the existing attempt, and never automatically recreate an ambiguous task.
 
-The adapter therefore:
+Local cancellation stops polling and deletes local result material. The task may complete and charge, so normalized cancellation reports =providerCancellationSupported: false= and =chargePossible: true=.
 
-- journals the broker attempt before creation;
-- records the provider task identifier immediately;
-- attaches duplicate deliveries to the journaled attempt;
-- never retries an ambiguous create automatically;
-- treats cancellation as local polling cancellation;
-- reports =providerCancellationSupported: false=;
-- records that a provider charge may still occur.
+* Contract Drift State UML
+
+#+begin_src plantuml
+@startuml
+[*] --> disabled
+disabled --> probing : operator requests bounded probe
+probing --> verified : request/result fixture passes
+probing --> invalidContract : unsupported or schema mismatch
+verified --> degraded : failure threshold exceeded
+degraded --> verified : recovery probe passes
+verified --> invalidContract : required field or result kind drifts
+invalidContract --> probing : operator approves reprobe
+verified --> disabled : operator disables
+@enduml
+#+end_src
+
+Only =verified= capabilities are advertised to the broker.
 
 * Actor Manifest Sketch
 
 #+begin_src json
 {
   "actorId": "star.pro.captcha.twoCaptcha",
-  "label": "2Captcha Experimental hCaptcha Adapter",
-  "actorVersion": "0.1.0",
-  "protocolVersion": "star.captcha.provider/1",
-  "roles": ["captchaProviderAdapter", "experimentalProviderAdapter"],
+  "label": "2Captcha Multi-Family Adapter",
+  "actorVersion": "0.2.0",
+  "protocolVersion": "star.captcha.provider/2",
+  "roles": ["captchaProviderAdapter", "humanAssistedProviderAdapter"],
   "accepts": [
     "captchaProviderContractProbe",
     "captchaProviderSubmit",
@@ -126,50 +212,54 @@ The adapter therefore:
     "captchaProviderHealth"
   ],
   "capabilities": [],
+  "executionClass": "humanAssistedVendor",
   "implementation": {
     "package": "starintel-pro-actors",
     "entrypoint": "STARINTEL-PRO-ACTORS.CAPTCHA.TWO-CAPTCHA:START"
   },
   "permissions": {
     "network": ["https://api.2captcha.com"],
-    "secrets": ["provider:twoCaptcha", "ephemeral:captcha", "ephemeral:proxy"]
+    "secrets": [
+      "provider:twoCaptcha",
+      "ephemeral:captcha",
+      "ephemeral:proxy",
+      "ephemeral:artifact"
+    ]
   },
   "configuration": {
     "baseUrl": "https://api.2captcha.com",
     "credentialRef": "secret://runtime/provider/twoCaptcha/default",
-    "enabled": false,
-    "candidateProxylessTaskType": "HCaptchaTaskProxyless",
-    "candidateProxyTaskType": "HCaptchaTask",
+    "callbacksEnabled": false,
     "maxConcurrency": 1,
-    "contractProbeMaxCostMicrounits": 5000
+    "contractProbeMaxCostMicrounits": 5000,
+    "capabilityContracts": {}
   }
 }
 #+end_src
 
-The runtime capability list is populated only after verification. The persisted manifest itself does not falsely claim hCaptcha support.
+The runtime capability list is populated only from verified contract records.
 
 * Testing
 
-- Startup disabled state.
-- Successful and failed contract probes.
-- Unsupported-task response causes =invalidContract=.
-- Verified response fixture drift disables capability.
-- Generic create, processing, ready, balance, and feedback mocks.
-- Duplicate and ambiguous submission tests.
-- Local cancellation tests.
-- Secret and token redaction tests.
-- No callback listener tests.
-- Opt-in live canary with a one-task ceiling against an operator-owned page.
+- Generic create, processing, ready, balance, feedback, and errors.
+- One mapper and result validator fixture per enabled family.
+- Every normalized result kind.
+- hCaptcha disabled, successful probe, failed probe, and drift.
+- One family drift does not disable unrelated verified families.
+- Duplicate, ambiguous create, and local cancellation.
+- Disclosure-policy denial before context dereference.
+- Provider key, challenge artifact, and result redaction.
+- No callback listener.
+- Per-family opt-in live canaries with individual cost ceilings.
 
 * Related Nodes
 
-- [[id:star-pro-research-003-2captcha-hcaptcha-provider][STAR-PRO-RESEARCH-003 2Captcha hCaptcha Provider]]
+- [[id:star-pro-research-003-2captcha-hcaptcha-provider][STAR-PRO-RESEARCH-003 2Captcha Multi-Family Provider]]
+- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]]
 - [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
 
 * Footnotes and Glossary
 
-[fn:api] Application programming interface: The provider's documented request and response boundary for creating jobs, retrieving results, checking balance, and reporting outcomes.
+[fn:mapper] Task mapper: A versioned function that converts one normalized challenge descriptor into one provider-specific task object.
 
-[fn:ephemeral-secret-store] Ephemeral secret store: A temporary protected store used so sensitive token values are represented in messages only by opaque references.
-
-[fn:ip-address] Internet Protocol address: A numeric address representing the network endpoint used by the provider while processing a task.
+[fn:validator] Result validator: A versioned function that verifies a provider result contains the fields and type promised by the selected capability.

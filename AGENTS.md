@@ -4,9 +4,19 @@ This is the canonical instruction file for every agent working in this repositor
 
 ## Mission
 
-Build Starintel as a local-first, professional intelligence platform: a document-driven, actor-based search and analysis system that can run at home and scale into a hosted service.
+Build Starintel as a local-first, professional intelligence platform: a document-driven, actor-based collection, search, correlation, automation, and analysis system that can run at home and scale into a hosted service. Its purpose is to give ordinary operators the investigative reach needed to expose lobbying, procurement, institutional influence, surveillance deployments, ownership networks, coordinated activity, and other concentrations of power.
 
-Product line: **the world's most dangerous search engine**—dangerous because it can preserve, normalize, connect, and search fragmented public or authorized data while retaining evidence and provenance.
+Product line: **the world's most dangerous search engine**—dangerous because it can preserve, normalize, connect, search, and analyze fragmented data across public, private, commercial, supplied, acquired, platform, sensor, and archival sources while supporting evidence and provenance.
+
+## Capability-First Principle
+
+Starintel is an anti-technofeudalist intelligence tool. Its core must maximize collection breadth, source interoperability, entity resolution, relationship discovery, graph analysis, automation, replay, search, and operator-controlled execution. It must not be reduced to a public-record viewer or preemptively narrowed around the operating assumptions of a future company.
+
+Approval gates, audits, permissions, allowlists, retention rules, rate policies, resource policies, review queues, redaction, and deployment governance are optional modules selected by the operator or product deployment. They are not universal prerequisites, mandatory document fields, or limits on the core capability model.
+
+Parser, type, schema, transport-termination, and renderer-output correctness invariants are not deployment-policy modules. Generated artifacts must be deterministically validated before becoming typed documents or executable plans; actor and expert-system outputs must satisfy their schemas; poison inputs must reach a terminal reject or dead-letter outcome; untrusted rendered fields must be sanitized or escaped; and lifecycle, provenance, integrity, and processing semantics required for deterministic replay must be preserved.
+
+Research must first identify the strongest technically achievable capability. Deployment policy may wrap that capability later without rewriting or weakening the underlying architecture.
 
 ## Context Order
 
@@ -267,8 +277,9 @@ When changing the document specification:
 2. Define type, requiredness, null behavior, mutability, merge/conflict rules, and migration.
 3. Update every maintained language implementation.
 4. Add shared conformance fixtures.
-5. Preserve lifecycle, provenance, integrity, access, search, storage, and processing metadata.
-6. Never fabricate sources, confidence, authorization, or evidence.
+5. Preserve lifecycle, provenance, integrity, and processing semantics required for deterministic validation, replay, and conflict resolution.
+6. Keep access, audit, retention, review, and deployment-policy metadata optional unless the active design explicitly requires them.
+7. Never fabricate sources, confidence, authorization, or evidence.
 
 ## Code Rules
 

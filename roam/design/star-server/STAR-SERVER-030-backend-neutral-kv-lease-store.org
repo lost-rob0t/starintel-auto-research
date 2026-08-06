@@ -1,0 +1,669 @@
+:PROPERTIES:
+:ID:       bc8066ec-d7a3-4d6a-afff-353d444e725a
+:END:
+#+title: STAR-SERVER-030 Backend-Neutral KV Lease Store Protocol
+#+description: Normative design for a Common Lisp lease-store protocol that preserves atomic ownership, monotonic fencing, request replay, explicit uncertainty, canonical keys, versioned records, runtime lifecycle, auditability, metrics, and backend conformance without exposing backend packages to target actors or HTTP routes.
+#+status: REVIEW
+#+filetags: :starintel:star-server:lease-store:kv:fencing:common-lisp:design:org-roam:
+
+* Source Links
+
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:../../research/star-server/STAR-RESEARCH-030-backend-neutral-kv-lease-store.org][STAR-RESEARCH-030 Backend-Neutral KV Lease Store]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/30][starintel-server issue 30]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/29][starintel-server issue 29]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-auth-kv-lease-boundary.org][HTTP authentication threat model — KV lease boundary]]
+
+* Normative Status
+
+This document defines the backend-neutral key-value lease-store[fn:lease-store] protocol for StarIntel[fn:starintel]. It is a storage boundary beneath the distributed target-lease semantics defined by issue 29 and beneath the authorization boundary defined by the HTTP KV lease threat model.
+
+This design does not define HTTP routes, actor scheduling policy, downstream fencing enforcement, or administrator authorization. Those layers consume this protocol.
+
+The words MUST, MUST NOT, REQUIRED, SHOULD, SHOULD NOT, and MAY are normative requirements.[fn:normative]
+
+* Goals
+
+The protocol MUST:
+
+- preserve atomic acquire, compare-and-renew, compare-and-delete, revoke, and monotonic fencing behavior;
+- remain independent of etcd, Consul, Redis, DynamoDB, or another backend product;
+- make unsupported backend guarantees visible during startup;
+- accept an absolute deadline and request identifier on every operation;
+- return structured outcomes instead of booleans;
+- distinguish known timeout from an unknown commit outcome;
+- provide deterministic namespaced key encoding;
+- version every persisted envelope;
+- keep backend resources under an explicit runtime-owned object;
+- expose metrics and audit hooks without coupling correctness to those sinks;
+- provide one shared contract suite for every adapter;
+- provide a deterministic in-memory backend for unit tests only;
+- keep backend packages out of target actors and HTTP routes.
+
+* Non-Goals
+
+This protocol MUST NOT:
+
+- grant authorization from a lease request;
+- accept arbitrary backend keys or query expressions;
+- expose backend sessions, connections, transactions, revisions, credentials, or exceptions as its public API;
+- turn a weak backend into a strong backend through naming alone;
+- use lease listings to prove current ownership;
+- make a random lease identifier substitute for a fencing token;
+- use the in-memory backend in production;
+- block indefinitely while waiting to acquire a lease.
+
+* Package and System Layout
+
+#+begin_example
+star.lease-store.protocol
+star.lease-store.keys
+star.lease-store.records
+star.lease-store.results
+star.lease-store.runtime
+star.lease-store.contract-tests
+star.lease-store.memory
+star.lease-store.etcd
+star.lease-store.consul
+#+end_example
+
+=star.lease-store.protocol=, =keys=, =records=, =results=, and =runtime= form the backend-neutral core.
+
+Each production adapter lives in a separate ASDF system[fn:asdf] and package. The main server selects one adapter from configuration and passes only a =lease-store= instance to higher layers.
+
+Target actors, HTTP routes, and target scheduling packages MUST import =star.lease-store.protocol= only. A dependency test MUST fail when those packages import an adapter package or backend client library.
+
+* Domain Objects
+
+** Lease key
+
+A =lease-key= is an immutable logical tuple:
+
+#+begin_src lisp
+(defstruct (lease-key
+            (:constructor make-lease-key
+                (&key tenant-id dataset-id actor-name
+                      operation-class target-id)))
+  (tenant-id "" :type string :read-only t)
+  (dataset-id "" :type string :read-only t)
+  (actor-name "" :type string :read-only t)
+  (operation-class "" :type string :read-only t)
+  (target-id "" :type string :read-only t))
+#+end_src
+
+Every field MUST already be canonical according to its owning StarIntel document contract. The key codec still validates type, emptiness, byte length, and canonical encoding before backend access.
+
+** Lease owner
+
+A =lease-owner= binds the holder identity:
+
+#+begin_src lisp
+(defstruct (lease-owner
+            (:constructor make-lease-owner
+                (&key principal-id service-instance-id actor-instance-id)))
+  (principal-id "" :type string :read-only t)
+  (service-instance-id "" :type string :read-only t)
+  (actor-instance-id nil :type (or null string) :read-only t))
+#+end_src
+
+The owner structure contains identifiers only. It MUST NOT contain credentials, bearer tokens, verifier material, or connection secrets.
+
+** Lease handle
+
+A successful acquisition returns an immutable =lease-handle=:
+
+#+begin_src lisp
+(defstruct (lease-handle
+            (:constructor %make-lease-handle))
+  (key nil :type lease-key :read-only t)
+  (lease-id "" :type string :read-only t)
+  (owner nil :type lease-owner :read-only t)
+  (fencing-token 0 :type (integer 1 *) :read-only t)
+  (backend-version "" :type string :read-only t)
+  (acquired-at nil :read-only t)
+  (renewed-at nil :read-only t)
+  (expires-at nil :read-only t)
+  (execution-id nil :type (or null string) :read-only t)
+  (trace-id nil :type (or null string) :read-only t))
+#+end_src
+
+Renew and release MUST accept the full handle or an equivalent validated immutable token. They MUST NOT accept only a target identifier, lease identifier, or owner identifier.
+
+** Request context
+
+Every operation accepts a =lease-request-context=:
+
+#+begin_src lisp
+(defstruct (lease-request-context
+            (:constructor make-lease-request-context
+                (&key request-id deadline correlation-id decision-id
+                      principal-id audit-context)))
+  (request-id "" :type string :read-only t)
+  (deadline nil :read-only t)
+  (correlation-id nil :type (or null string) :read-only t)
+  (decision-id nil :type (or null string) :read-only t)
+  (principal-id nil :type (or null string) :read-only t)
+  (audit-context nil :read-only t))
+#+end_src
+
+The deadline is an absolute monotonic deadline[fn:monotonic-deadline]. Mutating request identifiers are idempotency keys[fn:idempotency-key]. Read request identifiers are trace identifiers and MAY be deduplicated without durable receipts.
+
+* Canonical Key Encoding
+
+The protocol owns one deterministic codec. Adapters MUST NOT invent their own logical namespace.
+
+The encoded components are:
+
+#+begin_example
+lease:   /starintel/lease/v1/<tenant>/<dataset>/<actor>/<operation>/<target>
+fence:   /starintel/fence/v1/<tenant>/<dataset>/<actor>/<operation>/<target>
+request: /starintel/request/v1/<principal>/<operation>/<request-id>
+#+end_example
+
+Each variable segment MUST be:
+
+1. validated against a maximum UTF-8 byte length;
+2. normalized to Unicode Normalization Form C[fn:nfc] when Unicode is permitted;
+3. encoded as UTF-8;
+4. encoded again as unpadded base64url[fn:base64url].
+
+Empty logical segments are forbidden. Raw separators, percent encoding, path traversal, backend wildcard syntax, and caller-supplied prefixes never enter the backend key.
+
+The canonical encoder MUST expose:
+
+#+begin_src lisp
+(encode-lease-key lease-key)       ; canonical binary tuple
+(render-lease-key lease-key)       ; versioned path representation
+(decode-lease-key octets)          ; strict inverse
+(lease-key-fingerprint lease-key)  ; safe audit identifier
+#+end_src
+
+Contract tests MUST prove round-trip behavior and absence of collisions across separators, Unicode equivalents, maximum-length identifiers, and all supported component combinations.
+
+* Persisted Record Contract
+
+** Lease record
+
+#+begin_src json
+{
+  "schema": "starintel.lease/1",
+  "key": {
+    "tenant_id": "tenant-main",
+    "dataset_id": "dataset-a",
+    "actor_name": "usernamegen",
+    "operation_class": "collect",
+    "target_id": "target_01"
+  },
+  "lease_id": "lease_01",
+  "owner": {
+    "principal_id": "principal_01",
+    "service_instance_id": "server_01",
+    "actor_instance_id": "actor-instance-01"
+  },
+  "fencing_token": 42,
+  "acquired_at": "2026-08-06T12:00:00Z",
+  "renewed_at": "2026-08-06T12:00:20Z",
+  "expires_at": "2026-08-06T12:00:40Z",
+  "backend_version": "opaque-adapter-version",
+  "execution_id": "run_01",
+  "trace_id": "trace_01",
+  "metadata": {}
+}
+#+end_src
+
+The serializer MUST use canonical field names and deterministic encoding for request fingerprints. The value =schema= is required. Unknown schema versions fail closed as =malformed-record= or =unsupported-record-version=.
+
+=metadata= is a bounded extension object containing non-secret scalar or structured values allowed by the lease-service layer. The serializer MUST reject credentials, raw authorization headers, arbitrary executable objects, and values exceeding configured depth or byte limits.
+
+** Fence record
+
+The fence record is durable and MUST NOT share the lease time to live[fn:ttl]:
+
+#+begin_src json
+{
+  "schema": "starintel.lease-fence/1",
+  "fencing_token": 42,
+  "updated_at": "2026-08-06T12:00:00Z"
+}
+#+end_src
+
+Release, expiration, and revocation MUST NOT delete or reset the fence record. Disaster recovery MUST preserve or explicitly advance the fence so restored state cannot issue a lower token than a downstream writer has already accepted.
+
+** Request receipt
+
+#+begin_src json
+{
+  "schema": "starintel.lease-request/1",
+  "operation": "acquire",
+  "request_id": "request_01",
+  "request_fingerprint": "sha256:...",
+  "result_kind": "acquired",
+  "lease_id": "lease_01",
+  "fencing_token": 42,
+  "backend_version": "opaque-adapter-version",
+  "completed_at": "2026-08-06T12:00:00Z",
+  "retain_until": "2026-08-07T12:00:00Z"
+}
+#+end_src
+
+For mutating operations, the receipt MUST commit atomically with the lease mutation. A replay with the same request identifier and fingerprint returns the recorded result. A replay with a different fingerprint returns =request-id-reused=.
+
+Receipt retention MUST exceed the maximum client retry and message-redelivery window. Removing old receipts is maintenance, not part of lease correctness.
+
+* Result Algebra
+
+Expected distributed outcomes are returned as immutable data. They are not signaled as ordinary Common Lisp conditions[fn:condition]. Programmer errors such as passing an object of the wrong type MAY signal a condition before backend access.
+
+#+begin_src lisp
+(defstruct (lease-result
+            (:constructor %make-lease-result))
+  (operation nil :type keyword :read-only t)
+  (kind nil :type keyword :read-only t)
+  (request-id "" :type string :read-only t)
+  (retryable-p nil :type boolean :read-only t)
+  (lease nil :type (or null lease-handle) :read-only t)
+  (observed-lease nil :read-only t)
+  (backend-revision nil :read-only t)
+  (backend-health nil :read-only t)
+  (started-at nil :read-only t)
+  (finished-at nil :read-only t)
+  (diagnostic-code nil :type (or null keyword) :read-only t)
+  (details nil :read-only t))
+#+end_src
+
+Allowed result kinds are closed and versioned:
+
+| Class | Kinds |
+|-------+-------|
+| Success | =:acquired= =:renewed= =:released= =:revoked= =:found= =:not-found= =:listed= =:healthy= =:closed= |
+| Ownership | =:conflict= =:expired= =:stale-token= =:not-owner= |
+| Request | =:invalid-request= =:request-id-reused= |
+| Deadline | =:deadline-exceeded= =:outcome-unknown= |
+| Backend | =:backend-unavailable= =:unsupported-capability= =:malformed-record= =:store-closed= |
+
+=:deadline-exceeded= means the adapter knows the mutation did not commit. =:outcome-unknown= means the request may have committed and MUST be recovered by repeating the same operation with the same request identifier.
+
+A result MAY contain a redacted observed-lease summary for internal callers. It MUST NOT disclose another owner's sensitive metadata to unauthorized callers.
+
+* Public Protocol
+
+#+begin_src lisp
+(defclass lease-store () ())
+
+(defgeneric lease-store-capabilities (store))
+(defgeneric lease-store-state (store))
+
+(defgeneric acquire-lease
+    (store key owner context
+     &key ttl maximum-lifetime execution-id trace-id metadata))
+
+(defgeneric renew-lease
+    (store handle context &key ttl))
+
+(defgeneric release-lease
+    (store handle context &key reason))
+
+(defgeneric get-lease
+    (store key context &key consistency))
+
+(defgeneric list-leases
+    (store scope context &key cursor limit consistency))
+
+(defgeneric revoke-lease
+    (store key context
+     &key expected-lease-id expected-fencing-token reason))
+
+(defgeneric backend-health
+    (store context &key thorough-p))
+
+(defgeneric close-lease-store
+    (store context &key reason))
+#+end_src
+
+Every generic function MUST validate the deadline before dispatch. Every adapter call MUST derive its own network timeout from the remaining deadline and MUST stop retrying when no time remains.
+
+=acquire-lease= is non-blocking at the protocol level. It performs one bounded acquisition attempt plus bounded internal compare-and-swap[fn:cas] retries caused by backend contention. Waiting for another owner is a scheduling policy above this interface.
+
+* Operation Semantics
+
+** Acquire
+
+The adapter MUST atomically:
+
+1. check for an existing request receipt;
+2. reject mismatched request-identifier reuse;
+3. inspect the current lease using a strong ownership read;
+4. treat an unexpired lease as =conflict=;
+5. increment the durable fence record;
+6. create a new opaque lease identifier;
+7. write the active lease with the new fencing token and expiration;
+8. write the request receipt;
+9. return the committed lease handle.
+
+Exactly one concurrent acquisition for the same canonical key may return =acquired=.
+
+An expired record MAY be overwritten or deleted inside the same transaction, but the new fencing token MUST be greater than the expired token.
+
+** Renew
+
+Renew MUST compare all of:
+
+- canonical key;
+- lease identifier;
+- owner identity;
+- fencing token;
+- backend version or compare token;
+- unexpired state.
+
+A successful renew extends expiration and updates =renewed_at=. It does not increment the fencing token.
+
+A token lower than the current record returns =stale-token=. A different owner returns =not-owner=. An already expired matching lease returns =expired=. A backend compare conflict caused by a newer record returns the most specific safe ownership result available.
+
+** Release
+
+Release MUST compare the same identity fields as renew and then delete only the active lease record. It MUST leave the fence record intact. Replaying an already successful release with the same request identifier returns =released= from the request receipt.
+
+A stale release MUST NOT delete a newer lease.
+
+** Get
+
+=get-lease= defaults to strong consistency[fn:strong-consistency] when used for ownership decisions. A caller MAY request diagnostic stale consistency only when the adapter advertises it and the result clearly records the used consistency mode.
+
+An expired record is returned as =expired= or =not-found= according to the application service contract, but it is never returned as active ownership.
+
+** List
+
+=list-leases= requires a bounded scope, limit, and cursor. The result MUST include:
+
+- consistency mode;
+- observed backend revision when available;
+- next cursor;
+- truncation flag;
+- lease summaries.
+
+Listings are administrative and diagnostic. A caller MUST NOT use a listing result to renew, release, or prove ownership.
+
+** Revoke
+
+=revoke-lease= is a privileged storage operation invoked only after authorization above the protocol. It MUST accept a reason. When =expected-lease-id= or =expected-fencing-token= is supplied, the adapter MUST compare it before deletion.
+
+Revocation deletes the active lease but not the fence record. A revoked former holder remains fenced from downstream writes.
+
+** Health
+
+=backend-health= returns a structured state including adapter readiness, required-capability satisfaction, connection-pool state, and a bounded backend probe result. It MUST NOT expose credentials, endpoints containing secrets, raw exceptions, or unrestricted backend diagnostics.
+
+** Close
+
+=close-lease-store= is idempotent and uses the lifecycle transition described below. A repeated close with the same or a new request identifier returns =closed=.
+
+* Capability Contract
+
+#+begin_src lisp
+(defstruct (lease-store-capabilities
+            (:constructor make-lease-store-capabilities))
+  linearizable-conditional-mutation-p
+  atomic-multi-key-transaction-p
+  monotonic-fencing-p
+  compare-and-delete-p
+  strong-owner-read-p
+  expiration-mode
+  bounded-request-p
+  consistent-prefix-list-p
+  native-idempotency-token-p
+  backend-name
+  backend-version)
+#+end_src
+
+Production readiness requires:
+
+- linearizable conditional mutation;
+- atomic mutation of the lease, fence, and request receipt, or one-item storage with equivalent atomicity;
+- monotonic durable fencing;
+- compare-and-delete;
+- strong ownership reads;
+- backend expiration or an atomic authoritative expiration test;
+- bounded request execution.
+
+A configured adapter missing a required capability MUST fail startup with =unsupported-capability=. It MUST NOT start in a degraded correctness mode.
+
+* Runtime Lifecycle
+
+** Lease-store runtime component
+
+#+begin_src lisp
+(defclass managed-lease-store (lease-store)
+  ((state :initform :created :reader lease-store-state)
+   (adapter :initarg :adapter :reader lease-store-adapter)
+   (pool :initarg :pool :reader lease-store-pool)
+   (clock :initarg :clock :reader lease-store-clock)
+   (metrics-sink :initarg :metrics-sink :reader lease-store-metrics-sink)
+   (audit-sink :initarg :audit-sink :reader lease-store-audit-sink)
+   (retry-policy :initarg :retry-policy :reader lease-store-retry-policy)
+   (capabilities :initarg :capabilities :reader lease-store-capabilities)))
+#+end_src
+
+Lifecycle:
+
+#+begin_example
+:created -> :opening -> :ready -> :draining -> :closed
+                     \-> :failed
+#+end_example
+
+Only =:ready= accepts new lease operations.
+
+Closing MUST atomically change state to =:draining= before waiting for in-flight calls. New calls then return =store-closed= without backend access. The close operation drains or cancels in-flight calls according to their deadlines, closes the pool and adapter resources exactly once, emits lifecycle telemetry, and enters =:closed=.
+
+The server runtime owns the lease-store component. Server shutdown MUST call =close-lease-store= before destroying dependencies used by its audit or metrics sinks.
+
+* Retry Rules
+
+Adapters MAY retry only errors classified as transient and only while the original deadline remains.
+
+Retries MUST:
+
+- reuse the same request identifier;
+- reuse the same request fingerprint;
+- use bounded exponential backoff with jitter[fn:jitter];
+- stop on ownership conflicts, stale tokens, invalid requests, request-identifier reuse, malformed records, closed state, or unsupported capabilities;
+- return =outcome-unknown= when a mutating request may have committed and the receipt cannot be read before the deadline.
+
+The adapter MUST NOT generate a replacement request identifier internally.
+
+* Metrics
+
+The protocol emits low-cardinality metrics[fn:cardinality]:
+
+- operation count by operation, result kind, adapter, and retryability;
+- latency histogram by operation and adapter;
+- in-flight operation gauge;
+- compare-retry count;
+- unknown-outcome count;
+- connection-pool state;
+- lifecycle state;
+- malformed-record count;
+- audit-sink failure count.
+
+Tenant identifiers, dataset identifiers, target identifiers, actor names, principal identifiers, lease identifiers, request identifiers, and correlation identifiers MUST NOT be metric labels.
+
+Metrics failure MUST NOT change a committed lease result.
+
+* Audit Hooks
+
+Every operation produces a bounded audit event containing:
+
+- operation;
+- result kind;
+- timestamp and latency;
+- request, correlation, and authorization decision identifiers;
+- principal class and identifier when supplied;
+- canonical key fingerprint and separately authorized scope fields;
+- lease identifier and fencing token when safe;
+- backend adapter and health state;
+- retry count;
+- whether the result was recovered from a receipt;
+- reason for revoke or close.
+
+Audit events MUST NOT contain backend credentials, connection strings with secrets, raw authorization headers, verifier material, arbitrary request bodies, or unrestricted backend errors.
+
+The audit sink is not part of the backend transaction. If audit delivery fails after a commit, the returned result remains accurate and the metrics sink records the failure. Deployments that require durable audit delivery SHOULD route events to a bounded durable journal owned by the runtime.
+
+* Deterministic Memory Backend
+
+The memory backend exists only in =star.lease-store.memory= and MUST refuse production configuration.
+
+It uses:
+
+- one explicit state object;
+- one injected manual clock;
+- deterministic identifier and request generators supplied by tests;
+- one mutex[fn:mutex] or serialized actor owning all state;
+- no sleeping;
+- no global variables;
+- no real network or wall clock.
+
+The backend must implement the same result algebra, records, receipts, lifecycle, and contract tests. Its purpose is semantic testing, not evidence that a production backend handles partitions or crash recovery.
+
+* etcd Reference Mapping
+
+The first production adapter SHOULD target etcd v3.
+
+For acquire:
+
+1. grant an etcd lease for the requested bounded TTL;
+2. perform a linearizable read of the fence record and lease key;
+3. calculate the next fence value;
+4. submit one etcd transaction comparing the observed fence revision and current lease state;
+5. write the fence record, lease record attached to the etcd lease, and request receipt in the successful branch;
+6. revoke the unused etcd lease when the transaction loses contention;
+7. retry within the original deadline.
+
+Renew compares the active lease record and backend revision, then updates the record while keeping the same fencing token and refreshing backend expiration.
+
+Release and revoke compare and delete only the active lease key. They do not delete the fence key.
+
+The adapter MUST use linearizable reads for ownership. Serializable member-local reads are permitted only for explicitly diagnostic listing modes.
+
+* Consul Candidate Mapping
+
+A later Consul adapter MAY combine sessions, =LockIndex=, and atomic KV transactions. It MUST prove through the common contract suite and failure injection that its fencing value remains monotonic across release, session invalidation, snapshot restore, and reacquisition.
+
+Because Consul locks are advisory, deployment access control MUST prevent unrelated clients from directly mutating the lease namespace.
+
+* Unsupported Initial Mappings
+
+Redis and DynamoDB MUST NOT be enabled as strict production adapters by the initial issue-30 implementation.
+
+A later Redis adapter requires a separate approved design covering failover, persistence, crash recovery, fencing durability, and bounded clock assumptions.
+
+A later DynamoDB adapter requires a separate approved design covering transaction structure, request-token retention, application-authoritative expiration checks, clock skew, global-table behavior, and asynchronous TTL deletion.
+
+* Backend Contract Suite
+
+The contract suite exports one test registration function:
+
+#+begin_src lisp
+(register-lease-store-contract-suite
+ :name :etcd
+ :factory #'make-isolated-etcd-test-store
+ :destroy #'destroy-isolated-etcd-test-store
+ :capability-overrides nil)
+#+end_src
+
+Every adapter MUST run:
+
+1. canonical key round-trip and collision tests;
+2. record-version validation tests;
+3. one-winner concurrent acquire;
+4. fencing monotonicity across release, expiration, revoke, and reacquire;
+5. exact-handle renew;
+6. stale-token renew rejection;
+7. exact-handle release;
+8. stale release cannot delete a newer lease;
+9. request replay returns the original mutation result;
+10. request-identifier mismatch rejection;
+11. known deadline failure;
+12. unknown-outcome recovery with the same request identifier;
+13. backend unavailable mapping;
+14. malformed backend data fail-closed behavior;
+15. bounded listing and cursor behavior;
+16. close rejects new operations;
+17. close racing with an in-flight operation returns only permitted terminal results;
+18. pool closure occurs exactly once;
+19. audit and metrics sink failure isolation;
+20. no adapter dependency in target actor or HTTP route systems.
+
+Production adapters additionally run failure injection for leader loss, connection reset before response, delayed response after commit, backend restart, expiration-service interruption, and snapshot restore.
+
+* Acceptance Mapping
+
+| Issue 30 acceptance requirement | Design mechanism |
+|---------------------------------+------------------|
+| Backend-neutral operations | =lease-store= generic-function protocol and closed result algebra |
+| Deadline and request identifier | Required =lease-request-context= on every operation |
+| Atomic acquire, renew, delete, fence increment | Capability-gated adapter transaction contract |
+| Namespaced deterministic keys | Versioned canonical tuple and base64url segment codec |
+| Serialization version | Required =schema= in lease, fence, and receipt records |
+| Runtime-owned resources | =managed-lease-store= lifecycle under server runtime |
+| Structured failures | Closed =lease-result= kinds including uncertainty |
+| Metrics and audit hooks | Low-cardinality metrics and bounded post-result audit events |
+| Deterministic memory backend | Injected clock, explicit state, test-only guard |
+| Contract suite | Shared adapter factory suite plus production failure injection |
+| One concurrent owner | One-winner acquire test |
+| Stale operations harmless | Full-handle compare plus persistent fencing token |
+| Runtime close rejects work | =:draining= transition before resource closure |
+| No backend imports above boundary | ASDF/package dependency regression test |
+
+* Implementation Order
+
+1. Create =star.lease-store.protocol=, result kinds, keys, records, and clocks.
+2. Implement strict serializers and request fingerprints.
+3. Implement =managed-lease-store= lifecycle and sink interfaces.
+4. Implement deterministic memory backend.
+5. Implement the complete backend contract suite against memory.
+6. Implement the etcd adapter behind a separate ASDF system.
+7. Run the contract suite against a real disposable etcd cluster.
+8. Add failure-injection tests for uncertain outcomes and leader loss.
+9. Add the application lease service that applies issue-29 state transitions and authorization context.
+10. Wire the service into the runtime without importing etcd from actors or HTTP routes.
+
+* Open Risks
+
+- Downstream writers that do not validate fencing tokens can still accept work from an expired holder.
+- Snapshot restore can lower durable fence state unless recovery explicitly advances or invalidates generations.
+- Audit sink loss can leave an operational evidence gap even when lease correctness is preserved.
+- A backend client library may not expose cancellation cleanly; the adapter must still bound its own pool and return uncertainty honestly.
+- Prefix listings may be expensive or weakly consistent; they remain diagnostic.
+- Request receipt retention must be sized to the longest realistic retry and message-redelivery window.
+
+* Footnotes and Glossary
+
+[fn:lease-store] Lease store: The component that atomically records temporary ownership, expiration, and the monotonically increasing generation used to reject stale holders.
+
+[fn:starintel] StarIntel: A local-first intelligence platform that collects, validates, connects, searches, analyzes, and exports structured documents through actor-based services.
+
+[fn:normative] Normative requirement: A rule that an implementation must follow to conform to this design, rather than background explanation or an optional example.
+
+[fn:asdf] ASDF: Another System Definition Facility, the standard Common Lisp build system used to declare source files and dependencies.
+
+[fn:monotonic-deadline] Monotonic deadline: An absolute limit measured by a clock that only moves forward, so wall-clock corrections do not extend or shorten an in-flight operation unexpectedly.
+
+[fn:idempotency-key] Idempotency key: A caller-generated request identifier used to recover the original result and prevent duplicate side effects when a request is retried.
+
+[fn:nfc] Unicode Normalization Form C: A standard representation that composes equivalent Unicode character sequences before byte encoding.
+
+[fn:base64url] Base64url: A URL-safe Base64 encoding. Unpadded base64url produces path segments without slash or equals-sign ambiguity.
+
+[fn:ttl] Time to live: The bounded period after which a backend treats a lease as expired and removes or invalidates its active record.
+
+[fn:condition] Common Lisp condition: A typed signaling object used for exceptional control flow. Expected lease conflicts and backend outcomes are returned as data instead.
+
+[fn:cas] Compare-and-swap: An atomic operation that changes data only when the currently stored value or version matches the expected value.
+
+[fn:strong-consistency] Strong consistency: A read guarantee that returns the latest committed state required for a current ownership decision rather than a possibly stale replica value.
+
+[fn:jitter] Jitter: A small randomized delay added to retry timing so competing callers do not repeatedly retry in lockstep.
+
+[fn:cardinality] Metric cardinality: The number of distinct label-value combinations a metrics system must store. Identifiers such as target IDs create unbounded cardinality and must not be labels.
+
+[fn:mutex] Mutex: A mutual-exclusion primitive that allows only one thread to enter a protected critical section at a time.

@@ -1,0 +1,310 @@
+:PROPERTIES:
+:ID:       1930fee2-2dc1-43b2-9dc2-9fd17ebc6289
+:END:
+#+title: STAR-RESEARCH-030 Backend-Neutral KV Lease Store
+#+description: Deep implementation research for a backend-neutral StarIntel lease-store protocol with atomic ownership, monotonic fencing, request replay recovery, deterministic key encoding, runtime-owned resources, and a shared backend contract suite.
+#+status: REVIEW
+#+filetags: :starintel:star-server:leases:fencing:kv:distributed-systems:common-lisp:research:org-roam:
+
+* Source Links
+
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:../../design/star-server/STAR-SERVER-030-backend-neutral-kv-lease-store.org][STAR-SERVER-030 Backend-Neutral KV Lease Store Protocol]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/30][starintel-server issue 30]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/29][starintel-server issue 29]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-auth-kv-lease-boundary.org][HTTP authentication threat model — KV lease boundary]]
+
+* Research Question
+
+How should StarIntel[fn:starintel] define a key-value lease store[fn:kv-store] that remains independent of etcd, Consul, Redis, DynamoDB, or another product while preserving the atomicity[fn:atomicity], fencing[fn:fencing-token], deadline[fn:deadline], idempotency[fn:idempotency], lifecycle, observability, and failure semantics required by target scheduling?
+
+The protocol is not allowed to reduce every backend to a boolean lock API. A backend-neutral interface is correct only when it preserves the strongest required semantics and rejects backends that cannot supply them.
+
+* Repository Findings
+
+The current =starintel-server= runtime is assembled procedurally in =source/main.lisp=. It creates the worker kernel, CouchDB state, authentication store, actors, HTTP service, RabbitMQ consumers, and event consumer without a single runtime object that owns and closes these resources. Issue 30 explicitly requires the lease connection pool and resource lifecycle to live under a runtime object. The lease design should therefore introduce a narrow owned component that can later become part of a broader runtime refactor without forcing target actors or HTTP routes to import backend packages.
+
+The existing authentication package already carries request and service-call contexts containing correlation identifiers and deadlines. The lease protocol should accept those values explicitly and should not depend on dynamically bound HTTP state.
+
+The existing KV lease threat-model document already defines the authorization boundary, canonical scope binding, compare-and-swap ownership checks, secret-handling rules, audit requirements, and fail-closed behavior. Issue 30 should implement the storage and runtime boundary beneath that document rather than redefining HTTP authorization.
+
+* Core Distributed-Systems Findings
+
+** Leases are time-bounded authority, not permanent locks
+
+Gray and Cheriton's lease work describes time-bounded authority that can expire after a client failure, but it also depends on explicit clock assumptions.[fn:gray-leases] Chubby demonstrates a production lock service designed for reliable low-volume coordination rather than high-throughput data storage.[fn:chubby]
+
+StarIntel must therefore treat a lease as a temporary authority record. Expiration permits another owner to acquire the target, but expiration alone does not stop a delayed former owner from writing. That second problem requires fencing tokens validated by downstream state-changing systems.
+
+** Fencing is a downstream write rule
+
+A fencing token is a monotonically increasing generation attached to an acquisition. Every authoritative write caused by leased work must reject a token lower than the highest accepted token for the affected resource. The lease store can issue the token, but CouchDB writers, graph writers, RabbitMQ settlement paths, job state, and other mutation boundaries must enforce it.
+
+A lease API that returns only a random lease identifier is insufficient. Random identifiers protect compare-and-delete operations but do not order old and new owners.
+
+** Timeouts can leave the outcome unknown
+
+A mutating request may commit in the backend and then lose its response. Returning a generic timeout would hide whether ownership changed. The protocol needs two distinct deadline outcomes:
+
+- =deadline-exceeded=: the request was not dispatched or is known not to have committed;
+- =outcome-unknown=: the backend may have committed the mutation, so the caller must repeat the same operation with the same request identifier or read the request receipt.
+
+This distinction is essential for safe retries. The protocol must never encourage a caller to generate a new request identifier after an uncertain acquire.
+
+** Idempotency requires durable request receipts
+
+For mutating operations, the request identifier must be stored atomically with the mutation result. A receipt contains the operation name, request identifier, canonical request fingerprint, final result kind, lease identity, fencing token when present, backend revision, and retention deadline.
+
+A retry with the same identifier and the same fingerprint returns the original result. Reusing the identifier with different arguments returns =request-id-reused=. A backend or adapter that cannot atomically persist the receipt with the lease mutation does not provide full mutation idempotency.
+
+Read operations may use the request identifier for tracing and duplicate suppression without durable receipts.
+
+* Required Capability Model
+
+Every backend adapter must report a capability profile before becoming ready:
+
+| Capability | Production requirement | Meaning |
+|------------+------------------------+---------|
+| =linearizable-conditional-mutation= | required | Compare and mutate one logical lease state against the latest committed value. |
+| =atomic-multi-key-transaction= | required unless lease, fence, and receipt share one item | Commit lease state, durable fence state, and request receipt together. |
+| =monotonic-fencing= | required | Persist a per-key generation that never decreases or resets after release. |
+| =compare-and-delete= | required | Delete only the exact lease generation and owner being released. |
+| =strong-owner-read= | required for ownership decisions | Read current state without accepting stale replica data. |
+| =expiration= | required | Supply backend TTL or permit an atomic authoritative expiration test. |
+| =bounded-request= | required | Permit backend calls to stop or return when the caller deadline expires. |
+| =consistent-prefix-list= | optional | Return a revision-pinned listing. Listings without this capability are diagnostic only. |
+| =native-idempotency-token= | optional | Backend can complement StarIntel receipts with its own replay token. |
+
+The adapter constructor must fail with =unsupported-capability= when the configured deployment cannot meet the required profile. Product independence does not justify silent semantic downgrade.
+
+* Backend Evaluation
+
+** etcd v3: reference backend
+
+etcd provides linearizable range reads by default, atomic transactions guarded by value, version, create-revision, or modification-revision comparisons, and lease-attached keys that are deleted when the backend lease expires.[fn:etcd-api][fn:etcd-guarantees]
+
+Recommended mapping:
+
+1. Maintain a durable fence record separate from the expiring lease key.
+2. Read the current fence value and modification revision using a linearizable read.
+3. Submit one transaction that compares the fence revision and lease state, writes the incremented fence value, writes the lease record attached to an etcd lease, and writes the request receipt.
+4. Retry the compare loop on contention while the deadline remains.
+5. Renew only after comparing the full lease identity and current backend revision.
+6. Release through compare-and-delete without deleting the fence record.
+
+The etcd transaction revision orders the committed mutation, but the lease record still needs the explicit per-resource fencing value because backend-global revisions are not a stable public contract and the caller needs the token inside the returned handle.
+
+etcd is the strongest first production adapter because its ordinary operations are linearizable, its transactions provide compare-and-swap over multiple keys, and its lease service owns expiration.[fn:etcd-api]
+
+** Consul: viable second adapter
+
+Consul sessions bind liveness to KV lock state. Each successful acquire increments =LockIndex=, which can act as a sequencer for stale-request detection. Consul also provides atomic transactions with =cas=, =lock=, =unlock=, =check-index=, =check-session=, and =delete-cas= operations.[fn:consul-sessions][fn:consul-transactions]
+
+Important constraints:
+
+- Consul locks are advisory; untrusted clients with direct KV write access can bypass them.
+- The adapter must use leader-managed write transactions and strong reads for ownership decisions.
+- StarIntel should still write its own versioned lease record and idempotency receipt instead of exposing raw sessions.
+- =LockIndex= may be used as the fencing token only after contract tests prove its monotonic behavior across release, session invalidation, snapshot restore, and reacquisition for the selected Consul version.
+
+** Redis: not an initial strict backend
+
+Redis documents that asynchronous primary-replica failover can violate mutual exclusion when the primary fails before a lock write reaches the replica.[fn:redis-locks] Redis also documents stronger multi-primary Redlock behavior, but that algorithm depends on bounded clock drift and operational assumptions that do not match the simplest StarIntel correctness model.
+
+A single Redis instance can implement compare-and-delete and atomic =INCR= plus lease mutation through a script or function, but crash recovery and failover configuration determine whether the fencing counter and lease state remain durable. The initial protocol should classify Redis as unsupported for strict production leases unless an adapter-specific design proves the configured topology, persistence, restart delay, and fencing enforcement through failure injection.
+
+** DynamoDB: conditional candidate, not the reference
+
+DynamoDB provides serializable single-item operations and all-or-nothing transactional writes. Transaction client tokens provide a bounded idempotency window and reject mismatched parameter reuse.[fn:dynamodb-transactions]
+
+Its background TTL deletion is not lease expiration: expired items may remain visible and mutable for days.[fn:dynamodb-ttl] A DynamoDB adapter must enforce expiration in every transactional condition using an application-supplied timestamp and must define the allowed multi-instance clock skew. This weakens the preference for backend-authoritative time. DynamoDB can still be supported when the deployment accepts that explicit clock model and uses transactional conditions rather than TTL deletion for correctness.
+
+* Canonical Key Encoding
+
+Do not concatenate raw identifiers with separators. Use one closed encoder:
+
+1. Validate each logical identifier against its domain rule and maximum UTF-8 byte length.
+2. Normalize text identifiers to Unicode Normalization Form C[fn:nfc] where the owning StarIntel document contract permits Unicode.
+3. Encode each segment as unpadded base64url[fn:base64url] of its UTF-8 bytes.
+4. Join only encoded segments beneath a versioned fixed prefix.
+
+#+begin_example
+/starintel/lease/v1/<tenant>/<dataset>/<actor>/<operation>/<target>
+/starintel/fence/v1/<tenant>/<dataset>/<actor>/<operation>/<target>
+/starintel/request/v1/<principal>/<operation>/<request-id>
+#+end_example
+
+The canonical binary tuple is the authority. A backend adapter may map it to a string path, one composite key, or partition and sort keys, but it must round-trip the same tuple and must reject non-canonical encodings.
+
+* Serialization Findings
+
+Lease records need an explicit envelope version independent of the backend adapter version:
+
+#+begin_src json
+{
+  "schema": "starintel.lease/1",
+  "key": {
+    "tenant_id": "tenant-main",
+    "dataset_id": "dataset-a",
+    "actor_name": "usernamegen",
+    "operation_class": "collect",
+    "target_id": "target_01"
+  },
+  "lease_id": "lease_01",
+  "owner_id": "principal_01",
+  "service_instance_id": "server_01",
+  "fencing_token": 42,
+  "acquired_at": "2026-08-06T12:00:00Z",
+  "renewed_at": "2026-08-06T12:00:20Z",
+  "expires_at": "2026-08-06T12:00:40Z",
+  "backend_version": "opaque-adapter-version",
+  "execution_id": "run_01",
+  "trace_id": "trace_01"
+}
+#+end_src
+
+Unknown envelope versions fail closed. Unknown extension fields may be preserved only when the version contract says they are forward-compatible. Backend-native handles, connection details, and credentials never enter the record.
+
+* Result Algebra
+
+Every operation returns an immutable structured result[fn:result-algebra], never a boolean. The common fields are:
+
+- operation;
+- request identifier;
+- result kind;
+- retryable flag;
+- canonical lease key or redacted key fingerprint;
+- lease handle when successful;
+- current or observed lease summary when disclosure is allowed;
+- backend revision;
+- backend health state;
+- start and finish timestamps;
+- audit and correlation identifiers;
+- diagnostic code safe for logs and HTTP mapping.
+
+Required result kinds:
+
+#+begin_example
+:acquired :renewed :released :revoked :found :not-found :listed :healthy :closed
+:conflict :expired :stale-token :not-owner :request-id-reused
+:deadline-exceeded :outcome-unknown :backend-unavailable
+:malformed-record :unsupported-capability :store-closed :invalid-request
+#+end_example
+
+The Common Lisp API should represent result kind as a closed keyword set inside one =lease-result= structure, with validated kind-specific slots. This is easier to serialize and exhaustively test than an unbounded condition hierarchy. Programmer errors may signal conditions; expected distributed outcomes are returned as data.
+
+* Deadline Model
+
+Accept an absolute monotonic deadline object, not only a timeout duration. The runtime clock creates the deadline and the adapter derives remaining time before each retry and network operation. This prevents nested layers from each consuming a fresh timeout.
+
+The deterministic memory backend uses an injected manual clock. Tests advance that clock directly and never sleep.
+
+* Runtime and Resource Ownership
+
+Create one =lease-store= component owned by a future =server-runtime= object. The component owns:
+
+- backend client or connection pool;
+- adapter configuration and capability profile;
+- serializer version registry;
+- clock;
+- metrics sink;
+- audit sink;
+- bounded retry policy;
+- lifecycle state.
+
+Lifecycle states:
+
+#+begin_example
+:created -> :opening -> :ready -> :draining -> :closed
+                     \-> :failed
+#+end_example
+
+=close-lease-store= is idempotent. The transition to =:draining= rejects new operations before waiting for or cancelling in-flight work. Closing the server runtime closes the lease store exactly once. Target actors and HTTP routes receive the protocol object and import only the protocol package.
+
+* Contract-Test Findings
+
+A backend contract suite must run from a factory that creates a clean isolated namespace. Every production adapter runs the same behavioral tests against a real backend. The deterministic memory adapter is used for fast unit tests only.
+
+Minimum suite:
+
+1. concurrent acquire yields exactly one active owner;
+2. successful reacquisition strictly increases the fencing token;
+3. stale renew cannot extend a newer lease;
+4. stale release cannot delete a newer lease;
+5. release never resets the fence counter;
+6. identical request replay returns the original result;
+7. mismatched request replay returns =request-id-reused=;
+8. a lost response followed by same-ID replay recovers the committed result;
+9. expiration permits reacquisition but rejects the former handle;
+10. list pagination never authorizes work and reports its consistency level;
+11. namespace encoding has no collisions for separator, Unicode, empty, and maximum-length cases;
+12. malformed and unsupported record versions fail closed;
+13. backend unavailability maps to a structured result without leaking backend secrets;
+14. closing rejects new work and closes the backend resource;
+15. close racing with acquire returns only allowed terminal outcomes;
+16. audit hook failure cannot roll back or falsify a committed lease result;
+17. metrics contain no unbounded target, tenant, principal, request, or lease labels;
+18. adapter packages are absent from target actor and HTTP route dependency graphs.
+
+Failure injection for production adapters must cover leader loss, connection reset before response, delayed response after commit, lease-service interruption, snapshot restore, and backend restart.
+
+* Decision
+
+Create a =star.lease-store.protocol= system with a closed result algebra, canonical key codec, versioned records, explicit capability negotiation, absolute deadlines, request receipts, runtime-owned lifecycle, audit and metrics hooks, and a backend contract suite.
+
+Use etcd v3 as the first production adapter. Treat Consul as the next viable adapter. Do not advertise Redis or DynamoDB as strict equivalents until adapter-specific designs and failure tests prove their deployment assumptions.
+
+* Implementation Consequences
+
+- Issue 29 remains the authority for target lease state transitions and downstream fencing enforcement.
+- Issue 30 owns the storage protocol and backend conformance boundary.
+- HTTP code maps structured results to stable API errors but does not implement lease semantics.
+- Actor code receives immutable lease handles and cancellation/loss notifications through an application service above the store.
+- A future runtime refactor should move CouchDB, RabbitMQ, actors, HTTP, and the lease store under one explicit owner, but issue 30 can introduce the lease component first.
+
+* Sources
+
+- Gray and Cheriton, “Leases: An Efficient Fault-Tolerant Mechanism for Distributed File Cache Consistency.”[fn:gray-leases]
+- Burrows, “The Chubby Lock Service for Loosely-Coupled Distributed Systems.”[fn:chubby]
+- etcd v3 API and API guarantees.[fn:etcd-api][fn:etcd-guarantees]
+- Consul sessions, distributed locks, and transactions.[fn:consul-sessions][fn:consul-transactions]
+- Redis distributed-lock documentation.[fn:redis-locks]
+- DynamoDB transactions and TTL behavior.[fn:dynamodb-transactions][fn:dynamodb-ttl]
+
+* Footnotes and Glossary
+
+[fn:starintel] StarIntel: A local-first intelligence platform that collects, validates, connects, searches, analyzes, and exports structured documents through actor-based services.
+
+[fn:kv-store] Key-value store: A database that retrieves a value by a key. Distributed key-value products differ sharply in consistency, transaction, expiration, and failure guarantees.
+
+[fn:atomicity] Atomicity: The guarantee that a group of changes becomes visible as one complete operation or not at all.
+
+[fn:fencing-token] Fencing token: A monotonically increasing number issued to each new lease holder. A downstream writer rejects operations carrying an older number, preventing a delayed former holder from committing work.
+
+[fn:deadline] Deadline: The absolute latest monotonic time by which an operation may continue. Unlike a fresh timeout at each layer, one deadline bounds the entire call.
+
+[fn:idempotency] Idempotency: The property that repeating the same request identifier with the same arguments has the same externally visible effect and returns the original outcome.
+
+[fn:result-algebra] Result algebra: A closed set of structured success and failure variants that callers must handle explicitly.
+
+[fn:nfc] Unicode Normalization Form C: A standard representation that composes equivalent Unicode character sequences so logically identical text has one byte encoding after UTF-8 conversion.
+
+[fn:base64url] Base64url: A URL-safe Base64 alphabet using =-= and =_= instead of =+= and =/=; unpadded encoding avoids separator and padding ambiguity in path segments.
+
+[fn:gray-leases] Cary G. Gray and David R. Cheriton, “Leases: An Efficient Fault-Tolerant Mechanism for Distributed File Cache Consistency,” 1989. [[https://carlstrom.com/stanford/quals/mirror/www-db.stanford.edu/~daswani/quals/Gray89%20-%20Leases.htm][paper mirror and summary]].
+
+[fn:chubby] Mike Burrows, “The Chubby Lock Service for Loosely-Coupled Distributed Systems,” OSDI 2006. [[https://research.google/pubs/the-chubby-lock-service-for-loosely-coupled-distributed-systems/][Google Research publication]].
+
+[fn:etcd-api] etcd, “etcd API,” version 3.6. Documents transactions, comparisons, revisions, linearizable range defaults, and lease grant, keepalive, and revocation. [[https://etcd.io/docs/v3.6/learning/api/][official documentation]].
+
+[fn:etcd-guarantees] etcd, “API guarantees.” Documents linearizability for ordinary operations and the weaker optional serializable read mode. [[https://etcd.io/docs/v3.7/learning/api_guarantees/][official documentation]].
+
+[fn:consul-sessions] HashiCorp, “Sessions and distributed locks overview.” Documents session invalidation, advisory locking, and monotonically increasing =LockIndex=. [[https://developer.hashicorp.com/consul/docs/automate/session][official documentation]].
+
+[fn:consul-transactions] HashiCorp, “Transactions HTTP API.” Documents atomic transaction rollback and KV =cas=, =lock=, =unlock=, =check-index=, =check-session=, and =delete-cas= operations. [[https://developer.hashicorp.com/consul/api-docs/txn][official documentation]].
+
+[fn:redis-locks] Redis, “Distributed Locks with Redis.” Documents compare-and-delete, clock assumptions, persistence requirements, and the mutual-exclusion failure of asynchronous replica promotion. [[https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/][official documentation]].
+
+[fn:dynamodb-transactions] Amazon Web Services, “DynamoDB Transactions: How it works.” Documents all-or-nothing transaction writes, serializable operation relationships, conflicts, and the bounded client-token idempotency window. [[https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html][official documentation]].
+
+[fn:dynamodb-ttl] Amazon Web Services, “Using time to live in DynamoDB” and “Working with expired items.” Documents that expired items remain readable and writable until asynchronous background deletion, which may occur days later. [[https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html][TTL overview]] and [[https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ttl-expired-items.html][expired item behavior]].

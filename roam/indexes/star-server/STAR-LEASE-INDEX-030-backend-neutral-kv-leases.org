@@ -1,0 +1,82 @@
+:PROPERTIES:
+:ID:       c9c8d8a5-09f3-452e-a012-83e26551395b
+:END:
+#+title: STAR-LEASE-INDEX-030 Backend-Neutral KV Leases
+#+description: Project index connecting the StarIntel distributed target-lease dependency, backend-neutral lease-store research, normative protocol design, security boundary, implementation order, and public review pages.
+#+status: ACTIVE
+#+filetags: :starintel:index:star-server:leases:fencing:kv:org-roam:
+
+* Purpose
+
+This project index[fn:project-index] connects the research and design required to implement the StarIntel[fn:starintel] backend-neutral key-value lease store[fn:lease-store] tracked by =starintel-server= issue 30.
+
+* Normative Design
+
+- [[id:bc8066ec-d7a3-4d6a-afff-353d444e725a][STAR-SERVER-030 Backend-Neutral KV Lease Store Protocol]]
+
+The design defines the Common Lisp[fn:common-lisp] protocol, canonical key codec, versioned persisted records, request-replay receipts, structured result algebra, runtime lifecycle, metrics, audit hooks, deterministic memory backend, etcd reference mapping, and shared backend contract suite.
+
+* Research Basis
+
+- [[id:1930fee2-2dc1-43b2-9dc2-9fd17ebc6289][STAR-RESEARCH-030 Backend-Neutral KV Lease Store]]
+
+The research compares the guarantees needed from etcd, Consul, Redis, and DynamoDB; separates known deadline failure from an unknown mutation outcome; and concludes that backend neutrality must be capability-gated rather than reduced to the weakest available lock primitive.
+
+* Upstream Dependencies
+
+- [[file:STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/29][Issue 29 — distributed target lease and fencing semantics]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/30][Issue 30 — backend-neutral KV lease-store protocol]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-auth-kv-lease-boundary.org][HTTP authentication threat model — KV lease boundary]]
+
+Issue 29 owns the lease state machine, scheduling meaning, and downstream fencing enforcement. Issue 30 owns the storage protocol, adapter capability contract, persisted lease and fencing state, operation outcomes, lifecycle, and backend conformance suite. The HTTP security document owns authentication, authorization, scope binding, secret handling, and external error disclosure.
+
+* Selected Architecture
+
+#+begin_example
+HTTP routes / target actors
+          |
+          v
+Target lease application service
+          |
+          v
+star.lease-store.protocol
+      |             |
+      v             v
+memory tests    etcd adapter
+                    |
+                    +--> later Consul adapter
+#+end_example
+
+Target actors and HTTP routes import only the protocol and application-service packages. Backend-specific clients remain below the lease-store boundary.
+
+* Implementation Order
+
+1. Protocol objects, result kinds, deadline model, and canonical key codec.
+2. Versioned lease, fence, and request-receipt serializers.
+3. Runtime-owned lifecycle, bounded retry policy, metrics, and audit sinks.
+4. Deterministic in-memory backend and full contract suite.
+5. etcd v3 adapter and disposable-cluster conformance run.
+6. Failure injection for leader loss, delayed responses, connection resets, expiration interruption, restart, and snapshot restore.
+7. Target lease application service implementing issue-29 state transitions.
+8. Runtime, actor, and HTTP integration without backend package imports.
+
+* Review Gate
+
+The design is ready for implementation review when:
+
+- every issue-30 acceptance requirement maps to a normative section;
+- every non-obvious term is defined locally;
+- the Pages build resolves every Org-roam identifier;
+- the generated site link checker passes;
+- implementation does not begin before issue-29 state-transition decisions are treated as authoritative.
+
+* Footnotes and Glossary
+
+[fn:project-index] Project index: A maintained navigation note that connects the authoritative design, research, dependencies, implementation order, and review status for one subsystem.
+
+[fn:starintel] StarIntel: A local-first intelligence platform that collects, validates, connects, searches, analyzes, and exports structured documents through actor-based services.
+
+[fn:lease-store] Lease store: A component that atomically records temporary ownership, expiration, and a monotonically increasing generation used to reject stale former owners.
+
+[fn:common-lisp] Common Lisp: The standardized Lisp programming language used by =starintel-server= for its service and actor runtime.

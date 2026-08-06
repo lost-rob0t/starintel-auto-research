@@ -1,71 +1,140 @@
 :PROPERTIES:
 :ID:       star-pro-research-004-hcaptcha-provider-gap-audit
 :END:
-#+title: STAR-PRO-RESEARCH-004 hCaptcha Provider Gap Audit
-#+description: Audit of well-known CAPTCHA providers whose current public documentation does not support a production hCaptcha token adapter.
+#+title: STAR-PRO-RESEARCH-004 Multi-Provider CAPTCHA Capability Gap Audit
+#+description: Capability-level audit of providers previously rejected globally because they lacked hCaptcha, correcting the decision to retain exact support for other CAPTCHA families.
 #+status: REVIEW
-#+filetags: :starintel:research:starintel-pro-actors:captcha:hcaptcha:provider-drift:rejected:
+#+filetags: :starintel:research:starintel-pro-actors:captcha:provider-gaps:capabilities:uml:
 
 * Scope
 
-This note prevents StarIntel from implementing stale hCaptcha integrations copied from old examples, client libraries, or third-party tutorials. It covers CapSolver, Anti-Captcha, and CapMonster Cloud as of 2026-08-05.
+This note corrects the previous hCaptcha-only audit. CapSolver, Anti-Captcha, and CapMonster Cloud must not be rejected as whole providers merely because their current catalogs do not advertise hCaptcha. They may still cover reCAPTCHA, Turnstile, Arkose, GeeTest, Amazon Web Services Web Application Firewall, DataDome, Friendly Captcha, ALTCHA, MTCaptcha, image tasks, or custom tasks.[fn:waf]
 
-* Decision Summary
+The broker registers exact capabilities. Missing one family is a capability gap, not a global provider verdict.
 
-| Provider | Current public hCaptcha token task | Decision |
-|----------+------------------------------------+----------|
-| CapSolver | Not listed in current supported-task or pricing pages | Do not implement |
-| Anti-Captcha | Not listed in current task catalog | Do not implement |
-| CapMonster Cloud | Not listed in current captcha catalog; prior reports show unsupported-task errors | Do not implement |
+* Approval Table
 
-The absence of a current public task does not prove that a private or transitional service does not exist. It does prove that StarIntel lacks an authoritative contract suitable for production implementation.
+| Approval area | Required reviewer | State | Evidence required |
+|---------------+-------------------+-------+-------------------|
+| Provider catalog snapshot | Research reviewer | PENDING | Current official task pages and retrieval dates |
+| Adapter candidacy | Pro-actors maintainer | PENDING | Measured uncovered capability and contract quality |
+| Disclosure and execution class | Security reviewer | PENDING | Automated versus human-assisted behavior documented |
+| Cost and operations | Operator | PENDING | Pricing, balance, concurrency, and canary limits |
+| Implementation | Repository maintainer | NOT STARTED | Separate adapter design and green fixtures |
+
+* Corrected Decision Summary
+
+| Provider | Current hCaptcha status | Other current catalog value | Correct decision |
+|----------+-------------------------+-----------------------------+------------------|
+| CapSolver | No current public hCaptcha task found | reCAPTCHA, Turnstile/Cloudflare, GeeTest, MTCaptcha, DataDome, AWS WAF, and selected image tasks | Candidate for exact uncovered capabilities |
+| Anti-Captcha | hCaptcha absent from current main task index | reCAPTCHA, Arkose, GeeTest, Turnstile, Prosopo, Friendly Captcha, Amazon WAF, ALTCHA, image and custom tasks | Strong broad adapter candidate |
+| CapMonster Cloud | hCaptcha absent from current catalog | reCAPTCHA, Turnstile, GeeTest, Friendly Captcha, MTCaptcha, Arkose, and other catalogued families | Candidate for exact uncovered capabilities |
+
+None of these providers may advertise hCaptcha unless a current official contract and fixture appear. None should be excluded from the provider registry for other verified families.
+
+* Capability-Gap UML
+
+#+begin_src plantuml
+@startuml
+component "Challenge Coverage Matrix" as Matrix
+component "Provider Catalog Snapshot" as Catalog
+component "Capability Gap Analyzer" as Gap
+component "Adapter Backlog" as Backlog
+component "CaptchaProviderRegistryActor" as Registry
+
+Catalog --> Matrix : exact issuer/family/variant rows
+Registry --> Matrix : enabled capabilities
+Matrix --> Gap : uncovered or weakly redundant rows
+Gap --> Backlog : ranked adapter candidates
+Backlog --> Registry : only after design, fixtures, and approval
+@enduml
+#+end_src
 
 * CapSolver
 
-The current CapSolver supported-task page lists image recognition, reCAPTCHA, GeeTest, MTCaptcha, DataDome, Amazon Web Services Web Application Firewall[fn:aws-waf], Cloudflare Turnstile, and Cloudflare Challenge. hCaptcha is absent. The current pricing page is also missing an hCaptcha line.
+The current supported-task and pricing surfaces list a broad set of token and anti-bot families but do not list hCaptcha. The architecture implication is:
 
-Older third-party integrations that claim CapSolver hCaptcha support are therefore not authoritative. No adapter is designed until CapSolver publishes a current hCaptcha task page and a successful live contract test confirms it.
+- do not implement or advertise =captcha.hcaptcha.*=;
+- evaluate CapSolver where StarIntel lacks verified Turnstile, reCAPTCHA, GeeTest, MTCaptcha, DataDome, AWS WAF, or Cloudflare challenge coverage;
+- require an exact official task page and request/result fixture for every enabled capability;
+- record whether the provider is fully automated, human-assisted, or mixed for disclosure policy.
 
 * Anti-Captcha
 
-The current Anti-Captcha documentation index lists reCAPTCHA, Arkose Labs FunCaptcha, GeeTest, Turnstile, custom AntiGate tasks, Prosopo, Friendly Captcha, Amazon WAF, Altcha, and image tasks. hCaptcha is absent.
+The current official task index documents:
 
-Old package names, marketing text, or archived pages must not be treated as a supported contract. No adapter is designed.
+- image-to-text and image-to-coordinates;
+- reCAPTCHA v2/v3 and Enterprise;
+- Arkose Labs FunCaptcha;
+- GeeTest;
+- Cloudflare Turnstile;
+- Prosopo;
+- Friendly Captcha;
+- Amazon WAF;
+- ALTCHA;
+- custom AntiGate tasks.
+
+This is a materially useful broad catalog. An Anti-Captcha adapter should be prioritized when these capabilities remain uncovered or when operational redundancy is required. Custom AntiGate work needs additional scrutiny because programmable target-specific templates can exceed a normal normalized CAPTCHA contract.
 
 * CapMonster Cloud
 
-The current CapMonster Cloud overview and captcha catalog advertise reCAPTCHA, Turnstile, GeeTest, Friendly Captcha, MTCaptcha, Arkose Labs FunCaptcha, and other task families, but not hCaptcha. A public support discussion from 2025 records =ERROR_TASK_NOT_SUPPORTED= for hCaptcha and points back to the provider catalog.
+The current catalog advertises multiple token and puzzle families but not hCaptcha. The same exact-capability rule applies. Historical unsupported-task reports for hCaptcha remain valid only for the hCaptcha row; they are not evidence against every other task.
 
-Because the official current catalog is the authority, no adapter is designed.
+* Adapter Selection Gate
 
-* Reconsideration Gate
+A provider receives a new adapter design only when:
 
-A rejected provider may be reconsidered only when all of these exist:
+1. a current official task page defines request and result schemas;
+2. the capability closes a measured coverage or redundancy gap;
+3. authentication and error contracts are documented;
+4. result kind and context binding map to the normalized broker protocol;
+5. execution and disclosure class are known;
+6. cost, concurrency, cancellation, and ambiguous-create behavior are understood;
+7. mock fixtures pass;
+8. a bounded owned-system canary is approved.
 
-1. A current official provider page naming an hCaptcha token task.
-2. A documented create request and result request.
-3. A documented token field and enterprise =rqdata= behavior.
-4. A documented authentication method and error table.
-5. A live test against an operator-owned hCaptcha page.
-6. A recorded provider contract version or retrieval date.
+* Reconsidering a Missing Capability
 
-A stale software-development kit[fn:sdk] alone is insufficient.
+A previously absent capability such as hCaptcha can be added only when all of these exist:
+
+1. a current official provider page naming the task;
+2. a documented create request and result request;
+3. a documented result field and variant behavior;
+4. a documented authentication method and error table;
+5. a successful fixture or live canary against an operator-owned test page;
+6. a recorded contract retrieval date and fixture fingerprint.
+
+A stale software-development kit alone is insufficient.[fn:sdk]
+
+* Provider Ranking
+
+Do not rank providers by count of marketing logos. Rank by:
+
+- uncovered exact capabilities;
+- contract clarity and drift history;
+- result acceptance rate;
+- disclosure class;
+- session and network-binding compatibility;
+- cancellation and ambiguous-submission behavior;
+- cost and concurrency;
+- operational redundancy value.
 
 * Sources
 
-- [[https://docs.capsolver.com/en/guide/api-support/][CapSolver supported task types]], accessed 2026-08-05.
-- [[https://docs.capsolver.com/en/pricing/][CapSolver pricing and supported types]], accessed 2026-08-05.
-- [[https://anti-captcha.com/apidoc][Anti-Captcha documentation index]], accessed 2026-08-05.
-- [[https://docs.capmonster.cloud/docs/overview/][CapMonster Cloud overview]], accessed 2026-08-05.
-- [[https://docs.capmonster.cloud/docs/captchas/][CapMonster Cloud captcha catalog]], accessed 2026-08-05.
+- [[https://docs.capsolver.com/en/guide/api-support/][CapSolver supported task types]], accessed 2026-08-06.
+- [[https://docs.capsolver.com/en/pricing/][CapSolver pricing and supported types]], accessed 2026-08-06.
+- [[https://anti-captcha.com/apidoc][Anti-Captcha documentation index]], accessed 2026-08-06.
+- [[https://docs.capmonster.cloud/docs/overview/][CapMonster Cloud overview]], accessed 2026-08-06.
+- [[https://docs.capmonster.cloud/docs/captchas/][CapMonster Cloud CAPTCHA catalog]], accessed 2026-08-06.
 
 * Related Nodes
 
+- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]]
+- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 Capability-Based Solver Selection]]
 - [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
-- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 hCaptcha Provider Selection]]
 
 * Footnotes and Glossary
 
-[fn:aws-waf] Amazon Web Services Web Application Firewall: A managed network-filtering product that can challenge or block suspicious web requests.
+[fn:waf] Web Application Firewall: A managed service that inspects web requests and can allow, block, rate-limit, or challenge them before they reach an application.
 
-[fn:sdk] Software-development kit: A package of integration code and examples whose contents may lag behind the provider's live service contract.
+[fn:sdk] Software-development kit: Provider integration code and examples that can remain published after the live service contract changes.

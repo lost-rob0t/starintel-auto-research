@@ -1,0 +1,452 @@
+:PROPERTIES:
+:ID:       224359ad-5d27-472d-b3d7-b3e542bb41df
+:END:
+#+title: STAR-SERVER-029 Distributed Target Lease and Fencing Semantics
+#+description: Normative state machine and execution contract for canonical target leases, owner identity, request replay, lease loss, recurring scheduling, target envelopes, downstream fencing enforcement, split-brain assumptions, HTTP mappings, and semantic conformance tests.
+#+status: REVIEW
+#+filetags: :starintel:star-server:target-leases:fencing:actors:rabbitmq:design:org-roam:
+
+* Source Links
+
+- [[file:../../indexes/star-server/STAR-LEASE-INDEX-030-backend-neutral-kv-leases.org][STAR-LEASE-INDEX-030 Target Lease Stack]]
+- [[file:../../research/star-server/STAR-RESEARCH-029-distributed-target-lease-and-fencing.org][STAR-RESEARCH-029 Distributed Target Lease and Fencing Semantics]]
+- [[file:STAR-SERVER-030-backend-neutral-kv-lease-store.org][STAR-SERVER-030 Backend-Neutral KV Lease Store Protocol]]
+- [[file:STAR-SERVER-032-authenticated-target-lease-http-execution.org][STAR-SERVER-032 Authenticated Target-Lease HTTP and Execution Enforcement]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/29][starintel-server issue 29]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-auth-kv-lease-boundary.org][HTTP authentication threat model — KV lease boundary]]
+
+* Normative Status
+
+This document defines the application-level target lease[fn:lease] and fencing[fn:fencing] semantics for StarIntel[fn:starintel]. It is authoritative for lease identity, state transitions, ownership checks, stale-client behavior, execution envelopes, lease-loss behavior, downstream fencing gates, and semantic tests.
+
+Issue 30 defines the storage protocol beneath this contract. Issue 31 defines the initial Valkey[fn:valkey] adapter. Issue 32 defines authenticated HTTP and target-execution integration above it.
+
+The words MUST, MUST NOT, REQUIRED, SHOULD, SHOULD NOT, and MAY are normative.[fn:normative]
+
+* Goals
+
+The lease service MUST:
+
+- permit at most one current owner for one canonical target-operation key under normal backend operation;
+- recover from owner failure through bounded expiration;
+- issue a strictly larger fencing token for every successful reacquisition;
+- make stale renew, release, dispatch, publish, acknowledgement, and persistence attempts harmless;
+- make retries idempotent through request identifiers;
+- surface lease loss to the running actor or job;
+- support local actors, RabbitMQ workers, embedded library calls, and HTTP clients through one service contract;
+- remain explicit about Valkey failover and recovery assumptions;
+- reject unbounded blocking acquisition.
+
+* Non-Goals
+
+The lease service MUST NOT:
+
+- replace authentication or authorization;
+- treat RabbitMQ delivery, actor registration, process locality, or timer ownership as lease ownership;
+- lock raw unnormalized caller input;
+- make lease expiry alone sufficient to stop stale writes;
+- expose backend-native keys, revisions, scripts, or credentials;
+- promise strong consistency across a Valkey failover without downstream fencing and recovery evidence.
+
+* Canonical Target Lease Key
+
+A =target-lease-key= is an immutable tuple:
+
+#+begin_src lisp
+(defstruct (target-lease-key
+            (:constructor make-target-lease-key
+                (&key tenant-id program-id dataset-id actor-name
+                      workflow-id operation-class target-id)))
+  (tenant-id "" :type string :read-only t)
+  (program-id nil :type (or null string) :read-only t)
+  (dataset-id nil :type (or null string) :read-only t)
+  (actor-name "" :type string :read-only t)
+  (workflow-id nil :type (or null string) :read-only t)
+  (operation-class "" :type string :read-only t)
+  (target-id "" :type string :read-only t))
+#+end_src
+
+The canonicalization service MUST resolve aliases and normalize the target before authorization and acquisition. Empty optional fields are represented as absent values, not ambiguous empty strings.
+
+The same canonical tuple MUST be used by:
+
+- authorization scope checks;
+- lease storage;
+- target execution envelopes;
+- audit events;
+- persistence fencing records;
+- result publication;
+- administrative inspection.
+
+* Owner Identity
+
+A lease owner is:
+
+#+begin_src lisp
+(defstruct (target-lease-owner
+            (:constructor make-target-lease-owner
+                (&key principal-id credential-id service-instance-id
+                      actor-instance-id client-id)))
+  (principal-id "" :type string :read-only t)
+  (credential-id nil :type (or null string) :read-only t)
+  (service-instance-id "" :type string :read-only t)
+  (actor-instance-id nil :type (or null string) :read-only t)
+  (client-id nil :type (or null string) :read-only t))
+#+end_src
+
+Credential secrets MUST NOT enter the owner object. =credential-id= is a non-secret audit identifier.
+
+* Lease Handle
+
+A successful acquisition returns:
+
+#+begin_src lisp
+(defstruct (target-lease-handle
+            (:constructor %make-target-lease-handle))
+  key
+  (lease-id "" :type string :read-only t)
+  owner
+  (fencing-token 0 :type (integer 1 *) :read-only t)
+  acquired-at
+  renewed-at
+  expires-at
+  maximum-expires-at
+  (renew-after nil :read-only t)
+  (execution-id nil :type (or null string) :read-only t)
+  (trace-id nil :type (or null string) :read-only t)
+  (backend-version nil :read-only t))
+#+end_src
+
+Renew and release MUST compare the full key, lease identifier, owner, fencing token, and backend compare version. Knowledge of a target or lease identifier alone is insufficient.
+
+* Logical States
+
+The application state machine is:
+
+#+begin_example
+ABSENT
+  -> ACTIVE
+ACTIVE
+  -> ACTIVE-RENEWED
+  -> RELEASED
+  -> REVOKED
+  -> EXPIRED
+RELEASED | REVOKED | EXPIRED
+  -> ACTIVE with fencing token greater than every prior token
+#+end_example
+
+=ACTIVE-RENEWED= is an audit transition; the externally active state remains =active=.
+
+The active lease key MAY disappear after release or expiry. The audit and run journal MUST preserve the logical terminal transition.
+
+* Acquire Semantics
+
+=acquire-target-lease= accepts:
+
+- canonical key;
+- owner;
+- request context containing request identifier and deadline;
+- bounded requested time to live;
+- maximum lifetime policy;
+- execution and trace identifiers;
+- bounded non-secret metadata.
+
+Acquire MUST:
+
+1. canonicalize and validate all identifiers before storage access;
+2. reject an expired request deadline;
+3. replay an existing matching request receipt;
+4. reject request-identifier reuse with a different fingerprint;
+5. return =conflict= for an active unexpired lease;
+6. atomically increment the persistent fence counter and create the active lease;
+7. return the new lease handle and recommended renewal time.
+
+Acquire MUST NOT wait for another owner beyond bounded internal contention retries. Scheduling retries happen above this service.
+
+* Renew Semantics
+
+Renew MUST succeed only when all handle fields still identify the active lease and the lease is unexpired.
+
+Renew:
+
+- preserves the fencing token;
+- updates =renewed_at= and =expires_at=;
+- never extends beyond =maximum_expires_at=;
+- returns a new immutable handle;
+- records a request receipt for replay.
+
+Renew returns:
+
+| Condition | Outcome |
+|-----------+---------|
+| exact active handle | =renewed= |
+| lower token than current generation | =stale-token= |
+| different owner or lease identifier | =not-owner= or policy-hidden =not-found= |
+| matching lease already expired | =expired= |
+| request may have committed but response is unavailable | =outcome-unknown= |
+
+A client receiving =outcome-unknown= MUST pause new side effects and replay the same renew request identifier or strongly inspect the lease.
+
+* Release Semantics
+
+Release MUST compare and delete the exact active lease. It MUST NOT delete or reset the fence counter.
+
+A replay of a successful release returns =released=. A stale handle cannot release a newer generation.
+
+Release is an ownership operation, not a promise that in-flight work has stopped. The actor must stop side effects before voluntary release.
+
+* Revoke Semantics
+
+Revocation is a privileged application operation. Authorization occurs above the storage protocol.
+
+Revoke MUST:
+
+- require a reason or incident identifier;
+- optionally compare an expected lease identifier and token;
+- delete the active lease without resetting the fence counter;
+- emit high-priority audit data;
+- deliver =lease-lost= to the known execution when possible.
+
+* Time Model
+
+The lease backend or server-controlled authoritative time source determines expiration. Client wall clocks are advisory only.
+
+The service returns:
+
+- =expires_at=: authoritative expiration instant;
+- =renew_after=: recommended earlier renewal instant;
+- =maximum_expires_at=: absolute lifetime cap.
+
+The renewal recommendation SHOULD include bounded jitter[fn:jitter] to prevent synchronized renewal bursts.
+
+A worker MUST stop side effects before its local safety margin reaches expiry. It MUST NOT assume that a late renew response succeeded.
+
+* Fencing Rule
+
+Every successful acquisition issues a token greater than every token previously issued for the same canonical key.
+
+Every protected side-effect function MUST accept an =execution-authority= object:
+
+#+begin_src lisp
+(defstruct (execution-authority
+            (:constructor make-execution-authority
+                (&key key lease-id fencing-token execution-id expires-at)))
+  key
+  (lease-id "" :type string :read-only t)
+  (fencing-token 0 :type (integer 1 *) :read-only t)
+  (execution-id "" :type string :read-only t)
+  expires-at)
+#+end_src
+
+A side-effect gate MUST atomically compare the incoming token with the highest accepted token for the protected resource.
+
+A lower token returns =stale-fence=. The write, publish, acknowledgement, or external commit MUST NOT proceed.
+
+* Downstream Enforcement Points
+
+Fencing is REQUIRED at:
+
+- target dispatch when a manifest requires locking;
+- local actor acceptance;
+- RabbitMQ consumer acceptance;
+- CouchDB document create, update, and delete paths caused by leased work;
+- event and job status updates;
+- graph and search-index mutation;
+- attachment and object-store commits;
+- publication of target results or derived documents;
+- RabbitMQ success acknowledgement after protected side effects;
+- irreversible external actions immediately before invocation.
+
+No caller may bypass these gates through a lower-level database or publisher function. Internal package boundaries and tests MUST enforce this.
+
+* Target Execution Envelope
+
+A target requiring locking is dispatched as:
+
+#+begin_src json
+{
+  "schema": "starintel.target-execution/1",
+  "target": { "_id": "target_01", "actor": "collector" },
+  "authority": {
+    "canonical_target_key": "opaque-key",
+    "lease_id": "lease_01",
+    "fencing_token": 42,
+    "expires_at": "2026-08-06T12:00:40Z",
+    "execution_id": "run_01",
+    "owner_service_instance_id": "server_01",
+    "request_id": "request_01",
+    "trace_id": "trace_01"
+  }
+}
+#+end_src
+
+The envelope MUST be immutable after dispatch. Actors MUST NOT accept lease identity from mutable target fields.
+
+The envelope proves what the dispatcher claimed. It does not replace a fencing check at commit time.
+
+* Manifest Policy
+
+The actor or dataset manifest MAY declare:
+
+#+begin_src json
+{
+  "target_locking": {
+    "mode": "required",
+    "operation_class": "collect",
+    "default_ttl_ms": 30000,
+    "maximum_lifetime_ms": 600000,
+    "renew_fraction": 0.5,
+    "lease_loss_policy": "cancel"
+  }
+}
+#+end_src
+
+Allowed modes:
+
+- =required=: dispatch is rejected without active authority;
+- =optional=: a lease may be used but absence is permitted;
+- =forbidden=: the actor does not accept lease-bound execution.
+
+The default for existing actors remains an explicit migration decision. The server MUST NOT silently infer =required= from actor name or target type.
+
+* Recurring Target Semantics
+
+A recurring timer is an acquisition trigger, not an owner.
+
+For each scheduled occurrence:
+
+1. compute a stable occurrence or execution identifier;
+2. attempt acquisition with a stable request identifier;
+3. dispatch only on =acquired= or a matching replayed acquisition;
+4. record conflict without duplicate dispatch;
+5. renew while execution remains active;
+6. release after successful terminal settlement or let expiry recover from failure.
+
+Multiple service instances MAY schedule the same occurrence. Only one may produce accepted protected side effects.
+
+* RabbitMQ Semantics
+
+RabbitMQ delivery MUST carry the execution envelope intact.
+
+The consumer MUST:
+
+1. validate schema and canonical target identity;
+2. reject or dead-letter missing authority when locking is required;
+3. strongly validate active authority before protected work when feasible;
+4. revalidate or fence each side effect;
+5. acknowledge success only after all protected effects are accepted;
+6. reject stale-fence completion without requeueing forever;
+7. classify backend unavailability separately from stale ownership.
+
+Redelivery of the same envelope is safe because protected effects are keyed by execution and fencing generation.
+
+* Lease Loss
+
+The service emits:
+
+#+begin_src lisp
+(defstruct lease-lost
+  execution-id
+  lease-id
+  fencing-token
+  reason
+  detected-at
+  replacement-token)
+#+end_src
+
+Reasons include =:expired=, =:renew-rejected=, =:stale-token=, =:revoked=, =:backend-uncertain=, and =:runtime-draining=.
+
+On lease loss the actor MUST stop new side effects. Uncommitted results become stale and may be retained only as diagnostic artifacts. The actor MAY complete bounded read-only cleanup.
+
+* Split-Brain and Valkey Assumptions
+
+The initial Valkey adapter provides atomic scripts on one primary but does not make failover strongly consistent. =WAIT= or =WAITAOF= improve durability without eliminating acknowledged-write loss.
+
+Therefore:
+
+- the deployment profile MUST declare standalone, Sentinel, or cluster topology;
+- the adapter MUST declare requested replica and persistence acknowledgements;
+- the service MUST return degraded health when required acknowledgements are unavailable;
+- downstream accepted fencing generations MUST be durable outside volatile lease state;
+- recovery MUST determine the highest accepted downstream token and advance the Valkey fence counter above it before enabling acquisition;
+- automatic acquisition MUST remain disabled when recovery cannot prove non-reuse.
+
+* HTTP Error Mapping
+
+The service returns backend-neutral outcomes. HTTP maps them as follows:
+
+| Service outcome | HTTP status |
+|-----------------+-------------|
+| acquired, renewed, released, revoked | 200 or 201 according to route |
+| active lease conflict | 409 |
+| stale token or stale fencing generation | 412 |
+| hidden or absent lease | 404 |
+| invalid request | 400 or 422 |
+| missing authentication | 401 |
+| denied scope | 403 |
+| rate or concurrency limit | 429 |
+| backend unavailable or unsafe recovery state | 503 |
+| request deadline exceeded before known commit | 504 |
+| mutation outcome unknown | 503 with stable =outcome_unknown= problem code |
+
+* Audit Events
+
+Required events:
+
+- =target-lease-acquired=;
+- =target-lease-conflict=;
+- =target-lease-renewed=;
+- =target-lease-released=;
+- =target-lease-expired=;
+- =target-lease-revoked=;
+- =target-lease-lost=;
+- =target-stale-fence-rejected=;
+- =target-dispatch-rejected-no-lease=;
+- =target-lease-outcome-unknown=;
+- =target-lease-recovery-fence-advanced=.
+
+Each event includes bounded identifiers, canonical-key fingerprint, execution identifier, result class, token where safe, correlation identifier, and latency. Secrets are forbidden.
+
+* Semantic Contract Suite
+
+Acceptance requires tests proving:
+
+1. concurrent acquire permits one active owner;
+2. reacquisition strictly increases the token;
+3. release, expiry, and revoke never reset the token;
+4. stale renew and release cannot affect a newer lease;
+5. same request identifier replays the original outcome;
+6. request identifier with different arguments is rejected;
+7. multiple recurring schedulers yield one accepted execution;
+8. target dispatch without required authority is rejected;
+9. RabbitMQ redelivery cannot create duplicate accepted effects;
+10. a paused expired actor cannot publish or persist after reacquisition;
+11. every protected boundary rejects a lower token;
+12. lease-loss messages cancel further side effects;
+13. Valkey recovery prevents token reuse after lost state;
+14. HTTP and embedded APIs expose the same service outcomes.
+
+* Implementation Order
+
+1. Implement canonical key, owner, handle, execution-authority, and state outcomes.
+2. Implement issue-30 storage protocol and memory conformance backend.
+3. Implement issue-31 Valkey adapter and recovery fence.
+4. Implement target lease application service.
+5. Add execution envelope and manifest policy.
+6. Add fencing gates to persistence, publication, settlement, and external-effect boundaries.
+7. Add actor lease-loss delivery.
+8. Add issue-32 HTTP routes using the same service.
+
+* Footnotes and Glossary
+
+[fn:lease] Lease: A temporary grant of authority that expires unless renewed.
+
+[fn:fencing] Fencing: Rejecting work from an older lease generation by comparing a monotonically increasing token at the system receiving the write.
+
+[fn:starintel] StarIntel: A local-first intelligence platform that collects, validates, connects, searches, analyzes, and exports structured documents through actor-based services.
+
+[fn:valkey] Valkey: The key-value server selected by issue 31 as the initial deployable lease backend.
+
+[fn:normative] Normative: A requirement that conforming implementations must follow.
+
+[fn:jitter] Jitter: A bounded randomized adjustment that prevents many clients from renewing at exactly the same moment.

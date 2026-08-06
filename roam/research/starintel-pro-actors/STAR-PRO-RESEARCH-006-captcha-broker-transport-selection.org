@@ -1,0 +1,303 @@
+:PROPERTIES:
+:ID:       star-pro-research-006-captcha-broker-transport-selection
+:END:
+#+title: STAR-PRO-RESEARCH-006 CAPTCHA Broker Transport Selection
+#+description: Evidence-based selection of Sento and RabbitMQ over ZeroMQ for the initial StarIntel CAPTCHA broker critical path, including implementation cost, dependency repair cost, reliability semantics, and deferred ZeroMQ gates.
+#+status: REVIEW
+#+filetags: :starintel:research:starintel-pro-actors:captcha:rabbitmq:zeromq:sento:transport:cost:
+
+* Research Question
+
+Should the StarIntel[fn:starintel] CAPTCHA broker[fn:captcha-broker] use RabbitMQ[fn:rabbitmq] or ZeroMQ[fn:zeromq] for communication with separately deployed provider actors, after accounting for the current server infrastructure, required reliability, implementation cost, and dependent Common Lisp[fn:common-lisp] library repairs?
+
+* Executive Decision
+
+Use a two-layer transport model:
+
+1. Use Sento[fn:sento] mailboxes for actors inside the same StarIntel server process.
+2. Use RabbitMQ durable queues[fn:durable-queue] for solve commands, provider state transitions, results, cancellations, and health messages that cross a process, container, or host boundary.
+
+Do not place ZeroMQ in the initial paid-solve critical path. ZeroMQ remains a possible future transport beneath Star Router[fn:star-router] for explicitly non-durable low-latency control, telemetry, or language-independent component boundaries after the PZMQ[fn:pzmq] binding audit passes. It must not become the sole carrier for paid work whose loss, duplication, or ambiguous completion can create external charges.
+
+This decision does not make the application protocol RabbitMQ-specific. The normalized CAPTCHA request, result, cancellation, capability, and health envelopes remain transport-neutral. RabbitMQ is the selected production adapter for the durable external-provider boundary.
+
+* Workload Characteristics
+
+A CAPTCHA solve is not a microsecond message-passing workload. It is a comparatively slow external operation with these properties:
+
+- a provider request may create an immediate paid side effect;
+- completion may take seconds and may require polling;
+- a process can fail after creating a provider job but before recording the result;
+- cancellation may race with provider completion;
+- duplicate delivery must not create duplicate charges;
+- requests have deadlines, budgets, target policy, and authorization state;
+- work must survive broker, server, adapter, or container restart;
+- terminal outcomes must be observable and recoverable;
+- solve tokens and credentials must remain ephemeral and must not be written into durable messages.
+
+Transport latency is therefore a minor criterion. Durable delivery, explicit acknowledgement[fn:acknowledgement], idempotency[fn:idempotency], recovery, dead-letter handling[fn:dead-letter], and operational visibility dominate the decision.
+
+* Existing Infrastructure Audit
+
+** StarIntel server
+
+The current =starintel-server= already contains:
+
+- a RabbitMQ C client dependency through =rabbitmq-c=;
+- a pinned Common Lisp =cl-rabbit= dependency;
+- a RabbitMQ container image in the Nix build;
+- durable topic exchanges and durable queues;
+- manual consumer acknowledgements and negative acknowledgements;
+- explicit settlement objects;
+- dead-letter exchange and dead-letter queue support;
+- consumer prefetch and per-worker connections;
+- an at-least-once[fn:at-least-once] external actor contract;
+- Sento actor mailboxes for local traffic.
+
+The current RabbitMQ producer wrapper still needs hardening. It publishes over a persistent connection but does not yet enable publisher confirms[fn:publisher-confirm], handle returned mandatory messages, reconnect safely, or couple paid external side effects to a durable outbox[fn:outbox]. These are bounded changes above the existing dependency.
+
+** Common Lisp ZeroMQ path
+
+The approved ZeroMQ architecture is a design, not a completed runtime. Its own reliability section states that ZeroMQ is not a durable broker and directs durable work to RabbitMQ or another persistence layer.
+
+The Common Lisp binding path is also unresolved. The PZMQ audit remains in progress and must still validate foreign-memory ownership, context shutdown, multipart framing, polling, monitoring, non-blocking input and output, production socket options, CURVE security[fn:curve], tests, and reproducible Nix packaging. The audit may still conclude that StarIntel must fork PZMQ or write a smaller maintained foreign-function binding[fn:ffi].
+
+Selecting ZeroMQ for the CAPTCHA critical path now would therefore add two projects before the broker can be trusted:
+
+1. finish or replace the Common Lisp ZeroMQ binding;
+2. build a durable application protocol above a brokerless transport.
+
+* RabbitMQ Evaluation
+
+** Strengths
+
+- Durable queues and persistent messages are already part of the deployed architecture.
+- Publisher confirms can prove that a broker accepted a publication.
+- Manual acknowledgements allow a provider adapter to acknowledge only after required state is recorded.
+- Dead-letter routing provides a terminal path for poison messages and exhausted retries.
+- Quorum queues[fn:quorum-queue] are available for replicated hosted deployments where several RabbitMQ nodes exist.
+- Topic routing supports provider, message type, tenant, and policy routing without creating a new socket topology.
+- The management interface exposes queues, consumers, rates, unacknowledged messages, and dead letters.
+- JavaScript, Python, Common Lisp, and other provider runtimes have mature AMQP[fn:amqp] clients.
+- The current StarIntel code and deployment already pay the operational cost of RabbitMQ.
+
+** Weaknesses
+
+- RabbitMQ adds a service process and storage overhead.
+- At-least-once delivery means handlers must remain idempotent.
+- Publisher confirms and consumer acknowledgements do not create exactly-once external side effects by themselves.
+- A single-node local RabbitMQ deployment is durable across process restart but is not highly available across host loss.
+- The current producer wrapper needs explicit confirms, return handling, reconnect behavior, and bounded retry policy.
+
+These weaknesses are known and bounded. They do not require a new transport binding or a custom durable broker protocol.
+
+* ZeroMQ Evaluation
+
+** Strengths
+
+- Low transport overhead and direct peer communication.
+- Useful ROUTER and DEALER patterns for asynchronous addressed messages.
+- Strong cross-language support in maintained ecosystems such as Python.
+- Good fit beneath Star Router for explicit component boundaries.
+- No central message-broker service is required for non-durable traffic.
+
+** Weaknesses for this workload
+
+- ZeroMQ does not provide a durable queue, replay log, dead-letter queue, or completed-work journal.
+- Default delivery over ordinary sockets is not proof that the destination completed the work.
+- Reliable request and reply requires application-level acknowledgement, retry, correlation, deduplication, and recovery logic.
+- PUB and SUB can lose earlier messages for late subscribers and can drop messages under pressure.
+- Connection loss and socket close behavior can discard queued output depending on linger and application state.
+- The Common Lisp binding and production adapter are not yet approved by the required audit.
+- CURVE authentication, socket ownership, monitoring, high-water marks, poller shutdown, and reconnect logic would all become new implementation scope.
+- Adding a database journal to make ZeroMQ durable would reproduce part of RabbitMQ while retaining another transport stack.
+
+ZeroMQ can be the faster raw transport and still be the worse system choice. The CAPTCHA broker is constrained by paid external side effects and recovery correctness, not by local message throughput.
+
+* Decision Matrix
+
+Scores use =1= for poor fit and =5= for strong fit. The table evaluates the implementation available to StarIntel now, not an idealized future implementation.
+
+| Criterion | Importance | RabbitMQ | ZeroMQ | Finding |
+|-----------+------------+----------+--------+---------|
+| Existing StarIntel infrastructure | Critical | 5 | 1 | RabbitMQ is built, packaged, documented, and already used |
+| Durable restart recovery | Critical | 5 | 1 | ZeroMQ requires a separate durable journal and replay protocol |
+| Paid-side-effect protection | Critical | 5 | 2 | Both require idempotency; RabbitMQ supplies durable delivery primitives |
+| Dependency readiness | High | 4 | 1 | =cl-rabbit= exposes required primitives; PZMQ audit is unfinished |
+| Operational visibility | High | 5 | 2 | RabbitMQ exposes queue and consumer state directly |
+| Cross-language support | Medium | 5 | 5 | Both have broad ecosystem support |
+| Raw transport latency | Low | 3 | 5 | ZeroMQ wins, but solve latency dominates end-to-end time |
+| Incremental implementation cost | Critical | 5 | 1 | RabbitMQ needs wrapper hardening; ZeroMQ needs binding and reliability work |
+
+RabbitMQ wins every criterion that controls correctness and delivery cost. ZeroMQ wins raw transport latency, which is not the bottleneck for provider solves.
+
+* Implementation Cost Estimate
+
+These are engineering estimates from the inspected repositories and required reliability work. They are not measured delivery promises.
+
+** RabbitMQ path
+
+| Work | Estimated engineer-days |
+|------+-------------------------|
+| CAPTCHA exchanges, queues, routing keys, envelopes, and fake provider | 1–2 |
+| Publisher confirms, mandatory return handling, persistent delivery properties, and reconnect behavior | 2–4 |
+| Dead-letter policy, bounded retry, deadlines, idempotency journal, and recovery tests | 2–4 |
+| Total | 5–10 |
+
+No =cl-rabbit= fork is required for the first implementation. The pinned dependency already exports publisher confirms, acknowledgement and negative-acknowledgement frames, mandatory returns, transactions, and Transport Layer Security[fn:tls] socket functions. StarIntel should first repair its own producer abstraction and add regression tests around those exported functions.
+
+** ZeroMQ path
+
+| Work | Estimated engineer-days |
+|------+-------------------------|
+| Complete PZMQ source, lifecycle, security, shutdown, and interoperability audit | 3–7 |
+| Fork and repair PZMQ or build a narrow replacement binding if the audit fails | 5–15 |
+| Implement durable journal, replay, acknowledgement, retry, deduplication, dead-letter, and recovery protocol | 10–20 |
+| Add gateway supervision, security, monitoring, Nix packaging, cross-language and failure-injection tests | 5–10 |
+| Total | 23–52 |
+
+The ZeroMQ estimate can fall only if durability is removed from the requirement. Removing durability is unacceptable for paid solve creation.
+
+* Required RabbitMQ Production Model
+
+** Local traffic
+
+Use direct Sento actor messages for the broker, policy, registry, budget, deduplication, telemetry, and per-run actors when they share one process. Do not route ordinary local actor messages through RabbitMQ.
+
+** External provider traffic
+
+Use one durable topic exchange named =captcha= with versioned routing keys. An initial routing model is:
+
+#+begin_example
+captcha.v1.provider.<providerId>.solve
+captcha.v1.provider.<providerId>.cancel
+captcha.v1.provider.<providerId>.health
+captcha.v1.broker.result
+captcha.v1.broker.state
+captcha.v1.dead
+#+end_example
+
+Each provider receives a durable queue owned by that provider deployment. The broker receives durable result and state queues. Queue names are deployment identifiers, while routing keys remain protocol identifiers.
+
+** Message guarantees
+
+- publish commands and terminal results as persistent messages;
+- enable publisher confirms before accepting a publication as durable;
+- set =mandatory= for commands and treat returned unroutable messages as terminal routing failures;
+- use manual consumer acknowledgement;
+- acknowledge a solve command only after the provider job identifier or terminal failure is durably recorded;
+- reject poison messages to a dead-letter exchange without infinite requeue;
+- apply message expiry and application deadlines;
+- use =requestId= as the logical idempotency key and =attemptId= for provider attempts;
+- retain no provider key, solve token, proxy secret, cookie bundle, or raw enterprise challenge data in the RabbitMQ payload;
+- use an outbox or equivalent durable state transition around any publication that follows a paid provider side effect.
+
+** Queue type
+
+Use durable classic queues for the lowest-cost single-node local deployment when host-level high availability is not claimed. Use RabbitMQ quorum queues for hosted multi-node deployments that require replicated queue state. Queue type is a deployment policy; the broker protocol does not depend on it.
+
+* Deferred ZeroMQ Gate
+
+ZeroMQ may be reconsidered for a CAPTCHA route only after all of these conditions are true:
+
+1. The PZMQ audit reaches an adopt, fork, or replace decision with passing lifecycle and interoperability tests.
+2. The StarIntel ZeroMQ adapter has bounded queues, monitoring, authenticated encryption, deterministic shutdown, and explicit ownership.
+3. The proposed route is either intentionally non-durable or backed by a tested durable journal and replay source.
+4. The route does not duplicate a RabbitMQ command path without a declared migration or fallback policy.
+5. Benchmarks show that RabbitMQ transport is an actual bottleneck in the complete provider workflow.
+6. Failure-injection tests prove no paid job is silently lost or duplicated.
+
+Until those gates pass, adding ZeroMQ to CAPTCHA solves would increase cost and failure surface without improving the user-visible solve path.
+
+* Implementation Order
+
+1. Preserve the normalized transport-neutral CAPTCHA envelope.
+2. Build the broker and fake provider as local Sento actors.
+3. Add the RabbitMQ =captcha= exchange, provider queues, broker result queues, and dead-letter topology.
+4. Harden the StarIntel RabbitMQ producer with confirms, mandatory-return handling, persistent properties, reconnect state, and structured publication outcomes.
+5. Add the idempotency and provider-job journal before calling a paid provider.
+6. Add restart, duplicate-delivery, unroutable-message, expired-message, dead-letter, and ambiguous-submission tests.
+7. Implement NoneCap as the reference provider adapter.
+8. Implement NopeCHA after subscription-aware budget accounting.
+9. Keep 2Captcha experimental until its provider contract is verified.
+10. Revisit ZeroMQ only through the deferred gate.
+
+* Sources
+
+** StarIntel design and implementation evidence
+
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Provider Router]]
+- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 hCaptcha Provider Selection]]
+- [[id:starintel-adr-domain-gserver-zmq-001][STAR-ADR-001 Domain GServer and ZeroMQ Approval]]
+- [[file:../../design/cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]]
+- [[id:sento-zmq-pzmq-binding-audit-001][SENTO-ZMQ-RESEARCH-001 PZMQ Binding Audit]]
+- =starintel-server/docs/messaging.org=
+- =starintel-server/source/producers/producers.lisp=
+- =starintel-server/source/consumers/rabbit-settlement.lisp=
+- =starintel-server/flake.nix=
+- =lokedhs/cl-rabbit/src/package.lisp=
+- =lokedhs/cl-rabbit/src/examples.lisp=
+
+** RabbitMQ primary sources
+
+- RabbitMQ Publisher Confirms and Consumer Acknowledgements: https://www.rabbitmq.com/docs/confirms
+- RabbitMQ Reliability Guide: https://www.rabbitmq.com/docs/reliability
+- RabbitMQ Quorum Queues: https://www.rabbitmq.com/docs/quorum-queues
+- RabbitMQ Publishers: https://www.rabbitmq.com/docs/publishers
+
+** ZeroMQ primary sources
+
+- ZeroMQ documentation and guide: https://zeromq.org/get-started/
+- ZeroMQ Guide, Reliable Request-Reply Patterns: https://zguide.zeromq.org/docs/chapter4/
+- ZeroMQ Guide, Advanced Publish-Subscribe Patterns: https://zguide.zeromq.org/docs/chapter5/
+- libzmq =zmq_disconnect= reference: https://libzmq.readthedocs.io/en/latest/zmq_disconnect.html
+
+* Related Nodes
+
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Provider Router]]
+- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 hCaptcha Provider Selection]]
+- [[id:star-adr-003-captcha-broker-transport-selection][STAR-ADR-003 CAPTCHA Broker Transport Selection]]
+
+* Footnotes and Glossary
+
+[fn:starintel] StarIntel: A local-first actor-based intelligence platform that collects, normalizes, links, searches, and analyzes structured data while preserving provenance and operator control.
+
+[fn:captcha-broker] CAPTCHA broker: The StarIntel service that validates authorized solve requests, selects a provider, enforces budgets and policy, tracks attempts, and returns an ephemeral token reference.
+
+[fn:rabbitmq] RabbitMQ: A networked message broker that stores and routes messages through exchanges and queues and supports durable delivery, acknowledgements, dead-letter routing, and replicated queue options.
+
+[fn:zeromq] ZeroMQ: A brokerless messaging library that supplies asynchronous socket patterns over in-process, inter-process, and network transports without providing a durable queue by itself.
+
+[fn:common-lisp] Common Lisp: The standardized Lisp-family programming language used for the StarIntel server and its actor runtime.
+
+[fn:sento] Sento: The Common Lisp actor runtime, distributed as the =cl-gserver= repository, that provides local actors, mailboxes, supervisors, dispatchers, and routing pools.
+
+[fn:durable-queue] Durable queue: A queue whose definition survives a broker restart and whose persistent messages can be recovered from broker storage, subject to the selected deployment and replication policy.
+
+[fn:star-router] Star Router: The StarIntel client-facing and cross-process logical routing layer under which a transport such as ZeroMQ may operate.
+
+[fn:pzmq] PZMQ: A Common Lisp foreign-function binding for the native ZeroMQ library that is currently undergoing a StarIntel source and runtime audit.
+
+[fn:acknowledgement] Acknowledgement: An explicit signal that a received message was processed successfully; a negative acknowledgement rejects or retries the delivery according to policy.
+
+[fn:idempotency] Idempotency: The property that repeating one logical request does not create an additional external operation or charge.
+
+[fn:dead-letter] Dead-letter handling: Routing a rejected, expired, or retry-exhausted message to a separate terminal queue for inspection or controlled recovery.
+
+[fn:at-least-once] At-least-once delivery: A delivery model in which a message is not silently discarded after a recoverable failure, but duplicates remain possible and consumers must be idempotent.
+
+[fn:publisher-confirm] Publisher confirm: A RabbitMQ protocol acknowledgement indicating that the broker accepted responsibility for a published message; it is distinct from a consumer completing the work.
+
+[fn:outbox] Durable outbox: A stored record of an intended outgoing message written in the same reliable state transition as the domain change, then published and marked complete by a separate relay.
+
+[fn:curve] CURVE security: ZeroMQ's public-key authentication and encryption mechanism for network sockets.
+
+[fn:ffi] Foreign-function binding, or foreign-function interface: Code that allows Common Lisp to call a native C library and must correctly manage native types, memory, errors, and lifecycle.
+
+[fn:quorum-queue] Quorum queue: A RabbitMQ queue type that replicates its state with the Raft consensus algorithm across broker nodes for stronger data safety and availability.
+
+[fn:amqp] Advanced Message Queuing Protocol, or AMQP: The messaging protocol used by RabbitMQ clients to declare exchanges and queues, publish messages, consume deliveries, and settle them.
+
+[fn:tls] Transport Layer Security, or TLS: The standard protocol that encrypts and authenticates network connections using certificates and cryptographic keys.

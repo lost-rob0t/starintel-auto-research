@@ -2,9 +2,9 @@
 :ID:       star-pro-index-001-captcha-service-actors
 :END:
 #+title: STAR-PRO-INDEX-001 CAPTCHA Service Actors
-#+description: Index for the StarIntel CAPTCHA broker, hCaptcha provider research, provider-adapter designs, implementation boundaries, and approval state.
+#+description: Index for the StarIntel CAPTCHA broker, hCaptcha provider research, provider-adapter designs, transport selection, implementation boundaries, and approval state.
 #+status: REVIEW
-#+filetags: :starintel:index:starintel-pro-actors:captcha:hcaptcha:providers:
+#+filetags: :starintel:index:starintel-pro-actors:captcha:hcaptcha:providers:rabbitmq:zeromq:
 
 * Purpose
 
@@ -16,20 +16,35 @@ The subsystem is restricted to operator-owned systems, accessibility workflows, 
 
 - Broker, authorization, routing, budgets, deduplication, secret references, cancellation, and normalized events belong to =starintel-server=.
 - Provider credentials, vendor-specific request formats, polling, error translation, and billing telemetry belong to =starintel-pro-actors=.
+- Local actors inside one server process communicate through Sento[fn:sento] mailboxes.
+- Solve commands, cancellations, provider state, results, and required health messages that cross a process, container, or host boundary use durable RabbitMQ[fn:rabbitmq] queues.
+- ZeroMQ[fn:zeromq] is excluded from the initial paid-solve critical path. It remains deferred for explicitly non-durable Star Router or component-boundary traffic after the PZMQ binding audit and runtime gates pass.
 - Tokens remain ephemeral secrets. They are not StarIntel documents and are not persisted in RabbitMQ, CouchDB, logs, actor events, or research datasets.
 - Provider adapters advertise capabilities dynamically. The broker must not assume that a vendor still supports hCaptcha merely because an old software-development kit contains an obsolete task type.
 
-* Broker Design
+* Broker Designs and Decisions
 
 - [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Provider Router]]
+- [[id:star-adr-003-captcha-broker-transport-selection][STAR-ADR-003 CAPTCHA Broker Transport Selection]]
 
-* Provider Research
+* Provider and Transport Research
 
 - [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001 NoneCap hCaptcha Provider]]
 - [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA hCaptcha Provider]]
 - [[id:star-pro-research-003-2captcha-hcaptcha-provider][STAR-PRO-RESEARCH-003 2Captcha hCaptcha Provider]]
 - [[id:star-pro-research-004-hcaptcha-provider-gap-audit][STAR-PRO-RESEARCH-004 hCaptcha Provider Gap Audit]]
 - [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 hCaptcha Provider Selection]]
+- [[id:star-pro-research-006-captcha-broker-transport-selection][STAR-PRO-RESEARCH-006 CAPTCHA Broker Transport Selection]]
+
+* Transport Selection
+
+The selected model is Sento locally and RabbitMQ across a durable external-provider boundary.
+
+RabbitMQ was selected because =starintel-server= already builds, packages, deploys, and operates it; the consumer layer already supports manual acknowledgement, dead-letter routing, durable queues, prefetch, and explicit settlement; and the pinned =cl-rabbit= dependency already exports publisher-confirm and Transport Layer Security functions. The remaining work is a bounded producer repair, durable provider-job journal, and failure-test pass.
+
+ZeroMQ was rejected for the first critical path because it is not a durable broker, the Common Lisp PZMQ binding audit is unfinished, and StarIntel would need to build acknowledgement, replay, retry, dead-letter, security, monitoring, and recovery layers above it. The cost estimate is =5–10= engineer-days for the RabbitMQ path versus =23–52= engineer-days for a production-ready ZeroMQ path with dependent-library work.
+
+The application envelopes remain transport-neutral. A future architecture decision may add ZeroMQ beneath Star Router for explicitly non-durable traffic, but paid solve creation and terminal state remain on RabbitMQ until equivalent durability is proven by implementation and failure tests.
 
 * Provider Adapter Designs
 
@@ -41,12 +56,16 @@ No CapSolver, Anti-Captcha, or CapMonster Cloud hCaptcha adapter is designed in 
 
 * Implementation Order
 
-1. Approve the normalized broker protocol and policy model.
-2. Implement the =starintel-server= broker with a fake provider actor.
-3. Implement the NoneCap adapter as the reference adapter because its current interface is hCaptcha-specific and exposes cancellation and long polling.
-4. Implement the NopeCHA adapter behind subscription-aware budget accounting.
-5. Keep the 2Captcha adapter disabled by default until a live sandbox or support confirmation proves the current hCaptcha task contract.
-6. Add provider health, circuit breaking, cost accounting, and explicit operator selection before enabling automatic fallback.
+1. Approve the normalized broker protocol, policy model, and transport-neutral message envelopes.
+2. Implement the =starintel-server= broker and fake provider as local Sento actors.
+3. Add the durable RabbitMQ =captcha= exchange, provider queues, broker result queues, and dead-letter topology.
+4. Harden the StarIntel producer with publisher confirms[fn:publisher-confirm], mandatory returned-message handling, persistent message properties, bounded reconnect, and structured publication outcomes.
+5. Add the provider-job idempotency journal[fn:idempotency] and explicit uncertain-submission recovery before enabling any paid provider.
+6. Implement the NoneCap adapter as the reference adapter because its current interface is hCaptcha-specific and exposes cancellation and long polling.
+7. Implement the NopeCHA adapter behind subscription-aware budget accounting.
+8. Keep the 2Captcha adapter disabled by default until a live sandbox or support confirmation proves the current hCaptcha task contract.
+9. Add provider health, circuit breaking, cost accounting, and explicit operator selection before enabling automatic fallback.
+10. Reconsider ZeroMQ only after the PZMQ audit, transport runtime, end-to-end benchmark, and failure-injection gates pass.
 
 * Non-Goals
 
@@ -56,6 +75,7 @@ No CapSolver, Anti-Captcha, or CapMonster Cloud hCaptcha adapter is designed in 
 - A public HTTP endpoint that accepts arbitrary URLs.
 - Persisting challenge tokens or proxy credentials.
 - Selecting a provider solely by lowest advertised price.
+- Adding ZeroMQ merely to replace ordinary local actor mailboxes or an existing durable RabbitMQ route.
 
 * Footnotes and Glossary
 
@@ -66,3 +86,13 @@ No CapSolver, Anti-Captcha, or CapMonster Cloud hCaptcha adapter is designed in 
 [fn:pro-actors] StarIntel Pro Actors: Optional paid-service, collection, and enrichment actors deployed separately from the generic StarIntel server.
 
 [fn:star-server] StarIntel Server: The Common Lisp control, routing, persistence, search, and actor-hosting service at the center of StarIntel.
+
+[fn:sento] Sento: The Common Lisp actor runtime, distributed from the =cl-gserver= repository, that provides local actors, mailboxes, supervisors, dispatchers, and routing pools.
+
+[fn:rabbitmq] RabbitMQ: A networked message broker that stores and routes messages through exchanges and queues and supports durable delivery, acknowledgements, dead-letter routing, and replicated queue options.
+
+[fn:zeromq] ZeroMQ: A brokerless messaging library that provides asynchronous socket patterns but does not supply a durable queue or completed-work journal by itself.
+
+[fn:publisher-confirm] Publisher confirm: A RabbitMQ acknowledgement that the broker accepted responsibility for a publication; it does not mean a consumer completed the work.
+
+[fn:idempotency] Idempotency: The property that repeating one logical request does not create another external operation or charge.

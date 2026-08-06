@@ -1,180 +1,242 @@
 :PROPERTIES:
 :ID:       star-pro-research-002-nopecha-hcaptcha-provider
 :END:
-#+title: STAR-PRO-RESEARCH-002 NopeCHA Multi-Family CAPTCHA Provider
-#+description: Current NopeCHA Recognition and Token API research for exact-capability StarIntel solver actors across hCaptcha, reCAPTCHA, Turnstile, Arkose, AWS WAF, GeeTest, text, and related challenge families.
+#+title: STAR-PRO-RESEARCH-002 NopeCHA Token and Recognition Provider
+#+description: Capability-local NopeCHA research separating token generation from recognition outputs, per-capability credit costs, credential exposure, context binding, and runtime registration evidence.
 #+status: REVIEW
-#+filetags: :starintel:research:starintel-pro-actors:captcha:nopecha:recognition:token:uml:
+#+filetags: :starintel:research:starintel-pro-actors:captcha:nopecha:recognition:token:provider:uml:
 
 * Scope
 
-This note evaluates both NopeCHA service surfaces behind the provider-neutral StarIntel broker:
+NopeCHA exposes two materially different service surfaces:
 
-- the *Token API*, which returns issuer verification tokens; and
-- the *Recognition API*, which returns text, classifications, coordinates, or challenge answers.[fn:recognition]
+1. the Token API, which returns issuer verification tokens for exact supported integrations; and
+2. the Recognition API, which returns text, classifications, coordinates, selections, or provider-specific answers.
 
-The previous hCaptcha-only scope was incomplete. The two surfaces must register separate capabilities, budgets, result kinds, and disclosure rules.
+The surfaces require separate capability registrations, request mappers, result validators, budgets, fixtures, error contracts, and disclosure policies. Browser-extension marketing is not a server API contract and does not become a runtime capability without an official API operation and fixture.
 
 * Approval Table
 
-| Approval area | Required reviewer | State | Evidence required |
-|---------------+-------------------+-------+-------------------|
-| Token contracts | Pro-actors maintainer | PENDING | hCaptcha, reCAPTCHA v2/v3, and Turnstile fixtures |
-| Recognition contracts | Pro-actors maintainer | PENDING | Arkose, AWS WAF, GeeTest, text, and hCaptcha-recognition fixtures |
-| Quota model | Operator | PENDING | Effective per-capability credits and twenty-three-hour refill policy |
-| Secret handling | Security reviewer | PENDING | Query-key, proxy, cookie, session, and result redaction |
-| Live enablement | Operator | NOT STARTED | Capability-specific bounded canaries on owned test systems |
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Current official Token and Recognition API pages, task catalogs, quota pages, and error behavior | Sources below, retrieved 2026-08-06 |
+| Architecture | Pro-actors maintainer | PENDING | Token and Recognition capability records and actor boundaries reviewed separately | [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002]] |
+| Security | Security reviewer | PENDING | Subscription key, query authentication, proxy, cookie, session, challenge, and result redaction | Security and disclosure section below |
+| Operations | Operator | PENDING | Per-capability credit costs, refill policy, concurrency, cancellation limits, and bounded canaries | Quota and lifecycle sections below |
+| Implementation | Repository maintainer | NOT STARTED | Passing fixtures, fake-provider tests, CI, opt-in canaries, and publication checks | |
 
-* Current Advertised Coverage
+No row is implied approval.
 
-NopeCHA currently advertises these families in its supported-CAPTCHA catalog.
+* Provider Contract Summary
 
-| Service surface | Advertised families | Typical result kind |
-|-----------------|---------------------+---------------------|
-| Token API | hCaptcha, reCAPTCHA v2, reCAPTCHA v3, Cloudflare Turnstile | token |
-| Recognition API | Arkose FunCaptcha, AWS WAF CAPTCHA, GeeTest, hCaptcha, Lemin, reCAPTCHA, text CAPTCHA | text, coordinates, selection, or provider-specific answer |
-| Browser extension | broader interactive automation | browser-bound result; not a server adapter contract by itself |
+| Field | Token API | Recognition API |
+|-------+-----------+-----------------|
+| Provider | NopeCHA | NopeCHA |
+| Official source | Official token guides and per-family pages | Official recognition guides and formatting pages |
+| Retrieval date | 2026-08-06 | 2026-08-06 |
+| Request operation | =POST https://api.nopecha.com/token/= | Official recognition operation documented for the exact task |
+| Result operation | Retrieval request using provider job identifier | Synchronous or asynchronous operation declared per capability |
+| Authentication | Subscription key in documented body/query locations | Subscription key in documented operation |
+| Delivery model | asynchronous job and bounded polling | capability-specific synchronous or asynchronous result |
+| Result kind | =token= or capability-specific =assessment= metadata | =textAnswer=, =coordinates=, =selectionSet=, =interactionPlan=, or =customTypedResult= |
+| Cancellation | no provider-side token cancellation established by researched public contract | capability-specific; unsupported unless documented |
+| Idempotency | no global create idempotency guarantee established | capability-specific; never assume |
+| Billing | per-capability credits | per-capability credits |
+| Human or automated | automated provider service | automated provider service |
+| Retention | exact provider retention requires current policy review | exact provider retention requires current policy review |
 
-A marketing or extension claim is not enough to register a server capability. Each runtime capability requires a current request/result fixture from the corresponding official API page.
+The provider subscription key can appear in request bodies or retrieval query data. Request-target, body, trace, proxy, and error logging must redact it.
 
-* Token Contract
+* Token API Capabilities
 
-The token service uses =POST https://api.nopecha.com/token/= and a retrieval request containing the subscription key and provider job identifier. The key may appear in the create body or retrieval query. Request-body and request-target logging must be disabled and sanitized.[fn:url]
+Current official Token API material advertises hCaptcha, reCAPTCHA v2, reCAPTCHA v3, and Cloudflare Turnstile operations. Each integration remains independent.
 
-Current documented token types include:
+| Exact capability | Required source fields | Result | Current state |
+|------------------+------------------------+--------+---------------|
+| hCaptcha standard | page URL, site key, documented token context | =token= | =experimental= until fixture passes |
+| hCaptcha Enterprise | page URL, site key, exact Enterprise data and provider fields | =token= | =experimental= until fixture passes |
+| reCAPTCHA v2 checkbox | page URL, site key, exact v2 integration context | =token= | =experimental= until fixture passes |
+| reCAPTCHA v2 invisible | page URL, site key, invisible/action context | =token= | =experimental= until separate fixture passes |
+| reCAPTCHA Enterprise checkbox/invisible | exact Enterprise fields and integration type | =token= | =experimental= until separate fixture passes |
+| reCAPTCHA v3 score | page URL, site key, action, minimum score when supported | =token= plus score-related metadata | =experimental= until fixture passes |
+| Cloudflare Turnstile managed | page URL, site key, action/challenge data when required | =token= | =experimental= until fixture passes |
+| Other Turnstile modes | exact documented mode and fields | =token= | =unsupported= unless current operation and fixture exist |
 
-- =hcaptcha= with optional Enterprise data;
-- =recaptcha2= including Enterprise variants;
-- =recaptcha3= with action and minimum-score context;
-- =turnstile= with optional action and challenge data.
+Support for one integration does not widen to another version, variant, Enterprise mode, result kind, browser binding, network binding, or mobile flow.
 
-The hCaptcha page documents five credits per request, while the general overview has published a different value. The adapter therefore requires an operator-configured or contract-probed credit cost per capability rather than one global hard-coded value.
+* Recognition API Capabilities
 
-* Recognition Contract
+Recognition returns challenge answers, not trusted issuer tokens.
 
-Recognition tasks return challenge answers rather than issuer tokens. They must use distinct normalized result kinds:
+| Challenge family | Required input | Normalized result kind | Current state |
+|------------------+----------------+------------------------+---------------|
+| Distorted text | bounded image artifact | =textAnswer= | =experimental= until fixture passes |
+| Grid/object selection | bounded image plus exact prompt/task format | =selectionSet= or =coordinates= | =experimental= until fixture passes |
+| Coordinate/bounding/draw task | bounded image and task instructions | =coordinates= or =interactionPlan= | =experimental= until fixture passes |
+| Slider/rotation/puzzle | bounded challenge media and exact task context | =interactionPlan= or =customTypedResult= | =experimental= until fixture passes |
+| Arkose image subchallenge | exact supported recognition task | typed recognition result | =experimental= until fixture passes |
+| AWS WAF image/puzzle subchallenge | exact supported recognition task | typed recognition result | =experimental= until fixture passes |
+| GeeTest v3/v4 subchallenge | version-specific media and fields | typed recognition result | =experimental= until version fixture passes |
+| hCaptcha image subchallenge | bounded challenge image/prompt | selection or coordinate result | =experimental= until fixture passes |
 
-| Recognition family | Normalized result kind |
-|--------------------+------------------------|
-| Distorted text | =textAnswer= |
-| Grid or object selection | =selectionSet= or =coordinates= |
-| Bounding or drawing task | =coordinates= or =interactionPlan= |
-| Slider/rotate/puzzle | =interactionPlan= or provider-specific typed result |
-| Provider image subchallenge | capability-specific typed result |
+Recognition completion does not prove issuer or target acceptance. The source runtime applies the answer and returns downstream verification.
 
-Recognition output must never be mislabeled as a trusted token. The source actor applies it through its own browser/session flow and reports whether the issuer accepted it.
-
-* Capability Separation UML
+* Capability Separation Diagram
 
 #+begin_src plantuml
 @startuml
 component "CaptchaBrokerActor" as Broker
-component "NopeChaAdapterActor" as Adapter
-component "NopeCHA Token API" as Token
-component "NopeCHA Recognition API" as Recognition
+component "NopeCHATokenAdapterActor" as TokenAdapter
+component "NopeCHARecognitionAdapterActor" as RecognitionAdapter
+component "NopeCHA Token API" as TokenAPI
+component "NopeCHA Recognition API" as RecognitionAPI
 component "EphemeralSecretStoreActor" as Secrets
 
-Broker --> Adapter : exact capability request
-alt token capability
-  Adapter --> Token : site key + page/context
-  Token --> Adapter : token job/result
-  Adapter --> Secrets : store token
-else recognition capability
-  Adapter --> Recognition : bounded image/challenge artifact
-  Recognition --> Adapter : answer/coordinates/selection
-  Adapter --> Secrets : store typed answer
-end
-Adapter --> Broker : normalized resultRef + resultKind
+Broker --> TokenAdapter : exact token capability
+TokenAdapter --> TokenAPI : token request
+TokenAPI --> TokenAdapter : token job/result
+TokenAdapter --> Secrets : store token
+TokenAdapter --> Broker : token resultRef
+
+Broker --> RecognitionAdapter : exact recognition capability
+RecognitionAdapter --> RecognitionAPI : bounded challenge artifact
+RecognitionAPI --> RecognitionAdapter : text/coordinates/selections/typed result
+RecognitionAdapter --> Secrets : store recognition result
+RecognitionAdapter --> Broker : typed resultRef
 @enduml
 #+end_src
 
-* Capability Registration
+The recommended implementation uses sibling actors or one supervisor with separate Token and Recognition children. One surface's contract drift does not disable the other.
 
-NopeCHA registers individual capabilities such as:
+* Request and Result Fields
 
-#+begin_example
-captcha.hcaptcha.token.standard
-captcha.hcaptcha.token.enterprise
-captcha.googleRecaptcha.token.v2
-captcha.googleRecaptcha.score.v3
-captcha.cloudflareTurnstile.token.managed
-captcha.arkose.imageSelect.recognition
-captcha.awsWaf.puzzle.recognition
-captcha.geetest.puzzle.v3
-captcha.geetest.puzzle.v4
-captcha.imageText.text.recognition
-#+end_example
+Every capability record captures:
 
-The actual runtime list is populated only by fixtures that pass. A token capability never implies recognition, and recognition never implies token generation.
+- exact official operation and retrieval date;
+- exact task type;
+- required and optional request fields;
+- required result fields;
+- result kind;
+- proxy and cookie formats;
+- user-agent requirements;
+- browser-session and same-network requirements;
+- mobile requirements;
+- credential location;
+- polling or synchronous delivery;
+- cancellation and idempotency support;
+- ambiguous-create behavior;
+- per-capability credit cost;
+- error codes;
+- fixtures and unsupported variants.
 
-* Proxy, Cookie, and Session Context
+A general supported-CAPTCHA catalog is discovery evidence, not enough to activate a runtime capability.
 
-Some token and Enterprise flows may require the solve network identity to match the source actor's submission identity. Cookies may contain authenticated session material.[fn:session]
+* Proxy, Cookie, Session, and Network Context
 
-Therefore:
+Some token and Enterprise flows may require a source-consistent proxy, cookies, user agent, challenge data, or other session context. Therefore:
 
-- proxy and cookie values are represented only by ephemeral references;
-- target policy explicitly permits each context kind;
-- a capability registration declares same-network and same-session requirements;
-- the broker prefers a local browser actor when remote provider context cannot preserve required binding;
-- no provider URL, log, trace, or error may contain the subscription key.
+- proxy credentials and cookie bundles remain behind ephemeral references;
+- target policy explicitly permits each disclosure;
+- the capability declares whether the provider must use the same network identity;
+- the capability declares whether result application requires the same browser session;
+- authenticated cookie material is never stored in documents or ordinary actor messages;
+- the broker prefers a local browser solver when an external provider cannot preserve exact context fidelity.
 
-* Quota Accounting
+* Quota and Billing
 
-Credits refill every twenty-three hours and unused capacity does not accumulate. The adapter maintains a per-capability quota ledger because token and recognition operations consume different amounts.
+Official NopeCHA pages describe credit costs and refill behavior, but public pages can differ by capability or change over time. Store cost with the exact capability contract, retrieval date, and fixture. Never use one global hard-coded cost.
 
-Before submission, reserve the configured amount. On completion, reconcile against provider evidence where available. Do not release a reservation unless the contract proves no charge occurred. A refill is paid subscription capacity, not free budget.
+The adapter reserves configured credits before submission and reconciles only from provider evidence. A local cancellation does not imply provider credit recovery. Refill capacity is subscription capacity, not a free budget override.
 
-* Polling and Cancellation
+* Polling, Cancellation, and Ambiguous Submission
 
-A token create returns a job identifier. The documented incomplete-job response remains pending and is polled with bounded backoff. The researched token contract does not document provider-side cancellation. Local cancellation stops polling and deletes local secret material, but may still consume credits.
+Token jobs are polled with bounded backoff until terminal state or deadline. The researched token contract does not establish provider-side cancellation, so local cancellation stops polling, deletes local result material, and reports that cost may still be incurred.
 
-Recognition operations may be synchronous or asynchronous by endpoint. Each capability adapter declares its delivery model explicitly.
+After an ambiguous token create, recover only through a provider-supported identifier or lookup contract. Never blindly submit another billable job.
 
-* Risks
+Recognition delivery and cancellation are declared per capability. A synchronous recognition timeout is not silently retried when the provider may have consumed credits.
 
-- Credit documentation can disagree across official pages.
-- Retrieval authentication in a query creates log-exposure risk.
-- Token and recognition coverage can drift independently.
-- Cookies and proxy context increase disclosure.
-- Recognition can solve a subchallenge without producing a server-accepted token.
-- Browser-extension capability is not automatically equivalent to a stable server API.
+* Security and Disclosure
 
-* StarIntel Decision
+Never persist or publish:
 
-Approve NopeCHA as a broad secondary provider candidate, not as one undifferentiated adapter capability. Implement separate token and recognition ports inside one supervised provider actor or two sibling actors. Enable each capability only after its own contract fixture, redaction test, cost configuration, and operator policy pass.
+- subscription keys;
+- request URLs containing keys;
+- proxy credentials;
+- cookie bundles;
+- authenticated session material;
+- challenge images or audio containing private target data unless explicitly approved and retained according to policy;
+- provider tokens;
+- text answers;
+- coordinates;
+- selections;
+- interaction plans;
+- full provider bodies or authorization headers.
 
-* Test Requirements
+Use placeholders such as =key=<redacted>=. Result values remain in the ephemeral secret store and leave it only through a bounded authorized read in the source runtime.
 
-- Per-capability fixture registration and drift disablement.
-- hCaptcha, reCAPTCHA v2/v3, and Turnstile token mocks.
-- Arkose, AWS WAF, GeeTest, hCaptcha-recognition, and text mocks.
-- Pending-job behavior and bounded polling.
-- Recognition result-kind validation.
-- Per-capability quota and refill-window tests.
-- Local cancellation without provider cancellation support.
-- Proxy, cookie, key, challenge, and result redaction.
-- Capability-specific opt-in canaries only.
+* Error Contract and Drift
+
+Normalize authentication, quota, invalid request, unsupported task, pending, unsolvable, timeout, service failure, malformed result, and internal adapter errors. Every failure carries =retryable= and =chargePossible=.
+
+Drift is localized:
+
+- one Token capability may become =invalidContract= without disabling other token families;
+- Token API drift does not automatically disable Recognition API capabilities;
+- Recognition result-schema drift affects only the exact task;
+- shared credential or provider outage may temporarily mark all NopeCHA capabilities =disabled=;
+- browser-extension changes do not alter server API capability state.
+
+* Required Fixtures and Tests
+
+- hCaptcha standard and Enterprise token requests/results;
+- reCAPTCHA v2 checkbox, v2 invisible, Enterprise, and v3 score fixtures;
+- Turnstile mode-specific fixtures;
+- text, grid, coordinate, bounding, puzzle, Arkose, AWS WAF, GeeTest, and hCaptcha-recognition fixtures;
+- typed result validation and forbidden result-kind widening;
+- pending-job polling and deadline behavior;
+- ambiguous create and duplicate RabbitMQ delivery;
+- per-capability credit cost and refill-window behavior;
+- local cancellation with possible charge;
+- proxy, cookie, session, key, challenge, and result redaction;
+- capability-local drift;
+- source-runtime downstream acceptance, rejection, replacement, expiration, and inconclusive outcomes;
+- no paid provider in continuous integration;
+- capability-specific opt-in canaries on operator-owned systems only.
+
+* Decision
+
+Retain NopeCHA as a broad secondary provider candidate with separate Token and Recognition actor surfaces. Activate each exact capability only after its official contract, fixture, cost, redaction, context, and operator-policy requirements pass.
 
 * Sources
 
-- [[https://developers.nopecha.com/captcha/][NopeCHA supported CAPTCHA catalog]], accessed 2026-08-06.
-- [[https://developers.nopecha.com/guides/token/][NopeCHA Token API quickstart]], accessed 2026-08-06.
-- [[https://developers.nopecha.com/token/hcaptcha/][NopeCHA hCaptcha Token API]], accessed 2026-08-06.
-- [[https://developers.nopecha.com/token/recaptcha2/][NopeCHA reCAPTCHA v2 Token API]], accessed 2026-08-06.
-- [[https://developers.nopecha.com/formatting/proxy/][NopeCHA proxy format]], accessed 2026-08-06.
-- [[https://developers.nopecha.com/][NopeCHA overview and credit model]], accessed 2026-08-06.
+All sources accessed 2026-08-06.
+
+- [[https://developers.nopecha.com/captcha/][NopeCHA supported CAPTCHA catalog]].
+- [[https://developers.nopecha.com/guides/token/][NopeCHA Token API quickstart]].
+- [[https://developers.nopecha.com/token/hcaptcha/][NopeCHA hCaptcha Token API]].
+- [[https://developers.nopecha.com/token/recaptcha2/][NopeCHA reCAPTCHA v2 Token API]].
+- [[https://developers.nopecha.com/token/recaptcha3/][NopeCHA reCAPTCHA v3 Token API]].
+- [[https://developers.nopecha.com/token/turnstile/][NopeCHA Turnstile Token API]].
+- [[https://developers.nopecha.com/recognition/][NopeCHA Recognition API]].
+- [[https://developers.nopecha.com/formatting/proxy/][NopeCHA proxy format]].
+- [[https://developers.nopecha.com/][NopeCHA overview and credit model]].
 
 * Related Nodes
 
-- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]]
-- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Multi-Family Adapter]]
-- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]].
+- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Token and Recognition Adapter]].
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors]].
 
 * Footnotes and Glossary
 
-[fn:recognition] Recognition API: A service that interprets challenge media and returns answers, labels, selections, or coordinates rather than a completed issuer token.
+- *Recognition result* — Text, coordinates, selections, or an interaction description that the source runtime must apply; it is not an issuer token.
+- *Token result* — An issuer-specific verification token produced by an exact provider operation and later applied and verified by the source runtime.
+- *Query credential exposure* — Risk that a secret in a URL query is captured by logs, traces, analytics, or error reports.
+- *Capability-local drift* — A request or result contract failure isolated to the exact task and API surface.
 
-[fn:url] Uniform resource locator: A network address whose query component can accidentally expose credentials when recorded.
+* Changelog
 
-[fn:session] Session material: Cookies or related values that associate requests with an authenticated or previously established browser session.
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-06 | Separated NopeCHA Token and Recognition API contracts, exact task states, typed results, per-capability cost, credential exposure, session/network context, cancellation limits, drift isolation, fixtures, and approval evidence | repository audit agent | Official NopeCHA sources listed above and PR source diff |

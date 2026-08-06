@@ -16,7 +16,7 @@ Record an implemented design in the append-only implementation ledger.
 ## Preconditions
 
 - Read the applicable `AGENTS.md`.
-- Identify the active design and its direct dependencies.
+- Identify the active design for the target project and its direct dependencies.
 - Inspect Git status before writing.
 - Do not bulk-load `roam/`.
 
@@ -24,7 +24,7 @@ Record an implemented design in the append-only implementation ledger.
 
 1. Search the repository and Org database for existing contracts and APIs.
 2. State the exact outcome and validation required.
-3. Use `scripts/mark-design.py implemented`, require a concrete summary, changed files, observed tests, and commits; then run `scripts/sync.py`.
+3. Use `scripts/mark-design.py implemented`; when multiple projects have active designs, pass `--project <project>`. Require a concrete summary, changed files, observed tests, and commits; then run `scripts/sync.py`.
 4. Run the narrowest meaningful validation, then broader configured checks.
 5. Update research, design status, or implementation records as required.
 
@@ -32,6 +32,6 @@ Record an implemented design in the append-only implementation ledger.
 
 - The requested outcome is observable.
 - The canonical design and status ledgers agree.
-- Directory mirroring and the one-design slot remain valid.
+- Directory mirroring and every per-project implementation slot remain valid.
 - Tests or checks are reported with exact observed results.
 - No unrelated files, secrets, unsupported claims, or hidden assumptions were introduced.

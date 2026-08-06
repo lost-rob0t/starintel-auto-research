@@ -25,6 +25,7 @@ python scripts/sync.py
 python scripts/implement.py roam/design/star-server/STAR-SERVER-001-example.org
 
 python scripts/mark-design.py implemented \
+  --project star-server \
   --summary "Added a CL-GServer round-robin router pool" \
   --file source/actors.lisp \
   --test "nix flake check: passed"
@@ -36,6 +37,7 @@ Rejected design:
 
 ```bash
 python scripts/mark-design.py rejected \
+  --project star-server \
   --reason "The design duplicates Star Router responsibilities" \
   --evidence "Repository architecture review" \
   --replacement "Use CL-GServer only for in-process routee pools"
@@ -43,7 +45,9 @@ python scripts/mark-design.py rejected \
 python scripts/sync.py
 ```
 
-`sync.py` preserves the canonical design, writes an implementation or rejection record into it, updates status headers, mirrors directory structure, and clears only the active working copy.
+Each immediate project subtree under `roam/implement/` has its own zero-or-one active design slot. Independent projects may proceed concurrently. Use `python scripts/implement.py --status` to inspect every slot, and pass `--project <project>` when marking or clearing a design while multiple projects are active.
+
+`sync.py` preserves each canonical design, writes implementation or rejection records into it, updates status headers, mirrors directory structure, and clears only active working copies whose status events were synchronized.
 
 ## Org-roam Pages
 

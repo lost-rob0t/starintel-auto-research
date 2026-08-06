@@ -11,3 +11,25 @@ if [[ -d "$root/pages/root" ]]; then
 fi
 
 python3 "$root/scripts/enhance-pages.py" "$root/_site"
+
+# Keep the workflow artifact bound to the canonical public host.
+printf '%s\n' 'auto-research.starintel.actor' > "$root/_site/CNAME"
+
+# Make the deployed revision observable so stale Pages builds are immediately
+# distinguishable from the current main branch.
+python3 - "$root/_site/deployment.json" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+output = Path(sys.argv[1])
+payload = {
+    "commit": os.environ.get("GITHUB_SHA", "local"),
+    "run_id": os.environ.get("GITHUB_RUN_ID"),
+    "built_at": datetime.now(timezone.utc).isoformat(),
+    "domain": "auto-research.starintel.actor",
+}
+output.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+PY

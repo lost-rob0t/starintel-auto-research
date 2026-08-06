@@ -1,102 +1,180 @@
 :PROPERTIES:
 :ID:       star-pro-research-002-nopecha-hcaptcha-provider
 :END:
-#+title: STAR-PRO-RESEARCH-002 NopeCHA hCaptcha Provider
-#+description: Current NopeCHA hCaptcha Token API research for a guarded StarIntel Pro Actors provider adapter.
+#+title: STAR-PRO-RESEARCH-002 NopeCHA Multi-Family CAPTCHA Provider
+#+description: Current NopeCHA Recognition and Token API research for exact-capability StarIntel solver actors across hCaptcha, reCAPTCHA, Turnstile, Arkose, AWS WAF, GeeTest, text, and related challenge families.
 #+status: REVIEW
-#+filetags: :starintel:research:starintel-pro-actors:captcha:hcaptcha:nopecha:
+#+filetags: :starintel:research:starintel-pro-actors:captcha:nopecha:recognition:token:uml:
 
 * Scope
 
-This note evaluates the NopeCHA Token API[fn:token-api] as an hCaptcha provider behind the StarIntel broker. It excludes the separate image-recognition API because the broker contract returns complete short-lived verification tokens rather than click coordinates or classifications.
+This note evaluates both NopeCHA service surfaces behind the provider-neutral StarIntel broker:
 
-* Provider Summary
+- the *Token API*, which returns issuer verification tokens; and
+- the *Recognition API*, which returns text, classifications, coordinates, or challenge answers.[fn:recognition]
 
-NopeCHA advertises token generation for hCaptcha Publisher, Pro, and Enterprise. The documented hCaptcha operation accepts a site key, page URL, optional enterprise =rqdata=, optional proxy, optional cookies, and a browser user-agent string.
+The previous hCaptcha-only scope was incomplete. The two surfaces must register separate capabilities, budgets, result kinds, and disclosure rules.
 
-The service uses a subscription credit model. Credits refill every twenty-three hours and unused daily capacity does not accumulate. Current documentation is inconsistent about hCaptcha token cost: the dedicated hCaptcha page says five credits per request, while the general overview says ten credits. The adapter must therefore discover or configure the effective charge instead of hard-coding either value.
+* Approval Table
 
-* Current Contract
+| Approval area | Required reviewer | State | Evidence required |
+|---------------+-------------------+-------+-------------------|
+| Token contracts | Pro-actors maintainer | PENDING | hCaptcha, reCAPTCHA v2/v3, and Turnstile fixtures |
+| Recognition contracts | Pro-actors maintainer | PENDING | Arkose, AWS WAF, GeeTest, text, and hCaptcha-recognition fixtures |
+| Quota model | Operator | PENDING | Effective per-capability credits and twenty-three-hour refill policy |
+| Secret handling | Security reviewer | PENDING | Query-key, proxy, cookie, session, and result redaction |
+| Live enablement | Operator | NOT STARTED | Capability-specific bounded canaries on owned test systems |
 
-| Capability | Current public contract |
-|------------+-------------------------|
-| Create | =POST https://api.nopecha.com/token/= |
-| Retrieve | =GET https://api.nopecha.com/token/?key=...&id=...= |
-| Authentication | subscription key in request body or query |
-| Challenge type | =type: hcaptcha= |
-| Enterprise input | =data.rqdata= |
-| Optional context | proxy, cookie array, and user agent |
-| Pending response | error number 14 with =Incomplete job= |
-| Result | token returned in the =data= field |
+* Current Advertised Coverage
 
-The public contract does not document cancellation, provider callbacks, or an idempotency key. The key-in-query retrieval form creates additional log-exposure risk because uniform resource locators[fn:url] are commonly recorded by clients, proxies, and servers.
+NopeCHA currently advertises these families in its supported-CAPTCHA catalog.
 
-* Strengths
+| Service surface | Advertised families | Typical result kind |
+|-----------------|---------------------+---------------------|
+| Token API | hCaptcha, reCAPTCHA v2, reCAPTCHA v3, Cloudflare Turnstile | token |
+| Recognition API | Arkose FunCaptcha, AWS WAF CAPTCHA, GeeTest, hCaptcha, Lemin, reCAPTCHA, text CAPTCHA | text, coordinates, selection, or provider-specific answer |
+| Browser extension | broader interactive automation | browser-bound result; not a server adapter contract by itself |
 
-- Explicit support for regular and enterprise hCaptcha.
-- Optional proxy, cookie, and user-agent context for authorized sessions requiring network identity continuity.
-- Official Python and Node.js clients.
-- Subscription tiers expose stated concurrency limits.
-- The token API has a small request and response surface.
+A marketing or extension claim is not enough to register a server capability. Each runtime capability requires a current request/result fixture from the corresponding official API page.
 
-* Weaknesses and Open Risks
+* Token Contract
 
-- Published credit consumption disagrees across official pages.
-- Daily credit refill makes cost accounting quota-based rather than purely per solve.
-- No documented cancellation endpoint.
-- No documented callback or long-poll endpoint.
-- Authentication in query parameters is incompatible with strict secret hygiene unless the adapter prevents URL logging.
-- Cookies accepted by the provider may contain session secrets and must be represented only by ephemeral secret references.
-- The provider notes that some enterprise flows require the solve proxy to match the client submission proxy.
-- The dedicated documentation says area-selection challenges are not supported by the Token API.
+The token service uses =POST https://api.nopecha.com/token/= and a retrieval request containing the subscription key and provider job identifier. The key may appear in the create body or retrieval query. Request-body and request-target logging must be disabled and sanitized.[fn:url]
+
+Current documented token types include:
+
+- =hcaptcha= with optional Enterprise data;
+- =recaptcha2= including Enterprise variants;
+- =recaptcha3= with action and minimum-score context;
+- =turnstile= with optional action and challenge data.
+
+The hCaptcha page documents five credits per request, while the general overview has published a different value. The adapter therefore requires an operator-configured or contract-probed credit cost per capability rather than one global hard-coded value.
+
+* Recognition Contract
+
+Recognition tasks return challenge answers rather than issuer tokens. They must use distinct normalized result kinds:
+
+| Recognition family | Normalized result kind |
+|--------------------+------------------------|
+| Distorted text | =textAnswer= |
+| Grid or object selection | =selectionSet= or =coordinates= |
+| Bounding or drawing task | =coordinates= or =interactionPlan= |
+| Slider/rotate/puzzle | =interactionPlan= or provider-specific typed result |
+| Provider image subchallenge | capability-specific typed result |
+
+Recognition output must never be mislabeled as a trusted token. The source actor applies it through its own browser/session flow and reports whether the issuer accepted it.
+
+* Capability Separation UML
+
+#+begin_src plantuml
+@startuml
+component "CaptchaBrokerActor" as Broker
+component "NopeChaAdapterActor" as Adapter
+component "NopeCHA Token API" as Token
+component "NopeCHA Recognition API" as Recognition
+component "EphemeralSecretStoreActor" as Secrets
+
+Broker --> Adapter : exact capability request
+alt token capability
+  Adapter --> Token : site key + page/context
+  Token --> Adapter : token job/result
+  Adapter --> Secrets : store token
+else recognition capability
+  Adapter --> Recognition : bounded image/challenge artifact
+  Recognition --> Adapter : answer/coordinates/selection
+  Adapter --> Secrets : store typed answer
+end
+Adapter --> Broker : normalized resultRef + resultKind
+@enduml
+#+end_src
+
+* Capability Registration
+
+NopeCHA registers individual capabilities such as:
+
+#+begin_example
+captcha.hcaptcha.token.standard
+captcha.hcaptcha.token.enterprise
+captcha.googleRecaptcha.token.v2
+captcha.googleRecaptcha.score.v3
+captcha.cloudflareTurnstile.token.managed
+captcha.arkose.imageSelect.recognition
+captcha.awsWaf.puzzle.recognition
+captcha.geetest.puzzle.v3
+captcha.geetest.puzzle.v4
+captcha.imageText.text.recognition
+#+end_example
+
+The actual runtime list is populated only by fixtures that pass. A token capability never implies recognition, and recognition never implies token generation.
+
+* Proxy, Cookie, and Session Context
+
+Some token and Enterprise flows may require the solve network identity to match the source actor's submission identity. Cookies may contain authenticated session material.[fn:session]
+
+Therefore:
+
+- proxy and cookie values are represented only by ephemeral references;
+- target policy explicitly permits each context kind;
+- a capability registration declares same-network and same-session requirements;
+- the broker prefers a local browser actor when remote provider context cannot preserve required binding;
+- no provider URL, log, trace, or error may contain the subscription key.
+
+* Quota Accounting
+
+Credits refill every twenty-three hours and unused capacity does not accumulate. The adapter maintains a per-capability quota ledger because token and recognition operations consume different amounts.
+
+Before submission, reserve the configured amount. On completion, reconcile against provider evidence where available. Do not release a reservation unless the contract proves no charge occurred. A refill is paid subscription capacity, not free budget.
+
+* Polling and Cancellation
+
+A token create returns a job identifier. The documented incomplete-job response remains pending and is polled with bounded backoff. The researched token contract does not document provider-side cancellation. Local cancellation stops polling and deletes local secret material, but may still consume credits.
+
+Recognition operations may be synchronous or asynchronous by endpoint. Each capability adapter declares its delivery model explicitly.
+
+* Risks
+
+- Credit documentation can disagree across official pages.
+- Retrieval authentication in a query creates log-exposure risk.
+- Token and recognition coverage can drift independently.
+- Cookies and proxy context increase disclosure.
+- Recognition can solve a subchallenge without producing a server-accepted token.
+- Browser-extension capability is not automatically equivalent to a stable server API.
 
 * StarIntel Decision
 
-Approve a secondary NopeCHA adapter after the reference NoneCap adapter. The adapter must remain disabled until the operator configures:
-
-- the effective credit charge per hCaptcha token;
-- subscription refill time and daily quota;
-- allowed maximum concurrency;
-- whether proxy and cookie context are permitted for the selected target policy.
-
-The adapter must place the provider key in a redacted query construction path and must disable request-line logging for the retrieval call. A future provider change that supports header authentication should replace query authentication immediately.
-
-* Budget Model
-
-The broker reserves one logical solve plus a configurable provider-credit ceiling. The adapter reports:
-
-- provider credits charged or estimated;
-- local daily quota remaining when known;
-- request duration;
-- polling count;
-- provider job identifier;
-- terminal normalized status.
-
-A quota refill is not treated as free capacity. It is still an operator-owned paid subscription budget.
+Approve NopeCHA as a broad secondary provider candidate, not as one undifferentiated adapter capability. Implement separate token and recognition ports inside one supervised provider actor or two sibling actors. Enable each capability only after its own contract fixture, redaction test, cost configuration, and operator policy pass.
 
 * Test Requirements
 
-- Contract tests for pending error 14, successful =data= token, malformed responses, authentication failure, and provider timeout.
-- Tests proving request URLs and logs never contain the real subscription key.
-- Tests proving cookie, proxy, =rqdata=, and token values never enter durable actor events.
-- Quota tests across the twenty-three-hour refill boundary.
-- Live canary testing only against an operator-owned hCaptcha page.
+- Per-capability fixture registration and drift disablement.
+- hCaptcha, reCAPTCHA v2/v3, and Turnstile token mocks.
+- Arkose, AWS WAF, GeeTest, hCaptcha-recognition, and text mocks.
+- Pending-job behavior and bounded polling.
+- Recognition result-kind validation.
+- Per-capability quota and refill-window tests.
+- Local cancellation without provider cancellation support.
+- Proxy, cookie, key, challenge, and result redaction.
+- Capability-specific opt-in canaries only.
 
 * Sources
 
-- [[https://developers.nopecha.com/token/hcaptcha/][NopeCHA hCaptcha Token API]], accessed 2026-08-05.
-- [[https://developers.nopecha.com/guides/token/][NopeCHA Token API quickstart]], accessed 2026-08-05.
-- [[https://developers.nopecha.com/formatting/proxy/][NopeCHA proxy format]], accessed 2026-08-05.
-- [[https://developers.nopecha.com/][NopeCHA overview and credit model]], accessed 2026-08-05.
-- [[https://nopecha.com/pricing][NopeCHA pricing]], accessed 2026-08-05.
+- [[https://developers.nopecha.com/captcha/][NopeCHA supported CAPTCHA catalog]], accessed 2026-08-06.
+- [[https://developers.nopecha.com/guides/token/][NopeCHA Token API quickstart]], accessed 2026-08-06.
+- [[https://developers.nopecha.com/token/hcaptcha/][NopeCHA hCaptcha Token API]], accessed 2026-08-06.
+- [[https://developers.nopecha.com/token/recaptcha2/][NopeCHA reCAPTCHA v2 Token API]], accessed 2026-08-06.
+- [[https://developers.nopecha.com/formatting/proxy/][NopeCHA proxy format]], accessed 2026-08-06.
+- [[https://developers.nopecha.com/][NopeCHA overview and credit model]], accessed 2026-08-06.
 
 * Related Nodes
 
+- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]]
+- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Multi-Family Adapter]]
 - [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
-- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Adapter]]
 
 * Footnotes and Glossary
 
-[fn:token-api] Token API: A network service that accepts challenge metadata and returns a completed verification token rather than returning individual image answers.
+[fn:recognition] Recognition API: A service that interprets challenge media and returns answers, labels, selections, or coordinates rather than a completed issuer token.
 
-[fn:url] Uniform resource locator: The textual address of a network resource, including its scheme, host, path, and optional query parameters.
+[fn:url] Uniform resource locator: A network address whose query component can accidentally expose credentials when recorded.
+
+[fn:session] Session material: Cookies or related values that associate requests with an authenticated or previously established browser session.

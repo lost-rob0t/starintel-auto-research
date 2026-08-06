@@ -84,6 +84,7 @@ jobs:
           node --check pages/static/site.js
           node --check pages/static/enhancements.js
           python3 -m py_compile scripts/enhance-pages.py
+          bash -n scripts/publish-pages
 
       - name: Install Emacs and PlantUML
         run: |
@@ -116,6 +117,27 @@ jobs:
 
       - name: Check internal links
         run: python3 scripts/check-pages-links.py _site
+
+      - name: Verify lease-stack publication artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fxq 'auto-research.starintel.actor' _site/CNAME
+          test -s _site/deployment.json
+          for page in \
+            notes/indexes/star-server/STAR-LEASE-INDEX-030-backend-neutral-kv-leases.html \
+            notes/design/star-server/STAR-SERVER-029-distributed-target-lease-and-fencing.html \
+            notes/research/star-server/STAR-RESEARCH-029-distributed-target-lease-and-fencing.html \
+            notes/design/star-server/STAR-SERVER-030-backend-neutral-kv-lease-store.html \
+            notes/research/star-server/STAR-RESEARCH-030-backend-neutral-kv-lease-store.html \
+            notes/design/star-server/STAR-SERVER-032-authenticated-target-lease-http-execution.html \
+            notes/research/star-server/STAR-RESEARCH-032-authenticated-target-lease-http-execution.html
+          do
+            test -s "_site/$page" || {
+              echo "::error file=$page::Expected published lease page is missing"
+              exit 1
+            }
+          done
 
       - name: Verify GitHub Pages is enabled
         if: github.event_name != 'pull_request'

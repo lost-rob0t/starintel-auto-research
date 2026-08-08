@@ -5,6 +5,15 @@
   const current = document.currentScript;
   const base = current?.src ? new URL(".", current.src) : new URL("./", window.location.href);
 
+  function mountShellStyles() {
+    if (document.querySelector('link[data-adar-shell="true"]')) return;
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = new URL("adar-shell.css", base).href;
+    link.dataset.adarShell = "true";
+    document.head.appendChild(link);
+  }
+
   function mountSiblingNavigation() {
     const header = document.querySelector(".site-header");
     if (!header) return;
@@ -24,6 +33,7 @@
     }
   }
 
+  mountShellStyles();
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", mountSiblingNavigation, { once: true });
   } else {

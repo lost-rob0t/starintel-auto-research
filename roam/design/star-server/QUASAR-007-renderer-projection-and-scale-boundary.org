@@ -1,0 +1,210 @@
+:PROPERTIES:
+:ID:       quasar-renderer-projection-scale-boundary-007
+:END:
+#+title: QUASAR-007 Renderer Projection and Scale Boundary
+#+description: Define Quasar renderer authority, safe graph-size selection, large-graph projection tiers, and benchmark gates without changing canonical graph mutation semantics.
+#+status: REVIEW
+#+filetags: :starintel:quasar:design:renderer:projection:scale:webgl:webgpu:tiling:approval:
+#+todo: TODO REVIEW BLOCKED | DONE REJECTED
+#+created: [2026-08-08 Sat]
+#+last_modified: [2026-08-08 Sat]
+
+| Version | Date       | Description of change                                            | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-08-08 | Split renderer projection and graph-scale decisions from QUASAR-004. | No                 |
+
+* Decision
+
+Every Quasar[fn:quasar] graph renderer is a projection[fn:projection] of canonical graph/document state. A renderer may select, cluster, tile, filter, position, and visualize data, but it is never the database or durable mutation authority.
+
+Quasar should select a renderer/view tier before attempting to load a graph that exceeds measured safe limits for the normal editable workbench.
+
+No fixed graph-size cutoff is declared in this design. Cutoffs must come from reproducible benchmarks on supported target classes.
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| User approval | nsaspy / repository owner | PENDING | Approve or request edits to the renderer/scale boundary | Publication link below |
+| Renderer abstraction | Quasar maintainers | PENDING | Renderer adapters consume stable projections and emit validated commands | GraphViewAdapter Boundary |
+| Scale tiers | Quasar maintainers | PENDING | Benchmarks justify tier cutoffs and candidate renderer selection | Benchmark Matrix |
+| Mutation safety | Runtime + UI maintainers | PENDING | Large-view edits round-trip through canonical command contracts | Mutation Boundary |
+
+No row is implied approval.
+
+* Related Nodes
+
+- [[file:QUASAR-004-canonical-runtime-and-fork-alignment.org][QUASAR-004 Canonical Runtime Authority]]
+- [[file:QUASAR-005-web-edition-standalone-scope.org][QUASAR-005 Web Edition and Standalone Scope]]
+- [[file:QUASAR-006-auto-dig-fork-and-bridge-boundary.org][QUASAR-006 Auto-Dig Fork and Bridge Boundary]]
+- [[file:QUASAR-003-graph-document-command-protocol.org][QUASAR-003 Graph Document and Command Protocol]]
+- [[file:../../research/star-server/QUASAR-RESEARCH-005-four-repository-alignment-and-scale.org][QUASAR-RESEARCH-005 Four-Repository Alignment and Scale Review]]
+
+* GraphViewAdapter Boundary
+
+A =GraphViewAdapter=[fn:graph-view-adapter] separates canonical graph state from a concrete renderer.
+
+#+begin_src text
+canonical graph/document state
+            |
+            v
+      stable projection
+            |
+            v
+     GraphViewAdapter
+       /    |     \
+      /     |      \
+ editable  overview  tiled
+ renderer  renderer  renderer
+      \       |       /
+       \      |      /
+        proposed commands
+              |
+              v
+      canonical validation
+#+end_src
+
+The adapter owns renderer-specific loading, drawing, selection, viewport state, neighborhood expansion, and visual level-of-detail behavior. It does not own canonical persistence.
+
+* Renderer Tiers
+
+The architecture reserves tiers rather than choosing one renderer for every scale.
+
+| Tier | Primary role | Candidate direction | Mutation behavior |
+|------+--------------+--------------------+-------------------|
+| 0 | Normal editable workbench | Current Cytoscape[fn:cytoscape] canvas path | Full supported edits through canonical commands |
+| 1 | Accelerated editable/preview path | Benchmarked Cytoscape acceleration or compatible WebGL[fn:webgl] path | Commands remain canonical; acceleration does not change semantics |
+| 2 | Large mostly-read overview | Sigma.js, cosmos.gl, Cosmograph, or another benchmark winner | Selection/filtering first; edits, if exposed, round-trip through canonical commands |
+| 3 | Massive/tiled overview | WebGPU[fn:webgpu], WebAssembly[fn:wasm], custom tiling, or hybrid projection | Projection-first; no direct durable mutation inside renderer state |
+
+Candidate names are research options, not approved dependencies.
+
+* Safe-Load Guard
+
+Before opening a graph, Quasar should know enough metadata to avoid blindly loading a dangerous representation.
+
+The guard may use:
+
+- node count;
+- edge count;
+- estimated serialized bytes;
+- relation density;
+- device/browser capability class;
+- configured memory budget;
+- renderer benchmark profile.
+
+If the normal editable tier is outside its tested envelope, Quasar should open a coarser projection first and let the user filter, search, tile, or focus before escalating to a more expensive view.
+
+The guard must execute before constructing the full expensive renderer state.
+
+* Tiling Boundary
+
+Tiling[fn:tiling] is a projection strategy, not a storage-authority change.
+
+A tile may contain:
+
+- a bounded node/edge subset;
+- cluster summaries;
+- spatial or semantic partition metadata;
+- continuation identifiers for neighboring tiles;
+- aggregate counts required for navigation.
+
+Tiles may be regenerated from canonical state. A tile must not become the only durable copy of a mutation.
+
+* Mutation Boundary
+
+Renderer interactions fall into two classes.
+
+** Ephemeral interaction
+
+Examples:
+
+- pan and zoom;
+- hover;
+- temporary selection;
+- local layout iteration;
+- preview clustering;
+- transient focus state.
+
+These may remain renderer-local.
+
+** Durable interaction
+
+Examples:
+
+- creating/deleting a node or relation;
+- committed position changes when positions are part of saved workspace state;
+- document/metadata edits;
+- batch changes from actions or actors.
+
+These must become validated QUASAR-003 commands before they become durable state.
+
+* Benchmark Matrix
+
+A renderer/tier recommendation is not accepted without reproducible measurements.
+
+Minimum benchmark matrix:
+
+| Dimension | Required coverage |
+|-----------+-------------------|
+| Graph size | small editable baseline, 100k-scale, 1M-scale, and larger tiled fixtures when feasible |
+| Density | sparse, medium, and dense relation sets |
+| Hardware | representative desktop CPU/GPU, lower-power laptop, and supported mobile class |
+| Browser | supported Chromium/Firefox/WebKit classes where practical |
+| Operations | initial load, first useful paint, pan/zoom, search/focus, neighborhood expansion, selection, memory peak |
+| Failure behavior | safe refusal/fallback before tab crash or system memory exhaustion |
+
+Benchmark fixtures must be deterministic and record software/hardware versions.
+
+* Selection Rule
+
+The implementation should choose the simplest tier that meets the measured requirement.
+
+Do not introduce WebGPU merely because it is newer. Do not retain Cytoscape for a workload after measurements show it cannot satisfy the target. Do not write a custom renderer before benchmarking maintained libraries and simpler projection strategies.
+
+* Acceptance Gates
+
+| Gate | Required proof |
+|------|----------------|
+| Adapter isolation | Renderer can be replaced without changing canonical graph/document contracts. |
+| Safe cutoff | Benchmark-derived limit is checked before expensive renderer construction. |
+| Fallback | Oversized graph opens a useful coarse view instead of freezing or crashing the browser. |
+| Mutation round-trip | Durable edit from an editable tier passes through canonical command validation. |
+| Massive overview | Selected large-view tier demonstrates target-scale navigation under documented hardware constraints. |
+| Accessibility | Non-graph table/search paths remain available when a visual graph is unusable or inappropriate. |
+
+* Non-Goals
+
+- Do not choose a permanent winner among Sigma.js, cosmos.gl, Cosmograph, custom WebGPU, or other candidates without benchmarks.
+- Do not move canonical persistence into a renderer.
+- Do not make large-graph viewing a prerequisite for ordinary document/dataset browsing.
+- Do not duplicate command schemas; QUASAR-003 owns command contracts.
+- Do not define Auto-Dig fork lifecycle here; QUASAR-006 owns it.
+
+* Publication Link
+
+- https://auto-research.starintel.actor/notes/design/star-server/QUASAR-007-renderer-projection-and-scale-boundary.html
+
+* Changelog
+
+| Version | Date       | Change | Evidence | Did nsaspy approve it |
+|---------+------------+--------+----------+-----------------------|
+| 0.1.0 | 2026-08-08 | Split renderer projection, tier selection, tiling, and benchmark gates from the previous combined QUASAR-004 design. | QUASAR-RESEARCH-005 and prior QUASAR-004 text | No |
+
+* Footnotes and Glossary
+
+[fn:quasar] Quasar: The StarIntel investigation graph workspace and runtime family.
+
+[fn:projection] Projection: A derived view of canonical data that can be rebuilt, such as a graph drawing, table, map, timeline, cluster summary, or tile.
+
+[fn:graph-view-adapter] GraphViewAdapter: A proposed renderer-facing interface that isolates visualization engines from canonical graph/document storage and command semantics.
+
+[fn:cytoscape] Cytoscape: The graph visualization library currently used by the browser workbench.
+
+[fn:webgl] WebGL: A browser graphics interface that uses the graphics processor for accelerated rendering.
+
+[fn:webgpu] WebGPU: A newer browser graphics and compute interface that exposes modern GPU capabilities more directly than WebGL.
+
+[fn:wasm] WebAssembly: A portable low-level execution format supported by modern browsers and useful for high-performance code.
+
+[fn:tiling] Tiling: Dividing a very large view into bounded pieces that can be loaded and rendered incrementally rather than all at once.

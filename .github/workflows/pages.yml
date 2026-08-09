@@ -42,6 +42,10 @@ concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PLANTUML_VERSION: "1.2026.6"
+  PLANTUML_SHA256: "89948f14c93756c7a3fb7b69078ff37e8489fd79dd430c582b931e2f65358690"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -111,10 +115,23 @@ jobs:
             --changed-since "$VALIDATION_BASE" \
             --audit-date "$(date -u +%F)"
 
-      - name: Install Emacs and PlantUML
+      - name: Install Emacs and pinned PlantUML
+        shell: bash
         run: |
+          set -euo pipefail
           sudo apt-get update -qq >/tmp/apt-update.log
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --quiet emacs-nox graphviz plantuml sqlite3 >/tmp/apt-install.log
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --quiet \
+            emacs-nox graphviz sqlite3 default-jre-headless curl >/tmp/apt-install.log
+          curl --fail --silent --show-error --location \
+            "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar" \
+            --output /tmp/plantuml.jar
+          printf '%s  %s\n' "$PLANTUML_SHA256" /tmp/plantuml.jar | sha256sum --check
+          sudo install -m 0644 /tmp/plantuml.jar /opt/plantuml.jar
+          sudo tee /usr/local/bin/plantuml >/dev/null <<'EOF'
+          #!/usr/bin/env bash
+          exec java -jar /opt/plantuml.jar "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/plantuml
           emacs --version | head -1
           plantuml -version | head -1
 

@@ -1,0 +1,412 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-034
+:END:
+#+title: STAR-RESEARCH-034 Titanic Durable Actor Job Protocol
+#+description: Define a backend-neutral durable job protocol for StarIntel actors, preserving the original Titanic disconnected-work idea while mapping it onto the current RabbitMQ, Sento, Star-Lang, lease, and persistence architecture.
+#+status: REVIEW
+#+last_modified: [2026-08-08 Sat]
+#+filetags: :starintel:star-server:titanic:actors:jobs:rabbitmq:star-lang:protocol:research:org-roam:
+
+* Research Question
+
+What should “Titanic” mean in the modern StarIntel architecture if the goal is durable job queues for actors rather than a second message broker?
+
+* Decision Summary
+
+Titanic should be a durable actor-job protocol and execution journal, not a replacement for Sento[fn:sento], Star Router[fn:star-router], or RabbitMQ[fn:rabbitmq].
+
+Use each layer for what it is good at:
+
+- Sento: hot in-process actor mailboxes and supervision;
+- CL-GServer routee pools: bounded local parallelism and keyed affinity;
+- Star Router: client-facing and cross-process application routing;
+- RabbitMQ: durable cross-process work delivery, competing consumers, backpressure, redelivery, and dead-letter transport;
+- Titanic: stable job identity, submission acceptance, lifecycle, result retrieval, retry/cancel semantics, idempotency scope, execution authority, and durable job history.
+
+The core semantic promise is at-least-once execution with duplicate-safe actors. Titanic MUST NOT claim transport-level exactly-once execution.
+
+* Why a Distinct Job Protocol Is Still Needed
+
+Current =starintel-server= already routes durable documents and actor targets through RabbitMQ, and its documentation explicitly says the system provides at-least-once processing. The generic settled Rabbit consumer now has explicit ACK/NACK outcomes, dead-letter configuration, and =basic.qos= prefetch.
+
+What it does not yet provide as one coherent contract is:
+
+- “I submitted job X and it is durably accepted”;
+- “what state is job X in?”;
+- “what actor capability owns X?”;
+- “what is the durable result or failure?”;
+- “can I reconnect tomorrow and retrieve it?”;
+- “can I cancel it?”;
+- “how many attempts occurred?”;
+- “is this redelivery the same logical job?”;
+- “what execution lease/fencing generation authorized the side effects?”;
+- “when may the retained result be deleted?”
+
+That is the modern Titanic layer.
+
+* Protocol Model
+
+** Logical entities
+
+A =job= is the stable logical request.
+
+An =attempt= is one execution attempt of a job.
+
+A =delivery= is one broker delivery of an attempt. A single attempt can be redelivered without becoming a new logical attempt if the worker crashed before the scheduler classified the failure.
+
+A =result= is the terminal or intermediate durable outcome associated with the job.
+
+A =job journal= is the append-only or revision-safe record of lifecycle transitions.
+
+** Stable identity
+
+Every job receives a stable =job_id= before or during durable admission. Use a ULID[fn:ulid] so IDs are globally unique, sortable, and already familiar in StarIntel.
+
+Retries keep the same =job_id=. Each scheduled execution receives a fresh =attempt_id=. Each transport publication receives a fresh =message_id= while preserving =correlation_id= and =idempotency_key=.
+
+Recommended identity hierarchy:
+
+#+begin_example
+job_id          stable logical request
+  attempt_id    one scheduled execution attempt
+    message_id  one transport publication/delivery identity
+#+end_example
+
+* Envelope
+
+A version-one cross-process envelope should remain canonical JSON and align with Star-Lang lifecycle semantics rather than inventing a parallel actor protocol.
+
+#+begin_src json
+{
+  "protocol": "star.titanic/1",
+  "kind": "job.command",
+  "job_id": "01K...",
+  "attempt_id": "01K...",
+  "message_id": "01K...",
+  "correlation_id": "01K...",
+  "causation_id": "01K...",
+  "idempotency_key": "actor:op:canonical-input",
+  "actor": "subfinder",
+  "operation": "discover-subdomains",
+  "dataset": "example",
+  "priority": 0,
+  "attempt": 1,
+  "max_attempts": 8,
+  "submitted_at": "2026-08-08T21:00:00Z",
+  "deadline": "2026-08-08T22:00:00Z",
+  "trace": {
+    "root_id": "...",
+    "parent_id": "...",
+    "depth": 2,
+    "hop": 4,
+    "max_depth": 8,
+    "max_hops": 32,
+    "actor_path": ["seed", "subfinder"]
+  },
+  "execution": {
+    "execution_id": "run_...",
+    "lease_id": "lease_...",
+    "fencing_token": 42,
+    "lease_expires_at": "2026-08-08T21:05:00Z"
+  },
+  "payload": {
+    "target": "google.com"
+  }
+}
+#+end_src
+
+Fields not needed for a given job MAY be absent, but identity, version, actor/capability, operation, attempt, payload, and correlation MUST be explicit.
+
+* Lifecycle State Machine
+
+The durable job state machine should be:
+
+#+begin_example
+SUBMITTING
+   |
+   v
+QUEUED ---------> CANCELLED
+   |
+   v
+DISPATCHED
+   |
+   +-------------> QUEUED        retry/redelivery policy
+   |
+   v
+RUNNING --------> CANCEL_REQUESTED
+   |
+   +-------------> RETRY_WAIT ---> QUEUED
+   |
+   +-------------> FAILED
+   |
+   +-------------> DEAD_LETTERED
+   |
+   v
+SUCCEEDED ------> CLOSED / EXPIRED_BY_RETENTION
+#+end_example
+
+=accepted= is not =completed=. The original TSP makes the same conceptual separation by durably accepting a request before a worker is available.
+
+** Terminal states
+
+Terminal execution states:
+
+- =succeeded=;
+- =failed= for a classified permanent failure;
+- =dead_lettered= for exhausted or operator-inspection failures;
+- =cancelled= when cancellation completed before an accepted terminal side effect.
+
+=closed= is a retention/consumer acknowledgement state, not an execution result.
+
+* Submission Contract
+
+A submit operation must not return =accepted= until the system has durable evidence that the job will survive the submitting process crashing.
+
+With RabbitMQ as the initial adapter that means, at minimum:
+
+1. validate the job envelope;
+2. create or idempotently recover the stable job record;
+3. publish to a durable work queue using a persistent message;
+4. require publisher confirmation before reporting durable admission;
+5. handle unroutable publication rather than silently dropping it;
+6. commit the journal transition to =queued= with enough information to reconcile an uncertain publish outcome.
+
+If the journal and broker cannot be committed atomically, use an outbox/reconciliation design rather than claiming atomic admission.
+
+* Worker Contract
+
+A Titanic worker is a capability implementation, not a queue implementation.
+
+On delivery it should:
+
+1. decode and validate the protocol version;
+2. validate actor/capability and operation;
+3. check deadline and recursion budget;
+4. resolve the stable idempotency scope;
+5. validate target lease/fencing authority when the manifest requires locking;
+6. record =running= or recover an existing attempt outcome;
+7. perform one bounded unit of work;
+8. commit required durable side effects;
+9. publish derived StarIntel documents through normal ingest paths;
+10. persist the terminal job outcome;
+11. ACK the Rabbit delivery only after the required durable outcome is safe.
+
+If the process dies after side effects but before ACK, RabbitMQ can redeliver. The actor must detect the prior idempotent outcome and return it rather than repeating an unsafe effect.
+
+* Result Contract
+
+Modern Titanic should preserve the best TSP property: results remain queryable independently of the worker connection.
+
+A result query by =job_id= should return one of:
+
+- =queued=;
+- =running=;
+- =retry_wait= with next eligible time;
+- =succeeded= with typed result/document references;
+- =failed= with stable error code and safe details;
+- =dead_lettered= with operator inspection reference;
+- =cancel_requested=;
+- =cancelled=;
+- =unknown=.
+
+Large artifacts should be referenced, not copied into the job journal. Store document IDs, attachment IDs, object-store references, or immutable hashes.
+
+* Close and Retention
+
+The original TSP =titanic.close= immediately expresses that the client is done with the retained request/reply. Modern StarIntel should preserve that intent but separate it from physical deletion.
+
+A =close= operation should:
+
+- be idempotent;
+- mark client consumption complete;
+- start or shorten a configured retention period;
+- never erase audit/provenance records required for replay or incident analysis;
+- permit garbage collection of bulky transient payloads after retention policy permits.
+
+This avoids coupling user acknowledgement to destructive deletion.
+
+* Retry Model
+
+Retries are explicit protocol transitions, not uncontrolled =nack requeue=true= loops.
+
+Each failure is classified as:
+
+- =invalid-input=: permanent;
+- =unsupported-operation=: permanent;
+- =deadline-expired=: terminal unless policy explicitly reschedules a new job;
+- =dependency-transient=: retryable with backoff;
+- =rate-limited=: retryable at an explicit time;
+- =lease-lost=: retryable only through a new authorized execution generation;
+- =internal-defect=: bounded retry, then dead-letter;
+- =cancelled=: terminal cooperative outcome.
+
+Retry creates a new =attempt_id= and increments =attempt= while preserving =job_id=, correlation, and idempotency identity.
+
+* Backpressure
+
+RabbitMQ prefetch is the first-line worker backpressure control. The current server hard-codes prefetch 200 in =settled-rabbit-queue-stream=. That is too coarse to be a universal Titanic default because job cost can vary by orders of magnitude.
+
+Titanic should support manifest-level or capability-level concurrency policy:
+
+#+begin_src json
+{
+  "capability": "browser-crawl",
+  "max_concurrency": 4,
+  "prefetch": 4,
+  "timeout_ms": 120000
+}
+#+end_src
+
+For cheap CPU transforms, prefetch may safely exceed worker concurrency to hide broker latency. For browser, LLM, OCR, or expensive network jobs, prefetch should usually stay close to available execution slots so work does not sit invisibly in worker memory while higher-priority jobs wait in the broker.
+
+* Priority
+
+Priority is optional and should stay small and bounded. RabbitMQ supports priority queues, but excessive levels increase overhead and priority cannot reorder messages already prefetched to a consumer.
+
+Recommended semantic levels:
+
+- 0 = background;
+- 1 = normal;
+- 2 = interactive;
+- 3 = urgent operator task.
+
+Do not encode business semantics in arbitrary 0-255 values.
+
+* Cancellation
+
+Cancellation is cooperative. It must not be reported as successful merely because a cancel message was delivered.
+
+Cancellation flow:
+
+1. persist =cancel_requested=;
+2. signal the active worker through the control plane;
+3. worker stops at safe boundaries;
+4. worker must not commit new side effects after cancellation authority is accepted;
+5. worker writes =cancelled= or a terminal result if the irreversible side effect already completed;
+6. broker delivery is settled according to the durable outcome.
+
+Long-running actors need periodic cancellation and lease checks.
+
+* Relationship to Target Leases
+
+Titanic job ownership and target leases solve different problems.
+
+RabbitMQ/Titanic answers: “which worker is processing this durable job and what happened to it?”
+
+The target lease/fencing layer answers: “which execution generation is currently authorized to mutate this canonical external target or protected resource?”
+
+A Rabbit delivery MUST NOT be treated as a fencing token. For lock-required targets, the execution envelope carries the lease identity and fencing token defined by [[id:7ee9b211-90e1-48c7-a99b-7807f04fc2e9][STAR-RESEARCH-029]].
+
+* Relationship to Star-Lang
+
+[[id:starintel-star-lang-research-010][STAR-LANG-RESEARCH-010]] already defines command/event/reply/ack/error/cancel lifecycle semantics, correlation, causation, attempt, deadline, and idempotency.
+
+Titanic should reuse those semantics. The job protocol adds durable execution identity, queue state, result retention, worker scheduling, and broker settlement. It should not create incompatible meanings for =messageId=, =correlationId=, =attempt=, =deadline=, or cancellation.
+
+* Routing
+
+Prefer capability routing, not process identity routing.
+
+Example Rabbit routing keys:
+
+#+begin_example
+jobs.subfinder.discover-subdomains
+jobs.database.build-graph
+jobs.browser.fetch
+jobs.ocr.extract
+#+end_example
+
+Workers competing on the same capability queue naturally form a pool.
+
+Stateful affinity should be explicit and rare. When required, use a canonical key and a routing strategy designed for affinity; do not accidentally rely on FIFO queue order across multiple consumers.
+
+* Persistence Model
+
+Titanic needs durable job metadata, but the queue backend remains the delivery authority.
+
+The job journal should contain:
+
+- immutable submission envelope or payload reference;
+- every lifecycle transition with timestamp;
+- attempt identifiers and worker identity;
+- correlation/causation;
+- retry classification and backoff;
+- result references;
+- idempotency outcome;
+- lease/fencing metadata where applicable;
+- close/retention state;
+- dead-letter and replay lineage.
+
+LMDB may be useful for a fast local cache or embedded single-node journal, but it should not become a hidden second distributed queue truth beside RabbitMQ.
+
+* Observability
+
+Per capability expose:
+
+- ready jobs;
+- in-flight jobs;
+- oldest queued age;
+- enqueue and completion rates;
+- P50/P95/P99 queue latency;
+- P50/P95/P99 execution latency;
+- retry rate by reason;
+- dead-letter rate;
+- worker capacity/concurrency;
+- cancellation latency;
+- deadline expiration count;
+- idempotent duplicate recovery count;
+- publisher-confirm failures and unroutable publishes.
+
+A job trace should be reconstructable from =job_id= without searching raw logs.
+
+* Initial RabbitMQ Mapping
+
+| Titanic concept | RabbitMQ / StarIntel mapping |
+|-----------------+------------------------------|
+| durable admission | persistent publish + publisher confirm + job journal |
+| capability queue | durable quorum queue preferred for high-value jobs |
+| dispatch | competing consumer delivery |
+| in-flight | unacknowledged delivery plus job attempt record |
+| backpressure | per-consumer prefetch |
+| retry | explicit retry scheduling / retry queue, bounded attempts |
+| terminal failure | DLX / dead-letter queue plus journal outcome |
+| result | durable job-result record/document references |
+| worker crash | unacked message redelivery plus idempotency recovery |
+| disconnected client | query job state/result by stable job ID |
+| close | idempotent consumption/retention transition |
+
+* Implementation Order
+
+1. Define =star.titanic/1= envelope and validation fixtures.
+2. Add durable job journal interface and fake in-memory deterministic implementation.
+3. Add RabbitMQ adapter with publisher confirms and mandatory/unroutable handling.
+4. Replace unconditional retry loops on Titanic queues with classified bounded retry.
+5. Add one capability queue end to end, preferably a side-effect-light worker such as =subfinder=.
+6. Add result query API by =job_id=.
+7. Add cancellation and deadline handling.
+8. Integrate target lease/fencing for protected target jobs.
+9. Add dead-letter inspection and replay.
+10. Benchmark prefetch/concurrency and only then generalize to expensive actors.
+
+* Sources
+
+- [[https://rfc.zeromq.org/spec/9/][ZeroMQ RFC 9/TSP — Titanic Service Protocol]]
+- [[https://zguide.zeromq.org/docs/chapter4/][ZeroMQ Guide Chapter 4 — Titanic and reliable request/reply patterns]]
+- [[https://www.rabbitmq.com/docs/4.1/publishers][RabbitMQ publishers and publisher confirms]]
+- [[https://www.rabbitmq.com/docs/4.1/consumer-prefetch][RabbitMQ consumer prefetch]]
+- [[https://www.rabbitmq.com/docs/4.1/consumers][RabbitMQ consumers]]
+- [[https://www.rabbitmq.com/docs/4.1/dlx][RabbitMQ dead-letter exchanges]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/messaging.org][Current StarIntel messaging documentation]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/consumers/rabbit-settlement.lisp][Current explicit Rabbit settlement implementation]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/blob/main/roam/research/star-lang/STAR-LANG-RESEARCH-010-message-lifecycle-and-delivery-semantics.org][Star-Lang lifecycle research]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/blob/main/roam/research/star-server/STAR-RESEARCH-029-distributed-target-lease-and-fencing.org][Distributed target lease and fencing research]]
+
+* Footnotes and Glossary
+
+[fn:sento] Sento: Common Lisp actor runtime used by StarIntel for in-process actors and mailboxes.
+
+[fn:star-router] Star Router: StarIntel client-facing and cross-process routing boundary; distinct from local Sento routing and from durable job semantics.
+
+[fn:rabbitmq] RabbitMQ: broker implementing AMQP and other messaging protocols; StarIntel currently uses it for distributed document and actor traffic.
+
+[fn:ulid] ULID, Universally Unique Lexicographically Sortable Identifier: 128-bit identifier encoding timestamp and randomness into a compact sortable string.

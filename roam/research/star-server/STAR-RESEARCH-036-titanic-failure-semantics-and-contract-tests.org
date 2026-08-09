@@ -1,0 +1,383 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-036
+:END:
+#+title: STAR-RESEARCH-036 Titanic Failure Semantics and Contract Tests
+#+description: Define crash, duplicate, retry, cancellation, deadline, fencing, dead-letter, and reconciliation semantics for the StarIntel Titanic durable actor-job protocol, with a contract-test matrix for RabbitMQ and future adapters.
+#+status: REVIEW
+#+last_modified: [2026-08-08 Sat]
+#+filetags: :starintel:star-server:titanic:failures:idempotency:dead-letter:replay:fencing:testing:research:org-roam:
+
+* Research Question
+
+What failure semantics must Titanic guarantee so durable actor jobs remain correct when publishers, brokers, workers, databases, or clients fail at every possible boundary?
+
+* Core Invariant
+
+Titanic MUST preserve one stable logical job identity across uncertain delivery and retry while accepting that execution may occur more than once.
+
+Correctness therefore comes from:
+
+- durable admission evidence;
+- at-least-once transport;
+- explicit settlement;
+- stable idempotency keys;
+- durable terminal outcomes;
+- bounded retries;
+- dead-letter inspection;
+- fencing for protected target side effects;
+- reconciliation when two durable systems cannot commit atomically.
+
+Exactly-once execution is not a valid protocol claim.
+
+* Failure Matrix
+
+| Failure point | Observable uncertainty | Required response |
+|---------------+------------------------+-------------------|
+| Before job journal insert | submitter does not know if anything exists | retry same idempotency key; create/recover same logical job |
+| After journal insert, before broker publish | job exists but no queued delivery | outbox/reconciler republishes; do not mark completed |
+| After publish socket write, before publisher confirm | broker acceptance unknown | reconcile using stable publication/job identity; never blindly create a new logical job |
+| Broker accepts, publisher loses confirm | duplicate republish possible | duplicate-safe broker/job admission and idempotent consumer |
+| Worker receives, crashes before side effect | unacked delivery returns | redelivery and continue same job |
+| Worker completes side effect, crashes before outcome record | external state changed but journal uncertain | side-effect-specific idempotency/fencing recovery; do not assume safe replay |
+| Worker records outcome, crashes before Rabbit ACK | broker redelivers completed job | return stored terminal outcome and ACK without repeating side effect |
+| Result publish succeeds, result journal write fails | downstream data exists, job uncertain | reconcile via deterministic result IDs/provenance; repair journal |
+| Journal succeeds, result publish fails | job says work succeeded but durable output absent | do not expose terminal success until required outputs are durably confirmed, or use outbox |
+| Worker loses lease mid-run | old generation may still execute code | fence every authoritative side effect; stale generation cannot commit |
+| Cancel races with success | both messages can be observed | terminal side-effect outcome wins when already committed; cancellation remains audited |
+| Deadline expires while queued | stale work should not start | reject/expire before execution and record terminal deadline outcome |
+| Deadline expires while running | work may need cleanup | stop at safe boundaries; do not commit new side effects after policy cutoff unless operation is explicitly non-interruptible |
+| Poison payload | repeated failure can hot-loop | permanent NACK/dead-letter, no requeue loop |
+| Transient dependency outage | many jobs retry simultaneously | exponential/jittered bounded backoff; preserve attempt lineage |
+| Client disappears after submit | job still executes | retain result independently of client connection |
+| Client retrieves result but close is lost | result remains retained | close is idempotent and safe to repeat |
+
+* Admission Semantics
+
+** Durable acceptance
+
+A submitter may receive one of three top-level outcomes:
+
+- =accepted=: durable admission is known;
+- =rejected=: validation/policy permanently refused the job;
+- =unknown-outcome=: the system cannot prove whether durable admission committed.
+
+Do not convert =unknown-outcome= into =accepted= or =rejected= by guessing.
+
+The client retries an unknown outcome using the same idempotency key and preferably the same preallocated =job_id=.
+
+** Journal/broker dual-write
+
+RabbitMQ and the job journal are distinct durable systems. Without a distributed transaction, the implementation cannot atomically commit both with one primitive.
+
+Preferred pattern:
+
+1. create job and outbox record in one journal transaction/revision-safe update;
+2. publisher drains outbox to RabbitMQ with confirms;
+3. publisher marks publication confirmed;
+4. reconciler scans old unconfirmed outbox records and republishes idempotently.
+
+If the chosen journal cannot provide the required atomic local update, explicitly model the weaker guarantee and test recovery windows.
+
+* Duplicate Semantics
+
+** Three different duplicates
+
+Do not collapse these into one concept:
+
+1. =duplicate-submit=: same logical user/actor intent submitted again with the same idempotency key;
+2. =duplicate-publication=: same logical attempt published more than once because confirmation was uncertain;
+3. =redelivery=: broker delivers an unacknowledged message again.
+
+All three should converge on the same durable logical job outcome when they represent the same intent.
+
+** Idempotency scope
+
+Reuse the Star-Lang scope:
+
+#+begin_example
+(actor, operation/message-type, idempotency-key)
+#+end_example
+
+Add dataset/tenant security boundary when identity is scoped there.
+
+The idempotency record should store:
+
+- canonical request fingerprint;
+- first =job_id=;
+- terminal result reference when complete;
+- status while active;
+- expiration policy if keys are not retained indefinitely.
+
+If a caller reuses a key with materially different canonical input, reject as an idempotency conflict rather than silently attaching the new payload to the old job.
+
+* ACK Semantics
+
+RabbitMQ ACK means “this delivery no longer needs broker redelivery.” It does not mean “the actor merely received the job.”
+
+For Titanic, ACK only when one of these is durably established:
+
+- terminal success and all required side effects/output publications are safe;
+- duplicate delivery recovered a previously stored terminal outcome;
+- terminal permanent failure has been durably recorded/dead-lettered according to policy;
+- cancellation reached a durable terminal outcome.
+
+A worker SHOULD NOT ACK merely after switching state to =running=.
+
+* Retry Semantics
+
+** Never infinite immediate requeue
+
+The legacy pattern =nack(requeue=true)= on every error can produce a hot poison-message loop and starvation. Titanic queues need a bounded retry policy.
+
+Recommended retry schedule for ordinary transient failures:
+
+#+begin_example
+base = 1s
+attempt delay = min(cap, base * 2^(attempt-1)) + jitter
+cap = capability policy, e.g. 5m
+#+end_example
+
+Rate-limit responses may provide an authoritative =retry_at= instead.
+
+** Broker requeue versus protocol retry
+
+Use immediate broker requeue only for very narrow cases where another worker can likely succeed immediately and the attempt budget remains bounded.
+
+For dependency outages, rate limits, and expensive failures, persist a protocol retry and schedule later redelivery. This keeps one failing message from monopolizing ready capacity.
+
+* Dead Letter Semantics
+
+A dead-letter record is a durable failure artifact, not a trash can.
+
+It must preserve:
+
+- =job_id= and =attempt_id=;
+- original message/canonical body reference;
+- original exchange/routing/capability;
+- message ID and correlation/causation IDs;
+- actor/worker identity;
+- failure class and stable error code;
+- attempt count;
+- first/last failure timestamps;
+- lease/fencing generation if present;
+- replay lineage;
+- safe diagnostic details.
+
+Replay MUST use normal validation, idempotency, authorization, and fencing paths. Do not replay by directly writing a result to CouchDB.
+
+* RabbitMQ Quorum Queue Note
+
+For high-value Titanic work, RabbitMQ quorum queues provide stronger relevant failure handling than classic queues: replicated storage, delivery limits/poison-message handling, and an at-least-once dead-lettering mode when configured with the required dead-letter strategy.
+
+The exact queue type remains deployment policy. The protocol contract must not require a Rabbit-specific queue type, but the reference deployment should test quorum queues.
+
+* Long-Running Jobs
+
+An unacknowledged broker delivery is not sufficient as the only long-running job heartbeat.
+
+Long-running jobs should periodically update progress/heartbeat state containing:
+
+- job and attempt IDs;
+- worker instance;
+- last progress time;
+- optional progress counters;
+- lease/fencing generation;
+- cancellation observation;
+- estimated remaining work only when meaningful.
+
+Do not increase Rabbit consumer acknowledgement timeout blindly to multi-hour values without considering broker policy and worker failure detection.
+
+A capability may split long work into bounded child jobs instead. This is preferred when the operation has natural checkpoints.
+
+* Cancellation Races
+
+Cancellation is a command, not a transaction that rewinds the world.
+
+Required ordering rules:
+
+1. if no irreversible side effect has committed and worker observes cancellation, terminal =cancelled= is valid;
+2. if terminal success was already durably committed, a later cancellation returns =already-completed=;
+3. if cancellation and side effect race, the fencing/idempotency boundary determines which write is authoritative;
+4. cancellation must never cause a completed durable StarIntel evidence document to be silently deleted;
+5. child jobs inherit cancellation intent unless their manifest declares independent lifetime.
+
+* Deadline Semantics
+
+A =deadline= is absolute and part of the logical command contract.
+
+Before starting expensive work, compare current time to deadline. If expired, record =deadline-expired= without running the operation.
+
+For running work, capabilities declare one of:
+
+- =hard-deadline=: stop before further side effects once exceeded;
+- =soft-deadline=: attempt to finish current bounded step, but do not schedule children;
+- =noninterruptible-side-effect=: once the side effect begins, record deadline overrun but complete/reconcile the operation safely.
+
+Timeout policy must not be inferred from a generic thread kill.
+
+* Fencing Semantics
+
+Rabbit delivery exclusivity is not resource ownership.
+
+For targets requiring distributed ownership, every authoritative side effect receives the current fencing token. Downstream storage must reject a lower generation than already accepted.
+
+A stale worker can therefore continue computing after lease loss, but its result cannot commit.
+
+Titanic records =lease-lost= as an execution failure/control event and only retries through a newly authorized generation.
+
+* Ordering
+
+Do not promise total queue order.
+
+Competing consumers, prefetch, retries, dead-letter/replay, and different capability queues all break naive global ordering.
+
+If order matters for a stateful resource:
+
+- key work by canonical resource;
+- use one affinity route/serial routee for that key;
+- or protect mutations with a monotonic version/fencing rule.
+
+Ordering should be a per-capability contract, not an accidental Rabbit FIFO assumption.
+
+* Contract-Test Suite
+
+A backend passes Titanic v1 only if the same semantic tests pass against a deterministic fake and the real adapter.
+
+** Admission
+
+1. valid submit returns one stable =job_id=;
+2. duplicate submit with same key/input returns same job;
+3. same key with different input is rejected as conflict;
+4. publisher crash before publish is recovered by outbox reconciliation;
+5. lost publisher confirm can cause duplicate publication but not duplicate logical result;
+6. unroutable publish is surfaced and cannot report durable acceptance incorrectly.
+
+** Delivery
+
+7. one job is processed by one competing worker at a time under normal operation;
+8. worker crash before ACK causes redelivery;
+9. worker crash after terminal outcome but before ACK returns stored outcome without repeating side effect;
+10. prefetch bound is respected;
+11. capability with concurrency 1 never has two active local executions unless explicitly configured.
+
+** Retry and dead letter
+
+12. retryable failure increments attempt and preserves job/correlation identity;
+13. permanent failure does not requeue;
+14. retry budget exhaustion produces one dead-letter artifact;
+15. poison payload cannot hot-loop indefinitely;
+16. delayed retry does not block unrelated ready jobs;
+17. replay creates audited lineage and still passes idempotency checks.
+
+** Result retention
+
+18. client disconnect does not cancel accepted work;
+19. reconnecting client can query pending state;
+20. terminal result is stable across repeated reads;
+21. close is idempotent;
+22. close does not erase required provenance/audit history;
+23. retention expiry removes only data permitted by policy.
+
+** Cancellation and deadline
+
+24. queued cancellation prevents execution;
+25. running cooperative cancellation reaches terminal =cancelled=;
+26. cancel after success returns already-completed;
+27. expired queued job never starts expensive work;
+28. hard-deadline worker cannot commit new gated side effects after expiry.
+
+** Fencing
+
+29. worker with stale fencing token cannot commit result;
+30. retry under newer generation can commit;
+31. stale worker cannot ACK a false success after its side effect is rejected;
+32. lease loss is visible in job history.
+
+** Restart and disaster cases
+
+33. restart broker with queued work and verify accepted jobs survive according to configured durability;
+34. restart server while workers are active and verify unacked work recovers;
+35. restart worker after stored outcome-before-ACK window and verify no duplicate side effect;
+36. temporarily remove job journal and verify failures are bounded rather than ACKing unverifiable success;
+37. restore service and reconcile orphaned outbox/journal records;
+38. verify dead-letter path under target DLQ outage according to chosen Rabbit safety mode.
+
+* Property-Based / Model Testing
+
+The state machine is small enough to model.
+
+Generate sequences over:
+
+#+begin_example
+submit
+publish-confirm
+publish-unknown
+receive
+start
+side-effect
+result-commit
+ack
+crash
+redeliver
+retry
+cancel
+lease-expire
+reacquire
+close
+replay
+#+end_example
+
+Assert invariants:
+
+- one logical =job_id= per idempotency scope/input;
+- terminal success never regresses to running/queued;
+- attempt numbers increase monotonically;
+- stale fencing generation never commits;
+- close never changes execution outcome;
+- no ACK of unrecorded required success;
+- every accepted job eventually remains queued/running/retryable or reaches a terminal inspectable state;
+- replay lineage is acyclic and traceable.
+
+Use a deterministic fake clock and transport so race windows are reproducible before testing RabbitMQ.
+
+* Operational Alerts
+
+Alert on:
+
+- oldest queued age above capability SLO;
+- no active workers for a nonempty queue;
+- sustained publisher-confirm failures;
+- unroutable job publishes;
+- retry spike by stable error code;
+- dead-letter growth;
+- job journal/broker reconciliation backlog;
+- stale running attempts with no heartbeat;
+- fencing rejections;
+- repeated cancellation failures;
+- queue capacity/preload saturation.
+
+* Decision
+
+The safety contract is more important than the transport implementation. Build the fake/model tests first, then make RabbitMQ pass them. That prevents Rabbit-specific behavior from quietly becoming the protocol definition.
+
+* Sources
+
+- [[https://rfc.zeromq.org/spec/9/][ZeroMQ RFC 9/TSP]]
+- [[https://zguide.zeromq.org/docs/chapter4/][ZeroMQ Guide: idempotent services and Titanic pattern]]
+- [[https://www.rabbitmq.com/docs/4.1/publishers][RabbitMQ publisher confirms and unroutable handling]]
+- [[https://www.rabbitmq.com/docs/4.1/consumer-prefetch][RabbitMQ consumer prefetch]]
+- [[https://www.rabbitmq.com/docs/4.1/dlx][RabbitMQ dead-letter exchanges]]
+- [[https://www.rabbitmq.com/docs/4.1/classic-queues][RabbitMQ classic versus quorum queue safety notes]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/blob/main/skills/message-idempotency/SKILL.md][StarIntel message-idempotency skill]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/blob/main/skills/dead-letter/SKILL.md][StarIntel dead-letter skill]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/blob/main/roam/research/star-server/STAR-RESEARCH-029-distributed-target-lease-and-fencing.org][StarIntel lease/fencing research]]
+
+* Footnotes and Glossary
+
+[fn:idempotency] Idempotency: property that repeating the same logical operation has the same externally visible effect as executing it once.
+
+[fn:publisher-confirm] Publisher confirm: RabbitMQ mechanism by which the broker acknowledges that it has accepted responsibility for a publication.
+
+[fn:fencing] Fencing token: monotonically increasing execution generation used by downstream systems to reject writes from stale workers.
+
+[fn:dead-letter] Dead letter: message or job attempt removed from normal execution after a terminal policy decision and retained for inspection/replay.

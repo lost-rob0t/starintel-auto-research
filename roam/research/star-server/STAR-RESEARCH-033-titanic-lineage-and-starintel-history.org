@@ -1,0 +1,133 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-033
+:END:
+#+title: STAR-RESEARCH-033 Titanic Lineage and Earliest Confirmed StarIntel History
+#+description: Reconstruct the historical StarIntel Titanic worker-queue idea, identify its ZeroMQ Titanic Service Protocol lineage, and establish the earliest externally verifiable StarIntel date.
+#+status: REVIEW
+#+last_modified: [2026-08-08 Sat]
+#+filetags: :starintel:star-server:titanic:history:zeromq:actors:job-queues:research:org-roam:
+
+* Research Question
+
+How old is StarIntel in verifiable public artifacts, and what exactly was the =Titanic= component shown in the 2023 StarIntel development diagram?
+
+* Executive Finding
+
+The earliest StarIntel artifact confirmed in the currently accessible GitHub history is commit =a26bfa8af1f2a51ea05981da9ad4b8209a58aa3f= in =lost-rob0t/starintel-doc=, dated 2022-02-12. The commit creates a README titled “Star Intel Document Spec” and the initial Python document model. That is a hard lower bound: StarIntel existed as code no later than 2022-02-12.
+
+The earliest public package release found during this pass is later: PyPI records =starintel-doc= releases by March 2022 and a documented 0.4.4 release on 2022-04-28. Git history therefore predates the public package evidence.
+
+A user-supplied 2023 development-video frame says the project was already “2 years in the making.” Taken literally, that points to ideation or private work in roughly 2021, but this pass found no independently verifiable 2021 StarIntel artifact. Treat 2021 as oral/devlog provenance, not yet as a public-source date.
+
+* Earliest Confirmed Timeline
+
+| Date | Evidence | Confidence | Meaning |
+|------+----------+------------+---------|
+| ~2021 | 2023 devlog statement: “2 years in the making” | Medium, first-party but not independently dated here | Likely private ideation/prototyping period |
+| 2022-02-12 | =starintel-doc= commit =a26bfa8…= | High | Earliest currently confirmed StarIntel code artifact |
+| 2022-03 | PyPI release history reaches 0.3.x | High | Public package distribution was underway |
+| 2022-04-28 | PyPI =starintel-doc 0.4.4= | High | Public package page explicitly describes the Star Intel Document Spec |
+| 2023 | Devlog diagram with Broker, Titanic, LMDB, actors/workers | High for the image contents | Durable asynchronous actor-job architecture was already being explored |
+| 2024-04-14 | =ideas/starintel-gserver.drawio= metadata | High | RabbitMQ plus actors plus persistence appears as the successor architecture |
+| 2026 | Current =starintel-server= | High | RabbitMQ distributed traffic plus Sento local actors are active runtime architecture |
+
+* The 2023 Diagram
+
+The recovered devlog frame shows:
+
+- a =Broker= receiving work from a pipeline actor and another actor;
+- a =Titanic= component connected bidirectionally to the broker;
+- =Titanic= connected to =LMDB= persistent storage;
+- a router socket below Titanic;
+- worker services including =subfinder= and =Database=;
+- request examples such as “find the subdomains for google.com” and “database make a graph”;
+- message identifiers associated with Titanic requests;
+- a section explicitly titled “Actors also as workers.”
+
+Architecturally, this is not merely similar to the ZeroMQ Titanic pattern. It maps directly onto its central shape: a durable proxy sits between intermittently connected clients and ordinary workers, stores requests, dispatches them through a broker, stores replies, and lets clients retrieve the result later.
+
+* ZeroMQ Titanic Lineage
+
+The ZeroMQ Guide calls Titanic a “disk-based/disconnected reliable queuing” pattern. The stable Titanic Service Protocol (TSP)[fn:tsp] specification defines three services:
+
+- =titanic.request=: persist a request and return a UUID;
+- =titanic.reply=: return the reply for the UUID when available;
+- =titanic.close=: confirm consumption and delete the retained request/reply.
+
+TSP explicitly places persistence outside the Majordomo broker.[fn:mdp] Titanic looks like a worker to clients and like a client to real workers. This is almost exactly the role drawn in the 2023 StarIntel frame.
+
+The original Guide also makes a subtle point that remains useful for StarIntel: Titanic is primarily justified for asynchronous/disconnected operation, where clients and workers do not need to be online simultaneously. It is not presented as a reason to put a slow persistence layer in the middle of every low-latency message.
+
+* StarIntel Evolution
+
+** Phase 1: document model first
+
+The 2022 =starintel-doc= root commit already names “Star Intel Document Spec” and defines document classes. The project therefore began with a durable structured-data model before the current actor runtime existed.
+
+** Phase 2: Titanic as explicit durable request proxy
+
+The 2023 frame separates four concerns:
+
+1. actors submit logical jobs;
+2. broker routes;
+3. Titanic persists and supervises asynchronous work;
+4. workers perform capability-specific operations.
+
+LMDB[fn:lmdb] appears to be the durable request/reply store, while a router socket dispatches to worker processes.
+
+** Phase 3: RabbitMQ absorbs much of the queue machinery
+
+The 2024 =ideas/starintel-gserver.drawio= states that external actors can pipe from RabbitMQ and that leaving messages in RabbitMQ prevents producers from outrunning processing. The current server makes that concrete: RabbitMQ carries distributed document traffic and external actor work, while Sento[fn:sento] handles local mailboxes.
+
+This means modern StarIntel already has a durable broker that can perform much of the mechanical work the old Titanic proxy had to implement itself.
+
+** Phase 4: Titanic should return as a protocol layer, not a second broker
+
+The useful old idea is not “put LMDB between RabbitMQ and every actor.” The useful idea is a durable job contract with explicit job identity, lifecycle, retry, result retention, cancellation, idempotency, and disconnected retrieval.
+
+Modern RabbitMQ can remain the first delivery backend. Titanic should define the semantics above it.
+
+* Historical Reconstruction Versus Current Reality
+
+| 2023 diagram concept | Current StarIntel equivalent | Gap remaining |
+|----------------------|------------------------------|---------------|
+| Broker | RabbitMQ plus local Sento routing | Already present |
+| Titanic persistent proxy | RabbitMQ durable queues plus CouchDB/state services | No unified job lifecycle API |
+| LMDB request/reply store | Could be a job journal/cache, not necessarily queue truth | Explicit job result/state store needed |
+| Router socket | Rabbit routing keys, consumers, Star Router, local routee pools | Capability routing needs one canonical job contract |
+| Worker | External Rabbit actor or bounded local worker/routee | Already present |
+| Request UUID | Rabbit message ID / Star-Lang message ID / proposed job ID | Must be made stable and queryable |
+| Reply polling | No single canonical job-result endpoint today | Needed for disconnected clients |
+| Close | No canonical acknowledgement/retention cleanup verb | Needed as retention policy, not necessarily immediate delete |
+
+* Decision
+
+Preserve the historical name =Titanic= for StarIntel's durable actor-job protocol, but do not revive the 2023 implementation literally.
+
+Define Titanic as the backend-neutral durable execution contract that sits between command submission and actor execution. RabbitMQ should be the first transport/queue adapter because the current server already uses it and already implements explicit ACK/NACK settlement, prefetch, durable queues, and dead-letter plumbing.
+
+The detailed protocol and backend decision are developed in:
+
+- [[id:starintel-star-server-research-034][STAR-RESEARCH-034 Titanic Durable Actor Job Protocol]]
+- [[id:starintel-star-server-research-035][STAR-RESEARCH-035 Titanic Backend and Transport Comparison]]
+- [[id:starintel-star-server-research-036][STAR-RESEARCH-036 Titanic Failure Semantics and Contract Tests]]
+
+* Sources
+
+- [[https://github.com/lost-rob0t/starintel-doc/commit/a26bfa8af1f2a51ea05981da9ad4b8209a58aa3f][Earliest currently confirmed StarIntel commit — 2022-02-12]]
+- [[https://pypi.org/project/starintel-doc/0.4.4/][PyPI starintel-doc 0.4.4 release history]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/ideas/starintel-gserver.drawio][2024 StarIntel gserver architecture drawing]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/messaging.org][Current StarIntel messaging documentation]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/actors.org][Current StarIntel actor documentation]]
+- [[https://zguide.zeromq.org/docs/chapter4/][ZeroMQ Guide, Chapter 4: Reliable Request-Reply Patterns]]
+- [[https://rfc.zeromq.org/spec/9/][ZeroMQ RFC 9/TSP — Titanic Service Protocol]]
+
+* Footnotes and Glossary
+
+[fn:tsp] TSP, Titanic Service Protocol: stable ZeroMQ RFC 9 defining persistent disconnected request submission, reply retrieval, and close semantics around a durable Titanic proxy.
+
+[fn:mdp] MDP, Majordomo Protocol: ZeroMQ service-oriented request/reply pattern and protocol using clients, a broker, and workers with service discovery and heartbeating.
+
+[fn:lmdb] LMDB, Lightning Memory-Mapped Database: an embedded transactional key-value database using a memory-mapped B+tree and single-writer/multiple-reader design.
+
+[fn:sento] Sento: the Common Lisp actor library used by StarIntel for in-process actors, mailboxes, supervision boundaries, timers, and local message passing.

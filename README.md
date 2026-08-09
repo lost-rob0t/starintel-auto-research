@@ -2,7 +2,7 @@
 
 Repository-root instructions, workflow scripts, Agent Zero support, focused skills, and an Emacs/Org-roam second brain for Starintel research.
 
-**Published second brain:** <https://lost-rob0t.github.io/starintel-auto-research/>
+**Published second brain:** <https://auto-research.starintel.actor/>
 
 ## Core Files
 
@@ -15,39 +15,58 @@ Repository-root instructions, workflow scripts, Agent Zero support, focused skil
 - `scripts/implement.py`
 - `scripts/mark-design.py`
 - `scripts/sync.py`
+- `scripts/validate-docs.py`
 - `scripts/search.py`
 - `scripts/save-research`
 
 ## Org Workflow
 
 ```bash
-python scripts/sync.py
-python scripts/implement.py roam/design/star-server/STAR-SERVER-001-example.org
+python3 scripts/sync.py
+python3 scripts/implement.py roam/design/star-server/STAR-SERVER-001-example.org
 
-python scripts/mark-design.py implemented \
+python3 scripts/mark-design.py implemented \
   --project star-server \
   --summary "Added a CL-GServer round-robin router pool" \
   --file source/actors.lisp \
   --test "nix flake check: passed"
 
-python scripts/sync.py
+python3 scripts/sync.py
 ```
 
 Rejected design:
 
 ```bash
-python scripts/mark-design.py rejected \
+python3 scripts/mark-design.py rejected \
   --project star-server \
   --reason "The design duplicates Star Router responsibilities" \
   --evidence "Repository architecture review" \
   --replacement "Use CL-GServer only for in-process routee pools"
 
-python scripts/sync.py
+python3 scripts/sync.py
 ```
 
-Each immediate project subtree under `roam/implement/` has its own zero-or-one active design slot. Independent projects may proceed concurrently. Use `python scripts/implement.py --status` to inspect every slot, and pass `--project <project>` when marking or clearing a design while multiple projects are active.
+Each immediate project subtree under `roam/implement/` has its own zero-or-one active design slot. Independent projects may proceed concurrently. Use `python3 scripts/implement.py --status` to inspect every slot, and pass `--project <project>` when marking or clearing a design while multiple projects are active.
 
-`sync.py` preserves each canonical design, writes implementation or rejection records into it, updates status headers, mirrors directory structure, and clears only active working copies whose status events were synchronized.
+`sync.py` preserves each canonical design, writes implementation or rejection records into it, updates status headers, mirrors directory structure, and clears only active working copies whose status events were synchronized. New implementation working copies receive their own stable Org ID and link back to the canonical design.
+
+## Repository Document Audit
+
+Every substantive Org document is validated for stable metadata, unique IDs, resolvable Org-roam and file links, canonical approval and changelog tables, changed-file history, applicable glossary and PlantUML requirements, index coverage, generated-output boundaries, and publication policy.
+
+```bash
+python3 scripts/validate-docs.py
+```
+
+For a pull request or another material document change, validate the changed set against its real base revision:
+
+```bash
+python3 scripts/validate-docs.py \
+  --changed-since origin/main \
+  --audit-date "$(date -u +%F)"
+```
+
+The deterministic `--fix` mode repairs structural omissions without fabricating approval. Review its diff before committing.
 
 ## Org-roam Pages
 
@@ -61,9 +80,12 @@ bash scripts/configure-pages
 
 That command creates or updates the Pages site with `build_type=workflow` and triggers the deployment workflow on `main`. The ordinary workflow token cannot perform this initial repository-setting change.
 
-Build and validate locally:
+Build and validate locally with the same sequence used by continuous integration:
 
 ```bash
+python3 scripts/sync.py
+python3 scripts/sync.py --check
+python3 scripts/validate-docs.py
 bash scripts/publish-pages
 python3 scripts/check-pages-links.py _site
 ```

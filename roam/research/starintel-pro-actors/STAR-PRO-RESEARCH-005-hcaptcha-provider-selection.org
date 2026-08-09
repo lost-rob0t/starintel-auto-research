@@ -1,106 +1,241 @@
 :PROPERTIES:
 :ID:       star-pro-research-005-hcaptcha-provider-selection
 :END:
-#+title: STAR-PRO-RESEARCH-005 hCaptcha Provider Selection
-#+description: Comparative provider selection for the StarIntel hCaptcha broker, including capability confidence, operational fit, cost model, and implementation order.
-#+status: REVIEW
-#+filetags: :starintel:research:starintel-pro-actors:captcha:hcaptcha:provider-selection:
+#+title: STAR-PRO-RESEARCH-005 Capability-Based CAPTCHA Solver Selection
+#+description: Research basis for deterministic capability-first solver eligibility and ranking across challenge contract, context binding, disclosure, health, deadline, and observed cost.
+#+status: APPROVED
+#+filetags: :starintel:research:starintel-pro-actors:captcha:provider-selection:capabilities:uml:
 
 * Question
 
-Which provider adapters should the StarIntel CAPTCHA broker support first, and which provider should be the reference implementation?
+How should StarIntel reason about solver selection when source actors encounter open-world CAPTCHA and adjacent browser, device, behavioral, proof-of-work, Web Application Firewall, media, puzzle, custom, and unknown challenges?
 
-* Evaluation Criteria
+* Approval Boundary
 
-The comparison uses these criteria:
+The project owner approved this research basis on 2026-08-09. That approval accepts the research findings that selection must be exact-capability and context aware; it does *not* approve the final broker algorithm, actor interfaces, adapter designs, security policy, operations policy, or implementation.
 
-- current authoritative hCaptcha support;
-- enterprise =rqdata= support;
-- cancellation and result-delivery model;
-- authentication and secret exposure;
-- concurrency and cost model;
-- structured errors and observability[fn:observability];
-- contract stability;
-- testability without uncontrolled spending;
-- compatibility with broker authorization and ephemeral token delivery.
+* Approval Table
 
-* Provider Matrix
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | APPROVED | Current challenge/provider evidence and selection tradeoff analysis | User approval 2026-08-09; STAR-PRO-RESEARCH-001 through 006 refreshed provider evidence |
+| Selection algorithm / broker design | StarIntel server maintainer | PENDING | Deterministic hard-eligibility, ranking, tie-break, fallback, and speculation tests | [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]] |
+| Capability registry design | Pro-actors maintainer | PENDING | Runtime capability records, fixtures, drift, health, and concurrency contract | Provider research and adapter nodes |
+| Security | Security reviewer | PENDING | Authorization, context, disclosure, provider allowlist, secret, and target-policy tests | Research constraints below |
+| Operations | Operator | PENDING | Pins, preferences, budgets, deadlines, fallback, speculation, cost, and telemetry policy | Ranking research below |
+| Implementation | Repository maintainer | NOT STARTED | Fake/local/provider actors, tests, CI, complete-site generation, and publication checks | |
 
-| Provider | hCaptcha confidence | Enterprise | Cancellation | Billing model | Adapter state |
-|----------+---------------------+------------+--------------+---------------+---------------|
-| NoneCap | High | Documented | Documented | successful challenge rounds | Reference |
-| NopeCHA | High | Documented | Not documented | subscription credits refreshed every 23 hours | Secondary |
-| 2Captcha | Medium-low | Unconfirmed in current docs | Not documented | per task or result cost | Experimental and disabled |
-| CapSolver | None in current docs | Not applicable | Not applicable | Not applicable | Rejected for hCaptcha |
-| Anti-Captcha | None in current docs | Not applicable | Not applicable | Not applicable | Rejected for hCaptcha |
-| CapMonster Cloud | None in current docs | Not applicable | Not applicable | Not applicable | Rejected for hCaptcha |
+* Core Research Finding
 
-* Decision
+Do not select one global CAPTCHA provider. Solver selection needs two logically separate stages:
 
-Use NoneCap as the reference adapter because its public contract is explicitly hCaptcha-focused, includes enterprise input, long polling, cancellation, terminal states, timing metadata, and structured credit reporting.
+1. *hard eligibility*: reject any actor that cannot satisfy an exact request and policy boundary;
+2. *ranking*: compare only eligible actors using deterministic evidence.
 
-Implement NopeCHA second because it provides explicit regular and enterprise hCaptcha support but requires more local policy around subscription quotas, key-in-query retrieval, absent cancellation, and inconsistent credit documentation.
+The exact final ordering and wire protocol remain design decisions and therefore remain unapproved.
 
-Create a 2Captcha adapter design now so the provider-neutral boundary is tested against a materially different API shape. Keep its hCaptcha capability disabled until a live contract probe or provider confirmation resolves the current documentation gap.
+* Candidate Hard-Eligibility Dimensions
 
-Do not create adapters for CapSolver, Anti-Captcha, or CapMonster Cloud in this pass.
+Research supports treating these dimensions as non-substitutable constraints before cost optimization:
 
-* Routing Policy
+- authenticated requester and =captcha:solve= authorization;
+- target policy and approved purpose;
+- provider/solver allowlist;
+- issuer, challenge family, variant, and integration version;
+- required normalized fields and required result kind;
+- result binding: source session, network identity, proxy, cookie, user agent, mobile/app runtime, or other exact context;
+- source-session and network fidelity;
+- execution class and worst-case disclosure class;
+- provider contract state and fixture freshness;
+- provider/account health and concurrency;
+- deadline feasibility;
+- reserved budget ceiling.
 
-Provider selection is not an unrestricted cheapest-provider race. The broker applies this order:
+There must be no implicit widening from reCAPTCHA v2 to v3, standard hCaptcha to Enterprise, Turnstile to Cloudflare Challenge, token to cookie/proof/coordinates/selections, proxyless to proxy-bound, remote provider to same-session browser execution, automated-only to human-exposure-possible, or unknown to a known issuer.
 
-1. Reject requests that fail authorization, target policy, budget, or secret requirements.
-2. Honor an operator-pinned provider when that provider is healthy and advertises the requested capability.
-3. Otherwise select from policy-approved providers by capability, health, remaining budget, concurrency, and recent acceptance rate.
-4. Automatic fallback requires explicit policy because each fallback may disclose challenge metadata to another third party and may incur another charge.
-5. Never send the same unresolved challenge to multiple providers concurrently unless the operator explicitly approves speculative execution and its cost and disclosure consequences.
+* Ranking Evidence
 
-* Common Contract Required From Every Adapter
+The current research supports the following ranking dimensions, but their exact precedence is still a broker-design question:
 
-Each adapter must implement:
+- explicit operator pin among otherwise eligible actors;
+- contract confidence;
+- fixture freshness;
+- source-context and result-binding fidelity;
+- exact-capability downstream acceptance rate;
+- provider health;
+- available concurrency and request-pacing headroom;
+- deadline fit;
+- observed cost per downstream accepted result;
+- price/cost confidence;
+- operator preference and deterministic tie-break.
 
-- =describe-capabilities=;
-- =submit-solve=;
-- =poll-solve=;
-- =cancel-solve=, returning =unsupported= where the provider lacks cancellation;
-- =get-balance-or-quota=;
-- =report-outcome=, returning =unsupported= where unavailable;
-- =health-snapshot=;
-- =normalize-error=.
+Cost must remain subordinate to hard context and disclosure eligibility. A cheaper token that cannot be applied in the target's required session/network context is not an alternative.
 
-The adapter returns no raw token through durable messages. It writes the token into the broker-owned ephemeral secret store[fn:ephemeral-secret-store] and returns only a short-lived secret reference.
+* Price and Cost Confidence
 
-* Acceptance Metrics
+Provider pricing is not stable enough to compile into the broker. Current research found contradictory price/credit statements inside official provider documentation for more than one provider.
 
-A provider remains eligible only while it meets configured thresholds for:
+Every runtime cost observation should therefore distinguish:
 
-- successful token delivery;
-- downstream acceptance rate on operator-owned systems;
-- p50 and p95 latency[fn:percentile];
-- provider error rate;
+- =advertisedCost= and its source/retrieval time;
+- =configuredReservationCeiling=;
+- =providerReportedCharge= when available;
+- =actualAccountDebit= when observable;
+- =costConfidence=;
+- downstream =accepted= / =rejected= / =expired= / =replaced= / =inconclusive= outcome.
+
+When official price evidence conflicts, eligibility can still be researched under a conservative configured ceiling, but low-confidence advertised cost should not win a ranking decision against reliable observed billing.
+
+* Execution and Disclosure Classes
+
+Provider research now requires a worst-case execution/disclosure classification. The exact enum is a pending design choice, but research distinguishes at least:
+
+| Research class | Example | Important implication |
+|----------------+---------+-----------------------|
+| local automated | local browser/OCR/image/audio actor | no third-party challenge disclosure, but local resource cost and source integration matter |
+| remote automated | exact provider capability with no human fallback | approved challenge context leaves the local boundary |
+| human exposure possible | provider normally automates but may escalate to humans | target policy must permit possible human exposure before submission |
+| human-assisted vendor | worker-backed task service | human disclosure is expected, not exceptional |
+| managed browser vendor | provider controls a browser/session workflow | materially wider session/fingerprint/cookie disclosure; separate boundary from ordinary token APIs |
+| manual operator | local review queue | local human access, latency, retention, and audit policy required |
+| custom first-party | owned-system test hook or explicitly modeled custom solver | bound to named target policy and schema |
+
+Unknown execution or disclosure class is insufficient evidence for automatic provider selection.
+
+* Source-Context and Result-Binding Fidelity
+
+Context fidelity includes whether a solver can preserve:
+
+- same browser session;
+- same cookie state;
+- same network identity or required caller proxy;
+- same user agent;
+- mobile application binding;
+- Enterprise challenge data;
+- bounded page/challenge data;
+- target-specific action and challenge instance.
+
+Result binding must be explicit. Examples from current research include:
+
+- ordinary token result;
+- token requiring source-consistent network identity;
+- =cf_clearance= cookie result;
+- DataDome special cookies requiring application back into the browser;
+- proof-of-work result;
+- coordinates/selections requiring source-side interaction;
+- managed-browser state that cannot safely be represented as a generic token.
+
+A local browser actor may be the only eligible class for some same-session challenges even when external providers advertise the issuer.
+
+* Current Provider-Class Research Seeds
+
+These are not provider winners and do not activate capabilities.
+
+| Challenge/context | Research candidate classes |
+|-------------------+----------------------------|
+| hCaptcha token | local browser for session-bound cases; exact NoneCap or NopeCHA capability when context permits; 2Captcha currently =unsupported= for hCaptcha on official API evidence |
+| reCAPTCHA v2/v3/Enterprise | local browser where binding requires it; exact NopeCHA, 2Captcha, Anti-Captcha, CapSolver, or CapMonster rows after fixture validation |
+| Turnstile standalone | local browser or exact Turnstile provider task |
+| Cloudflare Challenge Platform | isolated local browser or exact provider capability that returns the required token/cookie with matching context |
+| DataDome | browser/context-preserving actor or exact provider task with caller-proxy/user-agent/cookie contract |
+| AWS WAF | isolated browser or exact proxy/proxyless AWS WAF provider row |
+| Arkose/GeeTest puzzle | browser/local recognition or exact documented provider task; do not infer Arkose support from a provider marketing page when its current exact support index omits it |
+| text/image/audio | local recognition first when exact; remote recognition/worker task only when disclosure permits |
+| unknown/custom | custom first-party or manual operator path; no generic provider coercion |
+
+* Acceptance and Reliability Metrics
+
+Metrics need segmentation by exact capability, source-runtime class, target-policy class, and result binding:
+
+- provider task completion;
+- downstream =accepted=;
+- downstream =rejected=;
+- =expired=, =replaced=, and =inconclusive=;
+- p50/p95 latency;
+- provider and contract errors;
+- rate-limit/backoff incidents;
 - ambiguous-charge rate;
-- cancellation success where supported;
-- cost per accepted token;
-- secret-redaction conformance.
+- cancellation success;
+- provider-reported and observed account cost;
+- cost per accepted result;
+- result expiry before application;
+- redaction conformance.
 
-Metrics must be segmented by provider, challenge mode, target policy, and proxy mode without storing target secrets.
+Provider completion is not target acceptance.
 
-* Sources
+* Fallback Research Constraints
 
-- [[id:star-pro-research-001-nonecap-hcaptcha-provider][NoneCap provider research]].
-- [[id:star-pro-research-002-nopecha-hcaptcha-provider][NopeCHA provider research]].
-- [[id:star-pro-research-003-2captcha-hcaptcha-provider][2Captcha provider research]].
-- [[id:star-pro-research-004-hcaptcha-provider-gap-audit][Provider gap audit]].
+Fallback should never be assumed merely because another provider advertises the same issuer. Research supports requiring:
 
-* Related Nodes
+- a new independently eligible exact capability;
+- prior attempt terminality or safe cancellation;
+- no blind fallback after ambiguous create when the first provider may already have accepted/billed the task;
+- a new attempt identity and budget reservation;
+- disclosure count and total cost within policy;
+- sufficient deadline remaining;
+- equivalent or acceptable result binding;
+- complete redacted attempt telemetry.
 
-- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
-- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Provider Router]]
+Whether fallback is disabled by default and the exact state machine remain design decisions.
+
+* Speculative Execution Research Constraints
+
+Concurrent provider attempts multiply cost and disclosure. If a future design allows speculation, it needs separate approval and must bound:
+
+- exact capabilities where speculation is permitted;
+- maximum simultaneous solver count;
+- total reservation ceiling;
+- disclosure authorization for each solver;
+- winner selection;
+- loser cancellation;
+- late-result deletion;
+- ambiguous provider-task handling;
+- rollback and telemetry.
+
+Speculation is not implied by fallback.
+
+* Test Evidence Required Before Design Approval
+
+- positive/negative exact-match matrix;
+- unknown/custom challenge behavior;
+- forbidden issuer/family/variant/version/result/context widening;
+- source-session/network/proxy/cookie/user-agent/mobile binding cases;
+- all capability-state transitions;
+- worst-case disclosure-class denials before secret dereference;
+- provider pricing contradiction and conservative reservation behavior;
+- actual/provider-reported cost reconciliation;
+- exact acceptance segmentation;
+- deterministic tie scenarios;
+- ambiguous create preventing blind retry/fallback;
+- late result deletion and cancellation races;
+- request pacing/rate-limit behavior;
+- no paid provider in continuous integration.
+
+* Sources and Related Nodes
+
+- [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]].
+- [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001 NoneCap Provider]].
+- [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA Token and Recognition Provider]].
+- [[id:star-pro-research-003-2captcha-hcaptcha-provider][STAR-PRO-RESEARCH-003 2Captcha Multi-Family Provider]].
+- [[id:star-pro-research-004-hcaptcha-provider-gap-audit][STAR-PRO-RESEARCH-004 Multi-Provider Capability Gap Audit]].
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Capability Router]].
+- [[id:star-captcha-001-detection-resolution-orchestrator][STAR-CAPTCHA-001 CAPTCHA Detection and Resolution Orchestrator]].
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors]].
+
+Primary provider evidence was refreshed 2026-08-09 in STAR-PRO-RESEARCH-001 through 004 and 006.
 
 * Footnotes and Glossary
 
-[fn:observability] Observability: The ability to understand a running system from structured logs, metrics, traces, health states, and recorded outcomes.
+- *Hard eligibility* — All-or-nothing exact constraints that must pass before an actor can be meaningfully compared.
+- *Source-context fidelity* — Ability to preserve the source session, network, cookies, user agent, app runtime, challenge instance, and application context.
+- *Result binding* — Context that must remain stable for a returned result to work.
+- *Cost confidence* — Confidence that advertised/configured price evidence matches current provider billing.
+- *Cost per accepted result* — Total exact-capability spend divided by results verified downstream as accepted.
+- *Speculative execution* — Concurrent attempts before an earlier attempt becomes fallback-eligible.
 
-[fn:ephemeral-secret-store] Ephemeral secret store: A protected temporary store that keeps sensitive values for a short lifetime and returns opaque references instead of exposing those values in ordinary messages.
+* Changelog
 
-[fn:percentile] Percentile: A latency boundary below which a stated percentage of observations fall; p95 means ninety-five percent of observed requests completed at or below that duration.
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-09 | Research basis approved by project owner; separated approved selection research from unapproved broker algorithm design; added result-binding, worst-case disclosure, managed-browser, cost-confidence, observed-billing, current provider-state, and fallback/speculation research constraints | project owner + research agent | User approval and refreshed primary provider evidence |
+| 2026-08-06 | Replaced global provider selection with exact hard eligibility and deterministic evidence ranking research; added context fidelity, accepted-result metrics, fallback/speculation separation, tests, and approval evidence | repository audit agent | Broker and provider research contracts plus PR source diff |

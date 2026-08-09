@@ -1,0 +1,214 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-035
+:END:
+#+title: STAR-RESEARCH-035 Titanic Backend and Transport Comparison
+#+description: Compare RabbitMQ, NATS JetStream, Kafka, ZeroMQ/TSP, Temporal, and embedded persistence as delivery backends or inspirations for the StarIntel Titanic durable actor-job protocol.
+#+status: REVIEW
+#+last_modified: [2026-08-08 Sat]
+#+filetags: :starintel:star-server:titanic:rabbitmq:nats:kafka:zeromq:temporal:queues:research:org-roam:
+
+* Research Question
+
+Which transport or durable queue should back the modern StarIntel Titanic protocol, and which systems should influence the protocol without becoming dependencies?
+
+* Evaluation Criteria
+
+The backend must be judged against StarIntel's actual workload rather than generic messaging benchmarks:
+
+- durable cross-process actor jobs;
+- at-least-once redelivery;
+- explicit acknowledgement after side effects;
+- competing workers and horizontal scaling;
+- backpressure;
+- bounded retry and dead-letter handling;
+- disconnected submitters and durable result retrieval;
+- capability routing;
+- optional priority;
+- low operational burden for a local-first install;
+- Common Lisp integration;
+- compatibility with the server's existing RabbitMQ deployment;
+- no requirement to replace Sento local actor mailboxes or Star Router.
+
+* Result
+
+RabbitMQ should be the first Titanic backend. NATS JetStream is the strongest alternative worth keeping protocol-compatible. Kafka is useful for durable event/log replay but is a poor first fit for per-job actor scheduling. ZeroMQ Titanic/TSP is the conceptual ancestor and protocol inspiration, not the preferred durability implementation in the current server. Temporal solves a larger workflow-orchestration problem and would introduce a second execution platform. Embedded LMDB remains useful for local journal/cache experiments, but not as an independent distributed queue truth beside RabbitMQ.
+
+* Comparison Matrix
+
+| System | Durable work queue | Competing workers | ACK/redelivery | Backpressure | Retry/DLQ primitives | Replay/log strength | Current StarIntel fit | Decision |
+|--------+--------------------+-------------------+----------------+--------------+----------------------+---------------------+-----------------------+----------|
+| RabbitMQ | Excellent | Excellent | Excellent | Excellent via prefetch | Strong, especially quorum queues + DLX | Moderate | Already deployed and integrated | PRIMARY |
+| NATS JetStream | Excellent | Excellent with shared pull consumers | Excellent | Excellent pull flow control / MaxAckPending | Strong with MaxDeliver/backoff/advisories | Strong | Good architectural fit, new runtime dependency | SECONDARY / future adapter |
+| Kafka | Possible, but log-first | Consumer groups | Offset/transaction model | Partition/consumer driven | Application-level retry topics are common | Excellent | Too partition/log centric for initial actor jobs | NOT FIRST BACKEND |
+| ZeroMQ + TSP | TSP builds it in application layer | Majordomo workers | Application protocol | Application-designed | Application-designed | Weak unless custom persistence | Historical conceptual match | INSPIRATION, not queue backend |
+| Temporal | Yes as workflow/activity task queues | Worker fleets | Platform-managed | Worker/task-queue managed | Deep retry/workflow semantics | Durable workflow history | Much larger abstraction and service footprint | DO NOT ADD FOR TITANIC V1 |
+| LMDB-only | Embedded persistence, custom scheduler required | Custom | Custom | Custom | Custom | Local journal only | Useful local primitive, not distributed broker | CACHE/JOURNAL EXPERIMENT ONLY |
+
+* RabbitMQ
+
+** Strengths
+
+RabbitMQ already exists in =starintel-server=. The current server uses durable topic exchanges for document and actor traffic and explicit consumer settlement. The settled consumer path has one connection per worker, manual ACK/NACK, dead-letter arguments, and =basic.qos= prefetch.
+
+RabbitMQ's current documentation makes the relevant guarantees explicit:
+
+- consumer acknowledgements communicate successful processing;
+- unacknowledged deliveries are automatically requeued when connections/channels fail;
+- publisher confirms tell producers that the broker accepted responsibility for a publication;
+- =mandatory= publication can return unroutable messages;
+- per-consumer prefetch limits outstanding unacknowledged deliveries;
+- quorum queues add replication and poison-message/delivery-limit behavior;
+- quorum queues can provide at-least-once dead-lettering when configured appropriately.
+
+These map almost one-to-one to Titanic's mechanical delivery needs.
+
+** Risks and required changes
+
+The existing StarIntel publish helper opens a fresh RabbitMQ connection per call in one code path. RabbitMQ's own publisher guidance recommends long-lived connections/channels; Titanic should use the existing producer abstraction or a dedicated long-lived producer rather than per-job connection churn.
+
+The current settled consumer prefetch is hard-coded to 200. Titanic needs capability-specific prefetch/concurrency policy.
+
+Unconditional =nack requeue=true= remains unsafe as a general retry policy. Titanic needs bounded classified retry and dead-letter outcomes.
+
+Publisher confirms must be part of the durable-admission contract. A socket write is not proof that the broker accepted the job.
+
+For important queues, prefer quorum queues when the deployment can afford the replication/storage cost. Classic queues are non-replicated in RabbitMQ 4.x and lack the same poison-message and at-least-once dead-letter capabilities.
+
+* NATS JetStream
+
+JetStream is not Core NATS. Streams persist published messages, while stateful consumers track delivery and acknowledgements. Durable consumers can recover across client/server failures. Pull consumers are explicitly recommended by NATS when scalability, flow control, and error handling matter.
+
+For Titanic-like work:
+
+- a shared durable pull consumer naturally forms a horizontally scalable worker pool;
+- =AckExplicit= supports per-message completion acknowledgement;
+- =AckWait= drives redelivery if a worker fails to acknowledge;
+- =MaxAckPending= is a backpressure bound;
+- =MaxDeliver= bounds attempts;
+- =BackOff= configures redelivery delays;
+- work-queue retention removes messages after successful acknowledgement.
+
+This is an extremely clean semantic match.
+
+** Why not switch now
+
+StarIntel already has RabbitMQ code, topology, deployment, secrets, integration tests, and operator knowledge. Replacing it would spend complexity without solving a current semantic gap: the gap is the missing durable job protocol, not an incapable broker.
+
+Keep =star.titanic/1= backend-neutral enough that a JetStream adapter can be implemented later. Do not encode Rabbit-specific delivery tags or queue arguments in the core envelope.
+
+* Kafka
+
+Kafka is a durable partitioned log. Consumer groups distribute partitions across consumers and preserve ordering within a partition. That is ideal when replayable event history, high-throughput streams, partition-key affinity, or multiple independent subscriber groups are the core problem.
+
+Titanic's first problem is different: submit one logical job, let one capable worker execute it, retry/dead-letter it, and retrieve its result.
+
+Kafka can model this, but it imposes concepts that are not useful for the first implementation:
+
+- partition count constrains parallelism;
+- offset commits are not a direct job-result state machine;
+- retry scheduling generally needs retry topics, delayed infrastructure, or application conventions;
+- priorities are awkward;
+- one job's durable completion/result must still live somewhere other than merely “offset committed.”
+
+Kafka should remain an optional future event-stream/export backend, not Titanic v1.
+
+* ZeroMQ Titanic and Majordomo
+
+The original Titanic Service Protocol is the direct conceptual ancestor.
+
+Its architecture is elegant because it separates:
+
+- routing/service availability in Majordomo;
+- persistence in Titanic;
+- business work in ordinary workers.
+
+TSP's three-service API — request, reply, close — is still a useful conceptual model for disconnected clients.
+
+However, the original reference implementation deliberately builds durable storage and scheduling in application code. The ZeroMQ Guide calls its simple disk queue a reliability demonstration rather than a performance design and suggests raw disk/circular-buffer optimizations if used seriously.
+
+Current StarIntel does not need to rebuild a broker-level persistent queue on top of ZeroMQ when RabbitMQ already provides durable queues, acknowledgements, redelivery, routing, backpressure, confirms, and dead lettering.
+
+What should survive from TSP is the protocol shape, not the 2011 storage implementation.
+
+* Temporal
+
+Temporal offers durable execution where workflow state survives process and infrastructure failures. That is more powerful than a job queue: it is a workflow runtime with durable histories, workflow/activity semantics, retries, timers, and workers.
+
+That power is also the mismatch. Adding Temporal would create another control plane and programming model beside Sento actors, Star-Lang lifecycle semantics, Star Router, RabbitMQ, and StarIntel's own target/job state.
+
+Titanic v1 does not need a general durable workflow engine. Borrow the ideas of explicit durable state, deterministic recovery, and typed retry policy without adding Temporal as a dependency.
+
+Temporal can be reevaluated only if StarIntel develops workflows that require days-long durable orchestration across many dependent activities and the home-grown lifecycle becomes the dominant complexity.
+
+* LMDB
+
+The 2023 diagram shows LMDB behind Titanic. That made sense for a standalone embedded persistent proxy: LMDB offers fast local transactional key-value access with minimal service overhead.
+
+In the modern system LMDB can still be useful for:
+
+- local job-state cache;
+- fast result index;
+- offline single-node mode;
+- local deduplication table;
+- deterministic test backend.
+
+It should not be a hidden distributed authority that races with RabbitMQ. If RabbitMQ owns delivery, the durable job journal must have explicit reconciliation semantics with it.
+
+* The Backend-Neutral Boundary
+
+The Titanic core should define operations such as:
+
+#+begin_example
+submit(job) -> accepted(job-id) | rejected | unknown-outcome
+status(job-id) -> lifecycle state
+result(job-id) -> typed result | pending | unknown
+cancel(job-id) -> cancellation requested/outcome
+close(job-id) -> retention acknowledgement
+replay(job-id or dead-letter-id) -> new audited attempt
+#+end_example
+
+A backend adapter should implement:
+
+#+begin_example
+publish-command
+consume-command
+settle-success
+settle-retry
+settle-terminal-failure
+schedule-retry
+publish-control
+health/capacity
+#+end_example
+
+Do not expose AMQP delivery tags, Kafka offsets, NATS stream sequence numbers, or ZeroMQ routing identities in the stable actor protocol.
+
+* Recommendation
+
+**Titanic v1 = RabbitMQ quorum-capable work queues + StarIntel job journal + Star-Lang-compatible lifecycle envelope.**
+
+Keep adapters possible, but do not build adapter abstraction for hypothetical backends before the Rabbit implementation is proven. Define only the semantic seam needed to stop Rabbit-specific details from leaking into actor code.
+
+* Sources
+
+- [[https://www.rabbitmq.com/docs/4.1/publishers][RabbitMQ publishers and publisher confirms]]
+- [[https://www.rabbitmq.com/docs/4.1/consumer-prefetch][RabbitMQ consumer prefetch]]
+- [[https://www.rabbitmq.com/docs/4.1/consumers][RabbitMQ consumers]]
+- [[https://www.rabbitmq.com/docs/4.1/classic-queues][RabbitMQ classic queues]]
+- [[https://www.rabbitmq.com/docs/4.1/dlx][RabbitMQ dead-letter exchanges]]
+- [[https://docs.nats.io/nats-concepts/jetstream/consumers][NATS JetStream consumers]]
+- [[https://docs.nats.io/nats-concepts/jetstream/streams][NATS JetStream streams and work-queue retention]]
+- [[https://kafka.apache.org/documentation/][Apache Kafka documentation]]
+- [[https://zguide.zeromq.org/docs/chapter4/][ZeroMQ Guide Chapter 4]]
+- [[https://rfc.zeromq.org/spec/9/][ZeroMQ Titanic Service Protocol]]
+- [[https://docs.temporal.io/][Temporal documentation]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/consumers/rabbit-settlement.lisp][Current StarIntel Rabbit settlement implementation]]
+
+* Footnotes and Glossary
+
+[fn:rabbitmq] RabbitMQ: message broker currently used by StarIntel for durable cross-process document and actor traffic.
+
+[fn:jetstream] JetStream: NATS persistence and stateful-consumer layer providing streams, durable consumers, acknowledgements, redelivery, and work-queue retention.
+
+[fn:kafka] Apache Kafka: distributed replicated append-only event log organized into topics and partitions, with consumer groups for parallel consumption.
+
+[fn:temporal] Temporal: durable execution platform that persists workflow history and dispatches workflow/activity tasks to workers.

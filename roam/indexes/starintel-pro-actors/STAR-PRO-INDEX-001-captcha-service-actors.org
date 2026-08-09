@@ -23,7 +23,7 @@ The project owner approved the CAPTCHA research direction on 2026-08-09 and expl
 | Scope and coverage | Project maintainer | PENDING | Canonical document inventory, implementation order, and research-gap review | Canonical documents and research gaps below |
 | Research corpus | Research reviewer | APPROVED | Current provider/challenge/transport/local-inference evidence | [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006]], [[id:star-pro-research-007-captcha-broker-transport-selection][STAR-PRO-RESEARCH-007]], [[id:star-pro-research-008-self-sourced-captcha-solver-stack][STAR-PRO-RESEARCH-008]], provider research nodes; user approval 2026-08-09 |
 | Architecture and designs | StarIntel server maintainer | PENDING | Broker, detector, source-runtime, transport, local solver, and adapter contracts reviewed together | Core designs and ADR below |
-| Security | Security reviewer | PARTIAL | Self-sourced design security boundary approved; core broker/provider/operations implementation still requires verification | [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004]] security audit |
+| Security | Security reviewer | PENDING | Self-sourced design security boundary is approved, but subsystem-wide implementation verification remains outstanding | [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004]] security audit |
 | Operations | Operator | PENDING | Allowlists, local resource ceilings, model promotion, canaries, monitoring, cancellation, queue policy, and rollback policy | Operational work remains a tracked gap |
 | Implementation | Repository maintainer | NOT STARTED | Passing implementation, fixtures, complete-site generation, CI, and publication checks | |
 
@@ -65,6 +65,8 @@ package "starintel-pro-actors" {
   [LocalBrowserApplyActor]
   [LocalOperatorActor]
   [LocalModelRegistryActor]
+  [LocalCaptchaCorpusActor]
+  [LocalCaptchaBenchmarkActor]
   [External Provider Adapters]
 }
 
@@ -83,6 +85,8 @@ package "starintel-pro-actors" {
 [LocalCaptchaSupervisorActor] --> [LocalOperatorActor]
 [LocalCaptchaSupervisorActor] --> [LocalBrowserApplyActor]
 [LocalCaptchaSupervisorActor] --> [LocalModelRegistryActor]
+[LocalCaptchaCorpusActor] --> [LocalCaptchaBenchmarkActor]
+[LocalCaptchaBenchmarkActor] --> [LocalModelRegistryActor]
 [CaptchaRunSupervisor] --> [External Provider Adapters]
 [CaptchaRunSupervisor] --> [EphemeralSecretStoreActor]
 [CaptchaDetectActor] --> [Browser / Crawler / API / Mobile Actor] : apply instructions + verify
@@ -99,7 +103,7 @@ package "starintel-pro-actors" {
 
 - [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]] — canonical open-world taxonomy, typed result union, provider capability schema, state vocabulary, binding/disclosure model, and capability-local drift.
 - [[id:star-pro-research-007-captcha-broker-transport-selection][STAR-PRO-RESEARCH-007 CAPTCHA Broker Transport Selection]] — RabbitMQ/ZeroMQ/Sento evidence, durability and dependency analysis, and deferred ZeroMQ gates.
-- [[id:star-pro-research-008-self-sourced-captcha-solver-stack][STAR-PRO-RESEARCH-008 Self-Sourced CAPTCHA Solver Actor Stack]] — local OCR/audio/vision/geometry/browser/operator capability stack, model/corpus policy, benchmark plan, economics, and security research boundary.
+- [[id:star-pro-research-008-self-sourced-captcha-solver-stack][STAR-PRO-RESEARCH-008 Self-Sourced CAPTCHA Solver Actor Stack]] — local OCR/audio/vision/geometry/browser/operator capability stack, synthetic corpus/model policy, benchmark plan, economics, and security research boundary.
 - [[id:star-pro-research-004-hcaptcha-provider-gap-audit][STAR-PRO-RESEARCH-004 Multi-Provider Capability Gap Audit]] — provider-gap evidence generalized beyond hCaptcha.
 - [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 Capability-Based Solver Selection]] — exact eligibility and selection research; final broker algorithm remains a design decision.
 
@@ -114,7 +118,7 @@ package "starintel-pro-actors" {
 - [[id:star-pro-captcha-001-nonecap-adapter][STAR-PRO-CAPTCHA-001 NoneCap Adapter]] — =REVIEW=.
 - [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Token and Recognition Adapter]] — =REVIEW=.
 - [[id:star-pro-captcha-003-2captcha-adapter][STAR-PRO-CAPTCHA-003 2Captcha Multi-Family Adapter]] — =REVIEW=.
-- [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors]] — =REVIEW= architecture with security design review approved; implementation not started.
+- [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors]] — =REVIEW= architecture with design-level security review approved; implementation not started.
 
 Research approval does not activate runtime capabilities. The self-sourced security approval is conditional on the design invariants actually being enforced in code and deployment.
 
@@ -125,7 +129,7 @@ These are research or design gaps, not implied runtime capabilities:
 - Anti-Captcha provider research and adapter design.
 - CapSolver provider research and adapter design.
 - CapMonster Cloud provider research and adapter design.
-- Optional split designs for OCR, audio, vision, browser application, or operator review only if implementation shows the combined STAR-PRO-CAPTCHA-004 contract is too broad.
+- Optional split designs for OCR, audio, vision, browser application, corpus, benchmark, or operator review only if implementation shows the combined STAR-PRO-CAPTCHA-004 contract is too broad.
 - Ephemeral CAPTCHA secret/result store specification.
 - CAPTCHA operations runbook covering local resource ceilings, model promotion, provider allowlists, monitoring, cancellation, shutdown, and bounded canaries.
 - Detector registry specification with fixture and drift policy.
@@ -139,16 +143,16 @@ No planned child may be added as a static manifest capability before its contrac
 1. Review and approve or revise the normalized descriptor, typed result union, capability states, disclosure/binding model, and opaque result-reference contract.
 2. Review and approve or revise the Sento/RabbitMQ transport boundary and exact delivery/recovery design.
 3. Implement fake detector, broker, source actor, secret store, and fake local solver path.
-4. Implement =LocalModelRegistryActor=, media/resource ceilings, no-network recognition sandbox, cancellation, and deadline enforcement.
+4. Implement =LocalModelRegistryActor=, =LocalCaptchaCorpusActor=, =LocalCaptchaBenchmarkActor=, media/resource ceilings, no-network recognition sandbox, cancellation, and deadline enforcement.
 5. Implement Tesseract-backed =LocalOcrActor= and promote exactly one synthetic/owned fixture capability through the benchmark/calibration state machine.
 6. Add =LocalAudioActor= with =whisper.cpp=, then ONNX/OpenCV image capabilities only after the same gates pass.
 7. Add same-session browser application and local operator fallback.
-8. Measure the observed challenge matrix and keep paid provider adapters enabled only for exact authorized gaps where they are still useful.
+8. Measure the observed challenge matrix and keep paid provider adapters enabled only for exact authorized gaps where they remain useful.
 9. Add operational monitoring, circuit breakers, accepted-result cost telemetry, and opt-in owned-system canaries.
 
 * Required Test Coverage
 
-Future implementation should cover normalized families, unknown/custom challenges, exact matching, forbidden version/result widening, source-session/network binding, policy/disclosure denial, provider allowlists, local model hash/provenance validation, media decode ceilings, resource exhaustion, low-confidence abstention, exhausted budgets, health/concurrency, duplicate deliveries, ambiguous creation for external providers, cancellation, expiration, one-read results, detector evidence, conflicting candidates, downstream verification, capability-local drift, redaction, transport publish/ack/restart ambiguity, and shutdown with active runs.
+Future implementation should cover normalized families, unknown/custom challenges, exact matching, forbidden version/result widening, source-session/network binding, policy/disclosure denial, provider allowlists, local model hash/provenance validation, corpus provenance, media decode ceilings, resource exhaustion, low-confidence abstention, bounded multi-step action schemas, exhausted budgets, health/concurrency, duplicate deliveries, ambiguous creation for external providers, cancellation, expiration, one-read results, detector evidence, conflicting candidates, downstream verification, capability-local drift, redaction, transport publish/ack/restart ambiguity, and shutdown with active runs.
 
 Continuous integration must use fakes and fixtures and must never invoke a paid provider. Live probes remain opt-in, credential-gated, cost-bounded, capability-specific, and restricted to operator-owned or explicitly authorized systems.
 
@@ -168,6 +172,7 @@ Continuous integration must use fakes and fixtures and must never invoke a paid 
 - Benchmark Tesseract against PaddleOCR on owned/synthetic text fixtures.
 - Select and benchmark one small ONNX-exportable vision model for a single owned image-selection or coordinate fixture family.
 - Validate =whisper.cpp= CPU latency and accuracy on bounded owned/audio fixtures.
+- Review licenses and reproducibility before importing Open CaptchaWorld, CaptchaMind-associated artifacts, or other external benchmark/model assets.
 - Validate current =starintel-server= RabbitMQ producer/consumer behavior directly, especially confirms, mandatory returns, reconnect ambiguity, and durable attempt/outbox authority.
 - Mobile-native challenges require application-specific source-runtime research/contracts.
 - The complete generated site and every PlantUML block require observed target-branch publication after merge.
@@ -183,6 +188,7 @@ Continuous integration must use fakes and fixtures and must never invoke a paid 
 - Treating every anti-bot block as a CAPTCHA.
 - Guessing an issuer when evidence is insufficient.
 - Ranking by price before hard authorization, context, disclosure, exact capability, and contract checks.
+- Allowing a local model to emit unrestricted navigation, JavaScript, shell commands, credentials, or network actions.
 
 * Footnotes and Glossary
 
@@ -194,15 +200,17 @@ Continuous integration must use fakes and fixtures and must never invoke a paid 
 
 [fn:star-server] StarIntel Server: The Common Lisp control, routing, persistence, authorization, search, and actor-hosting service.
 
-- *Exact capability* — A solver contract matched on issuer, family, variant, version, required fields, result kind, binding, execution/disclosure class, and current contract state.
+- *Exact capability* — A solver contract matched on issuer, family, variant, version, required fields, result kind, binding, execution/disclosure class, action schema, and current contract state.
 - *Opaque result reference* — A short-lived identifier permitting one bounded secret read without putting sensitive result material in an actor message or document.
 - *Self-sourced solver* — A locally operated solver strategy whose recognition/inference and optional operator fallback do not require a paid external CAPTCHA service.
+- *Synthetic corpus* — Deterministically generated challenge fixtures with exact ground truth, provenance, and replay metadata.
 - *Transport-neutral envelope* — Application message contract that does not expose RabbitMQ exchange/queue identifiers or ZeroMQ socket topology as domain semantics.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-08-09 | Normalized overall security state to PENDING while preserving the approved self-sourced design audit; added corpus/benchmark actors and bounded-action research carried forward from STAR-PRO-RESEARCH-008 / STAR-PRO-CAPTCHA-004 | project owner + research/design agent | User approval 2026-08-09; STAR-PRO-RESEARCH-008; STAR-PRO-CAPTCHA-004 |
 | 2026-08-09 | Added approved STAR-PRO-RESEARCH-008 and review-stage STAR-PRO-CAPTCHA-004; changed implementation order to local-first self-sourced solving; recorded design-level security approval and remaining implementation gates | project owner + research/design agent | User approval 2026-08-09; STAR-PRO-RESEARCH-008; STAR-PRO-CAPTCHA-004 |
 | 2026-08-09 | Integrated approved provider/challenge research 001–006 with approved transport research 007; retained broker/orchestrator/provider-adapter/transport designs in REVIEW; resolved PR #78/#79 index overlap without widening approval | project owner + research agent | User approval, merged PR #78, replacement of PR #79 |
 | 2026-08-06 | Rebuilt the index as the canonical repository map for broker, detector, provider research, adapter design, planned operations, implementation order, approval state, gaps, and supersession | repository audit agent | Canonical ID inventory and PR source diff |

@@ -60,6 +60,13 @@ class PagesValidationTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("prohibited github.io publication link", result.stderr)
 
+    def test_external_github_pages_documentation_is_allowed(self) -> None:
+        site = self.make_site(
+            "<a href='https://mdbergmann.github.io/cl-gserver/index.html'>upstream docs</a>"
+        )
+        result = self.run_checker(site)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_high_confidence_secret_fails(self) -> None:
         site = self.make_site(
             "<pre>Authorization: Bearer " + "A" * 64 + "</pre>"

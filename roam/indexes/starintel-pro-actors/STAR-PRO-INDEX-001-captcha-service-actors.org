@@ -2,67 +2,86 @@
 :ID:       star-pro-index-001-captcha-service-actors
 :END:
 #+title: STAR-PRO-INDEX-001 CAPTCHA Service Actors
-#+description: Index for the StarIntel CAPTCHA broker, hCaptcha provider research, provider-adapter designs, implementation boundaries, and approval state.
+#+description: Index for CAPTCHA broker/provider research, unapproved design candidates, transport research, and implementation boundaries.
 #+status: REVIEW
-#+filetags: :starintel:index:starintel-pro-actors:captcha:hcaptcha:providers:
+#+filetags: :starintel:index:starintel-pro-actors:captcha:providers:rabbitmq:zeromq:
 
 * Purpose
 
-This index connects the StarIntel[fn:starintel] CAPTCHA[fn:captcha] broker design to the separately deployed provider adapters in =starintel-pro-actors=.[fn:pro-actors] The broker remains generic infrastructure in =starintel-server=.[fn:star-server] Paid provider integrations remain optional professional actors and are never compiled into the server core.
+This index connects the StarIntel CAPTCHA research corpus available on this branch to broker and provider-adapter design candidates. Research approval does not imply design approval.
 
-The subsystem is restricted to operator-owned systems, accessibility workflows, quality assurance, and explicitly authorized automation. It is not a public solve relay and must reject requests without an approved target policy.
+The subsystem is restricted to operator-owned systems, accessibility workflows, quality assurance, and explicitly authorized automation. It is not a public solve relay.
 
-* Architecture Decision
+* Approval Boundary — 2026-08-09
 
-- Broker, authorization, routing, budgets, deduplication, secret references, cancellation, and normalized events belong to =starintel-server=.
-- Provider credentials, vendor-specific request formats, polling, error translation, and billing telemetry belong to =starintel-pro-actors=.
-- Tokens remain ephemeral secrets. They are not StarIntel documents and are not persisted in RabbitMQ, CouchDB, logs, actor events, or research datasets.
-- Provider adapters advertise capabilities dynamically. The broker must not assume that a vendor still supports hCaptcha merely because an old software-development kit contains an obsolete task type.
+The project owner approved the related CAPTCHA research documents. The following design/ADR work on this branch remains =REVIEW= / =PENDING=:
 
-* Broker Design
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 broker/router design]];
+- [[id:star-adr-003-captcha-broker-transport-selection][STAR-ADR-003 transport ADR]];
+- provider-adapter designs.
 
-- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Provider Router]]
+PR #79 carries additional detector/orchestrator and open-world landscape work. This transport branch intentionally uses plain PR context rather than unresolved Org-ID links to nodes that do not yet exist on its base.
 
-* Provider Research
+No implementation approval is implied.
+
+* Research Available On This Branch/Base
 
 - [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001 NoneCap hCaptcha Provider]]
-- [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA hCaptcha Provider]]
-- [[id:star-pro-research-003-2captcha-hcaptcha-provider][STAR-PRO-RESEARCH-003 2Captcha hCaptcha Provider]]
-- [[id:star-pro-research-004-hcaptcha-provider-gap-audit][STAR-PRO-RESEARCH-004 hCaptcha Provider Gap Audit]]
-- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 hCaptcha Provider Selection]]
+- [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA Provider]]
+- [[id:star-pro-research-003-2captcha-hcaptcha-provider][STAR-PRO-RESEARCH-003 2Captcha Provider]]
+- [[id:star-pro-research-004-hcaptcha-provider-gap-audit][STAR-PRO-RESEARCH-004 Provider Gap Audit]]
+- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 Provider Selection]]
+- [[id:star-pro-research-007-captcha-broker-transport-selection][STAR-PRO-RESEARCH-007 CAPTCHA Broker Transport Selection]]
 
-* Provider Adapter Designs
+Transport research was renumbered from 006 to 007 on 2026-08-09 to avoid colliding with PR #79's challenge/provider landscape research, which will occupy 006 when integrated.
 
-- [[id:star-pro-captcha-001-nonecap-adapter][STAR-PRO-CAPTCHA-001 NoneCap Adapter]]
-- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Adapter]]
-- [[id:star-pro-captcha-003-2captcha-adapter][STAR-PRO-CAPTCHA-003 2Captcha Adapter]]
+* Current Transport Research Finding
 
-No CapSolver, Anti-Captcha, or CapMonster Cloud hCaptcha adapter is designed in this pass because their current public documentation does not advertise an hCaptcha token task. A future adapter requires fresh official documentation and a live contract test before its capability may be registered.
+Approved research favors:
 
-* Implementation Order
+- Sento mailboxes for tightly coupled same-process actors;
+- RabbitMQ as the leading candidate for durable paid work crossing process/container/host boundaries;
+- ZeroMQ deferred from the first paid-solve critical path until Common Lisp binding/runtime, persistence/replay, security, lifecycle, benchmark, and failure-injection evidence justify it.
 
-1. Approve the normalized broker protocol and policy model.
-2. Implement the =starintel-server= broker with a fake provider actor.
-3. Implement the NoneCap adapter as the reference adapter because its current interface is hCaptcha-specific and exposes cancellation and long polling.
-4. Implement the NopeCHA adapter behind subscription-aware budget accounting.
-5. Keep the 2Captcha adapter disabled by default until a live sandbox or support confirmation proves the current hCaptcha task contract.
-6. Add provider health, circuit breaking, cost accounting, and explicit operator selection before enabling automatic fallback.
+This is an approved research conclusion, not an approved queue topology or transport architecture.
+
+* Broker / Transport Design Candidates
+
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Provider Router]] — =REVIEW=
+- [[id:star-adr-003-captcha-broker-transport-selection][STAR-ADR-003 CAPTCHA Broker Transport Selection]] — =REVIEW=
+
+* Provider Adapter Design Candidates
+
+- [[id:star-pro-captcha-001-nonecap-adapter][STAR-PRO-CAPTCHA-001 NoneCap Adapter]] — =REVIEW=
+- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Adapter]] — =REVIEW=
+- [[id:star-pro-captcha-003-2captcha-adapter][STAR-PRO-CAPTCHA-003 2Captcha Adapter]] — =REVIEW=
+
+Provider research is capability-local. No provider adapter may widen support from a stale SDK name or broad marketing statement.
+
+* Research-Derived Implementation Order Candidate
+
+This ordering remains subject to design approval:
+
+1. settle broker and transport-neutral protocol designs;
+2. implement broker/fake provider locally with Sento;
+3. if transport ADR is approved, add the durable RabbitMQ boundary and failure tests;
+4. harden publication outcomes, confirm/return/reconnect handling, and durable attempt/outbox behavior;
+5. implement exact provider adapters only from fixture-backed current capability contracts;
+6. add provider health/circuit/cost/acceptance telemetry before automatic fallback;
+7. reconsider ZeroMQ from measured evidence only.
 
 * Non-Goals
 
-- CAPTCHA detection inside arbitrary web pages.
-- Browser fingerprint fabrication.
-- Automatic extraction of target-specific challenge internals.
-- A public HTTP endpoint that accepts arbitrary URLs.
-- Persisting challenge tokens or proxy credentials.
-- Selecting a provider solely by lowest advertised price.
+- a public arbitrary-URL solve endpoint;
+- browser fingerprint fabrication as a generic subsystem feature;
+- persistence of challenge tokens, provider credentials, proxy secrets, or authenticated session material in ordinary durable messages/documents;
+- provider selection solely by lowest advertised price;
+- treating research approval as design approval.
 
-* Footnotes and Glossary
+* Changelog
 
-[fn:starintel] StarIntel: A local-first, actor-based platform that collects, normalizes, links, searches, and analyzes public or authorized data while preserving provenance.
-
-[fn:captcha] CAPTCHA, or Completely Automated Public Turing test to tell Computers and Humans Apart: A challenge used by a service to distinguish ordinary human interaction from automated requests.
-
-[fn:pro-actors] StarIntel Pro Actors: Optional paid-service, collection, and enrichment actors deployed separately from the generic StarIntel server.
-
-[fn:star-server] StarIntel Server: The Common Lisp control, routing, persistence, search, and actor-hosting service at the center of StarIntel.
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-09 | Removed PR #79-only hard Org-ID links after Kindle EPUB caught unresolved cross-branch references; kept branch dependency as plain PR context | research agent | Kindle EPUB CI failure |
+| 2026-08-09 | Aligned index with project-owner approval boundary; marked research as approved context while keeping ADR/broker/adapter designs in review; renumbered transport research reference to 007 to avoid duplicate 006 | project owner + research agent | User instruction and current research/design nodes |
+| 2026-08-06 | Added transport-selection research and architecture candidate to CAPTCHA index | repository audit agent | PR transport research |

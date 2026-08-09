@@ -19,7 +19,11 @@ TEXT_SUFFIXES = {
     ".txt",
     ".xml",
 }
-PROHIBITED_DOMAIN_RE = re.compile(r"(?i)(?:https?:)?//[^\s\"'<>]*github\.io(?:[/:?#]|$)")
+# StarIntel publication must use the custom domain. Third-party projects may
+# legitimately publish their own documentation on GitHub Pages.
+PROHIBITED_DOMAIN_RE = re.compile(
+    r"(?i)(?:https?:)?//(?:www\.)?lost-rob0t\.github\.io(?:[/:?#]|$)"
+)
 
 
 @dataclass(frozen=True)

@@ -21,6 +21,7 @@
       (package-install 'htmlize)))
   (add-to-list 'load-path lisp-directory)
   (load (expand-file-name "second-brain.el" lisp-directory) nil nil t)
+  (load (expand-file-name "pages-metadata.el" lisp-directory) nil nil t)
 
   ;; Org-roam may omit a valid file-level ID from its node table while
   ;; `org-id' still resolves it. Keep Pages strict about genuinely broken

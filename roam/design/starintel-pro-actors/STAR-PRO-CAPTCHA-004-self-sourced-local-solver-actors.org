@@ -2,9 +2,9 @@
 :ID:       star-pro-captcha-004-self-sourced-local-solver-actors
 :END:
 #+title: STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors
-#+description: Actor design for local OCR, audio, image-selection, geometry, browser-application, model-registry, benchmark, and operator-fallback CAPTCHA capabilities behind the existing authorized StarIntel broker.
+#+description: Actor design for local OCR, audio, image-selection, geometry, browser-application, model-registry, benchmark, corpus, and operator-fallback CAPTCHA capabilities behind the existing authorized StarIntel broker.
 #+status: REVIEW
-#+filetags: :starintel:design:starintel-pro-actors:captcha:self-hosted:actors:common-lisp:onnx:ocr:audio:vision:security:uml:
+#+filetags: :starintel:design:starintel-pro-actors:captcha:self-hosted:actors:common-lisp:onnx:ocr:audio:vision:security:uml:synthetic-data:
 
 * Decision
 
@@ -12,10 +12,11 @@ Add self-sourced local solver capabilities to =starintel-pro-actors= and route t
 
 Do not create a second CAPTCHA broker and do not expose a public solve API.
 
-The control plane remains Common Lisp. Specialized inference engines run as bounded local workers behind typed actor contracts. Model training/export may use framework-specific tooling offline, but production orchestration does not depend on a Python control plane.
+The control plane remains Common Lisp. Specialized inference engines run as bounded local workers behind typed actor contracts. Model training/export may use framework-specific tooling offline, but production authorization, routing, lifecycle, result typing, deadlines, and secret references remain in the Common Lisp actor plane.
 
 Initial capability actors:
 
+- =LocalCaptchaSupervisorActor=;
 - =LocalOcrActor=;
 - =LocalAudioActor=;
 - =LocalVisionActor=;
@@ -23,34 +24,37 @@ Initial capability actors:
 - =LocalBrowserApplyActor=;
 - =LocalOperatorActor=;
 - =LocalModelRegistryActor=;
+- =LocalCaptchaCorpusActor=;
 - =LocalCaptchaBenchmarkActor=.
 
-The first implementation slice is Tesseract-backed OCR on synthetic and operator-owned fixtures. Everything else is added only after that contract, sandbox, resource-limit, secret-reference, and downstream-verification path works end to end.
+The first implementation slice is a fake strategy followed by Tesseract-backed OCR on synthetic and operator-owned fixtures. Everything else is added only after the contract, sandbox, resource-limit, secret-reference, abstention, and downstream-verification path works end to end.
 
 * Approval Table
 
-| Approval area | State | Evidence required / evidence |
-|---------------+-------+------------------------------|
-| Research basis | APPROVED | [[id:star-pro-research-008-self-sourced-captcha-solver-stack][STAR-PRO-RESEARCH-008]] and current primary sources |
-| Security design review | APPROVED FOR DESIGN | Security audit below; project owner explicitly authorized security review on 2026-08-09 |
-| Architecture | REVIEW | Maintainer should review actor names, worker boundary, model registry, and browser-source integration before implementation |
-| Operations | REVIEW | Resource ceilings, fixture retention, model promotion, local-operator queue, and canary policy must be configured |
-| Implementation | NOT STARTED | Code, manifests, systemd/Nix isolation, tests, and canaries do not yet exist |
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | APPROVED | Approved local-first research and current primary sources | [[id:star-pro-research-008-self-sourced-captcha-solver-stack][STAR-PRO-RESEARCH-008]]; project-owner approval 2026-08-09 |
+| Security | Security reviewer | APPROVED | Threat model and mandatory controls for target authorization, session secrecy, model/artifact integrity, media parsing, resource isolation, retention, action bounds, and worker egress | Security Audit below; project owner explicitly authorized security review 2026-08-09 |
+| Architecture | Pro-actors maintainer | PENDING | Actor names, Common Lisp/native-worker boundary, model/corpus registry boundaries, broker integration, and browser-source application reviewed together | This design |
+| Operations | Operator | PENDING | Resource ceilings, artifact retention, model promotion/rollback, local-operator queue, canary policy, and external fallback policy configured | Operations and Test Plan below |
+| Implementation | Repository maintainer | NOT STARTED | Code, actor manifests, Nix/systemd isolation, fixtures, tests, and owned-system canaries | Implementation Slices below |
 
-Security approval here means the proposed design boundary is acceptable if its mandatory controls are implemented. It is not an approval of code that has not been written.
+Security approval here applies to the design boundary and mandatory controls. It does not approve code that has not been implemented or tested. Any implementation that weakens those controls requires renewed review.
 
 * Core Invariants
 
 1. The existing broker performs authentication, =captcha:solve= authorization, target-policy checks, exact capability matching, and deadlines before a local solver receives work.
-2. Local recognition actors receive bounded artifact references, not arbitrary URLs.
+2. Local recognition actors receive bounded artifact references, not arbitrary target URLs.
 3. Recognition actors have no general outbound network access.
-4. Only the authorized source/browser runtime applies session-bound results.
-5. Tokens, cookies, answers, coordinates, selection sets, proofs, raw challenge media, and browser state remain ephemeral or referenced through bounded opaque handles.
-6. Every local model/engine is hash pinned and capability scoped.
+4. Only the authorized source/browser runtime applies session-bound results or bounded interaction actions.
+5. Tokens, cookies, answers, coordinates, selection sets, proofs, raw challenge media, and browser state remain ephemeral or represented by bounded opaque references.
+6. Every local model or engine is hash pinned, provenance recorded, and capability scoped.
 7. Every strategy can abstain.
-8. A recognition result is not target acceptance; the source runtime records acceptance separately.
-9. Local speculation is compute-budgeted and bounded; no uncontrolled fan-out.
-10. Unknown challenge families remain =unsupported= until an exact local capability is registered.
+8. Recognition success is not target acceptance; the source runtime records downstream acceptance separately.
+9. Local speculation is compute-budgeted and bounded; no uncontrolled model fan-out.
+10. Unknown challenge families remain =unsupported= until an exact local capability is registered and benchmarked.
+11. Training/benchmark jobs are outside the solve hot path and cannot silently promote a model.
+12. External paid providers are exact-capability fallbacks only when explicitly enabled by policy.
 
 * Actor Topology
 
@@ -66,7 +70,7 @@ package "starintel-server" {
   [CaptchaTelemetryActor]
 }
 
-package "starintel-pro-actors" {
+package "starintel-pro-actors / Common Lisp control" {
   [LocalCaptchaSupervisorActor]
   [LocalOcrActor]
   [LocalAudioActor]
@@ -75,12 +79,13 @@ package "starintel-pro-actors" {
   [LocalBrowserApplyActor]
   [LocalOperatorActor]
   [LocalModelRegistryActor]
+  [LocalCaptchaCorpusActor]
   [LocalCaptchaBenchmarkActor]
 }
 
-package "sandboxed native workers" {
+package "sandboxed local workers" {
   [Tesseract Worker]
-  [PaddleOCR Worker]
+  [Optional PaddleOCR Worker]
   [whisper.cpp Worker]
   [ONNX Runtime Worker]
   [OpenCV Worker]
@@ -95,7 +100,7 @@ package "sandboxed native workers" {
 [LocalCaptchaSupervisorActor] --> [LocalGeometryActor]
 [LocalCaptchaSupervisorActor] --> [LocalOperatorActor]
 [LocalOcrActor] --> [Tesseract Worker]
-[LocalOcrActor] --> [PaddleOCR Worker]
+[LocalOcrActor] --> [Optional PaddleOCR Worker]
 [LocalAudioActor] --> [whisper.cpp Worker]
 [LocalVisionActor] --> [ONNX Runtime Worker]
 [LocalGeometryActor] --> [OpenCV Worker]
@@ -105,8 +110,9 @@ package "sandboxed native workers" {
 [LocalGeometryActor] --> [LocalModelRegistryActor]
 [LocalCaptchaSupervisorActor] --> [LocalBrowserApplyActor] : only when source binding requires it
 [LocalBrowserApplyActor] --> [EphemeralSecretStoreActor]
-[LocalCaptchaSupervisorActor] --> [CaptchaTelemetryActor]
+[LocalCaptchaCorpusActor] --> [LocalCaptchaBenchmarkActor]
 [LocalCaptchaBenchmarkActor] --> [LocalModelRegistryActor] : promotion evidence
+[LocalCaptchaSupervisorActor] --> [CaptchaTelemetryActor]
 @enduml
 #+end_src
 
@@ -119,15 +125,15 @@ Owns one local attempt lifecycle and never bypasses broker eligibility.
 Responsibilities:
 
 - validate the exact local capability selected by the broker;
-- resolve the pinned strategy/model from =LocalModelRegistryActor=;
+- resolve a pinned strategy/model from =LocalModelRegistryActor=;
 - reserve local compute slots;
-- enforce attempt deadline;
+- enforce attempt deadline and cancellation;
 - dispatch to one or more explicitly configured local strategies;
-- merge/compare candidate results;
+- merge or compare candidate results when an ensemble is configured;
 - enforce calibrated confidence threshold;
 - return =lowConfidence= or =unsupported= instead of inventing an answer;
-- cancel child workers on deadline/caller cancellation;
-- emit redacted resource and outcome telemetry.
+- cancel child workers on deadline or caller cancellation;
+- emit redacted resource/outcome telemetry.
 
 It does not fetch arbitrary target pages.
 
@@ -137,12 +143,12 @@ Owns =textAnswer= recognition for exact OCR capabilities.
 
 Default strategy order:
 
-1. cheap preprocessing + Tesseract;
-2. optional second OCR engine only when policy enables it;
+1. bounded preprocessing and Tesseract;
+2. optional second OCR engine only when policy and registry enable it;
 3. consensus/calibration;
 4. abstain or local-operator escalation below threshold.
 
-The design does not assume OCR solves image-selection, behavioral, or browser-bound challenge families.
+OCR support never implies image-selection, behavioral, browser-bound, or puzzle support.
 
 ** LocalAudioActor
 
@@ -152,38 +158,39 @@ It enforces encoded-size, decoded-duration, channel-count, sample-rate, and wall
 
 ** LocalVisionActor
 
-Owns exact =selectionSet= or model-derived =coordinates= capabilities backed by pinned ONNX models.
+Owns exact =selectionSet= or model-derived =coordinates= capabilities backed by pinned ONNX models or another separately approved local runtime.
 
-It must register the model's exact label vocabulary and output schema. A generic image classifier is not eligible for a challenge whose result requires multiple selections or geometry unless the fixture-backed adapter explicitly maps those outputs.
+It registers the exact label vocabulary, preprocessing contract, and output schema. A generic image classifier is not eligible for a task whose result requires multiple selections or geometry unless a fixture-backed strategy explicitly maps those outputs.
 
 ** LocalGeometryActor
 
-Owns deterministic preprocessing/localization capabilities backed by OpenCV-style primitives. It may crop, segment, normalize, or produce an exact coordinate/interaction result for a verified fixture family.
+Owns deterministic preprocessing/localization capabilities backed by OpenCV-style primitives. It may crop, segment, normalize, or produce an exact coordinate or bounded interaction result for a verified fixture family.
 
 It does not advertise wildcard slider, rotation, or puzzle support.
 
 ** LocalBrowserApplyActor
 
-Applies a previously produced typed result inside the authorized source context when the result binding requires same-session execution.
+Applies a previously produced typed result or bounded action inside the authorized source context when the result binding requires same-session execution.
 
 It receives:
 
 - opaque browser-session reference;
-- opaque result reference;
-- exact application instruction produced by the verified capability;
-- target-policy ID and request ID.
+- opaque result reference or exact bounded action;
+- capability/application instruction;
+- target-policy ID;
+- request/attempt IDs.
 
 It does not receive permission to browse unrelated URLs. It never exports the full browser profile or cookie jar into a normal actor message.
 
 ** LocalOperatorActor
 
-Provides a local human-review fallback for explicitly authorized low-confidence or unknown rows.
+Provides local human-review fallback for explicitly authorized low-confidence or unknown rows.
 
 The queue stores only bounded artifact references and expires them. Operator decisions are typed results with actor identity and timestamp. No remote vendor disclosure occurs.
 
 ** LocalModelRegistryActor
 
-Maintains runtime eligibility for engines/models/preprocessors.
+Maintains runtime eligibility for engines, models, preprocessors, and calibrated strategies.
 
 Required fields:
 
@@ -195,26 +202,42 @@ Required fields:
 - license metadata;
 - engine version;
 - preprocessing fingerprint;
-- compatible capability IDs;
+- compatible exact capability IDs;
 - expected input schema;
 - output/result kind;
 - fixture-set fingerprint;
 - calibration fingerprint;
 - resource profile;
 - current state;
-- promotion time and reviewer.
+- promotion time and reviewer;
+- rollback predecessor where applicable.
 
-Production workers must not auto-download a model when a request arrives.
+Production workers must never auto-download a model when a solve request arrives.
+
+** LocalCaptchaCorpusActor
+
+Owns deterministic synthetic corpus manifests and approved imports, not production model promotion.
+
+Every durable sample records:
+
+- source class;
+- generator/version/seed where synthetic;
+- asset and license provenance;
+- exact ground truth;
+- process/region annotations when applicable;
+- renderer or preprocessing fingerprint;
+- train/validation/test split;
+- retention class.
+
+Live production artifacts do not automatically become training data.
 
 ** LocalCaptchaBenchmarkActor
 
-Runs offline or explicitly scheduled fixture suites and emits promotion evidence. It cannot mutate the active model pointer by itself. Promotion is an explicit registry operation after review.
+Runs offline or explicitly scheduled frozen fixture suites and emits promotion evidence. It cannot mutate the active model pointer by itself. Promotion is an explicit registry operation after review.
 
 * Strategy Pattern
 
-Local solvers use a strategy interface so actor orchestration does not depend on a specific engine.
-
-Research-level interface:
+Local solvers use a strategy interface so actor orchestration does not depend on a specific inference engine.
 
 #+begin_src common-lisp
 (defgeneric strategy-supports-p (strategy challenge artifact-descriptor))
@@ -225,8 +248,6 @@ Research-level interface:
 #+end_src
 
 =STRATEGY-SOLVE= returns a normalized candidate object, never a raw provider-shaped payload.
-
-Candidate fields:
 
 #+begin_src common-lisp
 (defstruct local-solve-candidate
@@ -278,7 +299,7 @@ All application fields remain camelCase.
 }
 #+end_src
 
-The numeric confidence threshold shown above is a schema example only. Production thresholds are capability-specific registry/policy data derived from calibration fixtures.
+The numeric threshold above is a schema example only. Production confidence thresholds are capability-specific registry/policy data derived from calibration fixtures.
 
 Terminal success:
 
@@ -307,7 +328,26 @@ Terminal success:
 }
 #+end_src
 
-Terminal abstention uses =captchaLocalSolveFailed= with =reason= equal to =lowConfidence=, =unsupportedArtifact=, =resourceLimit=, =deadline=, =modelUnavailable=, =invalidModel=, or another broker-normalized local error.
+Terminal abstention uses =captchaLocalSolveFailed= with a normalized reason such as =lowConfidence=, =unsupportedArtifact=, =resourceLimit=, =deadline=, =modelUnavailable=, or =invalidModel=.
+
+* Multi-Step Action Contract
+
+A local reasoning/puzzle strategy, if added later, never receives unrestricted browser control. It may emit only actions declared by an exact capability schema, such as a tile identifier, symbolic submit action, or a bounded coordinate region when symbolic actions are impossible.
+
+#+begin_src json
+{
+  "allowedActions": [
+    {"type": "clickTile", "tileIds": [0,1,2,3,4,5,6,7,8]},
+    {"type": "submit"},
+    {"type": "abstain"}
+  ],
+  "maximumSteps": 6
+}
+#+end_src
+
+The source runtime owns application and may reject any action that violates the target policy, capability schema, deadline, or state transition.
+
+The local solver never emits arbitrary URLs, JavaScript, shell commands, unrestricted navigation, credentials, cookies, or new network requests.
 
 * Local Solve Sequence
 
@@ -343,17 +383,20 @@ end
 
 * Concurrency and Backpressure
 
-Local work is cheaper than paid work but can still destroy the host if unbounded.
+Local work is cheaper than paid work but can still exhaust the host if unbounded.
 
-Use independent semaphores/actor pools for:
+Use independent semaphores or actor pools for:
 
 - OCR CPU workers;
 - audio CPU/GPU workers;
 - vision CPU/GPU workers;
 - browser contexts;
+- benchmark/training jobs;
 - local operator queue.
 
-The broker/routing layer sees current local concurrency as capability health. If every local worker is saturated and the deadline cannot be met, the local capability is temporarily ineligible rather than spawning unlimited processes.
+The broker sees current local concurrency as capability health. If every local worker is saturated and the deadline cannot be met, the capability is temporarily ineligible rather than spawning unlimited processes.
+
+Training and benchmark jobs use separate lower-priority resource pools so they cannot starve production solve actors.
 
 * Worker Isolation
 
@@ -371,7 +414,7 @@ Recognition workers run with:
 - no access to repository credentials, RabbitMQ credentials, browser profiles, or unrelated secrets;
 - explicit model path from the registry, never a request-controlled path.
 
-Nix should pin engines/models or their fetch hashes where practical. systemd service/slice limits should enforce the production resource envelope.
+Nix should pin engines and fetch hashes where practical. systemd service/slice limits should enforce the production resource envelope.
 
 * Media Validation
 
@@ -404,54 +447,56 @@ Reject malformed or over-budget media before it reaches the model.
 #+begin_src plantuml
 @startuml
 [*] --> discovered
- discovered --> quarantined : fetched/built + hash recorded
-quarantined --> benchmarked : sandbox + fixture suite pass
+discovered --> quarantined : fetched/built + hash recorded
+quarantined --> benchmarked : sandbox + frozen fixture suite pass
 benchmarked --> experimental : reviewer promotes
 experimental --> verified : owned-system canary + calibrated acceptance evidence
 experimental --> invalidContract : schema/resource/safety failure
 verified --> degraded : drift or known limitation
 verified --> disabled : operator/security action
 verified --> invalidContract : contract mismatch
- degraded --> verified : repaired + re-benchmarked
+degraded --> verified : repaired + re-benchmarked
 invalidContract --> quarantined : new immutable build only
- disabled --> experimental : explicit re-enable + review
+disabled --> experimental : explicit re-enable + review
 @enduml
 #+end_src
 
 An in-place model file replacement is forbidden. New bytes mean a new fingerprint and promotion cycle.
 
-* Corpus / Benchmark Boundary
+* Corpus and Training Boundary
 
 Training and benchmarking are separate from production solving.
 
-The benchmark actor may consume:
+Allowed durable corpus classes:
 
-- synthetic StarIntel fixtures;
-- operator-owned captures;
-- explicitly authorized bounded captures;
-- open datasets with recorded licenses.
+- deterministic synthetic StarIntel fixtures;
+- first-party operator-owned fixtures;
+- open datasets/benchmarks after license review;
+- operator-labeled samples with explicit provenance;
+- explicitly authorized real captures only when a bounded retention/provenance decision permits them.
 
-It must not automatically scrape arbitrary challenge images or attach live session metadata to the corpus.
+Production challenge artifacts are ephemeral by default and are not silently recycled into training.
 
-Raw production artifacts are not silently recycled into training. Any artifact promoted into a corpus requires an explicit provenance/retention decision.
+Corpus and training jobs cannot receive browser-session refs, cookie bundles, provider credentials, solved tokens, or other secret-bearing operational context.
 
 * Security Audit
 
 ** Threat model
 
-The high-value assets are:
+High-value assets include:
 
 - authenticated source browser sessions;
-- cookies/tokens/proofs/answers;
+- cookies, tokens, proofs, answers, selections, and coordinates;
 - target authorization policy;
-- model store and model promotion authority;
+- model store and promotion authority;
 - local compute resources;
-- RabbitMQ/actor identity;
+- actor/RabbitMQ identity and routing;
+- corpus provenance;
 - operator review artifacts.
 
 Potential adversaries include an untrusted target response, malicious media payload, poisoned model artifact, compromised worker process, spoofed actor message, and accidental operator misconfiguration.
 
-** Controls and disposition
+** Findings and controls
 
 | Finding | Severity | Control | Design disposition |
 |---------+----------+---------+--------------------|
@@ -461,34 +506,39 @@ Potential adversaries include an untrusted target response, malicious media payl
 | decompression/media bomb | HIGH | pre/post decode ceilings plus process memory/time limits | CLOSED BY DESIGN |
 | local compute denial of service | HIGH | per-class worker pools, broker eligibility from capacity, systemd/cgroup quotas, deadlines | CLOSED BY DESIGN |
 | worker breakout sees repository/service credentials | HIGH | dedicated UID, no-network recognition sandbox, minimal filesystem, no broker/browser secrets | CLOSED BY DESIGN |
-| model overconfidence causes forced bad answers | MEDIUM | calibrated threshold, abstention, downstream verification, no silent online retraining | CLOSED BY DESIGN |
+| unrestricted model-generated browser action | HIGH | typed family-specific action schema; source runtime owns application; no arbitrary JS/navigation | CLOSED BY DESIGN |
+| model overconfidence forces bad answers | MEDIUM | calibrated threshold, abstention, downstream verification, no silent online retraining | CLOSED BY DESIGN |
 | artifact retention leaks sensitive context | MEDIUM | ephemeral handles, TTL, redacted telemetry, explicit corpus promotion only | CLOSED BY DESIGN |
 | capability widened by generic model | MEDIUM | exact capability registration includes result kind, binding, label/output schema, fixture fingerprint | CLOSED BY DESIGN |
-| operator fallback becomes unbounded archive | MEDIUM | bounded queue, expiry, no vendor disclosure, audit identity | CLOSED BY DESIGN |
+| poisoned or unlicensed corpus | MEDIUM | immutable corpus manifests, source class, license/provenance metadata, explicit import review | CLOSED BY DESIGN |
+| operator fallback becomes unbounded archive | MEDIUM | bounded queue, expiry, local disclosure only, audit identity | CLOSED BY DESIGN |
 | stale model/engine silently changes behavior | MEDIUM | immutable fingerprints and state machine; no in-place replacement | CLOSED BY DESIGN |
 
-Security verdict: APPROVED FOR DESIGN with the invariants above as mandatory requirements. Any implementation that permits arbitrary URL submission, general network egress from recognition workers, runtime model auto-download, raw cookie/profile transport, or unbounded media/compute invalidates this approval.
+Security verdict: APPROVED for the design boundary with the invariants above as mandatory requirements. Any implementation that permits arbitrary URL submission, general network egress from recognition workers, runtime model auto-download, raw cookie/profile transport, unrestricted model-generated browser control, or unbounded media/compute invalidates this approval.
 
 * Test Plan
 
-** Unit / fake tests
+** Unit and fake tests
 
 - broker rejects unauthorized local solve;
 - local actor rejects a challenge whose exact capability does not match;
-- malformed artifact metadata rejected;
-- oversized encoded image rejected;
-- decoded pixel ceiling enforced;
-- oversized/long audio rejected;
-- model hash mismatch rejected;
+- malformed artifact metadata is rejected;
+- oversized encoded image is rejected;
+- decoded pixel ceiling is enforced;
+- oversized or long audio is rejected;
+- model hash mismatch is rejected;
 - model path cannot be request controlled;
 - low-confidence result abstains;
-- candidate result kind mismatch rejected;
+- candidate result-kind mismatch is rejected;
+- out-of-schema multi-step action is rejected;
 - cancellation terminates child worker;
 - deadline terminates child worker;
 - duplicate actor delivery is idempotent;
 - raw result never appears in telemetry;
-- raw cookie/browser profile never appears in local solver message;
-- unavailable capacity makes capability temporarily ineligible.
+- raw cookie/browser profile never appears in a local solver message;
+- unavailable capacity makes a capability temporarily ineligible;
+- benchmark job cannot promote a model by itself;
+- production solve does not add artifacts to a corpus automatically.
 
 ** Fixture tests
 
@@ -498,22 +548,24 @@ Security verdict: APPROVED FOR DESIGN with the invariants above as mandatory req
 - synthetic image-selection fixtures;
 - coordinate/localization fixtures;
 - corrupted image/audio fixtures;
-- decompression-bomb regression fixtures generated safely at bounded test sizes;
+- safe bounded decompression regression fixtures;
 - model corruption/hash mismatch fixture;
-- source-session application fixture on an operator-owned test page.
+- corpus provenance/license fixture;
+- source-session application fixture on an operator-owned test page;
+- vendor-published test-key integration fixtures where applicable.
 
 ** Canary gate
 
-Canaries are opt-in and operator-owned or explicitly authorized. A canary must set:
+Canaries are opt-in and restricted to operator-owned or explicitly authorized targets. A canary must set:
 
 - exact target policy;
 - exact capability;
-- maximum attempts;
+- maximum attempts or steps;
 - deadline;
 - model fingerprint;
 - resource ceiling;
 - artifact-retention TTL;
-- expected verification outcome.
+- expected downstream verification outcome.
 
 No paid provider is required for CI or for self-sourced canary validation.
 
@@ -529,7 +581,16 @@ No paid provider is required for CI or for self-sourced canary validation.
 - abstention path;
 - downstream verification path.
 
-** Slice 2 — Tesseract OCR
+** Slice 2 — model registry, corpus, and benchmark gates
+
+- immutable model/engine fingerprints;
+- deterministic synthetic corpus manifest;
+- frozen benchmark suite;
+- explicit experimental/verified promotion;
+- rollback predecessor;
+- no runtime model download.
+
+** Slice 3 — Tesseract OCR
 
 - native worker wrapper;
 - image normalization;
@@ -538,34 +599,41 @@ No paid provider is required for CI or for self-sourced canary validation.
 - no-network sandbox;
 - systemd/Nix resource envelope.
 
-** Slice 3 — local audio
+** Slice 4 — optional second OCR and local audio
 
+- benchmark PaddleOCR only if it materially improves the exact OCR row;
 - =whisper.cpp= worker;
 - audio decoder ceilings;
 - fixture benchmark;
 - CPU latency profile.
 
-** Slice 4 — ONNX vision + OpenCV
+** Slice 5 — ONNX vision and OpenCV geometry
 
 - pinned ONNX model registry;
 - exact label/output schema;
-- image selection and/or coordinate fixture family;
+- one image-selection or coordinate fixture family at a time;
 - model-supply-chain tests;
 - CPU/GPU execution-provider selection as deployment configuration.
 
-** Slice 5 — same-session browser application
+** Slice 6 — same-session browser application
 
 - browser-session opaque ref;
-- exact application instruction;
+- exact application/action instruction;
 - source-runtime verification;
 - browser worker isolation and concurrency.
 
-** Slice 6 — local operator fallback
+** Slice 7 — local operator fallback
 
 - bounded review queue;
 - expiry;
-- typed answer submission;
+- typed answer/action submission;
 - audit and retention controls.
+
+** Slice 8 — measured external fallback decision
+
+- collect observed challenge-family frequency;
+- measure local cost per accepted result;
+- keep paid adapters disabled by default unless an exact authorized coverage gap justifies enabling one.
 
 * Operational Telemetry
 
@@ -593,8 +661,20 @@ Do not record raw challenge media, text answers, audio transcripts, selection co
 - [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Capability Router]].
 - [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]].
 
+* Footnotes and Glossary
+
+- *Self-sourced solver* — A local capability whose inference and primary benchmark path do not require a per-solve external CAPTCHA service.
+- *Local recognition worker* — A sandboxed process that receives a bounded artifact/model reference and performs one exact inference operation without deciding target authorization.
+- *Exact capability* — A solver contract matched on challenge family/variant/version, required fields, result kind, binding, action schema, and current validation state.
+- *Model fingerprint* — Immutable content identity for a model/engine build tied to its benchmark and calibration evidence.
+- *Abstention* — A normal terminal local outcome indicating insufficient confidence or unsupported capability.
+- *Bounded action schema* — Capability-specific finite set of allowed source-runtime actions; excludes arbitrary navigation, JavaScript, shell commands, and credential changes.
+- *Same-session application* — Applying a result/action through the original authorized source browser/session when acceptance depends on that context.
+- *Opaque result reference* — Short-lived handle for sensitive result material that keeps raw tokens/cookies/answers out of ordinary actor messages.
+
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-09 | Created local self-sourced solver actor design with Common Lisp control plane, bounded native inference workers, strategy contract, model registry, sandboxing, media ceilings, promotion state machine, security audit, test plan, and staged implementation | research/design agent | STAR-PRO-RESEARCH-008 and existing broker architecture |
+| 2026-08-09 | Added canonical approval metadata and glossary; expanded the local design with corpus/benchmark actors, bounded multi-step action schema, explicit model promotion, sandbox/media limits, security audit, tests, and staged implementation | project owner + research/design agent | STAR-PRO-RESEARCH-008; user authorization 2026-08-09 |
+| 2026-08-09 | Created local self-sourced solver actor design with Common Lisp control plane, bounded local inference workers, strategy contract, model registry, sandboxing, media ceilings, promotion state machine, security audit, test plan, and staged implementation | research/design agent | STAR-PRO-RESEARCH-008 and existing broker architecture |

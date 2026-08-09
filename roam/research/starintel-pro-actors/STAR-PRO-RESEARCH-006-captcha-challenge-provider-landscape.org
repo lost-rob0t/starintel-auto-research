@@ -2,29 +2,31 @@
 :ID:       star-pro-research-006-captcha-challenge-provider-landscape
 :END:
 #+title: STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape
-#+description: Canonical open-world taxonomy separating challenge issuers, challenge variants, solver actors, external provider adapters, typed results, downstream application, and downstream verification.
-#+status: REVIEW
+#+description: Canonical research taxonomy separating challenge issuers, variants, solver classes, provider capabilities, typed results, context binding, disclosure, and downstream verification.
+#+status: APPROVED
 #+filetags: :starintel:research:starintel-pro-actors:captcha:providers:issuers:detection:capabilities:uml:
 
 * Research Question
 
 What challenge and solver capability model lets StarIntel detect, route, apply, and verify authorized CAPTCHA[fn:captcha] and browser-challenge work without assuming that hCaptcha is the only issuer, every result is a token, or one paid provider is globally valid or invalid?
 
+* Approval Boundary
+
+The project owner approved the related CAPTCHA research documents on 2026-08-09. This node's research basis and findings are therefore approved. The broker, detector/orchestrator, provider-adapter, security, operations, and implementation designs remain unapproved.
+
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research basis | Research reviewer | PENDING | Current official challenge and provider documentation | Sources and retrieval dates in this document |
-| Architecture | StarIntel server maintainer | PENDING | Broker, detector, source-runtime, and adapter contracts reviewed together | [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]] and [[id:star-captcha-001-detection-resolution-orchestrator][STAR-CAPTCHA-001]] |
-| Security | Security reviewer | PENDING | Authorization, disclosure, session binding, and secret-result review | Required security boundaries below |
-| Operations | Operator | PENDING | Budgets, allowlists, canaries, monitoring, cancellation, and rollback policy | Operational requirements below |
+| Research basis | Research reviewer | APPROVED | Current official challenge/provider documentation and capability analysis | User approval 2026-08-09; sources refreshed through 2026-08-09 |
+| Architecture / designs | StarIntel server maintainer | PENDING | Broker, detector, source-runtime, and adapter contracts reviewed together | [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]] and [[id:star-captcha-001-detection-resolution-orchestrator][STAR-CAPTCHA-001]] |
+| Security | Security reviewer | PENDING | Authorization, disclosure, session/network binding, managed-browser, and secret-result review | Research boundaries below |
+| Operations | Operator | PENDING | Budgets, allowlists, canaries, monitoring, cancellation, pacing, and rollback policy | Operational research below |
 | Implementation | Repository maintainer | NOT STARTED | Passing fixtures, unit tests, complete-site generation, and publication checks | |
-
-No row is implied approval. A merged pull request or green renderer does not approve research, architecture, security, or operations.
 
 * Finding
 
-The old one-dimensional question—“does this provider solve hCaptcha?”—is invalid. The subsystem must model these concepts separately:
+The old one-dimensional question—“does this provider solve hCaptcha?”—is invalid. The subsystem research must model these concepts separately:
 
 1. challenge issuer;
 2. challenge family;
@@ -32,10 +34,12 @@ The old one-dimensional question—“does this provider solve hCaptcha?”—is
 4. integration version;
 5. required source context;
 6. required result kind;
-7. solver actor;
-8. external provider adapter;
-9. downstream application;
-10. downstream verification.
+7. required result binding;
+8. solver execution/disclosure class;
+9. provider capability contract;
+10. downstream application;
+11. downstream verification;
+12. cost and contract confidence.
 
 Provider completion proves only that the selected solver returned a result matching its adapter contract. It does not prove that the target accepted the result. Acceptance is a later source-runtime verification event.
 
@@ -52,81 +56,75 @@ The catalog is open-world. A challenge remains =unknown= until positive and nega
 | reCAPTCHA Enterprise | checkbox; score; invisible; policy integrations | token, score, policy challenge | =token= or =assessment= |
 | hCaptcha | standard; invisible; passive; Enterprise | token or behavioral | =token= |
 | Cloudflare Turnstile | managed; non-interactive; invisible | token | =token= |
-| Cloudflare Challenge Platform | JavaScript, managed, interactive, clearance flows | WAF interstitial or behavioral | =cookie=, =proof=, or browser-bound clearance |
-| Arkose Labs FunCaptcha | risk-driven browser and mobile puzzle integrations | puzzle or token | =token= or =interactionPlan= |
+| Cloudflare Challenge Platform | JavaScript, managed, interactive, clearance flows | WAF interstitial or behavioral | =token=, =cookie=, =proof=, or browser-bound clearance |
+| Arkose Labs FunCaptcha | risk-driven browser/mobile puzzle integrations | puzzle or token | =token= or =interactionPlan= |
 | GeeTest | v3; v4 | slider, selection, token | =customTypedResult=, =token=, or =interactionPlan= |
-| AWS WAF CAPTCHA | puzzle widget or interstitial | WAF CAPTCHA | =cookie= or =token= |
+| AWS WAF CAPTCHA | puzzle widget or interstitial | WAF CAPTCHA | =cookie=, =proof=, or =token= according to exact integration |
 | AWS WAF Challenge | silent browser challenge | proof or WAF clearance | =cookie= or =proof= |
-| DataDome | behavioral, device, and CAPTCHA pages | behavioral or WAF challenge | =cookie= or browser-bound result |
+| DataDome | behavioral, device, slider, and interstitial flows | behavioral or WAF challenge | browser-bound =cookie= or custom result |
 | Friendly Captcha | proof-of-work widget | proof of work | =proof= or =token= |
-| ALTCHA | proof-of-work payload | proof of work | =proof= |
-| MTCaptcha | widget and enterprise integrations | token | =token= |
+| ALTCHA | proof-of-work, code, invisible | proof of work/custom | =proof= or custom typed result |
+| MTCaptcha | widget/enterprise integrations | token | =token= |
 | Prosopo Procaptcha | interactive and proof-style integrations | token or proof | =token= or =proof= |
-| Tencent challenges | regional web and mobile variants | token, puzzle, behavioral | capability-specific typed result |
+| Tencent/TenDI and other regional integrations | version-specific | token, puzzle, behavioral | capability-specific typed result |
 | Yandex SmartCaptcha | checkbox, invisible, advanced challenge | token or behavioral | =token= |
-| Mobile-native SDK challenge | Android or iOS application-bound execution | device or behavioral | app-bound =token= or =assessment= |
-| Custom first-party challenge | organization-defined integration | =custom= | =customTypedResult= |
-| Unknown challenge | insufficient or conflicting evidence | =unknown= | no solve result |
+| Mobile-native SDK challenge | Android/iOS application-bound execution | device or behavioral | app-bound =token= or =assessment= |
+| Custom first-party challenge | organization-defined integration | custom | =customTypedResult= |
+| Unknown challenge | insufficient/conflicting evidence | unknown | no solve result |
 
 ** Non-token challenge families
 
-The normalized catalog must also represent all of the following without coercing them into token tasks:
+The normalized research taxonomy also represents:
 
-- text CAPTCHAs;
-- arithmetic challenges;
-- question challenges;
-- distorted-image text;
-- image grids;
-- coordinate selection;
-- bounding boxes;
-- draw-around challenges;
+- text and distorted-image text;
+- arithmetic/question challenges;
+- image grids and object selections;
+- coordinates and bounding boxes;
+- draw-around tasks;
 - audio challenges;
-- slider puzzles;
-- rotation puzzles;
-- drag-and-drop puzzles;
-- proof-of-work challenges;
-- behavioral verification;
-- device verification;
-- mobile-native software-development-kit challenges;
+- slider, rotation, and drag-and-drop puzzles;
+- proof-of-work;
+- behavioral/device verification;
+- WAF clearance and cookie-producing tasks;
+- managed-browser workflows;
+- mobile-native challenges;
 - custom first-party challenges;
 - unknown challenges.
 
-Challenge families and result kinds are independent. A grid may return =selectionSet=, a coordinate task may return =coordinates=, a browser puzzle may return =interactionPlan=, and an issuer-specific integration may convert an interaction into a token only inside the source runtime or provider adapter.
+Challenge family and result kind are independent. A grid can return =selectionSet=, a coordinate task =coordinates=, a browser workflow a cookie or bounded browser-state reference, and a provider puzzle an =interactionPlan= or issuer token according to its exact contract.
 
-* Normalized Challenge Descriptor
+* Normalized Challenge Descriptor Research Shape
 
-Provider task names never appear in the provider-neutral descriptor.
+Provider task names do not belong in the provider-neutral descriptor. A research shape needs at least:
 
 #+begin_src json
 {
-  "issuer": "cloudflareTurnstile",
-  "challengeFamily": "token",
+  "issuer": "cloudflareChallenge",
+  "challengeFamily": "wafChallenge",
   "challengeVariant": "managed",
-  "integrationVersion": "turnstile",
+  "integrationVersion": "current",
   "pageUrl": "https://owned.example/verification",
-  "siteKey": "0x4AAAA...",
-  "action": "login",
-  "minimumScore": null,
+  "siteKey": null,
+  "action": null,
   "contextRefs": {
-    "enterpriseDataRef": null,
-    "challengeDataRef": null,
+    "challengeDataRef": "secret://challenge/01KZ...",
     "pageDataRef": null,
     "cookieBundleRef": null,
     "proxyCredentialRef": null,
     "browserSessionRef": "session://source/01KZ..."
   },
   "requiredResult": {
-    "kind": "token",
-    "binding": "sameSessionPreferred"
+    "kind": "cookieOrToken",
+    "binding": "sourceContextExact"
   }
 }
 #+end_src
 
-The descriptor is sparse. An absent field does not authorize capability widening. The broker must reject a solver that requires unavailable context.
+The exact schema is a design decision. The research requirement is that absent fields never authorize capability widening.
 
 * Required Result Kinds
 
-The result union is typed and supports at least:
+Research supports a typed result union containing at least:
 
 - =token=;
 - =assessment=;
@@ -136,129 +134,127 @@ The result union is typed and supports at least:
 - =coordinates=;
 - =selectionSet=;
 - =interactionPlan=;
-- =customTypedResult=.
+- =customTypedResult=;
+- a bounded opaque reference for separately approved managed-browser state if such a design is later accepted.
 
-Sensitive results remain in an ephemeral secret store. Actor and RabbitMQ messages carry only opaque result references. The system never persists raw API keys, tokens, cookies, text answers, coordinates, selection sets, interaction plans, proxy credentials, cookie bundles, enterprise data, page data, authorization headers, or authenticated browser-session material.
+Sensitive results should never be treated as ordinary StarIntel documents. The exact secret-store implementation remains a design question.
 
-* Solver Actor Classes
+* Result Binding
 
-| Solver actor class | Examples | Appropriate use | Principal constraint |
-|--------------------+----------+-----------------+----------------------|
-| Local browser actor | Playwright or browser-process worker | Same-session and browser-bound challenges | Resource cost and target-specific source integration |
-| Local optical-character-recognition actor | OCR model | Distorted text and text images | Produces text, not an issuer token |
-| Local image-recognition actor | Classifier, detector, segmentation model | Grids, coordinates, boxes, draw-around | Result schema and fixture quality must be exact |
-| Local audio-transcription actor | Speech-to-text model | Audio accessibility challenge | Audio acquisition and language coverage |
-| Manual operator actor | Local review queue | Unknown or unusual authorized challenge | Latency, operator availability, and disclosure policy |
-| Custom first-party solver actor | Owned-system bypass or test hook | Organization-defined challenge | Explicit schema and target policy |
-| External provider adapter | NoneCap, NopeCHA, 2Captcha, Anti-Captcha, CapSolver, CapMonster Cloud | Exact documented provider capability | Third-party disclosure, contract drift, cost, and context binding |
+A result is not fully described by its kind. Research must also capture binding such as:
 
-Execution class is a hard policy input. Local automated execution, provider automation, human-worker execution, and operator review are not interchangeable.
+- unbound/ordinary application;
+- same source browser session;
+- same network identity;
+- caller-owned proxy;
+- user-agent match;
+- cookie/session bundle;
+- mobile/app runtime;
+- exact challenge instance;
+- custom target-specific binding.
+
+Current provider documentation demonstrates why this matters: DataDome tasks can require caller-owned proxy and matching user-agent/cookie application, while a Cloudflare Challenge provider can return either a token or =cf_clearance= cookie. These cannot safely share a generic “token solved” contract.
+
+* Solver Actor / Execution Research Classes
+
+| Research class | Examples | Principal constraint |
+|----------------+----------+----------------------|
+| local automated browser | isolated Playwright/browser-process worker | resource cost and target-specific source integration |
+| local recognition | OCR/image/audio/model actor | exact typed output and fixture confidence |
+| remote automated provider | exact automated provider task | third-party data disclosure and context fidelity |
+| human exposure possible | provider with automation plus possible worker fallback | target policy must permit possible human exposure |
+| human-assisted vendor | worker-backed task provider | explicit human disclosure and bounded target data |
+| managed-browser vendor | provider-controlled browser/session product | substantially broader session/cookie/fingerprint disclosure; separate boundary from token APIs |
+| manual operator | local review queue | latency, retention, audit, operator availability |
+| custom first-party | owned-system test hook | named target policy and explicit schema |
+
+The exact actor classes/enums remain a design decision. Unknown execution/disclosure class is insufficient evidence for automatic routing.
 
 * Capability State Vocabulary
 
-Every provider capability uses exactly one state:
+Every exact provider capability uses one research state:
 
 | State | Meaning |
 |-------+---------|
-| =verified= | Current official contract and local fixture agree |
-| =experimental= | Plausible documented contract; fixture or bounded canary incomplete |
-| =degraded= | Capability remains usable with a known limitation or reduced confidence |
-| =invalidContract= | Current request or result contract is contradictory or fails validation |
-| =disabled= | Operator or circuit policy prevents selection |
-| =unsupported= | Provider does not advertise or cannot satisfy the exact capability |
+| =verified= | current official contract and local fixture agree |
+| =experimental= | plausible documented contract; fixture/canary incomplete |
+| =degraded= | usable with a known limitation/reduced confidence |
+| =invalidContract= | request/result contract contradicts current evidence or fails validation |
+| =disabled= | operator/circuit policy prevents selection |
+| =unsupported= | provider does not currently advertise or cannot satisfy exact capability |
 
-Contract drift is capability-local. One =invalidContract= task must not disable unrelated verified capabilities from the same provider.
+Contract drift is capability-local unless a shared provider/account failure affects every task.
 
 * Provider Capability Record
 
-Every provider capability record must contain:
+Research says every exact capability record needs:
 
-- provider;
-- official source;
-- retrieval date;
-- issuer;
-- family;
-- variant;
-- version;
-- request operation;
-- result operation;
-- authentication;
-- required request fields;
-- optional request fields;
-- result kind;
-- required result fields;
-- proxy support;
-- cookie support;
-- user-agent requirements;
-- browser-session requirements;
-- same-network requirements;
-- mobile requirements;
+- provider and official source;
+- retrieval date and contract fingerprint;
+- issuer, family, variant, integration version;
+- request/result operations;
+- authentication and credential location;
+- required/optional request fields;
+- result kind and required result fields;
+- result binding;
+- proxy/cookie/user-agent/browser-session/network/mobile requirements;
 - delivery model;
-- cancellation;
-- idempotency;
+- cancellation and idempotency;
 - ambiguous-submission behavior;
-- concurrency;
-- billing;
+- concurrency/rate-limit/pacing evidence;
+- execution and worst-case disclosure class;
+- advertised/configured/observed billing data;
+- =costConfidence=;
 - retention;
-- human or automated execution;
-- disclosure implications;
 - error contract;
-- contract confidence;
-- fixtures;
-- live-probe requirements;
-- unsupported variants;
-- documentation contradictions;
+- fixtures/live-probe requirements;
+- unsupported variants and documentation contradictions;
 - current capability state.
 
-No static actor manifest may advertise a runtime capability that has not reached its declared state through current contract validation.
+No static actor manifest should advertise a runtime capability merely because a vendor catalog or SDK once named it.
 
-* Provider Findings
+* Provider Findings Refreshed 2026-08-09
 
 ** NoneCap
 
-NoneCap is a narrow hCaptcha adapter candidate, not a universal reference provider. Its current API exposes active hCaptcha operations and a separate Enterprise task name while reserving other task names for future use. The adapter must separate standard, invisible, and Enterprise behavior; preserve polling, cancellation, feedback, billing, retention, and ambiguous-create analysis; and keep reserved task names =unsupported= until an active contract and fixture exist.
+NoneCap remains a narrow hCaptcha candidate. Current API evidence exposes standard =hcaptcha= and =hcaptcha_enterprise= operations, documented cancellation, thirty-day solve-record retention, default account concurrency guidance, and Enterprise =rqdata=. It is not a generic provider.
 
 ** NopeCHA
 
-NopeCHA has two distinct surfaces:
-
-1. the Token API, which returns integration tokens for supported issuer families; and
-2. the Recognition API, which returns text, selections, coordinates, or recognition-specific outputs.
-
-Per-capability credit cost, authentication exposure, redaction, required fields, and result type must be recorded separately. Browser-extension marketing is not automatically a server API capability.
+NopeCHA remains two distinct surfaces: Token and Recognition. Current hCaptcha documentation adds a meaningful same-network/proxy concern for Enterprise and excludes at least one box-drawing interaction shape. Current official pages also disagree on hCaptcha-token credit cost, making cost confidence independent from request/result validity.
 
 ** 2Captcha
 
-2Captcha exposes a broad asynchronous task catalog. The adapter must use family-specific request mappers, result validators, typed results, and human-worker disclosure classification. Current hCaptcha task uncertainty is capability-specific and cannot disable reCAPTCHA, Turnstile, Arkose, GeeTest, AWS WAF, image-to-text, coordinates, grids, rotate, draw-around, drag-and-drop, or other separately verified tasks.
+The current API v2 catalog is broad, but current official navigation/pricing do not advertise hCaptcha. Therefore hCaptcha is =unsupported= on current official evidence rather than merely “uncertain.” Current documentation describes AI-first solving with possible human fallback for difficult tasks, so worst-case human exposure must be modeled unless a capability proves automated-only. The separate managed Browser API is a distinct research boundary from ordinary =createTask/getTaskResult= tasks.
 
 ** Anti-Captcha
 
-Anti-Captcha documents multiple reCAPTCHA, Arkose, GeeTest, Turnstile, Friendly Captcha, Prosopo, AWS WAF, ALTCHA, image-to-text, coordinate, and custom AntiGate tasks. Lack of a current hCaptcha contract is one capability gap, not a global rejection. Human-worker execution and custom-task disclosure require explicit policy.
+Current task documentation covers multiple reCAPTCHA variants, Arkose/FunCaptcha, GeeTest, Turnstile, Friendly, Prosopo, AWS WAF, ALTCHA, image/coordinate, and programmable AntiGate tasks. hCaptcha is absent from the current task index. Worker-backed execution and AntiGate's programmable browser workflow create distinct disclosure classes; AntiGate cannot be a wildcard generic solver.
 
 ** CapSolver
 
-CapSolver documents selected reCAPTCHA, Turnstile, GeeTest, AWS WAF, Arkose, and related automated capabilities. Each task remains independent. Adapter selection must compare exact missing coverage, contract quality, cost, disclosure, fixture quality, and redundancy rather than provider name.
+The current exact support index lists token tasks for GeeTest, reCAPTCHA v2/v3, MTCaptcha, DataDome, AWS WAF, Cloudflare Turnstile/Challenge and recognition tasks including ImageToText, reCAPTCHA v2, AWS WAF, and VisionEngine. hCaptcha is absent. Arkose/FunCaptcha should not be inferred from broad marketing because the current exact support index does not list it. Current official CapSolver pages also conflict on advertised Turnstile pricing, so cost is drift-prone evidence.
 
 ** CapMonster Cloud
 
-CapMonster Cloud documents selected reCAPTCHA, Turnstile, Arkose, GeeTest, and related task families. As with CapSolver, the absence of a specific hCaptcha task does not invalidate unrelated capabilities. Runtime registration is limited to current fixture-backed tasks.
+The refreshed current catalog is much broader than the older snapshot: reCAPTCHA, GeeTest, Turnstile, Cloudflare Challenge/Waiting Room, DataDome, AWS WAF, Imperva, Prosopo, Friendly, MTCaptcha, ALTCHA, FunCaptcha, image/complex-image and several regional/vendor tasks. hCaptcha is absent. Cloudflare Challenge can return token or =cf_clearance= cookie; DataDome requires caller proxy context and returns cookies for browser application. Exact result binding is therefore mandatory.
 
 * Coverage Matrix
 
-This table is an audit summary, not a static runtime manifest.
+This is a research audit summary, not a runtime manifest.
 
-| Provider or actor | Capability summary | Current architecture state | Required next evidence |
-|-------------------+--------------------+----------------------------+------------------------|
-| NoneCap | Narrow hCaptcha standard/invisible/Enterprise surface | =experimental= until exact fixtures pass | Request/result fixtures and bounded owned-system canary |
-| NopeCHA Token API | Multi-issuer token results | capability-specific =experimental= | Per-family request/result fixtures and credit tests |
-| NopeCHA Recognition API | Text, image, selection, coordinate recognition | capability-specific =experimental= | Result-union fixtures and redaction tests |
-| 2Captcha | Broad human-assisted task catalog | mixed =experimental= and =invalidContract= by task | Family-specific contract fixtures; hCaptcha contradiction isolated |
-| Anti-Captcha | Broad human-assisted and custom task catalog | =experimental= adapter candidate | Exact task snapshots, disclosure review, fixture suite |
-| CapSolver | Selected automated token and challenge tasks | =experimental= adapter candidate | Exact task snapshot, cost and redundancy analysis |
-| CapMonster Cloud | Selected automated task catalog | =experimental= adapter candidate | Exact task snapshot, fixture and drift tests |
-| Local browser actor | Browser/session-bound execution | design candidate | Source-runtime contract and owned fixtures |
-| Local recognition actors | Text, image, audio, coordinate, and selection outputs | design candidate | Model-specific fixtures and confidence policy |
-| Manual operator actor | Unknown and unusual authorized challenges | design candidate | Queue, disclosure, retention, and timeout policy |
+| Provider/actor | Capability summary | Current research state | Required next evidence |
+|----------------+--------------------+------------------------+------------------------|
+| NoneCap | narrow hCaptcha standard/invisible/Enterprise | capability-specific =experimental= pending fixtures | request/result/context fixtures and bounded owned-system canary |
+| NopeCHA Token | multi-issuer token results | capability-specific =experimental= | per-family fixtures, network binding, cost contradiction resolution |
+| NopeCHA Recognition | text/image/selection/coordinate | capability-specific =experimental= | typed-result/redaction fixtures |
+| 2Captcha | broad task catalog; hCaptcha absent | hCaptcha =unsupported=; other rows capability-specific | family fixtures, pacing, human-exposure and billing evidence |
+| Anti-Captcha | broad worker-backed + programmable custom tasks | adapter candidate by exact row | worker disclosure and AntiGate separation |
+| CapSolver | selected automated token/recognition tasks | adapter candidate by exact row | exact fixtures and pricing-confidence reconciliation |
+| CapMonster Cloud | broad automated WAF/token/cookie/puzzle catalog | adapter candidate by exact row | token/cookie/proxy/context fixtures |
+| local browser | session/context-bound execution | design candidate | source-runtime contract and owned fixtures |
+| local recognition | typed text/image/audio outputs | design candidate | model-specific fixtures/confidence policy |
+| manual operator | unknown/unusual authorized challenges | design candidate | queue/disclosure/retention/timeout policy |
 
 * Capability Model UML
 
@@ -266,25 +262,21 @@ This table is an audit summary, not a static runtime manifest.
 @startuml
 class ChallengeDescriptor {
   issuer
-  challengeFamily
-  challengeVariant
+  family
+  variant
   integrationVersion
   requiredFields
   requiredResultKind
-  sourceSessionBinding
-  networkBinding
-  disclosureClass
+  requiredResultBinding
+  sourceContextRequirements
 }
 
 class SolverCapability {
   actorId
   providerId
-  issuerPredicate
-  familyPredicate
-  variantPredicate
-  integrationVersionPredicate
-  requiredFields
+  exactPredicates
   resultKind
+  resultBinding
   executionClass
   disclosureClass
   contractState
@@ -293,10 +285,9 @@ class SolverCapability {
 class ProviderContract {
   officialSource
   retrievalDate
-  adapterVersion
   fixtureFingerprint
-  costModel
-  concurrency
+  costConfidence
+  pacingAndConcurrency
   errorContract
 }
 
@@ -306,109 +297,82 @@ class DownstreamVerification {
   verifiedAt
 }
 
-ChallengeDescriptor "1" --> "0..*" SolverCapability : exact hard match
+ChallengeDescriptor "1" --> "0..*" SolverCapability : exact eligibility
 SolverCapability "1..*" --> "1" ProviderContract : supported by
 SolverCapability --> DownstreamVerification : acceptance telemetry
 @enduml
 #+end_src
 
-* Routing Activity UML
-
-#+begin_src plantuml
-@startuml
-start
-:Receive authenticated normalized request;
-if (captcha:solve and target policy pass?) then (yes)
-  if (purpose and disclosure class pass?) then (yes)
-    :Hard-match issuer, family, variant, version,
-required fields, result kind, session, network,
-mobile, execution, disclosure, and contract state;
-    if (Eligible actors exist?) then (yes)
-      :Reserve budget before external work;
-      :Journal attempt before submission;
-      :Rank by operator pin, confidence, fixture freshness,
-context fidelity, exact acceptance, health,
-concurrency, deadline, accepted-result cost,
-and operator preference;
-      :Submit one attempt unless speculative policy is separate and explicit;
-      :Return opaque result reference;
-      :Await downstream verification;
-    else (no)
-      :Return unsupportedChallenge or sourceContextRequired;
-    endif
-  else (no)
-    :Return disclosureDenied;
-  endif
-else (no)
-  :Return policyDenied without provider disclosure;
-endif
-stop
-@enduml
-#+end_src
+This diagram expresses the approved research model only; class names and implementation interfaces remain unapproved design details.
 
 * Detection Research Contract
 
-Every detector registry entry must declare:
+Every detector registry entry should ultimately declare evidence for:
 
-- detector ID;
-- version;
-- issuer;
-- family;
-- variant;
-- integration version;
+- detector ID/version;
+- issuer/family/variant/integration version;
 - required observations;
-- positive signatures;
-- negative signatures;
+- positive and negative signatures;
 - extracted fields;
 - confidence computation;
 - collision cases;
-- fixture set;
-- retrieval date;
-- state: =verified=, =experimental=, or =disabled=.
+- fixture set/retrieval date;
+- state =verified=, =experimental=, or =disabled=.
 
-Detection signatures drift independently from provider contracts. A detector retains rejected candidates and reasons, selects only the challenge blocking the current source action, and requests missing evidence from the source actor rather than scraping outside the source-runtime boundary.
+Detection signatures drift independently from provider contracts. Exact detector interfaces remain a design question.
 
-* Security and Operational Boundaries
+* Security and Operational Research Boundaries
 
-- Authenticate every requester and verify =captcha:solve=.
-- Verify target policy, purpose, disclosure class, provider allowlist, source-session binding, and network binding before external work.
-- Reserve budgets and journal attempts before provider submission.
-- Treat duplicate RabbitMQ deliveries idempotently.
-- On ambiguous create, recover a provider job or stop for review; never blindly resubmit a paid task.
-- Support cancellation, deadlines, capability-local drift, controlled fallback, and explicit speculative execution policy.
-- Drain or cancel active work during shutdown.
-- Expose no raw public solve endpoint.
-- Record only redacted cost and outcome metadata.
-- Keep live probes opt-in, credential-gated, cost-bounded, capability-specific, and restricted to operator-owned or explicitly authorized systems.
-- Continuous integration never invokes a paid provider.
+Research requires future designs to account for:
+
+- requester authorization and target policy before external disclosure;
+- purpose and provider/solver allowlists;
+- session/network/proxy/cookie/user-agent/mobile bindings;
+- worst-case human exposure;
+- managed-browser/custom-browser disclosure as separate from token APIs;
+- budget reservation before potentially billable work;
+- duplicate-delivery idempotency and ambiguous-create safety;
+- cancellation/deadline/shutdown behavior;
+- capability-local contract drift;
+- request pacing and account blocking/rate limiting;
+- no raw public “solve arbitrary URL” relay;
+- redacted cost/outcome telemetry;
+- opt-in, credential-gated, cost-bounded canaries on operator-owned or explicitly authorized systems only;
+- no paid providers in continuous integration.
+
+The exact mechanisms remain unapproved designs.
 
 * Research Gaps
 
-- Arkose and DataDome expose some integration detail only through account-gated or product-oriented material; exact detector and adapter fixtures remain unresolved.
-- Tencent and some regional provider contracts need a dedicated primary-source pass.
-- Current CapSolver and CapMonster task snapshots need capability-by-capability fixture capture.
-- 2Captcha hCaptcha documentation contradictions need a bounded contract probe without widening unrelated task states.
-- Mobile-native challenges need application-specific source-runtime contracts.
-- Unknown and custom challenges require fixture-driven schema registration as encountered.
+- Capture current exact fixtures for high-value CapSolver rows and reconcile contradictory official pricing evidence.
+- Capture CapMonster Cloud token-vs-cookie Cloudflare Challenge and DataDome proxy/cookie fixtures.
+- Separate Anti-Captcha ordinary worker tasks from AntiGate programmable-browser workflows.
+- Measure provider retention/cancellation semantics by exact task.
+- Build the StarIntel observed challenge-frequency matrix before optimizing provider breadth.
+- Keep 2Captcha hCaptcha =unsupported= unless current provider-supported contract evidence appears; an old SDK symbol is insufficient.
+- Mobile-native and account-gated challenge families need dedicated source-runtime research when encountered.
+- Unknown/custom challenges remain schema-on-evidence, not wildcard provider tasks.
 
 * Sources
 
-All sources retrieved 2026-08-06 unless otherwise stated.
+Primary sources refreshed through 2026-08-09.
 
 - [[https://developers.google.com/recaptcha/intro][Google reCAPTCHA overview]].
-- [[https://cloud.google.com/recaptcha/docs/reference/rpc/google.cloud.recaptchaenterprise.v1][Google reCAPTCHA Enterprise integration types]].
-- [[https://docs.hcaptcha.com/invisible/][hCaptcha invisible and passive modes]].
+- [[https://cloud.google.com/recaptcha/docs/reference/rpc/google.cloud.recaptchaenterprise.v1][reCAPTCHA Enterprise integration types]].
+- [[https://docs.hcaptcha.com/invisible/][hCaptcha invisible/passive modes]].
 - [[https://developers.cloudflare.com/turnstile/concepts/widget/][Cloudflare Turnstile widget modes]].
-- [[https://developers.cloudflare.com/cloudflare-challenges/challenge-types/turnstile/][Cloudflare Turnstile and Challenge Platform distinction]].
-- [[https://docs.aws.amazon.com/waf/latest/developerguide/waf-captcha-and-challenge-actions.html][AWS WAF CAPTCHA and Challenge actions]].
+- [[https://developers.cloudflare.com/cloudflare-challenges/challenge-types/turnstile/][Turnstile and Challenge Platform distinction]].
+- [[https://docs.aws.amazon.com/waf/latest/developerguide/waf-captcha-and-challenge-actions.html][AWS WAF CAPTCHA/Challenge]].
 - [[https://nonecap.com/api-reference/][NoneCap API reference]].
 - [[https://developers.nopecha.com/captcha/][NopeCHA supported CAPTCHA catalog]].
 - [[https://developers.nopecha.com/token/][NopeCHA Token API]].
 - [[https://developers.nopecha.com/recognition/][NopeCHA Recognition API]].
-- [[https://2captcha.com/api-docs][2Captcha API task catalog]].
+- [[https://2captcha.com/api-docs][2Captcha API v2 task catalog]].
 - [[https://anti-captcha.com/apidoc][Anti-Captcha task catalog]].
-- [[https://docs.capsolver.com/en/guide/captcha/][CapSolver CAPTCHA guide]].
-- [[https://docs.capmonster.cloud/docs/captchas/][CapMonster Cloud CAPTCHA task documentation]].
+- [[https://docs.capsolver.com/en/guide/support/][CapSolver supported task types]].
+- [[https://docs.capmonster.cloud/docs/captchas/][CapMonster Cloud task catalog]].
+- [[https://docs.capmonster.cloud/docs/captchas/turnstile-challenge-task/][CapMonster Cloud Cloudflare Challenge]].
+- [[https://docs.capmonster.cloud/docs/captchas/datadome/][CapMonster Cloud DataDome]].
 
 * Related Nodes
 
@@ -418,19 +382,23 @@ All sources retrieved 2026-08-06 unless otherwise stated.
 - [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001 NoneCap hCaptcha Provider]].
 - [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA Provider]].
 - [[id:star-pro-research-003-2captcha-hcaptcha-provider][STAR-PRO-RESEARCH-003 2Captcha Provider]].
+- [[id:star-pro-research-004-hcaptcha-provider-gap-audit][STAR-PRO-RESEARCH-004 Multi-Provider Gap Audit]].
+- [[id:star-pro-research-005-hcaptcha-provider-selection][STAR-PRO-RESEARCH-005 Capability-Based Selection]].
 
 * Footnotes and Glossary
 
-[fn:captcha] CAPTCHA: Completely Automated Public Turing test to tell Computers and Humans Apart; this document also covers adjacent browser, device, behavioral, proof-of-work, and Web Application Firewall challenge mechanisms.
+[fn:captcha] CAPTCHA: Completely Automated Public Turing test to tell Computers and Humans Apart; this research also covers adjacent browser, device, behavioral, proof-of-work, and WAF challenge mechanisms.
 
-- *Capability widening* — Treating support for one issuer, variant, integration version, result kind, or context as support for another without evidence.
-- *Contract drift* — A provider request, response, error, billing, or lifecycle contract changing after an adapter or fixture was created.
-- *Downstream verification* — Source-runtime evidence showing whether the target accepted, rejected, expired, or replaced an applied result.
-- *Opaque result reference* — A short-lived identifier that authorizes one bounded read from an ephemeral secret store without putting the result in a document or actor message.
-- *Source runtime* — The browser, HTTP, mobile, or first-party process that owns the target interaction and must apply and verify the result in its own context.
+- *Capability widening* — Treating evidence for one issuer/variant/result/context as evidence for another without proof.
+- *Contract drift* — Provider request/result/error/billing/lifecycle behavior changing after a fixture was captured.
+- *Downstream verification* — Source-runtime evidence that the target accepted, rejected, expired, replaced, or could not determine an applied result.
+- *Result binding* — Session/network/proxy/user-agent/app/challenge context required for a returned result to work.
+- *Cost confidence* — Confidence that current billing evidence matches an advertised/configured cost.
+- *Source runtime* — Browser, HTTP, mobile, or first-party process that owns target interaction and must apply/verify the result in its own context.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-06 | Replaced the hCaptcha-centric provider model with the complete open-world challenge taxonomy, typed result union, exact capability states, provider-record schema, provider-specific corrections, routing constraints, and current primary sources | repository audit agent | Official sources listed above and PR source diff |
+| 2026-08-09 | Research basis approved by project owner; refreshed provider landscape; added result binding, cost confidence, managed-browser and worst-case disclosure classes; changed 2Captcha hCaptcha to unsupported on current evidence; removed stale CapSolver Arkose inference; expanded CapMonster Cloud exact coverage; preserved all design/security/operations/implementation approvals as pending | project owner + research agent | User approval and refreshed primary provider documentation |
+| 2026-08-06 | Replaced hCaptcha-centric provider model with open-world challenge taxonomy, typed results, exact capability states, provider-record research, routing constraints, and primary-source evidence | repository audit agent | Official sources and PR source diff |

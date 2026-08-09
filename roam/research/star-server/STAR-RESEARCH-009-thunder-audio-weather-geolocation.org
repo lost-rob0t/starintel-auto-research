@@ -2,140 +2,318 @@
 :ID:       star-research-009-thunder-audio-weather-geolocation
 :END:
 #+title: STAR-RESEARCH-009 Thunder Audio and Weather-Correlation Geolocation
-#+description: Research seed for target-driven analysis of a public video using thunder audio, transcript context, weather and lightning records, and explicit uncertainty to test whether location or recording time can be constrained.
+#+description: Transcript-grounded Auto Research seed for reproducing and stress-testing thunder-audio geolocation against timestamped lightning observations, with the YouTube URL as target and the supplied SRT as an attachment.
 #+status: RESEARCHING
-#+filetags: :starintel:research:star-server:auto-research:osint:audio:geolocation:weather:lightning:youtube:targets:attachments:
+#+filetags: :starintel:research:star-server:auto-research:osint:audio:geolocation:weather:lightning:youtube:targets:attachments:signal-processing:
 #+created: [2026-08-09 Sun]
 #+last_modified: [2026-08-09 Sun]
 
-* Research Seed
+* Research Target
 
-Target the public YouTube video identified by =SnbkIm56TfI=:
+The execution target is the public YouTube source:
 
 - https://www.youtube.com/watch?v=SnbkIm56TfI
 
-The first research pass must determine what the video actually demonstrates, recover available captions or transcript material, identify any explicit assumptions made by the presenter, and then test the underlying method independently.
+This is no longer an idea-only seed. The operator supplied the English SRT transcript and instructed Auto Research to use it as an attachment to the target-driven run.
 
-Do not treat the video title, transcript, captions, upload metadata, claimed location, or claimed precision as verified until they are captured and checked.
+* Captured Attachment
 
-* Target-Driven Execution Invariant
+| Field | Value |
+|-------+-------|
+| attachment name | =SnbkIm56TfI.en.srt= |
+| media type | =application/x-subrip= |
+| byte size | =79028= |
+| SHA-256 | =f5a619f8964ace97d8a3837311fba4535c57a8c11adcb13dd2875de523973ad9= |
+| role | source transcript / input evidence |
+| target | =https://www.youtube.com/watch?v=SnbkIm56TfI= |
+| trigger | target execution, not attachment creation |
 
-The actor runs from a StarIntel =target= document. Attachments are inputs supplied to that run; they are not independent run triggers.
+The raw transcript remains an attachment to the research run rather than being duplicated into this public Org node. This note records the portions necessary to reproduce the research plan and ties them to the attachment digest.
+
+* Target-Driven Execution Contract
+
+StarIntel actors run from =target= documents. The attachment enriches the target context; it is not itself a second target.
+
+The maintained target contract requires =actor=, =target=, =delay=, =recurring=, and =options= plus ordinary document metadata. The runtime must use the schema constructor and a registered actor or declared Rabbit route rather than hand-building a target identifier.
 
 For this seed:
 
-- *target value*: =https://www.youtube.com/watch?v=SnbkIm56TfI=
-- *target purpose*: investigate whether thunder or related storm audio in a public recording can constrain recording location or time through correlation with public weather and lightning observations
-- *optional attachments*: downloaded transcript or captions, audio-only extraction, yt-dlp metadata JSON, selected spectrograms, manually supplied notes, and later source artifacts
-- *trigger rule*: creation or explicit execution of the target starts the research actor
-- *attachment rule*: adding an attachment enriches target context but must not itself be treated as a separate target unless the operator explicitly creates one
+- =target= is the YouTube URL above;
+- the supplied SRT is a local input artifact identified by its digest;
+- future WAV, metadata JSON, spectrograms, strike captures, and result tables are additional attachments;
+- the research actor name is intentionally not fabricated here: execution must resolve a real registered Auto Research actor/capability route before submission;
+- the Auto Research input packet must reference the transcript artifact and preserve its SHA-256.
 
-This preserves the existing StarIntel direction in which target documents are explicit actor inputs while attachments remain evidence or context.
+The current deep-research adapter design already has an =input-packet= and =local-artifact-ids= boundary. The target-triggered adapter should feed this attachment through that boundary and require claims, supporting evidence, contrary evidence, and unanswered questions in the result.
 
-* Acquisition Commands
+* Transcript-Derived Experiment
 
-First inspect which subtitle tracks YouTube exposes:
+The transcript describes a concrete blind geolocation experiment.
 
-#+begin_src sh
-yt-dlp --list-subs 'https://www.youtube.com/watch?v=SnbkIm56TfI'
+** Inputs
+
+1. a recording containing a sequence of thunder events;
+2. lightning observations containing strike position and strike time;
+3. a search region and time window, possibly as broad as the whole Earth for one known day;
+4. no location supplied to the scoring pipeline during the blind test.
+
+The presenter first had difficulty finding footage with both known location and reliable recording date, then switched to geolocatable live bird-feeder cameras because they consistently carried audio. A lightning event near one of those cameras triggered recording, producing paired audio and strike data for later blind evaluation.
+
+** Lightning acquisition described by the transcript
+
+The historical map exposed static image tiles, making OCR/reconstruction incomplete when strike markers overlapped. The presenter therefore inspected the live page, found a WebSocket, and observed per-strike messages containing latitude, longitude, time, and additional fields. A Python client emulated the browser connection and logged events continuously on a small AWS host.
+
+The auto-captioned source name near the end of the video is rendered as “Blitzer tongue.” The behavior described by the transcript strongly matches Blitzortung.org / LightningMaps.org: Blitzortung's public forum documents a real-time WebSocket stream and fields including timing-deviation information, and describes the network as primarily oriented toward cloud-to-ground ground-point location. Treat the source identification as a high-confidence inference until video metadata or visible page text confirms the exact site.
+
+** Modeled arrival time
+
+For every candidate observer location and lightning event, the experiment predicts when thunder should arrive.
+
+The video uses:
+
+- a constant sound speed of =343 m/s=;
+- slant range rather than horizontal range;
+- an assumed acoustic source height of about =2 km= for cloud-to-ground strikes;
+- no explicit wind or atmospheric correction in the proof of concept.
+
+The source-height assumption is a research variable, not a validated constant. A lightning channel is spatially extended, and real thunder arrival structure depends on channel geometry, atmosphere, terrain, and propagation. Auto Research must test sensitivity to source height rather than inherit =2 km= as fact.
+
+** Modeled amplitude
+
+The proof of concept uses distance-based inverse-square decay for relative loudness and caps the close-range value to approximate microphone clipping. Because YouTube audio does not provide calibrated absolute sound pressure level, scoring uses relative amplitude rather than absolute decibels.
+
+This is deliberately a crude forward model. Research must test whether timing carries most of the discriminative signal and whether the amplitude model improves ranking after microphone gain control, compression, attenuation, directionality, buildings, and terrain are considered.
+
+** Observed thunder signal
+
+The transcript says the observed audio is transformed into a one-dimensional thunder-energy curve by:
+
+1. band-pass filtering approximately =20–250 Hz=;
+2. measuring root-mean-square energy over time;
+3. normalizing within the candidate clip/window relative to the loudest observed event;
+4. smoothing the curve to tolerate modest timing-grid mismatch.
+
+The frequency band is physically plausible but must not be treated as universal. Few et al. reported a broad maximum near 200 Hz with zero-crossing peaks around 180–260 Hz in one classic data set, while Holmes et al. found peak power from below 4 Hz to 125 Hz across forty intracloud and cloud-to-ground events, with mean peaks around 28 Hz for intracloud and 50 Hz for cloud-to-ground thunder. The research branch must therefore sweep filter bands instead of assuming 20–250 Hz is globally optimal.
+
+** Unknown-time search
+
+When exact recording time is withheld, every candidate location receives a time sweep. The transcript's proof of concept uses approximately five-second increments over the day. At every offset it compares the normalized observed curve with the normalized modeled curve for the same clip window.
+
+This window-local normalization is important: the model must not normalize against lightning before or after the recording because the observed clip cannot contain those events.
+
+** Similarity and acceleration
+
+The presenter uses cosine similarity between the modeled and observed energy curves. Smoothing makes the score less brittle when the discrete time step or spatial grid misses exact alignment. The transcript then describes Fast Fourier Transform acceleration for evaluating similarity across many time offsets.
+
+The initial global run described in the transcript uses:
+
+- known date: July 2;
+- unknown time;
+- unknown location;
+- roughly 30 minutes of audio;
+- roughly fifteen audible events;
+- a coarse =5 km= global grid;
+- a prefilter requiring at least ten candidate strikes in a 30-minute window;
+- a land-only filter for that test;
+- about 90,000 surviving spatial points;
+- about five-second time increments;
+- roughly 700 million candidate checks by the presenter's approximation.
+
+* Transcript-Derived Claimed Results
+
+These are source claims to reproduce, not accepted StarIntel findings.
+
+1. The real Central Florida region reportedly separated strongly from unrelated global candidates.
+2. A coarse global pass reportedly recovered the correct city from about thirty minutes of thunder audio.
+3. A second, finer spatial and temporal pass reportedly reduced the result to likely neighborhoods.
+4. The presenter reports that the single best-scoring point was within =5 km= of the real camera location while deliberately withholding that location from viewers.
+5. A longer-horizon test reportedly searched about three weeks when the general area was known but the exact day was not, with similar qualitative results.
+6. The presenter says free data had roughly =1–5 km= event-location uncertainty and was mainly useful for cloud-to-ground events with good separation.
+7. The presenter claims commercial data can improve event location toward roughly =100 m=, potentially allowing denser storms and shorter clips.
+
+The final commercial-data claim needs geographic qualification. Vaisala states that the U.S. National Lightning Detection Network has median location accuracy better than 100 m in the continental United States. Vaisala's global GLD360 product instead reports about 1 km median location accuracy. “Paid data gives 100 m globally” is therefore not supported.
+
+* Independent Source Check
+
+| Transcript statement or assumption | Current source check | Auto Research disposition |
+|------------------------------------+----------------------+---------------------------|
+| live lightning page exposes a WebSocket | Blitzortung forum documents a real-time WebSocket stream for own-purpose use | VERIFIED as a Blitzortung capability; still confirm exact video source |
+| feed carries uncertainty-like fields | Blitzortung forum documents =mds= maximal deviation span and =mcg= maximal circular gap, with map deviation circles | VERIFIED field semantics at forum-documentation level |
+| free source is mainly cloud-to-ground | Blitzortung forum says the locator seeks ground points and is not presently oriented to intracloud analysis | VERIFIED as network orientation, not perfect event classification |
+| thunder energy in 20–250 Hz is useful | classic literature shows strong thunder energy in this neighborhood, but reported peaks vary substantially by event type and study | PLAUSIBLE; parameter sweep required |
+| fixed 2 km acoustic source height | no source in this pass validates a universal 2 km source height | UNVERIFIED simplifying assumption |
+| fixed 343 m/s sound speed | standard near-room-temperature approximation; atmosphere changes effective propagation | BASELINE parameter, not exact model |
+| inverse-square loudness is sufficient | geometric spreading is only one component of received amplitude | UNVERIFIED as a ranking model |
+| free data error is generally 1–5 km | Blitzortung exposes per-event deviation/error indicators, but this pass did not find an authoritative universal 1–5 km guarantee | UNVERIFIED; calibrate empirically per region/event |
+| commercial lightning can approach 100 m | Vaisala NLDN says better than 100 m inside the U.S. network | VERIFIED for NLDN/CONUS |
+| commercial global lightning is about 100 m | Vaisala GLD360 reports about 1 km median location accuracy globally | CONTRADICTED as a global generalization |
+| thirty minutes can locate within about 5 km | demonstrated only by the video's withheld-ground-truth experiment | REPRODUCTION REQUIRED |
+
+* Actual Auto Research Branches
+
+The target should fan out into bounded evidence-producing branches instead of one generic “research thunder” prompt.
+
+** Branch A — Source and lightning-feed contract
+
+- identify the exact lightning service shown in the video;
+- document WebSocket endpoint discovery, message fields, timestamp units, coordinate fields, event type, quality/deviation fields, connection requirements, retention and permitted use;
+- distinguish Blitzortung live-stream behavior from LightningMaps presentation behavior;
+- determine what historical replay is available without scraping rendered image tiles;
+- preserve raw event messages and schema samples as attachments.
+
+** Branch B — Acoustic forward model
+
+Compare progressively richer models:
+
+1. horizontal distance + constant sound speed;
+2. slant distance with source-height sweep;
+3. extended lightning-channel geometry;
+4. temperature/humidity/wind-adjusted effective sound speed;
+5. optional terrain/building attenuation and propagation effects.
+
+Measure whether added physics improves blind location rank enough to justify complexity.
+
+** Branch C — Thunder detector and signal representation
+
+Evaluate:
+
+- =20–250 Hz= RMS envelope baseline;
+- alternate low-frequency bands suggested by the literature;
+- multiband envelopes rather than one band;
+- event/onset detection;
+- robust wind rejection;
+- microphone clipping and automatic-gain-control detection;
+- spectrogram embeddings only as a later comparison, not as a replacement for the transparent baseline.
+
+** Branch D — Search and scorer
+
+Reproduce:
+
+- spatial grid generation;
+- candidate-strike density prefilter;
+- unknown-time sweep;
+- within-window normalization;
+- smoothing;
+- cosine similarity;
+- FFT/cross-correlation acceleration;
+- coarse-to-fine spatial refinement around top candidates.
+
+The implementation must record the complete score distribution, not only the winning point.
+
+** Branch E — Statistical validity and false positives
+
+Measure:
+
+- rank of ground truth;
+- distance from top-1 candidate to ground truth;
+- top-k radius and candidate count;
+- margin between the correct region and best wrong region;
+- score calibration under wrong-day and wrong-region controls;
+- false-match rate produced by isolated large peaks;
+- sensitivity to strike-location jitter, missing events, false detections, source-height error, filter band, time step, smoothing width, and clip duration.
+
+** Branch F — Blind reproduction
+
+Build a validation corpus from public cameras or operator-controlled recordings where ground truth is retained by the evaluator but hidden from the scoring branch.
+
+Minimum fixtures:
+
+- A: known-location, known-day sheltered microphone, location hidden from scorer;
+- B: same observed clip scored against intentionally wrong regions;
+- C: correct region with intentionally wrong days;
+- D: wind or other low-frequency noise without thunder;
+- E: dense storm dominated by intracloud activity, expected to stress free CG-oriented lightning data;
+- F: clipped/compressed microphone audio;
+- G: shortened clips at 20, 10, and 5 minutes where sufficient events exist.
+
+A single successful replay is not enough. The result must report distributions across fixtures.
+
+* Reproduction Gate
+
+The video's headline result is promoted from source claim to StarIntel finding only if a blind reproduction satisfies all of the following:
+
+1. scorer receives no ground-truth coordinates;
+2. target date/time priors are recorded before execution;
+3. lightning data are preserved with source and quality fields;
+4. ground truth lands within the declared top-k confidence region;
+5. for the claimed =5 km= result, the top candidate is within 5 km in at least one faithful reproduction and the result is not selected after tuning on that same fixture;
+6. negative controls produce materially lower confidence or explicit ambiguity;
+7. parameter choices are frozen before final evaluation or evaluated on a separate holdout set;
+8. score margin and candidate-set size are reported, not only top-1 distance;
+9. failures remain failures and are retained as evidence.
+
+* Seed Input Packet
+
+The target-triggered Auto Research run should construct an immutable packet equivalent to:
+
+#+begin_src lisp
+(:research-seed
+ (:id "thunder-audio-geolocation-SnbkIm56TfI-v1")
+ (:target "https://www.youtube.com/watch?v=SnbkIm56TfI")
+ (:question "Can the thunder/lightning correlation method described by the attached transcript be independently reproduced, calibrated, and bounded well enough to geolocate an unknown recording?")
+ (:attachments
+  ((:name "SnbkIm56TfI.en.srt"
+    :sha256 "f5a619f8964ace97d8a3837311fba4535c57a8c11adcb13dd2875de523973ad9"
+    :role :source-transcript)))
+ (:branches (:source-contract :acoustic-model :signal-extractor
+             :search-scorer :false-positive-evaluation :blind-reproduction))
+ (:required-output (:claims :evidence :contrary-evidence :unanswered-questions
+                    :artifacts :metrics)))
 #+end_src
 
-Download manual captions when present and automatic captions otherwise, without downloading the video, and normalize them to SRT:
+This is the research packet carried by a real target execution. It does not invent a runtime actor registration or bypass the maintained target constructor.
 
-#+begin_src sh
-yt-dlp \
-  --skip-download \
-  --write-subs \
-  --write-auto-subs \
-  --sub-langs 'en.*,en' \
-  --sub-format 'vtt/best' \
-  --convert-subs srt \
-  -o '%(id)s.%(ext)s' \
-  'https://www.youtube.com/watch?v=SnbkIm56TfI'
-#+end_src
+* Expected Research Artifacts
 
-Capture metadata alongside the research attachment set:
+The run should attach, hash, and retain:
 
-#+begin_src sh
-yt-dlp \
-  --skip-download \
-  --write-info-json \
-  --write-description \
-  -o '%(id)s.%(ext)s' \
-  'https://www.youtube.com/watch?v=SnbkIm56TfI'
-#+end_src
+- original SRT attachment;
+- yt-dlp metadata JSON;
+- extracted WAV used for signal analysis;
+- exact audio preprocessing configuration;
+- timestamped RMS or multiband feature vectors;
+- lightning event slices with original quality fields;
+- source schema/protocol notes;
+- candidate grid definition;
+- score arrays and top-k candidate tables;
+- negative-control score arrays;
+- parameter sweep results;
+- blind-evaluation ground truth revealed only after scoring;
+- final claims, contradictions, and unresolved questions.
 
-If the target requires acoustic analysis, acquire audio as a separate attachment while preserving the original media URL as the target:
+* Immediate Research Questions
 
-#+begin_src sh
-yt-dlp \
-  -x \
-  --audio-format wav \
-  -o '%(id)s.%(ext)s' \
-  'https://www.youtube.com/watch?v=SnbkIm56TfI'
-#+end_src
+1. Is the transcript's unnamed lightning service definitely Blitzortung/LightningMaps?
+2. What exact WebSocket message schema and timestamp precision are exposed today?
+3. How should =mds=, =mcg=, station count, and any other quality fields become probabilistic spatial uncertainty instead of a fixed 1–5 km error constant?
+4. Does a 20–250 Hz RMS envelope outperform narrower, wider, and multiband representations on holdout recordings?
+5. How much ranking accuracy comes from event timing versus relative amplitude?
+6. Does a fixed =2 km= source height improve or degrade arrival-time prediction compared with an optimized or channel-aware model?
+7. What clip length and number of distinct thunder events are needed for stable separation?
+8. How often does a global time sweep generate a high accidental cosine match from unrelated storms?
+9. How does free Blitzortung performance vary by station density and region?
+10. What is the empirical gain from NLDN-grade or other higher-accuracy data when evaluated without changing the scoring target after seeing ground truth?
+11. Can coarse-to-fine search reduce compute without changing top-k recall?
+12. What confidence model converts raw similarity scores into an honest region rather than a falsely precise point?
 
-* Research Questions
+* Source Links
 
-1. What exact geolocation or timestamping method does the video claim or demonstrate?
-2. Which observations are extracted from the audio: thunder onset times, repeated thunder events, rain intensity, wind, sirens, aircraft, speech, or other environmental cues?
-3. Can thunder events be matched to independently recorded lightning strikes or storm-cell observations with enough temporal resolution to reduce the candidate area?
-4. What timing uncertainty is introduced by unknown upload delay, editing, cuts, variable playback speed, microphone latency, encoding, and absent recording timestamps?
-5. How does the speed-of-sound delay between lightning and thunder affect the inference model?
-6. What public weather, radar, lightning, and storm-report archives provide sufficient historical resolution for independent verification?
-7. How many candidate storms or geographic regions remain after each constraint is applied?
-8. What false-positive rate appears when the same method is tested against negative-control recordings from other storms?
-9. What confidence language is justified: exact location, bounded region, time window, compatible-with, or unresolved?
-10. Which evidence must be preserved so another analyst can replay the conclusion without trusting the actor's prose?
+Retrieved or rechecked 2026-08-09.
 
-* Initial Hypothesis
-
-Thunder audio can potentially act as a temporal and environmental signal, but a single thunder event is unlikely to identify a unique location by itself. The useful research question is whether multiple timed storm observations, recording metadata, visible context, and independent weather or lightning records combine to reduce the candidate set reproducibly.
-
-This is a hypothesis for testing, not a finding.
-
-* Evidence Model
-
-Each research run should preserve:
-
-- the target document and stable target ID
-- source URL and retrieval timestamp
-- yt-dlp metadata JSON
-- exact subtitle or transcript artifact and subtitle track identity
-- hashes of downloaded attachments
-- audio extraction parameters
-- timestamps for each candidate acoustic event
-- any preprocessing or filtering parameters
-- public weather or lightning source identifiers and retrieval timestamps
-- candidate locations or regions before and after each constraint
-- rejected candidates and rejection reasons
-- confidence and unresolved ambiguity
-- actor version, model version when applicable, and complete provenance chain
-
-Derived spectrograms or clipped audio remain attachments derived from the target source and should point back to the original target and source artifact.
-
-* Evaluation Criteria
-
-A successful research pass must do more than produce a plausible map point.
-
-It should:
-
-1. reproduce the video's method from captured evidence rather than description alone
-2. identify all external datasets required by the method
-3. run at least one positive case when enough source data exists
-4. run negative controls or ambiguity tests
-5. quantify timing and spatial uncertainty
-6. keep target, attachments, derived artifacts, and conclusions separately addressable
-7. emit no precise-location claim when multiple candidates remain compatible with the evidence
-
-* Scope Boundary
-
-This node researches forensic analysis of publicly available media and general geolocation methodology. It does not authorize covert tracking of a private person, access-controlled data acquisition, or conversion of an ambiguous environmental signal into a precise personal-location claim without independent evidence.
+- [[https://www.youtube.com/watch?v=SnbkIm56TfI][Operator-supplied YouTube target]]
+- operator-supplied attachment =SnbkIm56TfI.en.srt=, SHA-256 recorded above
+- [[https://forum.blitzortung.org/showthread.php?tid=1450][Blitzortung forum: real-time WebSocket and deviation fields]]
+- [[https://forum.blitzortung.org/archive/index.php/thread-3981.html][Blitzortung forum: ground-point / cloud-to-ground orientation]]
+- [[https://agupubs.onlinelibrary.wiley.com/doi/10.1029/JZ072i024p06149][Few et al. 1967: dominant 200 Hz thunder peak]]
+- [[https://agupubs.onlinelibrary.wiley.com/doi/10.1029/JC076i009p02106][Holmes et al. 1971: thunder power spectrum and CG/IC differences]]
+- [[https://www.vaisala.com/en/blog/2022-06/homeowner-lightning-claims-increase][Vaisala: NLDN better than 100 m median location accuracy]]
+- [[https://www.vaisala.com/en/blog/2025-02/vaisalas-global-lightning-dataset-gld360-now-accurate-one-kilometer][Vaisala: GLD360 about 1 km median global location accuracy]]
 
 * Related Nodes
 
 - [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
 - [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-002-deep-research-execution-adapters.org][STAR-RESEARCH-PIPELINE-002 Deep Research Execution Adapters]]
 - [[file:STAR-RESEARCH-001-osint-feature-landscape.org][STAR-RESEARCH-001 OSINT Feature Landscape]]
 - [[file:STAR-RESEARCH-002-awesome-osint-research-backlog.org][STAR-RESEARCH-002 Awesome OSINT Research Backlog]]
 
@@ -143,24 +321,30 @@ This node researches forensic analysis of publicly available media and general g
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research seed | StarIntel operator | PENDING | Confirm target-driven scope and research questions | This document and operator review |
-| Target semantics | StarIntel operator | PENDING | Confirm target is the run trigger and attachments are contextual inputs | Target-driven execution invariant above |
-| External-data methodology | Research reviewer | PENDING | Current primary-source review of weather and lightning archives | Future research pass |
-| Implementation | Repository maintainer | NOT STARTED | Approved actor design and passing implementation tests | Future design or implementation node |
-| Publication | StarIntel auto-research maintainer | PENDING | Main-branch publication workflow succeeds and page resolves | Future deployment result |
+| Transcript extraction | Research reviewer | PENDING | Verify method summary against supplied SRT | Attachment SHA-256 and transcript-derived sections above |
+| External-source verification | Research reviewer | PENDING | Recheck Blitzortung, thunder literature, NLDN, and GLD360 sources | Source Links and Independent Source Check |
+| Reproduction protocol | StarIntel operator | PENDING | Confirm blind fixtures, controls, and promotion gate | Branches and Reproduction Gate |
+| Runtime execution | Repository maintainer | NOT STARTED | Resolve a real registered Auto Research actor/capability route and submit target through maintained constructor | Target-Driven Execution Contract |
+| Publication | StarIntel auto-research maintainer | PENDING | Main-branch Pages workflow succeeds and page resolves | Future deployment result |
 
-No row implies that the proposed geolocation method has been validated.
+No approval row claims that the video's 5 km result has been independently reproduced.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-08-09 | Replaced the generic video seed with a transcript-grounded research packet: captured SRT digest, reconstructed the actual signal/model/search pipeline, separated source claims from verified external facts, added six bounded research branches, negative controls, and a blind reproduction gate. | OpenAI research agent under operator direction | Operator-supplied SRT plus cited primary/project sources |
 | 2026-08-09 | Seeded target-driven thunder-audio and weather-correlation geolocation research from the operator-supplied YouTube source; defined attachments as contextual inputs rather than actor triggers. | OpenAI research agent under operator direction | Operator-supplied source URL and current StarIntel target/attachment contracts |
 
 * Footnotes and Glossary
 
 - *Target* — A StarIntel document whose explicit creation or execution selects work for an actor.
 - *Attachment* — Original or derived evidence supplied to a target-driven run without becoming an independent run trigger by itself.
-- *Thunder delay* — The propagation delay between a lightning discharge and the later arrival of its acoustic thunder at the recorder.
-- *Negative control* — A comparison case expected not to match the hypothesized source, used to measure false positives and ambiguity.
-- *Candidate set* — The remaining locations, time windows, or storm events compatible with the evidence after applying current constraints.
+- *Root-mean-square (RMS) envelope* — A time series summarizing signal energy over successive audio windows.
+- *Slant range* — Three-dimensional source-to-observer distance rather than map-plane distance alone.
+- *Cosine similarity* — Normalized vector similarity used here to compare temporal energy patterns without rewarding raw overall magnitude alone.
+- *Fast Fourier Transform (FFT)* — An efficient discrete Fourier transform algorithm that can accelerate correlation-like calculations across many time offsets.
+- *Negative control* — A comparison case expected not to match the target, used to expose accidental high scores and overfitting.
+- *Holdout* — A fixture not used to choose parameters, reserved for evaluating whether the method generalizes.
+- *Candidate set* — Locations and time offsets still compatible with the current evidence.
+- *Ground truth* — Recorder location and time retained by the evaluator and hidden from the scoring branch until evaluation completes.

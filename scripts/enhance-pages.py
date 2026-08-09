@@ -33,14 +33,54 @@ def decode_source(fragment: str) -> str:
     return html.unescape(without_tags).strip() + "\n"
 
 
+def normalize_activity_multilines(source: str) -> str:
+    """Make multiline activity statements portable to older PlantUML."""
+    lines = source.splitlines()
+    normalized: list[str] = []
+    index = 0
+
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.lstrip()
+
+        if stripped.startswith("if (") and ") then (" not in line:
+            merged = line.rstrip()
+            while index + 1 < len(lines) and ") then (" not in merged:
+                index += 1
+                merged += " " + lines[index].strip()
+            normalized.append(merged)
+            index += 1
+            continue
+
+        if stripped.startswith(":") and not line.rstrip().endswith(";"):
+            merged = line.rstrip()
+            while index + 1 < len(lines) and not merged.rstrip().endswith(";"):
+                index += 1
+                merged += r"\n" + lines[index].strip()
+            normalized.append(merged)
+            index += 1
+            continue
+
+        normalized.append(line)
+        index += 1
+
+    return "\n".join(normalized) + ("\n" if source.endswith("\n") else "")
+
+
 def normalize_plantuml(source: str) -> str:
-    """Normalize shorthand that newer PlantUML versions reject.
+    """Normalize shorthand and multiline syntax across PlantUML versions.
 
     Component diagrams historically accepted relations from an alias to an
     undeclared quoted label, such as ``Control --> "Ingress"``. Current
     PlantUML treats that form as a syntax error. Bracket component notation is
     equivalent and remains portable: ``Control --> [Ingress]``.
+
+    Older PlantUML releases also reject physical newlines inside activity
+    ``if`` conditions and ``:action;`` statements. Collapse conditions to one
+    physical line and encode action line breaks as PlantUML ``\\n`` text.
     """
+
+    source = normalize_activity_multilines(source)
 
     def replace(match: re.Match[str]) -> str:
         return f"{match.group('prefix')}[{match.group('label')}]"

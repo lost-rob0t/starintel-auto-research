@@ -1,137 +1,265 @@
 :PROPERTIES:
 :ID:       star-pro-captcha-002-nopecha-adapter
 :END:
-#+title: STAR-PRO-CAPTCHA-002 NopeCHA Adapter
-#+description: Provider-specific StarIntel Pro Actor design for guarded hCaptcha token generation through the NopeCHA Token API.
+#+title: STAR-PRO-CAPTCHA-002 NopeCHA Token and Recognition Adapter
+#+description: StarIntel Pro Actor design for separate NopeCHA Token and Recognition runtime capability surfaces, typed ephemeral results, per-capability quota accounting, context policy, and isolated contract drift.
 #+status: REVIEW
-#+filetags: :starintel:design:starintel-pro-actors:captcha:hcaptcha:nopecha:adapter:
+#+filetags: :starintel:design:starintel-pro-actors:captcha:nopecha:adapter:token:recognition:uml:
 
 * Decision
 
-Implement =NopeChaAdapterActor= as a secondary provider adapter behind [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]]. It is enabled only when the operator configures the subscription quota, effective hCaptcha credit charge, and permitted use of proxy or cookie context.
+Implement one supervised NopeCHA provider service with sibling =NopeChaTokenAdapterActor= and =NopeChaRecognitionAdapterActor= children. They share credential, quota, provider-health, and circuit services but register exact capabilities independently.
 
-The actor accepts no arbitrary page request. It accepts only a broker-normalized =captchaProviderSubmit= message that has already passed authorization and target-policy checks.
+The actors accept only broker-normalized messages that already passed authentication, target policy, purpose, disclosure, provider allowlist, session/network context, and budget checks. They expose no public solve route and no wildcard “NopeCHA solves CAPTCHA” capability.
 
-* Provider Contract
+* Approval Table
 
-| Broker operation | NopeCHA operation |
-|------------------+-------------------|
-| =submitSolve= | =POST https://api.nopecha.com/token/= |
-| =pollSolve= | =GET https://api.nopecha.com/token/?key=...&id=...= |
-| =cancelSolve= | unsupported |
-| =getBalanceOrQuota= | local subscription ledger plus provider status where available |
-| =reportOutcome= | unsupported by the researched token contract |
-| =healthSnapshot= | configured probe plus local circuit and quota state |
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Token actor | Pro-actors maintainer | PENDING | Exact hCaptcha, reCAPTCHA v2/v3/Enterprise, and Turnstile request/result fixtures | [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002]] |
+| Recognition actor | Pro-actors maintainer | PENDING | Exact text, grid, coordinate, Arkose, AWS WAF, GeeTest, and hCaptcha-recognition fixtures | Provider research and tests below |
+| Result typing | CAPTCHA maintainer | PENDING | Token, assessment, text, coordinates, selections, interaction-plan, and custom result schemas | Result validation below |
+| Security | Security reviewer | PENDING | Query key, request body, proxy, cookie, session, artifact, result, trace, and error redaction | Security section below |
+| Operations | Operator | PENDING | Per-capability credits, refill window, concurrency, cancellation limits, and owned-system canaries | Quota and lifecycle sections below |
+| Implementation | Repository maintainer | NOT STARTED | Passing fake-provider tests, opt-in canaries, CI, and publication checks | |
 
-The provider key appears in the create body and retrieval query. The adapter must disable request-body and request-line logging for these calls and must sanitize exception objects before they reach the actor event stream.
+No row is implied approval.
 
-* Actor State
+* Actor Topology
 
-The actor owns:
+#+begin_src plantuml
+@startuml
+component "NopeChaSupervisor" as Supervisor
+component "NopeChaTokenAdapterActor" as TokenActor
+component "NopeChaRecognitionAdapterActor" as RecognitionActor
+component "NopeChaQuotaActor" as Quota
+component "NopeChaHealthActor" as Health
+component "NopeCHA Token API" as TokenAPI
+component "NopeCHA Recognition API" as RecognitionAPI
+component "EphemeralSecretStoreActor" as Secrets
+component "CaptchaBrokerActor" as Broker
 
-- provider credential reference;
-- configured token endpoint;
-- configured daily quota and refill interval;
-- configured credit charge per hCaptcha request;
-- active jobs keyed by broker =attemptId=;
-- provider job identifiers;
-- local concurrency count;
-- polling schedule;
-- local quota reservations and reconciliation;
-- circuit-breaker state;
-- no durable tokens, cookies, proxy credentials, or =rqdata=.
+Supervisor --> TokenActor
+Supervisor --> RecognitionActor
+Supervisor --> Quota
+Supervisor --> Health
+Broker --> TokenActor : exact token capability
+Broker --> RecognitionActor : exact recognition capability
+TokenActor --> TokenAPI
+RecognitionActor --> RecognitionAPI
+TokenActor --> Quota
+RecognitionActor --> Quota
+TokenActor --> Health
+RecognitionActor --> Health
+TokenActor --> Secrets : token result
+RecognitionActor --> Secrets : typed recognition result
+@enduml
+#+end_src
 
-* Submission Mapping
+Token API drift does not automatically restart or disable the Recognition actor. Shared authentication, account, quota, or provider outage may affect both.
 
-| Broker field | NopeCHA field |
-|--------------+---------------|
-| =challenge.type= | =type: hcaptcha= |
-| =challenge.siteKey= | =sitekey= |
-| =challenge.pageUrl= | =url= |
-| dereferenced =rqdataRef= | =data.rqdata= |
-| =challenge.userAgent= | =useragent= |
-| dereferenced proxy reference | =proxy= dictionary |
-| dereferenced cookie reference | =cookie= array |
+* Provider Operations
 
-Cookie context is disabled by default. A target policy must explicitly permit it because cookies may contain authenticated session material.[fn:session-material]
+| Broker operation | Token actor | Recognition actor |
+|------------------+-------------+-------------------|
+| submit | =POST /token/= with exact task mapping | official exact recognition operation |
+| result | bounded retrieval with provider job identifier | synchronous result or task-specific retrieval |
+| cancel | local only unless current provider operation proves support | capability-specific; unsupported unless documented |
+| quota | shared configured subscription ledger | shared configured subscription ledger |
+| health | token endpoint and local circuit evidence | recognition endpoint and local circuit evidence |
+| outcome feedback | unsupported unless a current documented operation exists | unsupported unless a current documented operation exists |
 
-* Polling
+Provider-specific URLs and field names are immutable adapter configuration, not broker request input.
 
-A create response returns a provider job identifier in =data=. Poll with the identifier until:
+* Exact Token Candidates
 
-- a token appears in =data=;
-- provider error 14 reports =Incomplete job=, in which case polling continues with bounded backoff;
-- another provider error occurs;
-- the broker deadline expires;
-- cancellation is requested locally.
+| Candidate capability | Provider type | Required context | Result | Initial state |
+|----------------------+---------------+------------------+--------+---------------|
+| hCaptcha standard | =hcaptcha= | page URL, site key, documented task fields | =token= | =experimental= |
+| hCaptcha Enterprise | =hcaptcha= with exact Enterprise data | page URL, site key, Enterprise context reference | =token= | =experimental= |
+| reCAPTCHA v2 checkbox | =recaptcha2= | page URL, site key, v2 context | =token= | =experimental= |
+| reCAPTCHA v2 invisible | =recaptcha2= with invisible/action context | exact variant fields | =token= | =experimental= |
+| reCAPTCHA Enterprise | exact documented Enterprise token operation | exact Enterprise fields | =token= | =experimental= |
+| reCAPTCHA v3 | =recaptcha3= | page URL, site key, action, minimum score where supported | =token= and =assessment= metadata | =experimental= |
+| Turnstile managed | =turnstile= | page URL, site key, action/challenge data as required | =token= | =experimental= |
 
-The provider does not document cancellation. Local cancellation stops polling and deletes local secret material, but the provider job may continue and may consume credits. The normalized cancellation result must set =providerCancellationSupported: false= and =chargePossible: true=.
+Each candidate becomes =verified= only after its exact current fixture passes. One variant never implies another.
 
-* Quota Accounting
+* Exact Recognition Candidates
 
-The provider uses daily subscription credits that refresh every twenty-three hours. Current official pages disagree on whether an hCaptcha token costs five or ten credits. Therefore =creditsPerHcaptchaToken= is required configuration and is never inferred silently.
+| Candidate capability | Required artifact/context | Result | Initial state |
+|----------------------+---------------------------+--------+---------------|
+| distorted text | bounded image | =textAnswer= | =experimental= |
+| image grid | bounded image and exact prompt/task | =selectionSet= | =experimental= |
+| coordinates/bounding/draw | bounded image and exact task instructions | =coordinates= or =interactionPlan= | =experimental= |
+| slider/rotation/drag | exact media and task context | =interactionPlan= or =customTypedResult= | =experimental= |
+| Arkose subchallenge | versioned supported task | typed recognition result | =experimental= |
+| AWS WAF subchallenge | versioned supported task | typed recognition result | =experimental= |
+| GeeTest v3 | v3-specific fields and media | typed recognition result | =experimental= |
+| GeeTest v4 | v4-specific fields and media | typed recognition result | =experimental= |
+| hCaptcha image subchallenge | exact prompt and image | selection/coordinate result | =experimental= |
 
-Before submission, reserve the configured credit amount from the local quota ledger. On terminal completion:
+Recognition output is not an issuer token and is never counted as accepted until the source runtime applies and verifies it.
 
-- reconcile against provider evidence when available;
-- otherwise retain the configured estimate;
-- release the reservation only when the provider contract proves no charge occurred;
-- roll quota windows using the configured provider refill timestamp, not local midnight.
+* Runtime Capability Record
 
-* Error Mapping
+Every registered capability contains:
 
-| Provider condition | Normalized failure |
-|--------------------+--------------------|
-| error 14 =Incomplete job= | not a failure; continue polling |
-| invalid or missing key | =providerAuthenticationFailed=; open circuit |
-| insufficient quota | =providerInsufficientBalance= |
-| malformed input | =providerRejectedRequest= |
-| unsupported hCaptcha form | =unsupportedChallenge= |
-| network or 500-series failure | =providerUnavailable= |
-| deadline exhausted | =deadlineExceeded= with =chargePossible: true= |
-| local cancellation | =cancelled= with =providerCancellationSupported: false= |
+- port: Token or Recognition;
+- actor and provider identifiers;
+- adapter version;
+- official source and retrieval date;
+- issuer, family, variant, and integration version;
+- request/result operations;
+- required and optional fields;
+- result kind and required result fields;
+- proxy, cookie, user-agent, browser-session, same-network, and mobile requirements;
+- execution and disclosure class;
+- configured credit cost;
+- delivery, cancellation, idempotency, and ambiguous-create behavior;
+- concurrency, quota, health, circuit, billing, retention, and error contract;
+- fixture fingerprint and freshness;
+- live-probe requirement;
+- unsupported variants and contradictions;
+- state: =verified=, =experimental=, =degraded=, =invalidContract=, =disabled=, or =unsupported=.
 
-Unknown numeric provider errors are preserved as redacted =providerCode= and fail closed.
+Static manifests contain no active capabilities. Runtime registration may report all configured candidate records with their states, but the broker routes only records allowed by policy and state.
 
-* Authentication Hygiene
+* Token Request and Result Mapping
 
-Because retrieval requires the key in the query string:
+The Token actor:
 
-- construct the uniform-resource-locator[fn:url] only inside the HTTP client call;
-- disable request-target logging;
-- never attach the final URL to an error condition;
-- scrub query parameters from tracing spans;
-- use a custom redacted request description in telemetry;
-- add regression tests that search every log and event sink for the real key.
+1. validates exact capability and required context;
+2. reserves configured credits;
+3. dereferences the provider key and only the authorized context references;
+4. constructs the provider request inside the HTTP client call;
+5. submits the task;
+6. records the provider job identifier immediately;
+7. polls with bounded backoff and deadline;
+8. validates the exact token/result fields;
+9. writes sensitive values to the ephemeral secret store;
+10. reconciles charge evidence;
+11. returns only result reference and non-sensitive metadata.
 
-* Actor Manifest Sketch
+A missing required field or unexpected token shape moves only the exact capability to =invalidContract=.
+
+* Recognition Request and Result Mapping
+
+The Recognition actor:
+
+1. validates artifact kind, size, media type, prompt/task format, and exact capability;
+2. checks disclosure policy before dereferencing the artifact;
+3. reserves configured credits;
+4. submits the bounded challenge media and exact task fields;
+5. follows the capability's synchronous or asynchronous result model;
+6. validates text, coordinates, selections, interaction steps, or custom schema;
+7. writes the result to the ephemeral secret store;
+8. returns the exact normalized result kind.
+
+No generic list, string, or coordinate shape is accepted across task families without a versioned validator.
+
+* Adapter Sequence
+
+#+begin_src plantuml
+@startuml
+participant "CaptchaRunActor" as Run
+participant "NopeCHA Adapter Actor" as Adapter
+participant "QuotaActor" as Quota
+participant "EphemeralSecretStoreActor" as Secrets
+participant "NopeCHA API" as API
+
+Run -> Adapter : captchaProviderSubmit(capabilityId, challengeRef)
+Adapter -> Adapter : exact capability and context validation
+Adapter -> Quota : reserve capability credits
+Adapter -> Secrets : read provider credential and bounded context
+alt Token capability
+  Adapter -> API : create token job
+  alt provider job id returned
+    API --> Adapter : id
+    loop before deadline while incomplete
+      Adapter -> API : retrieve token job
+      API --> Adapter : incomplete or token/error
+    end
+  else ambiguous create
+    Adapter --> Run : ambiguousSubmission(chargePossible)
+  end
+else Recognition capability
+  Adapter -> API : submit bounded media/task
+  API --> Adapter : answer or job id
+  Adapter -> API : retrieve only if exact capability is asynchronous
+end
+Adapter -> Adapter : validate exact result schema
+Adapter -> Secrets : write typed result with one-read lease
+Adapter -> Quota : reconcile provider evidence
+Adapter --> Run : normalized resultRef or failure
+@enduml
+#+end_src
+
+* Quota and Billing
+
+NopeCHA credits and refill behavior are stored as operator configuration linked to each capability's official source and retrieval date. Costs can differ or public pages can disagree; no global cost constant is allowed.
+
+Reserve credits before submission. Release only when the contract proves no charge. Refill windows use the configured provider cycle, not local midnight. Local cancellation does not prove credit recovery.
+
+* Credential, Proxy, Cookie, Session, and Network Handling
+
+Because retrieval can put the key in a query:
+
+- construct the final URL only inside the HTTP client;
+- disable request-target and body logging;
+- never attach the final URL or raw response to an error;
+- scrub query parameters from traces and metrics;
+- use only a credential reference in actor state;
+- scan tests and generated output for the real key.
+
+Proxy credentials, cookies, authenticated sessions, challenge data, Enterprise data, images, and audio remain behind ephemeral references. The actor dereferences only fields permitted by target and disclosure policy. Same-network or same-session requirements are explicit hard constraints.
+
+* Idempotency, Cancellation, and Ambiguous Submission
+
+The actor journals =attemptId= before submission and records provider job identifiers immediately. Duplicate local or RabbitMQ deliveries attach to the journaled job or replay its terminal normalized result.
+
+Provider-side cancellation is =unsupported= unless an exact current contract proves it. Local cancellation stops polling, deletes unconsumed local material, releases only provably unused quota, and reports =chargePossible=true=.
+
+An ambiguous create without a recoverable provider identifier is never blindly retried. Fallback requires a terminal non-ambiguous state and a new broker attempt.
+
+* Contract Drift and Health
+
+- Token capability drift changes only that exact token record.
+- Recognition capability drift changes only that exact recognition record.
+- Token endpoint failure does not disable recognition when the shared provider remains healthy.
+- Shared key, account, quota, or provider outage may mark both actors =disabled=.
+- Result-kind mismatch, required-field omission, unsupported task, or documented contradiction moves the exact record to =invalidContract=.
+- A repaired adapter returns through =experimental= and new fixtures before =verified=.
+
+Health reports include active concurrency, exact-capability state, fixture age, recent provider completion, downstream acceptance, quota evidence, latency, and circuit state. No raw credential or result data enters telemetry.
+
+* Static Actor Manifest
 
 #+begin_src json
 {
   "actorId": "star.pro.captcha.nopecha",
-  "label": "NopeCHA hCaptcha Adapter",
-  "actorVersion": "0.1.0",
-  "protocolVersion": "star.captcha.provider/1",
-  "roles": ["captchaProviderAdapter"],
+  "label": "NopeCHA Token and Recognition Provider",
+  "actorVersion": "0.3.0",
+  "protocolVersion": "star.captcha.provider/2",
+  "roles": ["captchaProviderAdapter", "captchaRecognitionAdapter"],
   "accepts": [
     "captchaProviderSubmit",
-    "captchaProviderPoll",
     "captchaProviderCancel",
-    "captchaProviderBalanceRequest"
+    "captchaProviderBalanceRequest",
+    "captchaProviderContractProbe",
+    "captchaProviderShutdown"
   ],
   "produces": [
+    "captchaProviderContractState",
     "captchaProviderAccepted",
     "captchaProviderState",
     "captchaProviderSucceeded",
     "captchaProviderFailed",
-    "captchaProviderHealth"
+    "captchaProviderHealth",
+    "captchaProviderCapabilityRegistration"
   ],
-  "capabilities": [
-    "captcha.hcaptcha.standard",
-    "captcha.hcaptcha.invisible",
-    "captcha.hcaptcha.enterprise",
-    "captcha.provider.subscriptionQuota"
-  ],
+  "runtimeCapabilityRegistration": true,
+  "executionClass": "remoteAutomated",
   "implementation": {
     "package": "starintel-pro-actors",
     "entrypoint": "STARINTEL-PRO-ACTORS.CAPTCHA.NOPECHA:START"
@@ -142,41 +270,60 @@ Because retrieval requires the key in the query string:
       "provider:nopecha",
       "ephemeral:captcha",
       "ephemeral:proxy",
-      "ephemeral:cookie"
+      "ephemeral:cookie",
+      "ephemeral:artifact"
     ]
   },
-  "configuration": {
-    "tokenUrl": "https://api.nopecha.com/token/",
+  "configurationSchema": {
     "credentialRef": "secret://runtime/provider/nopecha/default",
     "maxConcurrency": 2,
-    "creditsPerHcaptchaToken": 5,
     "quotaRefillHours": 23,
-    "cookiesEnabled": false
+    "cookiesEnabled": false,
+    "capabilityCosts": {}
   }
 }
 #+end_src
 
-The example credit value is not a default. Manifest validation requires the operator to set it from the active subscription contract.
+The manifest declares no =capabilities= array and no unverified runtime claims.
 
-* Testing
+* Error Normalization
 
-- Mock token create and polling.
-- Test error 14 as a pending state.
-- Test conflicting configured credit values and quota-window rollover.
-- Test cancellation without provider cancellation support.
-- Test standard and enterprise field mapping.
-- Test proxy and cookie policy denials before secret dereferencing.
-- Test that keys never appear in URLs recorded by logs, traces, errors, or fixtures.
-- Test token, cookie, proxy, and =rqdata= redaction.
-- Add an opt-in one-request live canary against an operator-owned hCaptcha page.
+Normalize authentication, quota, invalid request, unsupported task, incomplete job, unsolvable, timeout, service error, malformed result, local cancellation, ambiguous create, and internal adapter errors. Every failure contains =retryable=, =chargePossible=, and a safe redacted provider code.
+
+* Tests and Bounded Canaries
+
+- separate Token and Recognition fake-provider fixtures;
+- exact request mapper and result validator per capability;
+- token, assessment, text, coordinates, selections, interaction-plan, and custom result tests;
+- forbidden version, variant, result-kind, context, proxy, and session widening;
+- pending token jobs and deadline behavior;
+- synchronous and asynchronous recognition tasks;
+- per-capability cost and refill-window behavior;
+- duplicate local and RabbitMQ delivery;
+- ambiguous create and local cancellation with possible charge;
+- disclosure denial before artifact or context dereference;
+- query key, request body, cookie, proxy, session, artifact, result, trace, and error redaction;
+- Token drift independent from Recognition drift;
+- static manifest has no active capability claims;
+- shutdown with active jobs;
+- no paid provider in continuous integration;
+- separate credential-gated, cost-bounded owned-system canary per capability.
 
 * Related Nodes
 
-- [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA hCaptcha Provider]]
-- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-pro-research-002-nopecha-hcaptcha-provider][STAR-PRO-RESEARCH-002 NopeCHA Token and Recognition Provider]].
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Capability Router]].
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors]].
 
 * Footnotes and Glossary
 
-[fn:session-material] Session material: Cookies or related values that allow a server to associate requests with an authenticated or previously established browser session.
+- *Token actor* — Provider actor that returns an issuer verification token for an exact integration.
+- *Recognition actor* — Provider actor that returns text, coordinates, selections, or interaction data rather than an issuer token.
+- *Sibling actor* — Separately supervised actor under one provider service, allowing one API surface to fail without stopping the other.
+- *Runtime capability record* — Exact current provider task contract reported at startup with state and fixture evidence.
 
-[fn:url] Uniform resource locator: A structured network address whose query section can accidentally expose credentials when logged.
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-06 | Split NopeCHA into sibling Token and Recognition actors; added exact candidate records, typed result validation, runtime registration, quota, secret handling, idempotency, ambiguity, drift isolation, static manifest, tests, and approval evidence | repository audit agent | NopeCHA research node, current broker contract, and PR source diff |

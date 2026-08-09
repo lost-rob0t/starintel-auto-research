@@ -1,145 +1,227 @@
 :PROPERTIES:
 :ID:       star-pro-captcha-001-nonecap-adapter
 :END:
-#+title: STAR-PRO-CAPTCHA-001 NoneCap Adapter
-#+description: Provider-specific StarIntel Pro Actor design for authorized hCaptcha solving through the NoneCap v1 API.
+#+title: STAR-PRO-CAPTCHA-001 NoneCap hCaptcha Adapter
+#+description: Exact-capability StarIntel Pro Actor design for NoneCap standard, invisible, and Enterprise hCaptcha operations with runtime contract registration and no static unverified capability claims.
 #+status: REVIEW
-#+filetags: :starintel:design:starintel-pro-actors:captcha:hcaptcha:nonecap:adapter:
+#+filetags: :starintel:design:starintel-pro-actors:captcha:hcaptcha:nonecap:adapter:uml:
 
 * Decision
 
-Implement =NoneCapAdapterActor= in =starintel-pro-actors= as the reference implementation of the provider protocol defined by [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]].
+Implement =NoneCapAdapterActor= as a narrow provider adapter behind [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000]]. It accepts only authenticated broker messages. It has no public solve route, performs no target authorization widening, and never registers reCAPTCHA, Turnstile, FunCaptcha, or other reserved task names.
 
-The actor accepts only normalized broker messages. It has no public solve route and does not independently decide whether a target is authorized.
+The actor may register standard, invisible, and Enterprise hCaptcha capabilities independently at runtime only after configuration, official-contract validation, fixture validation, and operator policy establish the declared state.
 
-* Provider Contract
+* Approval Table
 
-The adapter maps broker operations to NoneCap:
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Adapter protocol | Pro-actors maintainer | PENDING | Submit, poll, result, cancel, account, feedback, health, and shutdown tests | Provider mapping and tests below |
+| Capability registration | CAPTCHA maintainer | PENDING | Independent standard, invisible, and Enterprise request/result fixtures | [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001]] |
+| Security | Security reviewer | PENDING | Key, token, proxy, Enterprise data, request, trace, error, and retention review | Secret handling below |
+| Operations | Operator | PENDING | Base URL, credentials, concurrency, budget, retention, cancellation, and canary policy | Configuration and lifecycle sections below |
+| Implementation | Repository maintainer | NOT STARTED | Passing fake-provider tests, opt-in canary, CI, and publication checks | |
+
+No row is implied approval.
+
+* Exact Capability Candidates
+
+| Candidate capability | Provider operation | Result kind | Initial state |
+|----------------------+--------------------+-------------+---------------|
+| =captcha.hcaptcha.token.standard.v1= | =hcaptcha= | =token= | =experimental= until fixture passes |
+| =captcha.hcaptcha.token.invisible.v1= | =hcaptcha= with exact invisible context | =token= | =experimental= until separate fixture passes |
+| =captcha.hcaptcha.token.enterprise.v1= | =hcaptcha_enterprise= | =token= | =experimental= until fixture passes |
+| provider cancellation | =DELETE /v1/solves/{id}= | lifecycle result | =experimental= until race fixtures pass |
+| provider feedback | =POST /v1/feedback= | acknowledgement | =experimental= until fixture passes |
+| provider account/balance | =GET /v1/me= | account metadata | =experimental= until fixture passes |
+
+Allowed runtime states are =verified=, =experimental=, =degraded=, =invalidContract=, =disabled=, and =unsupported=. The actor emits runtime registration records; the static actor manifest does not list candidate capabilities as active.
+
+* Provider Operations
 
 | Broker operation | NoneCap operation |
 |------------------+-------------------|
-| =submitSolve= | =POST /v1/solves?wait=N= |
-| =pollSolve= | =GET /v1/solves/{id}?wait=N= |
-| =cancelSolve= | =DELETE /v1/solves/{id}= |
-| =getBalanceOrQuota= | =GET /v1/me= |
-| =reportOutcome= | per-solve feedback endpoint |
-| =healthSnapshot= | lightweight account or configured health probe plus local circuit state |
+| submit exact solve | =POST /v1/solves?wait=N= |
+| poll exact solve | =GET /v1/solves/{id}?wait=N= |
+| cancel | =DELETE /v1/solves/{id}= |
+| account/balance | =GET /v1/me= |
+| report verified outcome | =POST /v1/feedback= under operator policy |
+| health snapshot | account probe, recent contract state, and local circuit state |
 
-The default base uniform-resource-locator[fn:url] is =https://api.nonecap.com=. It is configuration, not request input.
+The configured default base uniform resource locator is =https://api.nonecap.com=. It is deployment configuration, never request-controlled input.
+
+* Request Mapping
+
+| Normalized field | NoneCap field or behavior |
+|------------------+---------------------------|
+| standard hCaptcha | =type: hcaptcha= with standard context fixture |
+| invisible hCaptcha | =type: hcaptcha= with separately validated invisible context |
+| Enterprise hCaptcha | =type: hcaptcha_enterprise= |
+| =siteKey= | =sitekey= |
+| =pageUrl= | =url= |
+| Enterprise data reference | dereference only after policy; map to exact provider field such as =rqdata= when documented |
+| user-agent context | map only when exact current contract requires it |
+| proxy reference | dereference only after policy and map to documented format |
+| deadline | derive bounded =wait= and polling schedule |
+| credential reference | read from secret store and send only as bearer authorization header |
+
+Reject missing required fields and any issuer, family, variant, version, result kind, mobile, cookie, browser-session, network, proxy, or user-agent requirement not satisfied by the exact registered capability.
+
+* Result Validation
+
+A solved response must contain the exact provider solve identifier, solved state, solution token, and billing/timing fields required by the fixture. Unknown additive fields may be ignored. Missing required fields or an unexpected result kind moves only the affected capability to =invalidContract=.
+
+The token is written to the ephemeral secret store with result kind, binding, expiry, request ID, attempt ID, and authorized source-reader metadata. The actor returns only =resultRef= and non-sensitive provider/job/cost/timing metadata.
+
+* Adapter Sequence
+
+#+begin_src plantuml
+@startuml
+participant "CaptchaRunActor" as Run
+participant "NoneCapAdapterActor" as Adapter
+participant "EphemeralSecretStoreActor" as Secrets
+participant "NoneCap API" as API
+
+Run -> Adapter : captchaProviderSubmit(exact capability, challengeRef)
+Adapter -> Adapter : verify runtime registration and deadline
+Adapter -> Secrets : read bounded challenge, proxy, and credential refs
+Adapter -> API : POST /v1/solves?wait=N
+alt solve id returned
+  API --> Adapter : pending/solving/terminal + id
+  loop while pending and before deadline
+    Adapter -> API : GET /v1/solves/{id}?wait=N
+    API --> Adapter : state + solution/error + charge metadata
+  end
+  alt solved and exact result valid
+    Adapter -> Secrets : store token with one-read lease
+    Adapter --> Run : captchaProviderSucceeded(resultRef)
+  else failed/cancelled/expired/invalid contract
+    Adapter --> Run : captchaProviderFailed(normalized failure)
+  end
+else ambiguous create without solve id
+  Adapter --> Run : ambiguousSubmission(chargePossible)
+end
+@enduml
+#+end_src
 
 * Actor State
 
 The actor owns:
 
+- immutable configured base URL;
 - provider credential reference;
-- configured base URL;
 - configured maximum concurrency;
-- active provider jobs keyed by broker =attemptId=;
+- runtime capability records and fixture fingerprints;
+- active attempts keyed by =attemptId=;
 - provider solve identifiers;
 - cancellation state;
-- local rate and concurrency counters;
-- circuit-breaker state;
-- recent latency and error measurements;
-- no durable solve tokens.
+- polling deadlines;
+- circuit and health state;
+- redacted latency, result, error, and billing counters.
 
-* Submission Mapping
+It owns no durable provider key, proxy credential, Enterprise data, cookie, or result token.
 
-| Broker field | NoneCap field |
-|--------------+---------------|
-| =challenge.mode= =standard= or =invisible= | =type: hcaptcha= |
-| =challenge.mode= =enterprise= | =type: hcaptcha_enterprise= |
-| =challenge.siteKey= | =sitekey= |
-| =challenge.pageUrl= | =url= |
-| dereferenced =rqdataRef= | =rqdata= |
-| =challenge.userAgent= | =user_agent= |
-| dereferenced proxy reference | =proxy= object |
+* Adapter State Machine
 
-The provider application-programming-interface[fn:api] key is sent only as a bearer authorization header. The adapter must never place it in a URL, request body fixture, actor event, or exception string.
+#+begin_src plantuml
+@startuml
+[*] --> received
+received --> rejected : capability not registered or fields/context mismatch
+received --> submitting : exact capability eligible
+submitting --> pending : solve id received
+submitting --> ambiguous : create outcome unknown
+pending --> solved
+pending --> failed
+pending --> cancelled
+pending --> expired
+solved --> delivered : token stored and resultRef returned
+solved --> resultExpired : lease not consumed
+ambiguous --> pending : provider job recovered
+ambiguous --> failed : recovery impossible
+pending --> cancellationRequested : broker cancel
+cancellationRequested --> cancelled : provider confirms
+cancellationRequested --> pending : already terminal or cannot cancel
+rejected --> [*]
+failed --> [*]
+cancelled --> [*]
+expired --> [*]
+delivered --> [*]
+resultExpired --> [*]
+@enduml
+#+end_src
 
-Use create long polling with a bounded =wait= selected from the remaining broker deadline. If the provider returns HTTP 202, record the solve identifier and continue through retrieve long polling.
+* Idempotency and Ambiguous Create
 
-* State Mapping
+The adapter journals =attemptId= before the provider request and records the solve identifier immediately after a successful create response. Duplicate local or RabbitMQ deliveries attach to the same attempt or replay its terminal normalized result.
 
-| NoneCap state | Normalized state |
-|---------------+------------------|
-| =pending= | =providerPending= |
-| =solving= | =providerPending= |
-| =solved= | =succeeded= |
-| =failed= | =failed= |
-| =cancelled= | =cancelled= |
-| =expired= | =failed= with =providerTimeout= or =providerUnsolvable= according to provider error |
+NoneCap does not document a create idempotency key. A transport failure without a solve identifier enters =ambiguousSubmission=. The adapter never recreates the task automatically. It reports =chargePossible= according to observed evidence.
 
-When =solved=, write the returned token directly into the broker-owned ephemeral secret store[fn:ephemeral-secret-store]. Return only =tokenRef=.
+* Cancellation, Feedback, and Shutdown
 
-* Error Mapping
+- Cancellation calls the documented delete operation for an active solve.
+- A conflict or already-terminal response triggers one result retrieval and normalized terminal report.
+- Duplicate cancellation is idempotent.
+- Feedback is sent only when target policy and operator policy allow it and only after downstream verification.
+- Shutdown stops new submissions, drains or cancels active solves until a bounded deadline, deletes unconsumed result leases, flushes redacted metadata, and reports unresolved provider identifiers.
 
-| Provider response | Normalized failure |
-|-------------------+--------------------|
-| 400 =invalid_request= | =invalidRequest= or =providerRejectedRequest= |
-| 401 =unauthorized= | =providerAuthenticationFailed=; open circuit |
-| 402 =insufficient_credits= | =providerInsufficientBalance=; open circuit |
-| 403 =account_locked= | =providerDisabled=; open circuit |
-| 404 unknown solve | =providerRejectedRequest= unless local state proves retention expiry |
-| 409 cancel conflict | return terminal state after retrieval |
-| 422 validation error | =providerRejectedRequest=; not retryable |
-| 429 concurrency limit | =providerConcurrencyLimited=; retry after local queue delay |
-| 500-series failure | =providerUnavailable=; bounded retry if deadline permits |
+* Error Normalization
 
-Unknown error codes are preserved only as redacted =providerCode= values and map to =providerUnavailable= or =providerRejectedRequest= according to HTTP class.
+| Provider condition | Normalized failure |
+|--------------------+--------------------|
+| invalid request or validation | =providerRejectedRequest=, not retryable |
+| unauthorized | =providerAuthenticationFailed=; disable shared credential path |
+| insufficient credits | =providerInsufficientBalance= |
+| locked or forbidden | =providerDisabled= |
+| unknown solve | =providerRejectedRequest= unless retention expiry is proven |
+| cancellation conflict | retrieve actual state once |
+| concurrency or rate limit | =providerConcurrencyLimited= |
+| provider timeout or service error | =providerUnavailable= with bounded retry only when create is unambiguous |
+| required result missing or wrong type | =contractDrift= and exact capability =invalidContract= |
 
-* Idempotency
+Every failure includes =retryable=, =chargePossible=, and a safe redacted provider code.
 
-NoneCap does not document a create idempotency key.[fn:idempotency] Therefore:
+* Contract Drift and Runtime Registration
 
-- one actor-owned attempt journal entry is reserved before submission;
-- the provider solve identifier is recorded immediately when received;
-- duplicate =captchaProviderSubmit= messages attach to the existing attempt;
-- an ambiguous connection failure before a solve identifier places the attempt in =ambiguousSubmission=;
-- the adapter never creates a replacement job automatically from =ambiguousSubmission=.
+At actor start:
 
-* Cancellation and Shutdown
+1. load configured candidate capabilities;
+2. validate configuration and credential reference presence without exposing the credential;
+3. load current request/result fixture fingerprints;
+4. register each capability with its exact state;
+5. omit =unsupported= capabilities from eligible routing while retaining them in audit metadata;
+6. update only the affected capability after drift;
+7. emit a redacted provider-health/capability event.
 
-On cancellation, call =DELETE /v1/solves/{id}= for =pending= or =solving= jobs. A conflict means the job is already terminal, so retrieve it once and report the actual final state.
+A shared authentication or transport outage may mark all capabilities =disabled=. A standard fixture failure does not disable invisible or Enterprise unless the shared failure actually affects them.
 
-During graceful shutdown:
+* Static Actor Manifest
 
-1. stop accepting new submissions;
-2. cancel active jobs when policy allows;
-3. delete unconsumed token leases;
-4. flush redacted terminal metadata;
-5. terminate before the server shutdown deadline.
-
-* Actor Manifest Sketch
+The manifest declares actor identity, accepted and produced message types, provider host allowlist, secret classes, implementation entry point, and runtime registration support. It does not advertise unverified active capabilities.
 
 #+begin_src json
 {
   "actorId": "star.pro.captcha.nonecap",
   "label": "NoneCap hCaptcha Adapter",
-  "actorVersion": "0.1.0",
-  "protocolVersion": "star.captcha.provider/1",
+  "actorVersion": "0.3.0",
+  "protocolVersion": "star.captcha.provider/2",
   "roles": ["captchaProviderAdapter"],
   "accepts": [
     "captchaProviderSubmit",
-    "captchaProviderPoll",
     "captchaProviderCancel",
     "captchaProviderBalanceRequest",
-    "captchaProviderOutcomeReport"
+    "captchaProviderOutcomeReport",
+    "captchaProviderShutdown"
   ],
   "produces": [
     "captchaProviderAccepted",
     "captchaProviderState",
     "captchaProviderSucceeded",
     "captchaProviderFailed",
-    "captchaProviderHealth"
+    "captchaProviderHealth",
+    "captchaProviderCapabilityRegistration"
   ],
-  "capabilities": [
-    "captcha.hcaptcha.standard",
-    "captcha.hcaptcha.invisible",
-    "captcha.hcaptcha.enterprise",
-    "captcha.provider.cancel",
-    "captcha.provider.feedback",
-    "captcha.provider.balance"
-  ],
+  "runtimeCapabilityRegistration": true,
+  "executionClass": "remoteAutomated",
   "implementation": {
     "package": "starintel-pro-actors",
     "entrypoint": "STARINTEL-PRO-ACTORS.CAPTCHA.NONECAP:START"
@@ -148,7 +230,7 @@ During graceful shutdown:
     "network": ["https://api.nonecap.com"],
     "secrets": ["provider:nonecap", "ephemeral:captcha", "ephemeral:proxy"]
   },
-  "configuration": {
+  "configurationSchema": {
     "baseUrl": "https://api.nonecap.com",
     "credentialRef": "secret://runtime/provider/nonecap/default",
     "maxConcurrency": 5,
@@ -157,28 +239,57 @@ During graceful shutdown:
 }
 #+end_src
 
-* Testing
+* Security and Secret Handling
 
-- Mock every documented HTTP status and solve state.
-- Verify long-poll deadline calculation.
-- Verify standard, invisible, and enterprise field mapping.
-- Verify exact redaction of bearer key, proxy credentials, token, and =rqdata=.
-- Verify duplicate submissions and ambiguous submission handling.
-- Verify cancellation races.
-- Verify unknown additive response fields are ignored safely.
-- Add an opt-in live canary against an operator-owned test page with a strict one-solve budget.
+Never log, persist, trace, fixture, publish, or place in ordinary actor/RabbitMQ messages:
+
+- bearer key;
+- solution token;
+- proxy credential;
+- Enterprise data;
+- cookie or session material;
+- authorization header;
+- full request or response body containing sensitive fields.
+
+Sanitized fixture values use explicit placeholders. Provider records and cost metadata are redacted before durable storage.
+
+* Quota, Billing, and Health
+
+The adapter exposes configured concurrency, active count, recent exact-capability success/failure, downstream acceptance, circuit state, balance evidence, and provider latency. It does not infer concurrency from marketing.
+
+Budget is reserved before submission. Multi-round hCaptcha costs are reconciled from provider evidence. Cost telemetry distinguishes provider completion from downstream accepted results.
+
+* Tests and Bounded Canaries
+
+- exact standard, invisible, and Enterprise request/result fixtures;
+- forbidden capability and context widening;
+- every documented state and relevant HTTP condition;
+- long-poll deadline calculation;
+- duplicate local and RabbitMQ delivery;
+- ambiguous create without solve identifier;
+- cancellation races and duplicate cancellation;
+- account/balance and feedback fixtures;
+- capability-local drift and shared outage behavior;
+- static manifest contains no active unverified capabilities;
+- bearer key, token, proxy, Enterprise data, request, trace, and error redaction;
+- shutdown with active solves;
+- no paid provider in continuous integration;
+- one opt-in, credential-gated, strict-budget canary per capability on an operator-owned system.
 
 * Related Nodes
 
-- [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001 NoneCap hCaptcha Provider]]
-- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Service Actors]]
+- [[id:star-pro-research-001-nonecap-hcaptcha-provider][STAR-PRO-RESEARCH-001 NoneCap hCaptcha Provider]].
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Capability Router]].
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors]].
 
 * Footnotes and Glossary
 
-[fn:url] Uniform resource locator: A structured network address used to identify the provider endpoint.
+- *Runtime capability registration* — Actor-start reporting of exact currently usable capability records after configuration and fixture checks.
+- *Static manifest* — Deployment discovery metadata that describes the actor without falsely claiming that candidate provider tasks are active.
+- *Ambiguous create* — A provider task creation whose outcome is unknown and cannot be safely retried.
 
-[fn:api] Application programming interface: The provider's documented network operations and structured request and response formats.
+* Changelog
 
-[fn:ephemeral-secret-store] Ephemeral secret store: A protected short-lived store that returns opaque references for sensitive values such as solve tokens.
-
-[fn:idempotency] Idempotency: The guarantee that repeating the same logical request does not create an additional provider job or charge.
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-06 | Separated standard, invisible, and Enterprise capabilities; removed unverified static capability claims; added exact mapping, result validation, runtime registration, lifecycle, ambiguity, drift, manifest, redaction, billing, tests, and approval evidence | repository audit agent | NoneCap research node, current broker contract, and PR source diff |

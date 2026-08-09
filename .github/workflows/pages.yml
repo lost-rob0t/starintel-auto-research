@@ -7,15 +7,8 @@ on:
       - "roam/**"
       - "lisp/starintel/**"
       - "pages/**"
-      - "scripts/_roamlib.py"
-      - "scripts/implement.py"
-      - "scripts/mark-design.py"
-      - "scripts/sync.py"
-      - "scripts/publish-pages"
-      - "scripts/enhance-pages.py"
-      - "scripts/configure-pages"
-      - "scripts/check-pages-links.py"
-      - "tests/test_implementation_slots.py"
+      - "scripts/**"
+      - "tests/**"
       - "skills/**"
       - ".github/workflows/pages.yml"
       - "AGENTS.md"
@@ -29,15 +22,8 @@ on:
       - "roam/**"
       - "lisp/starintel/**"
       - "pages/**"
-      - "scripts/_roamlib.py"
-      - "scripts/implement.py"
-      - "scripts/mark-design.py"
-      - "scripts/sync.py"
-      - "scripts/publish-pages"
-      - "scripts/enhance-pages.py"
-      - "scripts/configure-pages"
-      - "scripts/check-pages-links.py"
-      - "tests/test_implementation_slots.py"
+      - "scripts/**"
+      - "tests/**"
       - "skills/**"
       - ".github/workflows/pages.yml"
       - "AGENTS.md"
@@ -56,56 +42,112 @@ concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PLANTUML_VERSION: "1.2026.6"
+  PLANTUML_SHA256: "89948f14c93756c7a3fb7b69078ff37e8489fd79dd430c582b931e2f65358690"
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
-      - name: Validate implementation workflow
+      - name: Resolve validation base
+        id: validation-base
+        shell: bash
         run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [[ "${{ github.event.before }}" =~ ^0+$ ]] || [[ -z "${{ github.event.before }}" ]]; then
+            base="$(git rev-parse HEAD^)"
+          else
+            base="${{ github.event.before }}"
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "Validation base: $base"
+
+      - name: Validate Python and shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
           python3 -m py_compile \
             scripts/_roamlib.py \
             scripts/implement.py \
             scripts/mark-design.py \
             scripts/sync.py \
-            tests/test_implementation_slots.py
-          python3 -m unittest discover -s tests -p 'test_implementation_slots.py' -v
-          python3 scripts/sync.py --check
-
-      - name: Check browser and build script syntax
-        run: |
+            scripts/validate-docs.py \
+            scripts/validate-changed-docs.py \
+            scripts/enhance-pages.py \
+            scripts/check-pages-links.py
+          bash -n scripts/publish-pages
           node --check pages/static/site.js
           node --check pages/static/enhancements.js
-          python3 -m py_compile scripts/enhance-pages.py
-          bash -n scripts/publish-pages
 
-      - name: Install Emacs and PlantUML
+      - name: Run repository tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+      - name: Synchronize repository metadata
+        shell: bash
         run: |
+          set -euo pipefail
+          python3 scripts/sync.py
+          git diff --exit-code -- . ':(exclude)_site/**' ':(exclude).cache/**'
+
+      - name: Validate changed repository documents
+        shell: bash
+        env:
+          VALIDATION_BASE: ${{ steps.validation-base.outputs.base }}
+        run: |
+          set -euo pipefail
+          # Full maintenance checks remain available as:
+          # python3 scripts/sync.py --check
+          # python3 scripts/validate-docs.py
+          python3 scripts/validate-changed-docs.py \
+            --changed-since "$VALIDATION_BASE" \
+            --audit-date "$(date -u +%F)"
+
+      - name: Install Emacs and pinned PlantUML
+        shell: bash
+        run: |
+          set -euo pipefail
           sudo apt-get update -qq >/tmp/apt-update.log
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --quiet emacs-nox graphviz plantuml sqlite3 >/tmp/apt-install.log
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --quiet \
+            emacs-nox graphviz sqlite3 default-jre-headless curl >/tmp/apt-install.log
+          curl --fail --silent --show-error --location \
+            "https://github.com/plantuml/plantuml/releases/download/v${PLANTUML_VERSION}/plantuml-${PLANTUML_VERSION}.jar" \
+            --output /tmp/plantuml.jar
+          printf '%s  %s\n' "$PLANTUML_SHA256" /tmp/plantuml.jar | sha256sum --check
+          sudo install -m 0644 /tmp/plantuml.jar /opt/plantuml.jar
+          sudo tee /usr/local/bin/plantuml >/dev/null <<'EOF'
+          #!/usr/bin/env bash
+          exec java -jar /opt/plantuml.jar "$@"
+          EOF
+          sudo chmod +x /usr/local/bin/plantuml
           emacs --version | head -1
           plantuml -version | head -1
 
-      - name: Build Org-roam site
+      - name: Build complete Org-roam site
         shell: bash
         run: |
           set +e
           bash scripts/publish-pages >pages-build.log 2>&1
           status=$?
           if [ "$status" -ne 0 ]; then
-            echo "::group::Emacs build failure"
-            tail -n 20 pages-build.log
+            echo "::group::Complete-site build failure"
+            tail -n 80 pages-build.log
             echo "::endgroup::"
             exit "$status"
           fi
-          tail -n 20 pages-build.log
+          tail -n 80 pages-build.log
 
       - name: Upload Org-roam build log
         if: always()
@@ -113,28 +155,33 @@ jobs:
         with:
           name: org-roam-pages-build-log
           path: pages-build.log
-          if-no-files-found: warn
+          if-no-files-found: error
 
-      - name: Check internal links
-        run: python3 scripts/check-pages-links.py _site
-
-      - name: Verify lease-stack publication artifact
+      - name: Validate generated site
         shell: bash
         run: |
           set -euo pipefail
+          python3 scripts/check-pages-links.py _site
           grep -Fxq 'auto-research.starintel.actor' _site/CNAME
           test -s _site/deployment.json
+          if git ls-files '_site/**' '.cache/**' | grep -q .; then
+            echo "::error::Generated _site or .cache output must not be tracked"
+            git ls-files '_site/**' '.cache/**'
+            exit 1
+          fi
+
+      - name: Verify CAPTCHA publication artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
           for page in \
-            notes/indexes/star-server/STAR-LEASE-INDEX-030-backend-neutral-kv-leases.html \
-            notes/design/star-server/STAR-SERVER-029-distributed-target-lease-and-fencing.html \
-            notes/research/star-server/STAR-RESEARCH-029-distributed-target-lease-and-fencing.html \
-            notes/design/star-server/STAR-SERVER-030-backend-neutral-kv-lease-store.html \
-            notes/research/star-server/STAR-RESEARCH-030-backend-neutral-kv-lease-store.html \
-            notes/design/star-server/STAR-SERVER-032-authenticated-target-lease-http-execution.html \
-            notes/research/star-server/STAR-RESEARCH-032-authenticated-target-lease-http-execution.html
+            notes/indexes/starintel-pro-actors/STAR-PRO-INDEX-001-captcha-service-actors.html \
+            notes/design/star-server/STAR-CAPTCHA-000-broker-router.html \
+            notes/design/star-server/STAR-CAPTCHA-001-detection-resolution-orchestrator.html \
+            notes/research/starintel-pro-actors/STAR-PRO-RESEARCH-006-captcha-challenge-provider-landscape.html
           do
             test -s "_site/$page" || {
-              echo "::error file=$page::Expected published lease page is missing"
+              echo "::error file=$page::Expected published CAPTCHA page is missing"
               exit 1
             }
           done

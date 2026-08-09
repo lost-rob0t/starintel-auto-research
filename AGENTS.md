@@ -1,348 +1,280 @@
 # Starintel Agent Instructions
 
-This is the canonical instruction file for every agent working in this repository.
+This file is the repository-wide authority for every human or automated agent that reads or changes this repository.
 
-## Mission
+## Instruction Scope
 
-Build Starintel as a local-first, professional intelligence platform: a document-driven, actor-based collection, search, correlation, automation, and analysis system that can run at home and scale into a hosted service. Its purpose is to give ordinary operators the investigative reach needed to expose lobbying, procurement, institutional influence, surveillance deployments, ownership networks, coordinated activity, and other concentrations of power.
+1. Read this root `AGENTS.md` before making any change.
+2. Locate every nested `AGENTS.md` with `find .. -name AGENTS.md -print` and read the files that apply to each path you intend to edit.
+3. The actual tracked tree, current source, current tests, and current scripts override remembered behavior or stale prose.
+4. When inspecting another repository, read that repository's applicable `AGENTS.md` before treating its source or documentation as authoritative.
+5. A narrowly scoped change should load only the active node, direct links, relevant index, source, and tests. An explicitly requested repository-wide audit is the exception: inspect the complete tracked scope required by the request.
 
-Product line: **the world's most dangerous search engine**—dangerous because it can preserve, normalize, connect, search, and analyze fragmented data across public, private, commercial, supplied, acquired, platform, sensor, and archival sources while supporting evidence and provenance.
-
-## Capability-First Principle
-
-Starintel is an anti-technofeudalist intelligence tool. Its core must maximize collection breadth, source interoperability, entity resolution, relationship discovery, graph analysis, automation, replay, search, and operator-controlled execution. It must not be reduced to a public-record viewer or preemptively narrowed around the operating assumptions of a future company.
-
-Approval gates, audits, permissions, allowlists, retention rules, rate policies, resource policies, review queues, redaction, and deployment governance are optional modules selected by the operator or product deployment. They are not universal prerequisites, mandatory document fields, or limits on the core capability model.
-
-Parser, type, schema, transport-termination, and renderer-output correctness invariants are not deployment-policy modules. Generated artifacts must be deterministically validated before becoming typed documents or executable plans; actor and expert-system outputs must satisfy their schemas; poison inputs must reach a terminal reject or dead-letter outcome; untrusted rendered fields must be sanitized or escaped; and lifecycle, provenance, integrity, and processing semantics required for deterministic replay must be preserved.
-
-Research must first identify the strongest technically achievable capability. Deployment policy may wrap that capability later without rewriting or weakening the underlying architecture.
-
-## Context Order
-
-Read only what is needed:
-
-1. `AGENTS.md`
-2. The active design for the selected project under `roam/implement/<project>/`
-3. Directly linked design and research nodes
-4. The relevant project index under `roam/indexes/`
-5. Relevant source and tests
-6. Git history when needed
-
-Never recursively load all of `roam/`.
-
-## Org Database
-
-Every Org file must live beneath:
-
-```text
-<project-root>/roam/
-```
-
-The four trees maintain the same project-directory structure:
-
-```text
-roam/
-├── design/
-├── research/
-├── implement/
-├── indexes/
-├── .implemented
-└── .rejected
-```
-
-If `roam/design/star-server/` exists, these directories must also exist:
-
-```text
-roam/research/star-server/
-roam/implement/star-server/
-roam/indexes/star-server/
-```
-
-`scripts/sync.py` maintains this structure without deleting directories.
-
-## Per-Project Implementation Slots
-
-`roam/implement/` may contain many empty mirrored directories. Each immediate project subtree may contain exactly zero or one Org design file. Independent projects may have active designs concurrently.
-
-Select a design:
-
-```bash
-python scripts/implement.py roam/design/<project>/<design>.org
-```
-
-The working copy preserves the relative path:
-
-```text
-roam/design/star-server/STAR-SERVER-001.org
-→ roam/implement/star-server/STAR-SERVER-001.org
-```
-
-Inspect all project slots:
-
-```bash
-python scripts/implement.py --status
-```
-
-Inspect or clear one project slot:
-
-```bash
-python scripts/implement.py --status --project star-lang
-python scripts/implement.py --clear --project star-lang
-```
-
-Do not manually place a second Org file inside the same `roam/implement/<project>/` subtree.
-
-## Completing or Rejecting a Design
-
-Mark an implemented design:
-
-```bash
-python scripts/mark-design.py implemented \
-  --project star-server \
-  --summary "What was implemented" \
-  --file source/example.lisp \
-  --test "nix flake check: passed" \
-  --commit <sha>
-```
-
-Mark a rejected design:
-
-```bash
-python scripts/mark-design.py rejected \
-  --project star-server \
-  --reason "Why the design was rejected" \
-  --evidence "Benchmark or repository finding" \
-  --replacement "Replacement design, if any"
-```
-
-When exactly one project has an active design, `--project` may be omitted. When multiple projects are active, it is required to identify the design being completed or rejected.
-
-Then synchronize:
-
-```bash
-python scripts/sync.py
-```
-
-The status ledgers are append-only JSONL:
-
-- `roam/.implemented`
-- `roam/.rejected`
-
-Synchronization:
-
-- mirrors project directories across `design`, `research`, `implement`, and `indexes`
-- updates `#+status`, `#+status_event`, and `#+status_updated`
-- appends an idempotent Org implementation or rejection record
-- rewrites implemented designs to document what was actually implemented
-- preserves rejected canonical designs and their rejection record
-- removes only active working copies whose status events were synchronized
-- never deletes the canonical design
-
-A later implementation may supersede a rejection; both historical records remain in the design file and ledgers.
-
-## Research Workflow
-
-Search narrowly:
-
-```bash
-python scripts/search.py "router benchmark" --project star-server
-```
-
-Save research:
-
-```bash
-scripts/save-research \
-  --project star-server \
-  --title "CL-GServer router benchmark" \
-  --draft \
-  --finding "Round-robin routees improved throughput" \
-  --source "benchmark output"
-```
-
-Incomplete work is `DRAFT` and tagged `:draft:`.
-
-## Org-roam Second Brain and GitHub Pages
-
-The `roam/` tree is a long-lived second brain, not a pile of disconnected documents.
-
-Agents must:
-
-- treat every persistent Org file as an Org-roam file node
-- include a stable file-level `ID` property, `#+title`, and `#+description` in every new Org file
-- prefer durable `id:` links between Org-roam nodes
-- link new designs to their research basis, project index, dependencies, replacements, and related designs
-- update or create the relevant project index when adding a project or major subsystem
-- use Org-roam backlinks and direct graph neighbors before broader repository search
-- use `M-x star/roam`, `M-x star/roam-capture`, and `M-x star/roam-sync` for interactive work
-- run `bash scripts/publish-pages` for the same isolated Emacs export used by continuous integration
-- run `python3 scripts/check-pages-links.py _site` after changing the exporter, links, attachments, or site assets
-- keep all generated Org-roam database state under `.cache/`
-- keep all generated website output under `_site/`
-- never hand-edit `.cache/` or `_site/`
-- keep site links relative so the build works on GitHub Pages, custom domains, local files, and local web servers
-- never hard-code a branch preview URL into exported pages
-- preserve source directory structure in published note URLs
-- keep the publication pipeline reproducible from `emacs --batch -Q`
-- keep the GitHub Pages workflow green before reporting publishing work complete
-
-The Pages exporter must:
-
-- build an Org-roam database from the staged `roam/` tree
-- resolve `id:` and local Org-file links into generated HTML pages
-- add backlinks to every exported file node
-- generate the main index, search index, and graph index
-- copy referenced non-Org assets into the published note tree
-- fail on unresolved Org-roam identifiers
-- fail on broken internal pages, assets, or HTML anchors
-- deploy only from `main` or a manually dispatched workflow
-- build and validate pull requests without deploying them
-
-The public site is generated from repository content. Never commit secrets, private datasets, credentials, private evidence, or personal data that is not intended to exist in the repository.
-
-The canonical publishing index is:
-
-```text
-roam/indexes/second-brain/SECOND-BRAIN-000-org-roam-pages.org
-```
-
-## Reader Accessibility and Footnote Glossary
-
-Every design and research Org file must be readable by a person with no assumed background in intelligence work, actor systems, Common Lisp, infrastructure, security, or the specific project.
-
-Agents must:
-
-- define every acronym and initialism at first use
-- define every technical, domain-specific, legal, intelligence, security, programming, networking, database, and project-specific term at first use
-- define every non-obvious code word, package name, protocol name, component name, architectural pattern, and abbreviation
-- attach an Org footnote reference to the first use of each defined term
-- maintain a `* Footnotes and Glossary` section containing the plain-language definitions
-- use one stable footnote label per term and reuse that label when the same term appears again
-- explain terms in ordinary language before using more specialized terminology inside the definition
-- define specialized words used inside a definition unless the meaning is obvious from ordinary English
-- include a concrete example when a definition alone may still be unclear
-- expand shortened names such as `BBP`, `SOCMINT`, `SIGINT`, `API`, `ACL`, `TLS`, `mTLS`, `URI`, `FSM`, `OTP`, `PII`, `LEO`, `ASDF`, and `CLOS`
-- define project names such as Starintel, Sento, CL-GServer, Star Router, actor manifest, and dataset manifest
-- never assume that a familiar term is familiar to the reader
-
-“Every word” means every word or phrase whose meaning is not obvious to a general reader from normal English. Ordinary connective words such as “and,” “the,” and “inside” do not need glossary entries.
-
-A design is incomplete when a reader must search outside the file merely to understand its vocabulary. External citations may support claims, but they do not replace local definitions.
-
-Required Org structure:
-
-```org
-* Footnotes and Glossary
-
-[fn:actor] Actor: A small independent software unit that owns its state and processes messages one at a time.
-
-[fn:dispatcher] Dispatcher: A pool of worker threads that runs actor mailbox work.
-```
-
-## Architecture Boundaries
-
-- `starintel-doc`, `star-cl`, `starintel-doc.nim`, `starintel_doc.js`: document specification implementations.
-- `starintel-server`: Common Lisp control, ingest, search, persistence, and actor service.
-- `cl-gserver`: in-process actor runtime, dispatchers, event stream, and router pools.
-- `starRouter`: client-facing and cross-process routing.
-- `starReplay`: deterministic replay and rebuild.
-- `star-formatter`: normalization and conversion.
-- `star-db-bot`: persistence actors.
-- `tek9`: Star Actor Cache foundation.
-- Actor Manifests describe actor capabilities.
-- Dataset Manifests define declarative flows.
-- Relations, provenance, and evidence are first-class documents.
-
-## Star Server Routing
-
-Use CL-GServer router-backed routee pools for hot in-process paths:
-
-- validation
-- normalization
-- CouchDB operations
-- search
-- target dispatch
-- attachment processing
-- OCR
-- entity extraction
-- graph updates
-
-Benchmark shared, pinned, and custom dispatchers before claiming a speedup. Preserve sequential message handling inside each routee. Use Star Router for client or cross-process routing; do not duplicate that boundary inside CL-GServer.
-
-## Document Contract
-
-When changing the document specification:
-
-1. Update the canonical design.
-2. Define type, requiredness, null behavior, mutability, merge/conflict rules, and migration.
-3. Update every maintained language implementation.
-4. Add shared conformance fixtures.
-5. Preserve lifecycle, provenance, integrity, and processing semantics required for deterministic validation, replay, and conflict resolution.
-6. Keep access, audit, retention, review, and deployment-policy metadata optional unless the active design explicitly requires them.
-7. Never fabricate sources, confidence, authorization, or evidence.
-
-## Code Rules
-
-- Make minimal, reviewable changes.
-- Search existing APIs before inventing new ones.
-- Validate untrusted input at boundaries.
-- Keep I/O, parsing, storage, routing, and domain logic separated.
-- Preserve structured errors.
-- Add regression tests for bugs.
-- Avoid hidden global state when an actor, manifest, or explicit dependency fits.
-- Do not add dependencies without documenting why existing dependencies are insufficient.
-- Never commit secrets, private datasets, generated evidence, credentials, or local state.
-- Do not overwrite unrelated dirty work.
-- Do not claim a command passed unless it was executed and observed.
-
-## Multi-Agent Rules
-
-- Delegate bounded questions, not entire projects.
-- Give subagents exact scope, inputs, output format, and stop condition.
-- One agent owns each writable file at a time.
-- Parallelize read-only repository review and independent validation.
-- The parent agent integrates decisions and validates the result.
-- Limit recursive delegation by depth, time, and token budget.
-- Normalize tool outputs before passing them between agents.
-
-## Agent Zero
-
-For Agent Zero:
-
-- install the Starintel profile under `/a0/usr/agents/starintel`
-- install skills under `/a0/usr/skills`
-- activate the repository as a project
-- keep Agent Zero configuration under `/a0/usr`
-- keep project source and Org files inside the repository
-- activate only relevant skills
-- use subordinate agents for bounded read-only work
-- keep synthesis, file ownership, status marking, and synchronization with the superior agent
-
-## Git and Completion
-
-Before editing:
+Before editing, run and record:
 
 ```bash
 git status --short
 git branch --show-current
+git remote -v
+find .. -name AGENTS.md -print
 ```
 
-Before completion:
+Do not overwrite unrelated work. Never claim a clean tree, branch, remote, or instruction scope without observing these commands.
+
+## Repository Mission and Boundaries
+
+Starintel is a local-first, document-driven, actor-based intelligence platform. Research should identify technically achievable capability first; operator-selected authorization, disclosure, retention, review, and deployment policy then constrain its use. Correctness invariants—schema validation, deterministic replay, provenance, typed messages, terminal failure handling, output escaping, and reproducible publication—are mandatory.
+
+Architecture boundaries:
+
+- `starintel-doc`, `star-cl`, `starintel-doc.nim`, and `starintel_doc.js` implement document contracts.
+- `starintel-server` owns Common Lisp control, ingest, persistence, search, authorization, and local actor services.
+- `cl-gserver` owns in-process actor runtime behavior.
+- Star Router owns client-facing and cross-process routing.
+- Actor manifests describe runtime-discoverable actor capabilities.
+- Dataset manifests describe declarative data flows.
+- Relations, provenance, evidence, and operational outcomes are first-class records.
+
+Current source and tests are authoritative over old design memory. Never invent an API because a design would be easier with it.
+
+## Existing Scripts Are the Workflow
+
+Inspect `scripts/`, publication code, and `.github/workflows/` before inventing a build, synchronization, validation, rendering, indexing, or publication command. Extend the current validation architecture directly; do not add a contradictory parallel framework.
+
+The canonical source synchronization and complete-site validation sequence is:
 
 ```bash
-git diff --check
-git diff --stat
-python scripts/sync.py --check
+python3 scripts/sync.py
+python3 scripts/sync.py --check
+python3 scripts/validate-docs.py
 bash scripts/publish-pages
 python3 scripts/check-pages-links.py _site
 ```
 
+For a pull request or any task that materially changes substantive Org documents, also validate the changed-file history against the base revision:
+
+```bash
+python3 scripts/validate-docs.py \
+  --changed-since <base-revision> \
+  --audit-date YYYY-MM-DD
+```
+
+Rules:
+
+- Run `python3 scripts/sync.py` before page generation.
+- Run `python3 scripts/sync.py --check` after synchronization and before completion.
+- Run `bash scripts/publish-pages`; do not invoke the lower-level Emacs exporter directly.
+- `bash scripts/publish-pages` is the canonical complete-site generator. Do not manually generate selected pages.
+- Run `python3 scripts/check-pages-links.py _site` against the generated complete site.
+- PlantUML validation is part of `bash scripts/publish-pages`: `scripts/enhance-pages.py` renders every PlantUML block and fails the build on a rendering error. Run the complete page build whenever a diagram changes.
+- Org-roam ID and link validation is performed by `scripts/validate-docs.py` and the isolated page build. Run both when Org files change.
+- Continuous integration must execute the same commands in the same order. Local-only or CI-only substitute commands are defects.
+- Never bypass a failing wrapper by directly invoking its implementation detail.
+- Never suppress, ignore, or replace a failed exit status with a successful one.
+
+The implementation-slot workflow remains:
+
+```bash
+python3 scripts/implement.py roam/design/<project>/<design>.org
+python3 scripts/implement.py --status
+python3 scripts/mark-design.py implemented --project <project> --summary <summary> --file <path> --test <observed-test>
+python3 scripts/mark-design.py rejected --project <project> --reason <reason> --evidence <evidence>
+python3 scripts/sync.py
+```
+
+Each immediate `roam/implement/<project>/` subtree may contain zero or one active design. Do not manually create a second active design in the same project slot. The `.implemented` and `.rejected` JSONL ledgers are append-only. Synchronization may remove an active working copy after recording its terminal state, but it must never delete the canonical design.
+
+## Generated Files
+
+Never hand-edit generated output.
+
+- Do not edit `_site/`, `.cache/`, generated HTML, rendered diagram output, generated Org-roam databases, generated search indexes, or generated graph indexes.
+- Do not manually copy files into `_site/`.
+- Do not patch generated HTML.
+- Do not commit `_site/` or `.cache/` unless this file documents a specific tracked exception. No such exception currently exists.
+- Source changes must flow through tracked Org files, assets, templates, Elisp, and canonical scripts.
+- The page build must remove stale output before rendering and must propagate every failed command.
+- Before committing, inspect `git status --short` and `git diff --name-only` and confirm no generated cache or site output is staged.
+
+## Substantive Org Documents
+
+Substantive document classes include research, design, architecture, implementation, specifications, indexes, decisions, operational runbooks, projects, actors, and providers. Classify a document by its actual role; do not force unrelated factual content into one generic outline.
+
+Every substantive Org document must contain non-empty source metadata near the beginning:
+
+```org
+:PROPERTIES:
+:ID: stable-id
+:END:
+#+title:
+#+description:
+#+status:
+#+filetags:
+```
+
+Requirements:
+
+- Preserve every existing stable file ID.
+- Never regenerate an ID for formatting convenience.
+- New IDs must be unique and stable.
+- Duplicate IDs and unresolved `id:` links are validation failures.
+- Prefer durable `id:` links between canonical nodes.
+- Repair stale file links and related-node links when documents move or are superseded.
+- Avoid duplicate canonical research documents. Extend or supersede the existing canonical node instead.
+- A superseded document must identify and link its replacement.
+- New, moved, superseded, or materially changed documents require corresponding index and related-link updates.
+- Expand acronyms and define technical terms on first use.
+- Every materially modified substantive document must contain `* Footnotes and Glossary` with document-relevant definitions or durable links to shared definitions.
+
+## Approval Tables
+
+Every dedicated research, design, architecture, implementation, specification, provider, actor, and operational document requires an approval table. Indexes require their own table unless they carry an explicit metadata exemption with a concrete reason.
+
+Use this exact header near the beginning:
+
+```org
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+```
+
+Allowed states are:
+
+- `PENDING`
+- `NOT STARTED`
+- `APPROVED`
+- `REJECTED`
+- `SUPERSEDED`
+- `NOT APPLICABLE`
+
+Never fabricate approval. A merge, existing file, green build, or status keyword does not approve a research, architecture, security, operations, or implementation row. Preserve real evidence. Downgrade unsupported `APPROVED` rows. `NOT APPLICABLE` requires a written reason. Evidence references must point to real review evidence. `#+status` and approval state are separate.
+
+An exemption must use explicit metadata such as `#+approval_exemption:` followed by a concrete reason. An empty or vague exemption is invalid.
+
+## Changelogs
+
+Every substantive research, design, architecture, implementation, specification, index, provider, actor, and operational document requires:
+
+```org
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+```
+
+Record material document changes. For the current task, add a dated row to every materially modified substantive document. State what changed and cite the source diff, review, fixture, command output, or other real evidence. Do not invent historical authorship, dates, or prior entries. When history cannot be established, start with the current verified change. Git history does not replace the in-document changelog.
+
+An exemption must use `#+changelog_exemption:` with a concrete reason.
+
+## Indexes and Canonical Documents
+
+Every index must:
+
+- state its scope;
+- link every canonical direct child with durable `id:` links;
+- avoid duplicate canonical entries;
+- identify superseded documents and replacements;
+- connect research, design, implementation, specifications, and operations;
+- describe implementation order when order matters;
+- expose approval state and known research gaps where useful.
+
+When creating, moving, superseding, or materially changing a document, update its project index in the same change. The CAPTCHA index must cover every canonical broker, detector, challenge, solver, provider, adapter, implementation, operations, and future-work node.
+
+## Research and Provider Contracts
+
+Use current primary sources for externally changing facts and record retrieval dates. Separate verified facts, contradictions, inference, and unresolved questions. Provider marketing is not an API contract. Browser-extension behavior is not automatically a server API capability.
+
+For actor or provider capability research, record exact request fields, result fields, result kind, authentication, session/network requirements, cookies, proxies, user agent, mobile requirements, delivery model, cancellation, idempotency, ambiguous submission behavior, concurrency, billing, retention, disclosure, errors, confidence, fixtures, live-probe requirements, unsupported variants, and contradictions.
+
+Do not advertise unverified runtime capability in a static manifest. Live probes must be opt-in, credential-gated, cost-bounded, capability-specific, and restricted to operator-owned or explicitly authorized systems. Continuous integration must never call a paid provider.
+
+## Publication and Domain Rules
+
+The public site is `https://auto-research.starintel.actor/`.
+
+- Use only `auto-research.starintel.actor` links when reporting published pages.
+- Do not report or emit `github.io` publication links.
+- Generated canonical, navigation, sitemap, asset, and internal links must not use `github.io`.
+- Keep internal site links relative.
+- Do not hard-code branch-preview URLs into exported pages.
+- Preserve source directory structure in published note paths.
+- Never claim pages were published unless the target-branch publication workflow completed successfully.
+- A local `_site` build proves generation, not deployment.
+- Never commit secrets, credentials, private evidence, private datasets, authorization headers, browser-session material, or raw sensitive solver results to source or generated pages.
+
+`roam/indexes/second-brain/SECOND-BRAIN-000-org-roam-pages.org` is the canonical publishing index.
+
+## Continuous Integration
+
+The Pages workflow must:
+
+1. run the canonical synchronization process;
+2. run repository document validation;
+3. generate the complete site with `bash scripts/publish-pages`;
+4. fail on page generation or PlantUML rendering errors;
+5. fail on unresolved Org-roam IDs, file links, pages, assets, or anchors;
+6. fail on missing or malformed approval tables and changelogs;
+7. fail on invalid approval states or unsupported approval evidence;
+8. fail when materially changed substantive documents lack a current changelog entry or glossary;
+9. fail when generated pages expose prohibited secret material or `github.io` links;
+10. reject tracked `_site/` and `.cache/` output;
+11. avoid paid provider calls;
+12. deploy only from the expected target branch or an explicit manual dispatch;
+13. publish with the `auto-research.starintel.actor` domain.
+
+Do not maintain contradictory local and CI workflows.
+
+## Code and Test Rules
+
+- Make direct, reviewable changes; avoid workaround layers.
+- Search existing APIs before adding an API or dependency.
+- Validate untrusted input at boundaries.
+- Preserve typed errors and terminal failure states.
+- Add regression tests for bugs and validators.
+- Keep I/O, parsing, storage, routing, and domain logic separated.
+- Make retries idempotent and bounded.
+- Never persist secrets in messages, documents, fixtures, logs, or generated pages.
+- Never claim a check passed unless it was executed and its result was observed.
+- Never claim a command was run when it was inferred from CI configuration or prior history.
+
+## Git and Completion
+
+Before completion, run and record the exact output of:
+
+```bash
+git diff --check
+git diff --stat
+python3 -m py_compile \
+  scripts/_roamlib.py \
+  scripts/implement.py \
+  scripts/mark-design.py \
+  scripts/sync.py \
+  scripts/validate-docs.py \
+  scripts/enhance-pages.py \
+  scripts/check-pages-links.py
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+python3 scripts/sync.py
+python3 scripts/sync.py --check
+python3 scripts/validate-docs.py
+bash scripts/publish-pages
+python3 scripts/check-pages-links.py _site
+git status --short
+git diff --name-only
+```
+
+When substantive Org files changed, also run the changed-file validation command against the actual base revision and current date.
+
 Report:
 
-- active project design(s) and final status
-- files changed
-- behavior changed
-- tests and exact results
-- research/design records updated
-- Pages build and link-check result when Org or site content changed
-- unresolved risks
+- branch and exact head SHA;
+- pull request and target branch;
+- applicable `AGENTS.md` files read;
+- complete tracked scope inspected;
+- files created, changed, deleted, moved, or superseded;
+- canonical commands executed and exact results;
+- approval, changelog, metadata, Org-roam, index, PlantUML, generated-site, link, secret, and prohibited-domain results;
+- unresolved risks and research gaps;
+- publication workflow result and only `auto-research.starintel.actor` page links.
+
+Do not enable auto-merge. Merge directly only after every required check for the current head is complete and green, the branch is current and mergeable, review requirements are satisfied, discussions are resolved, and the expected current head SHA is supplied to the merge operation. After merging, verify the merge commit on the target branch and verify the target-branch publication workflow.

@@ -6,7 +6,7 @@ This repository is the Emacs-first control plane for Starintel research, design 
 
 The Org tree under =roam/= is the source of truth. Elisp under =lisp/= owns capture, indexing, validation, context bundling, Git workflow helpers, Org-roam database operations, and GitHub Pages export.
 
-Published second brain: [[https://lost-rob0t.github.io/starintel-auto-research/][lost-rob0t.github.io/starintel-auto-research]]
+Published second brain: [[https://auto-research.starintel.actor/][auto-research.starintel.actor]]
 
 * Repository Shape
 
@@ -14,8 +14,9 @@ Published second brain: [[https://lost-rob0t.github.io/starintel-auto-research/]
 lisp/starintel/                Emacs workflow and publishing implementation
 roam/design/                   Numbered design files
 roam/research/                 Research trackers and findings
-roam/implement/                Designs promoted for implementation
+roam/implement/                Active implementation working copies
 roam/indexes/                  Roadmaps and project indexes
+scripts/validate-docs.py       Repository document, ID, link, approval, and changelog audit
 pages/                         Batch bootstrap and static web assets
 epub/                          Kindle EPUB stylesheet
 .github/workflows/pages.yml    GitHub Pages build and deployment
@@ -38,6 +39,14 @@ M-x star/pages-open
 
 The repository =.dir-locals.el= points Org-roam at =roam/= and stores its generated database under =.cache/=.
 
+Validate substantive Org documents directly:
+
+#+begin_src sh
+python3 scripts/validate-docs.py
+#+end_src
+
+For materially changed documents, add =--changed-since <base-revision>= and =--audit-date YYYY-MM-DD=. The deterministic =--fix= mode repairs structural omissions without fabricating approval; its source diff must be reviewed before commit.
+
 Enable GitHub Pages workflow publishing once with an administrator-authenticated GitHub CLI session:
 
 #+begin_src sh
@@ -49,11 +58,14 @@ The ordinary workflow token cannot create or change the repository's initial Pag
 Build the same site used by GitHub Pages:
 
 #+begin_src sh
+python3 scripts/sync.py
+python3 scripts/sync.py --check
+python3 scripts/validate-docs.py
 bash scripts/publish-pages
 python3 scripts/check-pages-links.py _site
 #+end_src
 
-The export uses a temporary normalized copy of the Org tree, builds the Org-roam database, exports one HTML page per Org file, adds backlinks, creates search and graph indexes, and checks every internal page, asset, and anchor link.
+The export uses a temporary normalized copy of the Org tree, builds the Org-roam database, exports one HTML page per Org file, adds backlinks, creates search and graph indexes, renders every PlantUML block, checks every internal page, asset, and anchor link, enforces the custom domain, and rejects high-confidence secret material.
 
 See [[file:roam/indexes/second-brain/SECOND-BRAIN-000-org-roam-pages.org][SECOND-BRAIN-000 Org-roam Pages]].
 
@@ -69,4 +81,4 @@ The local output is =_exports/starintel-second-brain.epub=. The independent =Kin
 
 * Rule
 
-Do not load the entire research tree into an agent context. Build a bounded context bundle from the active node, its direct links, and its project index.
+Do not load the entire research tree into an agent context for ordinary focused work. An explicitly requested repository-wide structural audit must inspect the complete tracked scope named by the task and report anything that could not be validated.

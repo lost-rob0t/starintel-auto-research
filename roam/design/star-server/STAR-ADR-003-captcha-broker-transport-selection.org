@@ -44,6 +44,28 @@ future explicitly non-durable component boundary
 
 The normalized application envelopes remain transport-neutral. Application code should address logical capabilities/routes, not RabbitMQ exchange names or ZeroMQ sockets directly.
 
+* Candidate Topology Diagram
+
+#+begin_src plantuml
+@startuml
+component "CaptchaBrokerActor" as Broker
+component "Local Solver Actor" as Local
+queue "RabbitMQ durable boundary" as Rabbit
+component "Remote Provider Adapter" as Remote
+component "Future non-durable Star Router route" as Router
+cloud "ZeroMQ candidate" as Zmq
+
+Broker --> Local : Sento mailbox\n(same process)
+Broker --> Rabbit : transport-neutral solve/cancel/state envelope
+Rabbit --> Remote : durable external-provider work
+Remote --> Rabbit : normalized result/state reference
+Rabbit --> Broker : durable result/state delivery
+Router ..> Zmq : deferred pending separate design gates
+@enduml
+#+end_src
+
+This diagram is a review artifact, not an approved deployment topology.
+
 * Rationale From Approved Research
 
 - Current =starintel-server= packaging already includes =rabbitmq-c=, =cl-rabbit=, and Sento.
@@ -183,6 +205,7 @@ Continuous integration uses fake providers. Paid live probes remain separate, ex
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-08-09 | Added a renderable candidate topology diagram required for architecture review; design remains REVIEW and unapproved | research agent | PR #89 changed-document validation |
 | 2026-08-09 | Renamed approval section to the canonical Approval Table heading; preserved REVIEW status and all pending design gates | research agent | PR #89 changed-document validation |
 | 2026-08-09 | Removed cross-branch Org-ID dependency on PR #79-only landscape research so PR #78 validates independently | research agent | Kindle EPUB unresolved-link CI failure |
 | 2026-08-09 | Corrected approval boundary: returned ADR/design from APPROVED to REVIEW after project owner approved research but explicitly withheld design approval; updated references to transport research 007 and separated approved research findings from unapproved topology/interface decisions | project owner + research agent | User instruction and STAR-PRO-RESEARCH-007 |

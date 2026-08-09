@@ -1,0 +1,120 @@
+:PROPERTIES:
+:ID:       starintel-star-titanic-index-033
+:END:
+#+title: STAR-TITANIC-INDEX-033 Durable Actor Jobs
+#+description: Index for the StarIntel Titanic durable actor-job research stack: historical lineage, protocol architecture, backend comparison, failure semantics, and contract testing.
+#+status: REVIEW
+#+last_modified: [2026-08-08 Sat]
+#+filetags: :starintel:star-server:titanic:index:actors:jobs:rabbitmq:research:org-roam:
+
+* Purpose
+
+This stack revives the 2023 StarIntel =Titanic= concept as a modern durable actor-job protocol without recreating a second broker beside RabbitMQ.
+
+The historical design was already recognizably descended from ZeroMQ's stable Titanic Service Protocol: persistent asynchronous request submission, worker dispatch, retained results, and later client retrieval. Modern StarIntel has enough broker machinery that Titanic can move up one layer and become the durable execution contract.
+
+* Research Stack
+
+| Node | Scope | Decision |
+|------+-------+----------|
+| [[id:starintel-star-server-research-033][STAR-RESEARCH-033 Titanic Lineage and Earliest Confirmed StarIntel History]] | 2022 public-history lower bound, 2023 devlog reconstruction, ZeroMQ TSP lineage | Keep the Titanic name; earliest confirmed public StarIntel code is 2022-02-12 |
+| [[id:starintel-star-server-research-034][STAR-RESEARCH-034 Titanic Durable Actor Job Protocol]] | envelope, job/attempt identity, state machine, routing, cancellation, result retention, Rabbit mapping | Titanic is a backend-neutral durable job contract; RabbitMQ is v1 adapter |
+| [[id:starintel-star-server-research-035][STAR-RESEARCH-035 Titanic Backend and Transport Comparison]] | RabbitMQ vs JetStream vs Kafka vs ZeroMQ/TSP vs Temporal vs LMDB | RabbitMQ primary; JetStream future adapter; others are non-v1 or inspiration |
+| [[id:starintel-star-server-research-036][STAR-RESEARCH-036 Titanic Failure Semantics and Contract Tests]] | crashes, unknown outcomes, duplicates, retries, DLQ, deadlines, fencing, model tests | Model semantics first; exactly-once is not claimed |
+
+* Existing Dependencies
+
+- [[id:starintel-star-lang-research-010][STAR-LANG-RESEARCH-010 Message Lifecycle and Delivery Semantics]] supplies correlation, causation, ACK/error/cancel, attempt, deadline, and idempotency semantics.
+- [[id:7ee9b211-90e1-48c7-a99b-7807f04fc2e9][STAR-RESEARCH-029 Distributed Target Lease and Fencing Semantics]] supplies execution authority for protected targets.
+- =skills/rabbitmq-routing/SKILL.md= supplies the current broker topology and settlement review procedure.
+- =skills/message-idempotency/SKILL.md= supplies duplicate-safe document/side-effect policy.
+- =skills/dead-letter/SKILL.md= supplies failure capture and replay policy.
+
+* Architecture Boundary
+
+#+begin_example
+client / actor / planner
+        |
+        v
+  Titanic submit API
+  stable job + journal
+        |
+        v
+ RabbitMQ capability queue
+        |
+        +------------------+
+        |                  |
+        v                  v
+ external worker      local worker bridge
+        |                  |
+        +--------+---------+
+                 |
+                 v
+       normal StarIntel outputs
+       documents / relations /
+       events / attachments
+                 |
+                 v
+        Titanic terminal result
+#+end_example
+
+Sento remains the local actor runtime. Star Router remains the client/cross-process routing boundary. RabbitMQ remains the durable distributed transport. Titanic owns durable *job meaning*.
+
+* V1 Required Semantics
+
+1. stable =job_id= and idempotency scope;
+2. durable admission with publisher confirmation/reconciliation;
+3. capability queues and bounded worker concurrency;
+4. at-least-once delivery with explicit terminal settlement;
+5. durable job/attempt journal;
+6. typed terminal results and disconnected result lookup;
+7. bounded retry with backoff and dead-lettering;
+8. cooperative cancellation and absolute deadlines;
+9. target lease/fencing integration where manifests require exclusive authority;
+10. deterministic fake/model contract tests before Rabbit adapter promotion.
+
+* Explicit Non-Goals
+
+- replacing Sento local actor mailboxes;
+- replacing Star Router;
+- replacing RabbitMQ in v1;
+- promising exactly-once execution;
+- reviving the original LMDB-backed proxy literally;
+- using Rabbit delivery tags as stable protocol identity;
+- putting every high-frequency local actor message through durable storage;
+- introducing Temporal or Kafka merely to implement a job queue.
+
+* Suggested Next Design Pass
+
+After review, create a design node covering only the v1 seam:
+
+- =star.titanic/1= schema;
+- Common Lisp protocol structs/validators;
+- =job-store= interface plus deterministic fake;
+- Rabbit durable-admission producer with confirms;
+- one capability queue pilot;
+- result/status API;
+- contract tests from STAR-RESEARCH-036.
+
+Do not start by generalizing every actor or backend.
+
+* Approval
+
+| Date | Reviewer | Status | Notes |
+|------+----------+--------+-------|
+| 2026-08-08 | — | PENDING | Awaiting protocol/backend approval before design/implementation promotion |
+
+* Changelog
+
+| Date | Change |
+|------+--------|
+| 2026-08-08 | Created recursive Titanic research stack from recovered 2023 devlog architecture and current star-server runtime review. |
+| 2026-08-08 | Established 2022-02-12 as earliest currently confirmed public StarIntel code date. |
+| 2026-08-08 | Selected RabbitMQ as Titanic v1 backend while keeping protocol semantics backend-neutral. |
+| 2026-08-08 | Added failure/reconciliation/model-test requirements and linked existing Star-Lang and lease/fencing research. |
+
+* Footnotes and Glossary
+
+[fn:titanic] Titanic: StarIntel durable actor-job protocol name, historically derived from the ZeroMQ Titanic pattern for disconnected persistent request/reply processing.
+
+[fn:job-journal] Job journal: durable record of a job's submission, attempts, state transitions, retry/cancel history, terminal result, and replay lineage.

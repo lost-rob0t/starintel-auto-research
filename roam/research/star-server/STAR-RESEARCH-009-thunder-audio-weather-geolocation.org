@@ -1,0 +1,166 @@
+:PROPERTIES:
+:ID:       star-research-009-thunder-audio-weather-geolocation
+:END:
+#+title: STAR-RESEARCH-009 Thunder Audio and Weather-Correlation Geolocation
+#+description: Research seed for target-driven analysis of a public video using thunder audio, transcript context, weather and lightning records, and explicit uncertainty to test whether location or recording time can be constrained.
+#+status: RESEARCHING
+#+filetags: :starintel:research:star-server:auto-research:osint:audio:geolocation:weather:lightning:youtube:targets:attachments:
+#+created: [2026-08-09 Sun]
+#+last_modified: [2026-08-09 Sun]
+
+* Research Seed
+
+Target the public YouTube video identified by =SnbkIm56TfI=:
+
+- https://www.youtube.com/watch?v=SnbkIm56TfI
+
+The first research pass must determine what the video actually demonstrates, recover available captions or transcript material, identify any explicit assumptions made by the presenter, and then test the underlying method independently.
+
+Do not treat the video title, transcript, captions, upload metadata, claimed location, or claimed precision as verified until they are captured and checked.
+
+* Target-Driven Execution Invariant
+
+The actor runs from a StarIntel =target= document. Attachments are inputs supplied to that run; they are not independent run triggers.
+
+For this seed:
+
+- *target value*: =https://www.youtube.com/watch?v=SnbkIm56TfI=
+- *target purpose*: investigate whether thunder or related storm audio in a public recording can constrain recording location or time through correlation with public weather and lightning observations
+- *optional attachments*: downloaded transcript or captions, audio-only extraction, yt-dlp metadata JSON, selected spectrograms, manually supplied notes, and later source artifacts
+- *trigger rule*: creation or explicit execution of the target starts the research actor
+- *attachment rule*: adding an attachment enriches target context but must not itself be treated as a separate target unless the operator explicitly creates one
+
+This preserves the existing StarIntel direction in which target documents are explicit actor inputs while attachments remain evidence or context.
+
+* Acquisition Commands
+
+First inspect which subtitle tracks YouTube exposes:
+
+#+begin_src sh
+yt-dlp --list-subs 'https://www.youtube.com/watch?v=SnbkIm56TfI'
+#+end_src
+
+Download manual captions when present and automatic captions otherwise, without downloading the video, and normalize them to SRT:
+
+#+begin_src sh
+yt-dlp \
+  --skip-download \
+  --write-subs \
+  --write-auto-subs \
+  --sub-langs 'en.*,en' \
+  --sub-format 'vtt/best' \
+  --convert-subs srt \
+  -o '%(id)s.%(ext)s' \
+  'https://www.youtube.com/watch?v=SnbkIm56TfI'
+#+end_src
+
+Capture metadata alongside the research attachment set:
+
+#+begin_src sh
+yt-dlp \
+  --skip-download \
+  --write-info-json \
+  --write-description \
+  -o '%(id)s.%(ext)s' \
+  'https://www.youtube.com/watch?v=SnbkIm56TfI'
+#+end_src
+
+If the target requires acoustic analysis, acquire audio as a separate attachment while preserving the original media URL as the target:
+
+#+begin_src sh
+yt-dlp \
+  -x \
+  --audio-format wav \
+  -o '%(id)s.%(ext)s' \
+  'https://www.youtube.com/watch?v=SnbkIm56TfI'
+#+end_src
+
+* Research Questions
+
+1. What exact geolocation or timestamping method does the video claim or demonstrate?
+2. Which observations are extracted from the audio: thunder onset times, repeated thunder events, rain intensity, wind, sirens, aircraft, speech, or other environmental cues?
+3. Can thunder events be matched to independently recorded lightning strikes or storm-cell observations with enough temporal resolution to reduce the candidate area?
+4. What timing uncertainty is introduced by unknown upload delay, editing, cuts, variable playback speed, microphone latency, encoding, and absent recording timestamps?
+5. How does the speed-of-sound delay between lightning and thunder affect the inference model?
+6. What public weather, radar, lightning, and storm-report archives provide sufficient historical resolution for independent verification?
+7. How many candidate storms or geographic regions remain after each constraint is applied?
+8. What false-positive rate appears when the same method is tested against negative-control recordings from other storms?
+9. What confidence language is justified: exact location, bounded region, time window, compatible-with, or unresolved?
+10. Which evidence must be preserved so another analyst can replay the conclusion without trusting the actor's prose?
+
+* Initial Hypothesis
+
+Thunder audio can potentially act as a temporal and environmental signal, but a single thunder event is unlikely to identify a unique location by itself. The useful research question is whether multiple timed storm observations, recording metadata, visible context, and independent weather or lightning records combine to reduce the candidate set reproducibly.
+
+This is a hypothesis for testing, not a finding.
+
+* Evidence Model
+
+Each research run should preserve:
+
+- the target document and stable target ID
+- source URL and retrieval timestamp
+- yt-dlp metadata JSON
+- exact subtitle or transcript artifact and subtitle track identity
+- hashes of downloaded attachments
+- audio extraction parameters
+- timestamps for each candidate acoustic event
+- any preprocessing or filtering parameters
+- public weather or lightning source identifiers and retrieval timestamps
+- candidate locations or regions before and after each constraint
+- rejected candidates and rejection reasons
+- confidence and unresolved ambiguity
+- actor version, model version when applicable, and complete provenance chain
+
+Derived spectrograms or clipped audio remain attachments derived from the target source and should point back to the original target and source artifact.
+
+* Evaluation Criteria
+
+A successful research pass must do more than produce a plausible map point.
+
+It should:
+
+1. reproduce the video's method from captured evidence rather than description alone
+2. identify all external datasets required by the method
+3. run at least one positive case when enough source data exists
+4. run negative controls or ambiguity tests
+5. quantify timing and spatial uncertainty
+6. keep target, attachments, derived artifacts, and conclusions separately addressable
+7. emit no precise-location claim when multiple candidates remain compatible with the evidence
+
+* Scope Boundary
+
+This node researches forensic analysis of publicly available media and general geolocation methodology. It does not authorize covert tracking of a private person, access-controlled data acquisition, or conversion of an ambiguous environmental signal into a precise personal-location claim without independent evidence.
+
+* Related Nodes
+
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:STAR-RESEARCH-001-osint-feature-landscape.org][STAR-RESEARCH-001 OSINT Feature Landscape]]
+- [[file:STAR-RESEARCH-002-awesome-osint-research-backlog.org][STAR-RESEARCH-002 Awesome OSINT Research Backlog]]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research seed | StarIntel operator | PENDING | Confirm target-driven scope and research questions | This document and operator review |
+| Target semantics | StarIntel operator | PENDING | Confirm target is the run trigger and attachments are contextual inputs | Target-driven execution invariant above |
+| External-data methodology | Research reviewer | PENDING | Current primary-source review of weather and lightning archives | Future research pass |
+| Implementation | Repository maintainer | NOT STARTED | Approved actor design and passing implementation tests | Future design or implementation node |
+| Publication | StarIntel auto-research maintainer | PENDING | Main-branch publication workflow succeeds and page resolves | Future deployment result |
+
+No row implies that the proposed geolocation method has been validated.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-09 | Seeded target-driven thunder-audio and weather-correlation geolocation research from the operator-supplied YouTube source; defined attachments as contextual inputs rather than actor triggers. | OpenAI research agent under operator direction | Operator-supplied source URL and current StarIntel target/attachment contracts |
+
+* Footnotes and Glossary
+
+- *Target* — A StarIntel document whose explicit creation or execution selects work for an actor.
+- *Attachment* — Original or derived evidence supplied to a target-driven run without becoming an independent run trigger by itself.
+- *Thunder delay* — The propagation delay between a lightning discharge and the later arrival of its acoustic thunder at the recorder.
+- *Negative control* — A comparison case expected not to match the hypothesized source, used to measure false positives and ambiguity.
+- *Candidate set* — The remaining locations, time windows, or storm events compatible with the evidence after applying current constraints.

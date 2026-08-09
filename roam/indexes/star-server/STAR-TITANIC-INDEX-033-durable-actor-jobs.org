@@ -2,99 +2,108 @@
 :ID:       starintel-star-titanic-index-033
 :END:
 #+title: STAR-TITANIC-INDEX-033 Durable Actor Jobs
-#+description: Index for the StarIntel Titanic durable actor-job research stack: historical lineage, protocol architecture, backend comparison, failure semantics, and contract testing.
+#+description: Index for the StarIntel Titanic durable actor-job research stack: historical lineage, protocol architecture, polyglot ZeroMQ transport, persistence, failure semantics, and contract testing.
 #+status: REVIEW
 #+last_modified: [2026-08-08 Sat]
-#+filetags: :starintel:star-server:titanic:index:actors:jobs:rabbitmq:research:org-roam:
+#+filetags: :starintel:star-server:titanic:index:actors:jobs:zeromq:polyglot:research:org-roam:
 
 * Purpose
 
-This stack revives the 2023 StarIntel =Titanic= concept as a modern durable actor-job protocol without recreating a second broker beside RabbitMQ.
+This stack revives the 2023 StarIntel =Titanic= concept as a modern durable actor-job protocol while preserving the project's already-approved ZeroMQ boundary for language-independent and cross-process actors.
 
-The historical design was already recognizably descended from ZeroMQ's stable Titanic Service Protocol: persistent asynchronous request submission, worker dispatch, retained results, and later client retrieval. Modern StarIntel has enough broker machinery that Titanic can move up one layer and become the durable execution contract.
+The historical design was already recognizably descended from ZeroMQ's Titanic Service Protocol: persistent asynchronous request submission, worker dispatch, retained results, and later client retrieval. The recovered diagram also separated the broker, Titanic persistence, and the router socket. The modern design keeps those responsibilities separate.
 
 * Research Stack
 
 | Node | Scope | Decision |
 |------+-------+----------|
 | [[id:starintel-star-server-research-033][STAR-RESEARCH-033 Titanic Lineage and Earliest Confirmed StarIntel History]] | 2022 public-history lower bound, 2023 devlog reconstruction, ZeroMQ TSP lineage | Keep the Titanic name; earliest confirmed public StarIntel code is 2022-02-12 |
-| [[id:starintel-star-server-research-034][STAR-RESEARCH-034 Titanic Durable Actor Job Protocol]] | envelope, job/attempt identity, state machine, routing, cancellation, result retention, Rabbit mapping | Titanic is a backend-neutral durable job contract; RabbitMQ is v1 adapter |
-| [[id:starintel-star-server-research-035][STAR-RESEARCH-035 Titanic Backend and Transport Comparison]] | RabbitMQ vs JetStream vs Kafka vs ZeroMQ/TSP vs Temporal vs LMDB | RabbitMQ primary; JetStream future adapter; others are non-v1 or inspiration |
+| [[id:starintel-star-server-research-034][STAR-RESEARCH-034 Titanic Durable Actor Job Protocol]] | envelope, job/attempt identity, state machine, routing, cancellation, result retention | Titanic is a backend-neutral durable job contract |
+| [[id:starintel-star-server-research-035][STAR-RESEARCH-035 Titanic Backend and Transport Comparison]] | initial RabbitMQ/JetStream/Kafka/ZeroMQ/Temporal/LMDB comparison | Superseded where it made RabbitMQ the worker backend or JetStream the preferred future adapter |
 | [[id:starintel-star-server-research-036][STAR-RESEARCH-036 Titanic Failure Semantics and Contract Tests]] | crashes, unknown outcomes, duplicates, retries, DLQ, deadlines, fencing, model tests | Model semantics first; exactly-once is not claimed |
+| [[id:starintel-star-server-research-037][STAR-RESEARCH-037 Titanic Polyglot ZeroMQ Transport Correction]] | Common Lisp/Nim/Python/JavaScript support, approved ZMQ boundary, recovered router-socket architecture | ZeroMQ is canonical worker transport; Titanic owns durable job state; RabbitMQ is an adapter; JetStream is comparison only |
 
 * Existing Dependencies
 
 - [[id:starintel-star-lang-research-010][STAR-LANG-RESEARCH-010 Message Lifecycle and Delivery Semantics]] supplies correlation, causation, ACK/error/cancel, attempt, deadline, and idempotency semantics.
 - [[id:7ee9b211-90e1-48c7-a99b-7807f04fc2e9][STAR-RESEARCH-029 Distributed Target Lease and Fencing Semantics]] supplies execution authority for protected targets.
-- =skills/rabbitmq-routing/SKILL.md= supplies the current broker topology and settlement review procedure.
+- [[file:../../design/star-server/STAR-ADR-001-domain-gserver-zmq-approval.org][STAR-ADR-001 Domain GServer and ZeroMQ Approval]] is the approved process/language-boundary decision.
+- [[file:../../design/cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]] defines the cross-process ROUTER/DEALER runtime boundary.
+- [[file:../../research/cl-gserver/SENTO-000-zeromq-transport-analysis.org][SENTO-000 ZeroMQ Transport Analysis]] defines reactor ownership, overload, framing, monitoring, security, and transport semantics.
+- =skills/rabbitmq-routing/SKILL.md= supplies the current broker topology and settlement review procedure for existing document/event traffic.
 - =skills/message-idempotency/SKILL.md= supplies duplicate-safe document/side-effect policy.
 - =skills/dead-letter/SKILL.md= supplies failure capture and replay policy.
 
-* Architecture Boundary
+* Corrected Architecture Boundary
 
 #+begin_example
-client / actor / planner
+existing documents/events
         |
         v
-  Titanic submit API
-  stable job + journal
+    RabbitMQ
         |
         v
- RabbitMQ capability queue
+ Titanic admission / coordinator
+ durable job journal
         |
-        +------------------+
-        |                  |
-        v                  v
- external worker      local worker bridge
-        |                  |
-        +--------+---------+
-                 |
-                 v
-       normal StarIntel outputs
-       documents / relations /
-       events / attachments
-                 |
-                 v
-        Titanic terminal result
+        v
+ ZeroMQ ROUTER/DEALER
+    /       |       \
+   v        v        v
+Common    Nim     Python/JS
+Lisp      actor      actors
+worker
+        |
+        v
+ normal StarIntel outputs
+ documents / relations /
+ events / attachments
+        |
+        v
+ durable Titanic result
 #+end_example
 
-Sento remains the local actor runtime. Star Router remains the client/cross-process routing boundary. RabbitMQ remains the durable distributed transport. Titanic owns durable *job meaning*.
+Sento remains the local actor runtime. Star Router remains the client/application routing layer. ZeroMQ is the canonical cross-language actor-job transport. Titanic owns durable job meaning and persistence. RabbitMQ remains the existing broker for document/event traffic and may be used as an adapter or internal scheduling aid without becoming the public worker protocol.
 
 * V1 Required Semantics
 
 1. stable =job_id= and idempotency scope;
-2. durable admission with publisher confirmation/reconciliation;
-3. capability queues and bounded worker concurrency;
-4. at-least-once delivery with explicit terminal settlement;
-5. durable job/attempt journal;
-6. typed terminal results and disconnected result lookup;
-7. bounded retry with backoff and dead-lettering;
-8. cooperative cancellation and absolute deadlines;
-9. target lease/fencing integration where manifests require exclusive authority;
-10. deterministic fake/model contract tests before Rabbit adapter promotion.
+2. durable admission before submit acknowledgement;
+3. durable job/attempt journal;
+4. capability registration and worker capacity over ZeroMQ;
+5. ROUTER/DEALER dispatch to heterogeneous workers;
+6. at-least-once logical execution with explicit terminal outcomes;
+7. typed terminal results and disconnected result lookup;
+8. bounded retry with backoff and dead-lettering;
+9. cooperative cancellation and absolute deadlines;
+10. target lease/fencing integration where manifests require exclusive authority;
+11. deterministic fake/model contract tests before transport implementation promotion;
+12. byte-level interoperability tests across Common Lisp, Nim, Python, and JavaScript/TypeScript.
 
 * Explicit Non-Goals
 
 - replacing Sento local actor mailboxes;
-- replacing Star Router;
-- replacing RabbitMQ in v1;
+- forcing every actor language to implement AMQP or NATS;
+- making RabbitMQ delivery tags stable actor-protocol identity;
+- introducing JetStream as a planned StarIntel transport without a new explicit requirement;
 - promising exactly-once execution;
-- reviving the original LMDB-backed proxy literally;
-- using Rabbit delivery tags as stable protocol identity;
 - putting every high-frequency local actor message through durable storage;
+- exposing LMDB or another journal backend through the worker protocol;
 - introducing Temporal or Kafka merely to implement a job queue.
 
 * Suggested Next Design Pass
 
 After review, create a design node covering only the v1 seam:
 
-- =star.titanic/1= schema;
-- Common Lisp protocol structs/validators;
+- =star.titanic/1= durable job envelope;
+- ZeroMQ worker envelope and ROUTER/DEALER framing;
+- Common Lisp transport implementation using the approved SENTO-ZMQ strategy;
+- Nim, Python, and JavaScript conformance peers;
 - =job-store= interface plus deterministic fake;
-- Rabbit durable-admission producer with confirms;
-- one capability queue pilot;
-- result/status API;
-- contract tests from STAR-RESEARCH-036.
+- LMDB versus SQLite/local-store spike for the first embedded journal;
+- one capability-class worker pilot;
+- result/status/cancel/close API;
+- contract tests from STAR-RESEARCH-036 and STAR-RESEARCH-037.
 
 Do not start by generalizing every actor or backend.
 
@@ -102,7 +111,7 @@ Do not start by generalizing every actor or backend.
 
 | Date | Reviewer | Status | Notes |
 |------+----------+--------+-------|
-| 2026-08-08 | — | PENDING | Awaiting protocol/backend approval before design/implementation promotion |
+| 2026-08-08 | — | PENDING | Awaiting corrected protocol/transport/persistence approval before design/implementation promotion |
 
 * Changelog
 
@@ -110,11 +119,12 @@ Do not start by generalizing every actor or backend.
 |------+--------|
 | 2026-08-08 | Created recursive Titanic research stack from recovered 2023 devlog architecture and current star-server runtime review. |
 | 2026-08-08 | Established 2022-02-12 as earliest currently confirmed public StarIntel code date. |
-| 2026-08-08 | Selected RabbitMQ as Titanic v1 backend while keeping protocol semantics backend-neutral. |
-| 2026-08-08 | Added failure/reconciliation/model-test requirements and linked existing Star-Lang and lease/fencing research. |
+| 2026-08-08 | Initial pass selected RabbitMQ as v1 worker backend and mentioned JetStream as future adapter. |
+| 2026-08-08 | Corrected that decision after re-checking polyglot requirements and the already-approved ZeroMQ ADR: ZeroMQ is the canonical worker transport; RabbitMQ is an adapter; JetStream is comparative only. |
+| 2026-08-08 | Added cross-language Common Lisp/Nim/Python/JavaScript conformance requirements and restored the recovered broker -> Titanic persistence -> router socket separation. |
 
 * Footnotes and Glossary
 
 [fn:titanic] Titanic: StarIntel durable actor-job protocol name, historically derived from the ZeroMQ Titanic pattern for disconnected persistent request/reply processing.
 
-[fn:job-journal] Job journal: durable record of a job's submission, attempts, state transitions, retry/cancel history, terminal result, and replay lineage.
+[fn:job-journal] Job journal: Durable record of a job's submission, attempts, state transitions, retry/cancel history, terminal result, and replay lineage.

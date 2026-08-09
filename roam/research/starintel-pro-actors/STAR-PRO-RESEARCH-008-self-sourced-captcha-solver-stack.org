@@ -2,91 +2,134 @@
 :ID:       star-pro-research-008-self-sourced-captcha-solver-stack
 :END:
 #+title: STAR-PRO-RESEARCH-008 Self-Sourced CAPTCHA Solver Actor Stack
-#+description: Research for replacing routine paid CAPTCHA-provider use with local, self-hosted recognition, inference, same-session execution, and operator fallback actors for operator-owned or explicitly authorized workflows.
+#+description: Research for replacing routine paid CAPTCHA-provider use with local, self-hosted recognition, inference, same-session execution, synthetic corpora, and operator fallback actors for operator-owned or explicitly authorized workflows.
 #+status: APPROVED
-#+filetags: :starintel:research:starintel-pro-actors:captcha:self-hosted:local-inference:ocr:vision:audio:actors:security:
+#+filetags: :starintel:research:starintel-pro-actors:captcha:self-hosted:local-inference:ocr:vision:audio:actors:security:synthetic-data:
 
 * Research Question
 
-How far can StarIntel replace paid CAPTCHA-provider calls with self-hosted actors while preserving exact capability typing, source-session fidelity, bounded compute, explicit authorization, and downstream acceptance verification?
+How far can StarIntel replace paid CAPTCHA-provider calls with self-hosted actors while preserving exact capability typing, source-session fidelity, bounded compute, explicit authorization, reproducible training data, and downstream acceptance verification?
 
 * Approval Boundary
 
-The project owner approved extending CAPTCHA research on 2026-08-09 and explicitly authorized a security review. This node approves the research basis and the self-sourcing direction. It does not claim that every third-party challenge can or should be solved locally.
+The project owner approved extending CAPTCHA research on 2026-08-09 and explicitly authorized a security review. This node approves the research basis, the local-first self-sourcing direction, and the security research boundary described here. It does not claim that every third-party challenge can or should be solved locally.
 
-This work remains restricted to operator-owned systems, accessibility workflows, quality assurance, and explicitly authorized automation. It does not create a public arbitrary-target CAPTCHA relay.
+This work remains restricted to operator-owned systems, accessibility workflows, quality assurance, open research benchmarks, synthetic environments, and explicitly authorized automation. It does not create a public arbitrary-target CAPTCHA relay.
 
-| Approval area | State | Evidence |
-|---------------+-------+----------|
-| Research basis | APPROVED | Project-owner approval 2026-08-09 plus current primary-source review below |
-| Self-sourcing direction | APPROVED | Existing broker taxonomy already supports local browser, recognition, audio, and operator solver classes |
-| Security research boundary | APPROVED | Threat and control analysis in this node and linked design |
-| Exact implementation | NOT STARTED | Requires fixtures, model pins, sandboxing, resource limits, CI, and owned-system canaries |
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | APPROVED | Current primary papers, official project documentation, open benchmark metadata, and local inference documentation | Project-owner approval 2026-08-09; sources refreshed 2026-08-09 |
+| Self-sourcing direction | Project maintainer | APPROVED | Existing broker taxonomy plus evidence that local specialized solvers and synthetic training can cover useful exact capability rows | This node; [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006]] |
+| Security research boundary | Security reviewer | APPROVED | Threat model for target authorization, session secrecy, model/artifact integrity, media parsing, resource isolation, retention, and abstention | Security Research Audit below; project owner explicitly authorized security review 2026-08-09 |
+| Architecture | Pro-actors maintainer | PENDING | Exact actor names, worker boundary, model registry, corpus/training boundary, and source-browser integration reviewed together | [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004]] |
+| Operations | Operator | PENDING | Resource ceilings, model promotion, artifact retention, operator queue, canary policy, and fallback policy | Benchmark, economics, and open questions below |
+| Implementation | Repository maintainer | NOT STARTED | Code, fixtures, model pins, sandboxing, Nix/systemd limits, CI, and owned-system canaries | Recommended Implementation Order below |
 
 * Executive Finding
 
-Paid providers should become a fallback, not the default architecture.
+Paid providers should become fallback capabilities rather than the default architecture.
 
-A large fraction of challenge work can be decomposed into local capabilities that StarIntel already models independently:
+A useful share of challenge work decomposes into local capabilities that StarIntel already models independently:
 
-1. capture challenge artifacts from the authorized source runtime;
-2. classify the exact challenge family and required result kind;
-3. run one or more local recognition strategies;
+1. capture bounded challenge artifacts from the authorized source runtime;
+2. classify the exact challenge family, variant, binding, and required result kind;
+3. route to one or more local recognition or geometric strategies;
 4. calibrate confidence and abstain when evidence is weak;
 5. apply the result inside the original authorized browser/session when binding requires it;
 6. verify downstream acceptance separately;
-7. escalate only unsupported/low-confidence rows to a local operator or separately approved external provider.
+7. escalate only unsupported or low-confidence rows to a local operator or separately approved external provider.
 
-The important limit is that “self-sourced” is not a universal bypass engine. Behavioral-risk systems, device-attestation flows, proprietary browser-bound challenges, and unknown integrations remain unsupported until an exact authorized capability exists.
+The limit matters: “self-sourced” is not a universal bypass engine. Behavioral-risk systems, device-attestation flows, proprietary browser-bound challenges, and unknown integrations remain =unsupported= until an exact authorized capability has evidence.
+
+* Current Benchmark Evidence
+
+Recent research strengthens the case for a synthetic-data-first local stack, while also showing why one universal vision model is the wrong abstraction.
+
+CaptchaMind reports a programmatically generated training benchmark with 16,000 examples across eight CAPTCHA categories, including region and process supervision. Its reported solver results are 82.9% average success on the benchmark and 71.0% on real-world instances. This is evidence that synthetic labels can train practical local CAPTCHA capabilities; it is not evidence of universal vendor compatibility.
+
+Open CaptchaWorld covers 20 interactive CAPTCHA types. Its reported evaluation shows a large gap between current multimodal browser agents and people: the best reported agent reaches 40.0% pass@1 while humans reach 93.3%. This supports a heterogeneous actor design with specialized solvers, bounded interaction schemas, and abstention instead of routing every task to a general multimodal agent.
 
 * Candidate Local Capability Stack
 
-| Capability | Primary local implementation candidate | Role | Runtime notes |
-|------------+----------------------------------------+------+---------------|
+| Capability | Primary local implementation candidate | Result / role | Runtime notes |
+|------------+----------------------------------------+---------------+---------------|
 | distorted text / text answer | Tesseract + optional PaddleOCR ensemble | =textAnswer= | CPU-friendly baseline; retain exact-answer confidence and abstention |
-| multilingual / harder OCR | PaddleOCR | =textAnswer= | Heavier than Tesseract; current project advertises 100+ language OCR and lightweight PP-OCR families |
-| audio transcription | =whisper.cpp=, with OpenAI Whisper as reference model lineage | =textAnswer= or typed transcript | Fully local CPU/GPU deployment is available; keep raw audio ephemeral |
-| image-grid / object selection | locally trained/exported vision model via ONNX Runtime | =selectionSet= / =coordinates= | Model must be task-specific, pinned, benchmarked, and capability-scoped |
-| simple geometric localization | OpenCV | =coordinates= / =interactionPlan= | Useful for deterministic image geometry and preprocessing; not evidence of universal puzzle support |
-| proof-of-work on owned fixtures | first-party ALTCHA-compatible lab strategy | =proof= | ALTCHA documents a self-hosted proof-of-work design; treat as first-party/test capability unless exact authorization says otherwise |
-| session-bound application | isolated Playwright browser context worker | application only | Browser context preserves same-session cookies/state without putting secrets in broker messages |
-| unusual/unknown authorized challenge | local operator review actor | typed result | Human fallback stays local and auditable; no third-party disclosure |
+| multilingual / harder OCR | PaddleOCR | =textAnswer= | Heavier second pass; promote only after measured improvement |
+| audio transcription | =whisper.cpp= with Whisper model lineage | =textAnswer= | Fully local CPU/GPU deployment; keep raw audio ephemeral |
+| image grid / object selection | specialized local model exported to ONNX Runtime | =selectionSet= / =coordinates= | Exact label/output schema and benchmark required |
+| semantic tile matching | specialized classifier or OpenCLIP-style scorer after separate dependency review | =selectionSet= | Use only when confidence is calibrated on the exact task family |
+| simple geometric localization | OpenCV | =coordinates= / bounded =interactionPlan= | Deterministic image geometry and preprocessing; not generic puzzle support |
+| proof-of-work on owned fixtures | first-party ALTCHA-compatible lab strategy | =proof= | Useful owned-system fixture path, not wildcard proof bypass |
+| session-bound application | isolated Playwright browser context worker | application only | Preserve same-session cookies/state without exporting browser material |
+| unusual or unknown authorized challenge | local operator review actor | typed result | Human fallback remains local and auditable |
 
-The stack should prefer small deterministic or specialized models over a general vision-language model when the output contract is narrow. OCR and coordinate tasks benefit from exact schemas and lower hallucination risk.
+The stack should prefer small deterministic or specialized models over a general vision-language model when the output contract is narrow.
 
-* Primary-Source Findings
+* Synthetic Data as the Core Strategy
+
+Self-sourcing needs a reproducible corpus pipeline, not a folder of mystery screenshots.
+
+Preferred corpus order:
+
+1. programmatically generated synthetic challenges with deterministic ground truth;
+2. first-party StarIntel-owned fixtures and test environments;
+3. open research benchmarks whose licenses and redistribution terms are recorded;
+4. explicitly authorized captured challenge artifacts with bounded retention;
+5. live authorized canaries only for final generalization measurement.
+
+Synthetic generators should cover capabilities without cloning a commercial vendor implementation, for example:
+
+- distorted text with controlled font, rotation, warp, occlusion, noise, color, compression, and resolution variation;
+- bounded audio digits or words with speaker, speed, noise, clipping, codec, gain, and silence variation;
+- image-grid semantic selection from licensed image pools;
+- count and reference-matching tasks;
+- simple sequence-click fixtures;
+- slider/alignment and rotation fixtures;
+- synthetic multi-stage fixtures with explicit process annotations.
+
+Every durable sample needs generator version, deterministic seed, asset/license provenance, exact ground truth, renderer fingerprint, and split identity. Train/validation/test splits should isolate seeds, style packs, asset pools, and renderer variants so a model cannot pass by memorizing one template.
+
+Do not make production depend on harvesting proprietary challenge corpora from arbitrary sites. Do not retain target cookies, account identifiers, session material, browser profiles, or solved tokens as training data.
+
+* Vendor Test Keys Are Integration Fixtures
+
+Vendor-provided test keys are useful for safe integration tests but are not training data. hCaptcha, Cloudflare Turnstile, and Google reCAPTCHA document test or dummy credentials for predictable test behavior. StarIntel should use those only to validate its broker, source-runtime application, and downstream verification contracts on test environments.
+
+* Primary Local Components
 
 ** Tesseract
 
-Tesseract remains a mature open-source OCR engine with current 5.x releases and separate fast/best language-data repositories. It is suitable as the cheap first-pass =textAnswer= strategy, especially when the artifact has already been tightly cropped and normalized.
+Tesseract remains a mature open-source OCR engine and is suitable as the cheap first-pass =textAnswer= strategy when an artifact has already been tightly cropped and normalized.
 
 ** PaddleOCR
 
-PaddleOCR remains an active, open OCR toolkit. Current releases document PP-OCR and broader image/document recognition paths, including lightweight OCR models and multilingual support. For StarIntel, it is a stronger second-pass OCR strategy than immediately escalating to a paid provider.
+PaddleOCR remains an active local OCR toolkit with lightweight and multilingual model families. For StarIntel it is a second strategy to benchmark against Tesseract, not an automatic dependency.
 
 ** Whisper and whisper.cpp
 
-OpenAI Whisper provides the model lineage and reference implementation. =whisper.cpp= provides a dependency-light C/C++ implementation with CPU-only inference, quantization, Vulkan, CUDA, ROCm, OpenVINO, and other acceleration paths. That makes it a strong deploy-time choice for a local audio challenge actor without requiring a Python inference service.
+OpenAI Whisper provides the model lineage and reference implementation. =whisper.cpp= provides a dependency-light C/C++ local inference implementation with CPU operation, quantization, and multiple acceleration paths. It is a strong deploy-time candidate for a bounded local audio actor without requiring a Python inference service.
 
 ** ONNX Runtime
 
-ONNX Runtime provides a cross-platform inference layer and execution-provider abstraction for CPU, GPU, edge, and accelerator backends. This is useful for keeping StarIntel's actor contract independent from the training framework. Its documentation also explicitly warns that untrusted models can consume excessive memory or compute, so model provenance and sandboxing belong in the security contract.
+ONNX Runtime provides a cross-platform inference layer and execution-provider abstraction. This lets the actor contract remain independent from the framework used for training. Its own documentation warns that untrusted models can consume excessive memory or compute, reinforcing the need for hash pinning, sandboxing, and resource limits.
 
 ** OpenCV
 
-OpenCV provides deterministic image processing and localization primitives such as template matching. These are useful for preprocessing, crop normalization, segmentation, and narrowly defined geometric capabilities. They should not be advertised as generic CAPTCHA support.
+OpenCV supplies deterministic image-processing and localization primitives such as template matching, segmentation, contour work, and geometry. These are useful for exact capabilities and preprocessing, not generic CAPTCHA support.
 
 ** Playwright
 
-Playwright browser contexts are isolated, non-persistent browser sessions and expose explicit cookie/state handling. That fits the existing StarIntel requirement that a browser-bound result be applied within the source context instead of exporting cookies or browser state through normal actor messages.
+Playwright browser contexts provide isolated browser sessions and explicit cookie/state handling. That fits the requirement that browser-bound results be applied in the source context instead of exporting full cookie jars or browser profiles through normal actor messages.
 
 ** ALTCHA
 
-ALTCHA documents a fully self-hosted proof-of-work CAPTCHA design. It is useful as an owned-system fixture source and as evidence that not every CAPTCHA requires remote human/solver service infrastructure. StarIntel should treat ALTCHA-style proof solving as an exact first-party or explicitly authorized capability rather than a wildcard proof-of-work bypass.
+ALTCHA documents a self-hosted proof-of-work CAPTCHA design. It is useful as an owned-system fixture source and as evidence that a challenge path can be fully self-hosted. Treat it as a first-party or explicitly authorized exact capability.
 
-* Self-Sourced Actor Classes
+* Self-Sourced Actor Research Topology
 
-The existing =CaptchaBrokerActor= remains the authorization and exact-capability router. Add local solver capabilities rather than a second broker.
+The existing =CaptchaBrokerActor= remains the authorization and exact-capability router. Local solver capabilities are children of that architecture, not a second broker.
 
 #+begin_src plantuml
 @startuml
@@ -107,8 +150,9 @@ package "starintel-pro-actors / local capabilities" {
   [LocalGeometryActor]
   [LocalBrowserApplyActor]
   [LocalOperatorActor]
-  [ModelRegistryActor]
-  [CorpusAndBenchmarkActor]
+  [LocalModelRegistryActor]
+  [LocalCaptchaBenchmarkActor]
+  [LocalCaptchaCorpusActor]
 }
 
 [CaptchaBrokerActor] --> [CaptchaRunSupervisor]
@@ -118,20 +162,21 @@ package "starintel-pro-actors / local capabilities" {
 [CaptchaRunSupervisor] --> [LocalVisionActor]
 [CaptchaRunSupervisor] --> [LocalGeometryActor]
 [CaptchaRunSupervisor] --> [LocalOperatorActor]
-[LocalOcrActor] --> [ModelRegistryActor]
-[LocalAudioActor] --> [ModelRegistryActor]
-[LocalVisionActor] --> [ModelRegistryActor]
-[LocalGeometryActor] --> [ModelRegistryActor]
-[CaptchaRunSupervisor] --> [LocalBrowserApplyActor] : opaque resultRef + sessionRef
+[LocalOcrActor] --> [LocalModelRegistryActor]
+[LocalAudioActor] --> [LocalModelRegistryActor]
+[LocalVisionActor] --> [LocalModelRegistryActor]
+[LocalGeometryActor] --> [LocalModelRegistryActor]
+[CaptchaRunSupervisor] --> [LocalBrowserApplyActor] : resultRef + sessionRef
 [LocalBrowserApplyActor] --> [EphemeralSecretStoreActor]
-[CorpusAndBenchmarkActor] --> [ModelRegistryActor] : benchmark + promotion evidence
+[LocalCaptchaCorpusActor] --> [LocalCaptchaBenchmarkActor]
+[LocalCaptchaBenchmarkActor] --> [LocalModelRegistryActor] : promotion evidence
 [CaptchaRunSupervisor] --> [CaptchaTelemetryActor]
 @enduml
 #+end_src
 
 * Language and Runtime Boundary
 
-Keep orchestration, policy, routing, supervision, capability registration, and result typing in the existing Common Lisp actor control plane.
+Keep orchestration, policy, routing, supervision, capability registration, result typing, deadlines, and secret references in the existing Common Lisp actor control plane.
 
 Do not introduce a Python orchestration layer merely because some model-training ecosystems use Python.
 
@@ -140,24 +185,24 @@ Deployment candidates:
 - Tesseract through a bounded native worker or C API;
 - =whisper.cpp= through a bounded native worker;
 - ONNX Runtime through C/C++ or another thin native worker;
-- OpenCV in the same image worker where appropriate;
-- PaddleOCR as an optional isolated worker when its measured accuracy justifies the heavier runtime;
-- Playwright only in the separately isolated browser worker;
-- Python remains acceptable for offline training/export experiments, not as required message-broker/control-plane infrastructure.
+- OpenCV in the image worker where appropriate;
+- PaddleOCR as an optional isolated worker when measured accuracy justifies the heavier runtime;
+- Playwright only in the separately isolated browser/source worker;
+- Python remains acceptable for offline training/export experiments and optional isolated ML workers, not as required broker/control-plane infrastructure.
 
-This keeps the actor protocol stable even if the underlying model or inference engine changes.
+This preserves one actor protocol even when an inference engine changes.
 
 * Strategy Contract
 
 Every local strategy must register an exact capability. A research-level strategy record needs:
 
-- =strategyId= and version;
-- issuer/family/variant predicates;
+- =strategyId= and immutable version/fingerprint;
+- issuer, family, variant, and integration predicates;
 - accepted artifact kinds;
 - required result kind;
 - source-session/network binding;
 - model/engine fingerprint;
-- model-license/provenance record;
+- model license and provenance record;
 - preprocessing fingerprint;
 - maximum input bytes, pixels, frames, or audio duration;
 - CPU, memory, GPU, and wall-clock budget;
@@ -167,56 +212,44 @@ Every local strategy must register an exact capability. A research-level strateg
 - abstention behavior;
 - current state: =verified=, =experimental=, =degraded=, =invalidContract=, =disabled=, or =unsupported=.
 
-No model name implies a capability. A model becomes eligible only after the exact fixture set demonstrates the required typed result.
-
-* Corpus and Training Research
-
-Self-sourcing needs a legal and reproducible corpus pipeline, not a pile of mystery screenshots.
-
-Allowed corpus classes:
-
-1. synthetic fixtures generated by StarIntel for text, grid, coordinate, rotation, and proof tasks;
-2. fixtures from operator-owned test sites;
-3. explicitly authorized captured challenge artifacts with bounded retention;
-4. openly licensed datasets whose licenses are recorded with each training/benchmark snapshot;
-5. Common Voice or equivalent openly licensed speech data for ASR robustness work.
-
-Do not make production depend on harvesting proprietary challenge corpora from arbitrary sites. Do not retain target cookies, account identifiers, session material, or solved tokens as training data.
+A model name never implies a capability. Eligibility starts only after the exact fixture set demonstrates the required typed result.
 
 * Confidence, Ensemble, and Abstention
 
-Self-hosting is only useful if the actor can say “I do not know.”
+Self-hosting is useful only if the actor can say “I do not know.”
 
 For each exact capability:
 
-- record raw strategy confidence;
+- preserve raw strategy confidence;
 - calibrate it against a held-out fixture set;
-- require consensus when multiple independent strategies disagree materially;
+- use independent-strategy agreement as evidence where useful;
 - return =lowConfidence= rather than forcing an answer below policy threshold;
 - distinguish recognition success from downstream target acceptance;
-- update the capability's acceptance telemetry without silently retraining the production model.
+- update acceptance telemetry without silently retraining the production model.
 
-A local result may be cheap but wrong. Cost never overrides confidence or binding requirements.
+A cheap local answer can still be wrong. Cost cannot override confidence, authorization, or result binding.
 
 * Benchmark Plan
 
-Measure per exact capability, not across all CAPTCHA families:
+Measure per exact capability, not across every CAPTCHA family:
 
 - exact-answer accuracy for text;
 - character error rate for OCR diagnostics;
 - word error rate for audio diagnostics;
-- precision/recall or F1 for selection sets;
-- coordinate error / intersection-over-union for localized regions;
+- exact-set accuracy plus precision/recall for selections;
+- coordinate error and intersection-over-union where geometry matters;
+- success within the allowed number of bounded steps;
 - p50/p95/p99 latency;
 - peak resident memory;
 - CPU/GPU time;
 - abstention rate;
 - retry rate;
-- downstream =accepted/rejected/expired/inconclusive= rate on owned fixtures;
+- false-action rate;
+- downstream =accepted/rejected/expired/inconclusive= rate on owned or explicitly authorized fixtures;
 - local compute cost per accepted result;
 - local operator escalation rate.
 
-Promotion to =verified= requires a pinned model/engine, held-out fixtures, a calibrated threshold, stable resource bounds, and a bounded owned-system canary.
+Promotion to =verified= requires a pinned engine/model, frozen held-out fixtures, calibrated threshold, stable resource bounds, and a bounded owned-system canary.
 
 * Economics
 
@@ -224,31 +257,32 @@ The useful comparison is not “free versus paid.” It is:
 
 =localCostPerAccepted = (amortizedCompute + energy + modelOps + localReviewLabor) / acceptedRuns=
 
-versus provider cost per accepted result.
+versus external-provider cost per accepted result.
 
-Self-sourcing should win for frequent OCR/audio/image capabilities where local accuracy is high. External providers may still be rational for rare unsupported rows if authorized and if building a local model would cost more than the expected usage.
+Self-sourcing should win for recurring OCR, audio, image-selection, and geometry capabilities when local accuracy is high. External providers may remain rational for rare exact gaps when policy allows them and building a local model would cost more than expected usage.
 
-The broker therefore needs a policy preference such as =preferLocal=, not a permanent =externalProvidersDisabled= assumption.
+The broker therefore needs a preference such as =preferLocal= rather than assuming either “always external” or “external providers can never be used.”
 
 * Security Research Audit
 
-The self-sourced design reduces third-party disclosure but increases local attack surface.
+The local direction reduces third-party disclosure but increases local attack surface.
 
 | Threat | Required control |
 |--------+------------------|
 | arbitrary-target solve relay | authenticated internal actor messages only; target policy and =captcha:solve= capability; no public solve URL |
 | cookie/session exfiltration | browser-session refs stay opaque; same-session apply actor reads secrets locally; no raw cookie/token transport in ordinary messages |
-| malicious model | allowlisted model hashes, pinned derivations, no production auto-download, sandbox before promotion |
+| malicious model | allowlisted hashes, immutable derivations, no production auto-download, quarantine and benchmark before promotion |
 | image/audio decompression bomb | strict encoded-size, decoded-dimension, frame-count, sample-rate, duration, and wall-clock ceilings |
 | model resource exhaustion | cgroup/systemd CPU-memory-GPU quotas plus actor deadline and cancellation |
-| actor-message spoofing | existing authenticated StarIntel actor identity/capability checks and typed message validation |
+| actor-message spoofing | authenticated StarIntel actor identity/capability checks and typed message validation |
 | capability widening | exact issuer/family/variant/result/binding match; missing fields never widen support |
-| sensitive artifact retention | ephemeral secret store, short TTL, bounded one-read handles, redacted telemetry |
-| unsafe network egress from inference | recognition workers run without general network access; only the separately authorized browser/source worker needs target network access |
+| sensitive artifact retention | ephemeral secret store, short TTL, bounded handles, redacted telemetry, explicit corpus promotion only |
+| unsafe network egress from inference | recognition workers run without general network access; only separately authorized browser/source workers need target network access |
 | low-confidence forced answer | calibrated abstention and local operator/provider fallback policy |
-| training-data leakage | do not train on cookies, tokens, account data, or session-bearing artifacts; maintain dataset provenance |
+| unsafe action generation | multi-step policies emit only family-specific typed actions; source runtime owns browser/UI application |
+| training-data leakage | never train on cookies, tokens, account data, browser profiles, or session-bearing artifacts; preserve dataset provenance |
 
-Research security conclusion: the self-sourced direction is APPROVED provided these controls are mandatory design invariants. Implementation security remains unapproved until the controls are verified in code and deployment tests.
+Research security conclusion: the self-sourced direction is APPROVED provided these controls remain mandatory design invariants. Implementation security is not approved until code and deployment tests verify them.
 
 * Explicit Non-Goals
 
@@ -256,35 +290,44 @@ Research security conclusion: the self-sourced direction is APPROVED provided th
 - proxy rotation designed to evade target controls;
 - brute-force retry loops against third-party services;
 - a public arbitrary-URL solving endpoint;
-- automatic solving of behavioral/device-attestation systems without an exact authorized contract;
+- automatic solving of behavioral or device-attestation systems without an exact authorized contract;
 - online self-training from live target sessions;
-- persisting raw cookies, tokens, browser profiles, or challenge media beyond their bounded operational need;
-- treating a local model's confidence as downstream acceptance.
+- persisting raw cookies, tokens, browser profiles, or challenge media beyond bounded operational need;
+- treating local model confidence as downstream acceptance;
+- copying proprietary vendor implementations or making uncontrolled live vendor challenge harvesting a training dependency.
 
 * Recommended Implementation Order
 
-1. Implement =LocalOcrActor= using a fake strategy first, then Tesseract.
-2. Add =ModelRegistryActor= with hash-pinned engines/models and fixture fingerprints.
-3. Add artifact decode ceilings and no-network sandboxing before real media is accepted.
-4. Add =LocalAudioActor= using =whisper.cpp=.
-5. Add ONNX Runtime-based =LocalVisionActor= and OpenCV preprocessing only for one owned synthetic grid/coordinate capability.
-6. Add =LocalBrowserApplyActor= for same-session result application and verification.
-7. Add local operator fallback.
-8. Only then benchmark whether any paid adapter should remain enabled for the observed challenge matrix.
+1. Implement a fake local strategy through the existing broker/run path.
+2. Implement =LocalModelRegistryActor= and frozen benchmark/corpus manifests.
+3. Add artifact decode ceilings, no-network recognition sandboxing, cancellation, and resource limits before real media is accepted.
+4. Implement =LocalOcrActor= with Tesseract and synthetic/owned fixtures.
+5. Benchmark optional PaddleOCR only after the Tesseract baseline exists.
+6. Implement =LocalAudioActor= with =whisper.cpp=.
+7. Implement ONNX Runtime-based =LocalVisionActor= and OpenCV geometry for one synthetic/owned capability at a time.
+8. Implement =LocalBrowserApplyActor= for same-session result application and downstream verification.
+9. Add bounded local operator fallback.
+10. Measure the observed StarIntel challenge matrix before deciding which paid provider adapters, if any, remain enabled.
 
 * Open Questions
 
-- Which exact challenge families dominate current StarIntel crawler interruptions? Measure before training specialized models.
-- Is Tesseract alone adequate for the observed text artifacts, or does PaddleOCR materially improve accepted-result rate?
-- Which ONNX-exportable small vision architecture gives the best CPU latency on the deployment hosts?
-- Should =LocalVisionActor= be split into =SelectionActor= and =CoordinateActor= once fixtures show divergent resource/threshold policies?
-- What retention window is actually required for debugging failed local recognition without keeping sensitive challenge artifacts too long?
-- Which browser worker implementation best preserves existing StarIntel source-runtime boundaries without duplicating crawler state?
+- Which exact challenge families dominate current StarIntel crawler interruptions?
+- Is Tesseract alone adequate for observed text artifacts, or does PaddleOCR materially improve accepted-result rate?
+- Which small ONNX-exportable vision architecture gives the best CPU latency for the deployment hosts?
+- Which open benchmark/model licenses are acceptable for redistribution and reproducible deployment?
+- Should =LocalVisionActor= split into selection and coordinate actors once fixtures show divergent resource/threshold policies?
+- What retention window is actually required to debug failed local recognition without keeping sensitive artifacts too long?
+- Which browser worker integration best preserves the source runtime without duplicating authenticated state?
+- What is the measured local compute cost per accepted result before retiring any external fallback?
 
 * Sources
 
 Primary sources refreshed 2026-08-09.
 
+- [[https://arxiv.org/abs/2605.19538][CaptchaMind: Training CAPTCHA Solvers via Reinforcement Learning with Explicit Reasoning Supervision]].
+- [[https://arxiv.org/abs/2505.24878][Open CaptchaWorld: A Comprehensive Web-based Platform for Testing and Benchmarking Multimodal LLM Agents]].
+- [[https://github.com/MetaAgentX/OpenCaptchaWorld][Open CaptchaWorld repository]].
+- [[https://huggingface.co/datasets/OpenCaptchaWorld/Open_CaptchaWorld][Open CaptchaWorld dataset]].
 - [[https://github.com/tesseract-ocr/tesseract][Tesseract OCR main repository]].
 - [[https://github.com/PaddlePaddle/PaddleOCR][PaddleOCR main repository]].
 - [[https://github.com/openai/whisper][OpenAI Whisper reference implementation]].
@@ -294,6 +337,9 @@ Primary sources refreshed 2026-08-09.
 - [[https://playwright.dev/docs/api/class-browsercontext][Playwright BrowserContext documentation]].
 - [[https://altcha.org/docs/v2/][ALTCHA self-hosted documentation]].
 - [[https://commonvoice.mozilla.org/en/datasets][Mozilla Common Voice datasets]].
+- [[https://docs.hcaptcha.com/][hCaptcha developer guide and test keys]].
+- [[https://developers.cloudflare.com/turnstile/troubleshooting/testing/][Cloudflare Turnstile testing documentation]].
+- [[https://developers.google.com/recaptcha/docs/faq][Google reCAPTCHA testing guidance]].
 
 * Related Nodes
 
@@ -303,8 +349,19 @@ Primary sources refreshed 2026-08-09.
 - [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Capability Router]].
 - [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors]].
 
+* Footnotes and Glossary
+
+- *Self-sourced solver* — A locally operated StarIntel capability whose inference and primary benchmark path do not require a per-solve external CAPTCHA service.
+- *Exact capability* — A capability matched on challenge issuer/family/variant/version, required fields, result kind, binding, execution class, and current validation state.
+- *Abstention* — An explicit solver outcome stating that confidence or capability evidence is insufficient; preferable to a guessed answer or action.
+- *Synthetic corpus* — Programmatically generated fixtures with deterministic ground truth, provenance, and replay metadata.
+- *Model fingerprint* — Immutable content identity for a model/engine build used to tie runtime behavior to benchmark evidence.
+- *Same-session application* — Applying a typed result inside the original authorized browser/session when target acceptance is bound to that context.
+- *Downstream verification* — Independent observation of whether the target accepted, rejected, expired, replaced, or could not conclusively evaluate a solver result.
+
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-09 | Created self-sourced solver research; established local OCR/audio/vision/geometry/browser/operator stack, model and corpus policy, benchmark plan, economics, and security invariants; research direction approved by project owner | project owner + research agent | Existing CAPTCHA architecture plus current primary sources listed above |
+| 2026-08-09 | Added canonical approval table and glossary; expanded self-sourced research with synthetic-corpus strategy, current CaptchaMind/Open CaptchaWorld evidence, vendor test-key boundary, local component choices, benchmark/economic gates, and security invariants | project owner + research agent | User approval 2026-08-09; current primary sources listed above |
+| 2026-08-09 | Created self-sourced solver research; established local OCR/audio/vision/geometry/browser/operator stack, model and corpus policy, benchmark plan, economics, and security invariants | project owner + research agent | Existing CAPTCHA architecture plus current primary sources |

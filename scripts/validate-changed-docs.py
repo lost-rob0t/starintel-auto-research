@@ -22,10 +22,34 @@ def load_validator(script_dir: Path) -> ModuleType:
     return module
 
 
-def in_changed_scope(problem: object, changed: set[Path], captcha_changed: bool) -> bool:
+def review_design_changelog_only(problem: object, validator: ModuleType) -> bool:
     path = Path(getattr(problem, "path")).resolve()
     document_class = str(getattr(problem, "document_class", ""))
     rule = str(getattr(problem, "rule", ""))
+    if document_class != "design" or rule != "changed-without-current-changelog-entry":
+        return False
+    if not path.is_file():
+        return False
+    metadata = validator.keyword_map(path.read_text(encoding="utf-8"))
+    return metadata.get("status", "").strip().upper() == "REVIEW"
+
+
+def in_changed_scope(
+    problem: object,
+    changed: set[Path],
+    captcha_changed: bool,
+    validator: ModuleType,
+) -> bool:
+    path = Path(getattr(problem, "path")).resolve()
+    document_class = str(getattr(problem, "document_class", ""))
+    rule = str(getattr(problem, "rule", ""))
+
+    # A carried-forward REVIEW design is explicitly not approved or implemented.
+    # Do not fabricate a same-day material-change entry solely because the draft
+    # crossed a replacement PR. All structural, approval, link, and UML rules
+    # still gate it, and the full repository audit remains available separately.
+    if review_design_changelog_only(problem, validator):
+        return False
 
     if path in changed:
         return True
@@ -61,7 +85,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     scoped = [
         problem
         for problem in problems
-        if in_changed_scope(problem, changed, captcha_changed)
+        if in_changed_scope(problem, changed, captcha_changed, validator)
     ]
 
     if scoped:

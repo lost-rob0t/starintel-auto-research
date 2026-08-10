@@ -65,8 +65,8 @@
     mountSiblingNavigation();
   }
 
-  const core = document.createElement("script");
-  core.src = new URL("site-core.js", base).href;
-  core.async = false;
-  document.head.appendChild(core);
+  const runtime = document.createElement("script");
+  runtime.src = new URL(document.getElementById("graph-canvas") ? "graph.js" : "site-core.js", base).href;
+  runtime.async = false;
+  document.head.appendChild(runtime);
 })();

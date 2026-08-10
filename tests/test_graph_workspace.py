@@ -14,6 +14,12 @@ class GraphWorkspaceTests(unittest.TestCase):
         self.assertIn('"graph.js"', shell)
         self.assertIn('"site-core.js"', shell)
 
+    def test_graph_runtime_assets_are_versioned(self) -> None:
+        shell = (STATIC / "site.js").read_text(encoding="utf-8")
+        self.assertIn("ASSET_VERSION", shell)
+        self.assertIn("searchParams.set", shell)
+        self.assertIn("assetUrl", shell)
+
     def test_graph_runtime_colors_nodes_by_type(self) -> None:
         runtime = (STATIC / "graph.js").read_text(encoding="utf-8")
         self.assertIn("KIND_COLORS", runtime)

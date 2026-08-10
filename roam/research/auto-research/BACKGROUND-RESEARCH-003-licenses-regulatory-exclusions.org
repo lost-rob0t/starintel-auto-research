@@ -1,0 +1,163 @@
+:PROPERTIES:
+:ID:       starintel-background-research-003-licenses-regulatory
+:END:
+#+title: BACKGROUND-RESEARCH-003 Licenses, Regulatory Records, Sanctions, and Exclusions
+#+description: Research mirrorable professional, healthcare, aviation, securities, sanctions, and exclusion sources for self-sourced investigative background reports.
+#+status: REVIEW
+#+filetags: :starintel:research:auto-research:background-reports:licenses:nppes:ofac:sam:leie:securities:
+#+created: [2026-08-09 Sun]
+#+last_modified: [2026-08-09 Sun]
+
+* Research Question
+
+Which public regulatory and licensing sources can StarIntel mirror locally, which require targeted queries, and what source semantics must survive normalization?
+
+* Related Nodes
+
+- [[file:STAR-RESEARCH-003-us-government-data-acquisition-landscape.org][STAR-RESEARCH-003 U.S. Government Data Acquisition Landscape]]
+- [[file:BACKGROUND-RESEARCH-000-identity-address-public-records.org][BACKGROUND-RESEARCH-000 Identity and Address Public Records]]
+- [[file:BACKGROUND-RESEARCH-002-business-assets-public-records.org][BACKGROUND-RESEARCH-002 Business and Asset Public Records]]
+- [[file:../star-server/STAR-RESEARCH-010-first-class-contradictions.org][STAR-RESEARCH-010 First-Class Contradictions]]
+- [[file:../../indexes/auto-research/STAR-BACKGROUND-INDEX-000-self-sourced-background-reports.org][STAR-BACKGROUND-INDEX-000 Self-Sourced Background Reports]]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Review regulatory source contracts | Findings below |
+| Design promotion | StarIntel operator | PENDING | Approve source-family actor design | Future design node |
+| Publication | StarIntel auto-research maintainer | PENDING | Main-branch Pages workflow succeeds | Publication link below |
+
+* Executive Finding
+
+*HIGH-VALUE MIRROR TRACK.* NPPES, FAA airmen, OFAC sanctions, SAM public exclusions, and HHS-OIG LEIE all expose public files suitable for local mirroring. SEC IAPD exposes downloadable investment-adviser data and targeted individual/firm search. State professional-license systems require state-specific adapters unless a board publishes bulk data.
+
+The important semantic rule is that source membership is not interchangeable. An NPI is not proof of current professional licensure; an OFAC designation is not an HHS exclusion; a SAM exclusion is not a criminal conviction. Each normalized assertion must retain the source program and exact status.
+
+* CMS NPPES
+
+CMS publishes the National Plan and Provider Enumeration System data as a large monthly full file plus weekly incremental files and a monthly deactivation file. Version 2 is the supported format as of March 3, 2026. Each downloadable release also includes other-name, additional-practice-location, and endpoint reference files.
+
+The July 13, 2026 monthly Version 2 archive is approximately 1.09 GB, making NPPES a realistic local mirror rather than a remote-per-subject lookup dependency.
+
+Recommended strategy:
+
+1. ingest the monthly Version 2 full release as the new canonical source release
+2. retain the prior full release for replay and diff validation
+3. apply weekly incrementals to a derived current projection
+4. apply monthly deactivations explicitly
+5. reconcile next monthly full release against the derived projection
+
+NPPES itself warns that issuance of an NPI does not ensure or validate that a healthcare provider is licensed or credentialed. The actor must emit an NPI/enumeration assertion, not a generic licensed-professional assertion.
+
+* State Professional Licensing
+
+Ohio eLicense is a public verification surface across multiple state agencies, boards, and commissions. No stable public bulk API contract has yet been established in this research pass.
+
+Until a source contract is verified, eLicense should be represented as a query-source candidate rather than a mirror capability. The adapter research must identify query fields, result identifiers, license status and type, issue/expiration dates, disciplinary links, pagination, session state, and whether board-specific details redirect elsewhere.
+
+* FAA Airmen
+
+FAA publishes a releasable airmen certification database monthly in CSV or fixed-width formats. The download separates basic airman and certificate records. Certificate numbers are excluded, and records of airmen who elect not to have their addresses released omit those addresses.
+
+This is a full-mirror candidate. Address suppression is a source-level privacy state and must not be treated as missing-data corruption.
+
+* SEC IAPD
+
+The Investment Adviser Public Disclosure system provides a complete downloadable compilation of currently registered investment-adviser firms and searchable individual and firm records. Form ADV data includes business operations and certain disciplinary disclosures; individual adviser representative pages include registration, employment history, and certain disclosures.
+
+Research still needs the exact download package schema and refresh cadence before the actor advertises a complete mirror. Firm bulk data can be mirrored once profiled; individual details may remain targeted-query enrichment if the download does not contain equivalent records.
+
+* OFAC Sanctions List Service
+
+OFAC's Sanctions List Service is the primary public delivery surface for sanctions-list data. It supports downloadable SDN and non-SDN data, customized datasets, an API, and archived published delta files.
+
+Recommended mirror:
+
+- full SDN release
+- full non-SDN consolidated release
+- archived delta releases
+- program/list metadata
+- local exact and fuzzy candidate matching
+
+The local matcher should produce candidate matches with score and matched fields. It should not replace the source's own designation details.
+
+* SAM.gov Exclusions
+
+SAM.gov Data Services provides public exclusions extracts and historical public exclusion files. SAM's terms explicitly direct automated users to APIs and file extracts and prohibit automated gathering or scraping of the interactive site.
+
+Therefore the actor design should use:
+
+- public Data Services extracts
+- public API surfaces where needed
+- local indexes and diffing
+
+It should not scrape the SAM.gov search interface.
+
+* HHS-OIG LEIE
+
+HHS-OIG publishes the full active List of Excluded Individuals/Entities as CSV and replaces it monthly. It also publishes monthly exclusion and reinstatement supplement files. OIG explicitly supports loading the CSV into a local database.
+
+The downloadable data does not contain SSNs or EINs. OIG's online search can verify a specific candidate using those identifiers when available to the operator. Therefore the correct architecture is:
+
+1. mirror full LEIE monthly
+2. use the mirror for candidate generation and broad local matching
+3. optionally use supplements for change monitoring
+4. reconcile against each new full release
+5. use online verification only as a targeted source action when an appropriate identifier is available
+
+Profile corrections must not be treated as exclusion verification records.
+
+* Mirroring Decision
+
+| Source | Acquisition mode | Refresh |
+|--------+------------------+---------|
+| NPPES V2 | full mirror plus incrementals | monthly full, weekly delta, monthly deactivation |
+| FAA airmen | full mirror | monthly |
+| OFAC SLS | full mirror plus deltas | source-driven/current plus archived deltas |
+| SAM exclusions | full/public extract mirror | extract cadence plus historical releases |
+| HHS-OIG LEIE | full mirror | monthly full, optional monthly supplements |
+| SEC IAPD firm data | mirror after schema profiling | source cadence TBD |
+| SEC IAPD individual detail | targeted query unless equivalent bulk found | on demand |
+| Ohio eLicense | targeted query until bulk/API verified | on demand |
+
+* Research Gaps
+
+- Profile IAPD downloadable firm packages, field schemas, and cadence.
+- Determine whether FINRA BrokerCheck exposes a supported bulk or programmatic surface; do not infer one from the browser application.
+- Profile Ohio eLicense and the highest-value Ohio board-specific disciplinary sources.
+- Define cross-source professional-license reconciliation between NPPES, state boards, IAPD, BrokerCheck, and agency sanctions.
+- Define local fuzzy-match calibration for sanctions and exclusions without collapsing candidates into confirmed matches.
+
+* Source Matrix
+
+Sources retrieved 2026-08-09.
+
+| Source | Evidence used |
+|--------+---------------|
+| https://download.cms.gov/nppes/NPI_Files.html | Monthly NPPES V2 full release, weekly incrementals, deactivation file, reference files, and NPI caveat |
+| https://www.faa.gov/licenses_certificates/airmen_certification/releasable_airmen_download | Monthly FAA airmen CSV/fixed-width database and address-release caveat |
+| https://adviserinfo.sec.gov/ad_search.php | IAPD downloadable firm compilation and individual/firm search capabilities |
+| https://ofac.treasury.gov/sanctions-list-service | OFAC downloadable sanctions data, custom datasets, search, and delta archives |
+| https://sam.gov/data-services/Exclusions | SAM public exclusions extracts |
+| https://sam.gov/about/terms-of-use | API/extract automation path and prohibition on scraping interactive SAM.gov |
+| https://oig.hhs.gov/exclusions/leie-database-supplement-downloads/ | Full LEIE CSV and monthly supplement model |
+| https://oig.hhs.gov/exclusions/leie-quick-tips-instructions/ | Local-database use and targeted online identity verification |
+| https://elicense.ohio.gov/oh_verifylicense | Ohio public professional-license verification surface |
+
+* Publication Link
+
+- https://auto-research.starintel.actor/notes/research/auto-research/BACKGROUND-RESEARCH-003-licenses-regulatory-exclusions.html
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-09 | Created professional-license, regulatory, sanctions, and exclusion source research. | OpenAI research agent under operator direction | Primary-source review |
+
+* Footnotes and Glossary
+
+- *NPI*: National Provider Identifier issued through NPPES.
+- *LEIE*: HHS-OIG List of Excluded Individuals/Entities.
+- *Designation*: A source-specific sanctions-list record; it is not a generic criminal-status label.
+- *Deactivation*: A source event indicating an identifier or record is no longer active under that source's rules.

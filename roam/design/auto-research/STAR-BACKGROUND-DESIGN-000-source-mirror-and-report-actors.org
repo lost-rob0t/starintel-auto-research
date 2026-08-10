@@ -1,0 +1,515 @@
+:PROPERTIES:
+:ID:       starintel-background-design-000-source-mirror-report-actors
+:END:
+#+title: STAR-BACKGROUND-DESIGN-000 Source Mirror and Report Actors
+#+description: Define the complete supervised actor inventory for mirroring researched public datasets, querying non-mirrorable sources, resolving entities, measuring coverage, and assembling evidence-backed background reports for Auto Dig.
+#+status: REVIEW
+#+filetags: :starintel:design:auto-research:background-reports:actors:sento:mirrors:public-records:auto-dig:
+#+created: [2026-08-09 Sun]
+#+last_modified: [2026-08-09 Sun]
+
+* Objective
+
+Translate the self-sourced background-report research into one actor design that Auto Dig can implement without inventing new source semantics, bypassing the government-data revision protocol, or advertising unverified adapters.
+
+This design enumerates the actors. Implementation belongs in the Auto Dig/runtime repositories after the design and source contracts are accepted.
+
+* Related Nodes
+
+- [[file:../../indexes/auto-research/STAR-BACKGROUND-INDEX-000-self-sourced-background-reports.org][STAR-BACKGROUND-INDEX-000 Self-Sourced Background Reports]]
+- [[file:../../research/auto-research/BACKGROUND-RESEARCH-000-identity-address-public-records.org][BACKGROUND-RESEARCH-000 Identity and Address Public Records]]
+- [[file:../../research/auto-research/BACKGROUND-RESEARCH-001-courts-corrections-public-records.org][BACKGROUND-RESEARCH-001 Courts and Corrections Public Records]]
+- [[file:../../research/auto-research/BACKGROUND-RESEARCH-002-business-assets-public-records.org][BACKGROUND-RESEARCH-002 Business and Asset Public Records]]
+- [[file:../../research/auto-research/BACKGROUND-RESEARCH-003-licenses-regulatory-exclusions.org][BACKGROUND-RESEARCH-003 Licenses, Regulatory Records, Sanctions, and Exclusions]]
+- [[file:../../research/auto-research/BACKGROUND-RESEARCH-004-dataset-mirroring-refresh-protocol.org][BACKGROUND-RESEARCH-004 Dataset Mirroring and Refresh Protocol]]
+- [[file:../../research/auto-research/BACKGROUND-RESEARCH-005-source-constraints-and-coverage-gaps.org][BACKGROUND-RESEARCH-005 Source Constraints and Coverage Gaps]]
+- [[file:../../research/auto-research/BACKGROUND-RESEARCH-006-entity-resolution-report-evidence.org][BACKGROUND-RESEARCH-006 Entity Resolution and Report Evidence]]
+- [[file:STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+- [[file:STAR-RESEARCH-PIPELINE-004-government-data-revision-protocol-amendment.org][STAR-RESEARCH-PIPELINE-004 Government Data Revision Protocol Amendment]]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Architecture | StarIntel operator | PENDING | Review actor ownership, inventory, and source boundaries | This design |
+| Source contracts | Independent Review Authority | PENDING | Reviewed source-profile revisions for each enabled adapter | Per-source profiles |
+| Auto Dig implementation | StarIntel operator | PENDING | Explicit approval after design review | Future implementation |
+| Publication | StarIntel auto-research maintainer | PENDING | Main-branch Pages workflow succeeds | Publication link below |
+
+* Parent Protocol
+
+This design is a specialization of the government-data actor system, not a replacement.
+
+The following parent responsibilities remain authoritative:
+
+- source profile and deployment revisions
+- immutable artifact authority
+- retrieval-event provenance
+- rate and lease authority
+- durable jobs and lease-bound attempts
+- adapter registry and manifests
+- source-contract versions
+- independent reviews and coverage gates
+- checkpoints and replay
+- explicit gaps and failure states
+
+Background actors add source-family implementations, person/entity resolution, evidence findings, and report assembly.
+
+* Domain Tree
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+component "Background Domain Supervisor" as Root
+component "Control Supervisor" as Control
+component "Mirror Supervisor" as Mirror
+component "Query Supervisor" as Query
+component "Resolve Supervisor" as Resolve
+component "Report Supervisor" as Report
+component "Background Ingress" as Ingress
+component "Background Run Coordinators" as Runs
+component "Coverage Planner" as Planner
+component "Mirror Registry Authority" as MRegistry
+component "Mirror Scheduler" as MSched
+component "Mirror Dispatcher" as MDispatch
+component "Mirror Acceptance Authority" as MAccept
+component "Revision Diff Pool" as Diff
+component "Projection Builder Pool" as Projection
+component "Reconciliation Auditor" as Reconcile
+component "Source Adapter Pools" as Adapters
+component "Query Dispatcher" as QDispatch
+component "Entity Candidate Generator" as Candidate
+component "Identity Resolution Authority" as Identity
+component "Contradiction Detector" as Conflict
+component "Temporal Relation Builder" as Temporal
+component "Finding Builder" as Finding
+component "Coverage Basis Authority" as Coverage
+component "Report Assembler" as Assembler
+component "Evidence Bundle Builder" as Bundle
+component "Gap Reporter" as Gaps
+Root --> Control
+Root --> Mirror
+Root --> Query
+Root --> Resolve
+Root --> Report
+Control --> Ingress
+Control --> Runs
+Control --> Planner
+Mirror --> MRegistry
+Mirror --> MSched
+Mirror --> MDispatch
+Mirror --> MAccept
+Mirror --> Diff
+Mirror --> Projection
+Mirror --> Reconcile
+Mirror --> Adapters
+Query --> QDispatch
+Query --> Adapters
+Resolve --> Candidate
+Resolve --> Identity
+Resolve --> Conflict
+Resolve --> Temporal
+Resolve --> Finding
+Report --> Coverage
+Report --> Assembler
+Report --> Bundle
+Report --> Gaps
+@enduml
+#+end_src
+
+* Runtime Paths
+
+#+begin_example
+/user/domains/background
+/user/domains/background/control
+/user/domains/background/runs
+/user/domains/background/mirrors
+/user/domains/background/queries
+/user/domains/background/resolve
+/user/domains/background/reports
+#+end_example
+
+The background domain may delegate ordinary government acquisition to =/user/domains/government-data= where that domain already owns the source adapter. It must not duplicate canonical source authorities.
+
+* Core Control Actors
+
+| Actor | Kind | Responsibility |
+|-------+------+----------------|
+| Background Domain Supervisor | pinned supervisor | Own background-domain lifecycle and readiness |
+| Background Ingress | pinned | Validate typed requests and return stable run handles |
+| Background Run Coordinator Pool | temporary/router | Coordinate one requested background run without owning canonical evidence |
+| Source Coverage Planner | router pool | Expand report scope into required source families, jurisdictions, mirror states, and query jobs |
+| Background Capability Projector | pinned | Project reviewed source manifests into report-capability catalog |
+| Background Cancellation Coordinator | pinned | Propagate stable cancel IDs through mirror/query/resolve/report jobs |
+| Background Health Aggregator | pinned | Aggregate mirror freshness, adapter health, unresolved gaps, and degraded source states |
+
+* Mirror Control Actors
+
+| Actor | Kind | Responsibility |
+|-------+------+----------------|
+| Mirror Registry Authority | pinned authority | Own mirror identity, accepted-release pointer, partitions, and retention metadata |
+| Mirror Scheduler | pinned authority | Schedule releases from source cadence and freshness deadlines |
+| Mirror Acquisition Dispatcher | pinned/router | Create bounded source jobs and dispatch through government-data rate/lease authority |
+| Mirror Acceptance Authority | pinned authority | Atomically accept validated immutable releases |
+| Mirror Artifact Validator Pool | router | Validate transport, compression, expected members, hashes, and source-specific structural invariants |
+| Mirror Parser Dispatcher | router | Route accepted release artifacts to source parsers |
+| Mirror Revision Diff Pool | router | Compare parsed release state and emit typed revision events |
+| Mirror Projection Builder Pool | router | Build disposable current local projections from accepted releases and deltas |
+| Mirror Reconciliation Auditor Pool | router | Reconcile delta-maintained projections with later full snapshots |
+| Mirror Index Builder Pool | router | Build query indexes over source records without changing evidence |
+| Mirror Quarantine Actor | pinned | Hold anomalous releases that fail acceptance checks |
+| Mirror Metrics Actor | pinned | Record bytes, rows, duration, freshness, changes, and failures per release |
+
+* Dataset Mirror Actors
+
+These are source-specific workers behind =Mirror Acquisition Dispatcher=. A source worker does not own canonical release state.
+
+** Identity and state records
+
+| Actor | Mode | Initial state |
+|-------+------+---------------|
+| Ohio Voter Snapshot Catalog Actor | discover releases | ENABLED after source-profile review |
+| Ohio Voter Statewide Snapshot Mirror Actor | full snapshot | ENABLED after source-profile review |
+| Ohio Voter Snapshot Parser Actor | parser | ENABLED after fixture validation |
+| Ohio Voter Snapshot Diff Actor | derived revision | ENABLED after fixture validation |
+| Ohio Business Report Catalog Actor | discover reports | PROFILE_REQUIRED |
+| Ohio Business Report Mirror Actor | full/period report | PROFILE_REQUIRED |
+| Ohio Business Filing Parser Actor | parser | PROFILE_REQUIRED |
+
+** Healthcare and licensing bulk
+
+| Actor | Mode | Initial state |
+|-------+------+---------------|
+| NPPES Monthly Full Mirror Actor | full snapshot | ENABLED after source-profile review |
+| NPPES Weekly Incremental Mirror Actor | incremental | ENABLED after parent-release tests |
+| NPPES Monthly Deactivation Mirror Actor | deactivation | ENABLED after parent-release tests |
+| NPPES Reference File Parser Actor | parser | ENABLED after fixtures |
+| FAA Airmen Mirror Actor | full snapshot | ENABLED after source-profile review |
+| FAA Airmen Parser Actor | parser | ENABLED after fixtures |
+| IAPD Firm Data Mirror Actor | full snapshot | PROFILE_REQUIRED |
+| IAPD Firm Parser Actor | parser | PROFILE_REQUIRED |
+
+** Sanctions and exclusions
+
+| Actor | Mode | Initial state |
+|-------+------+---------------|
+| OFAC SDN Mirror Actor | full snapshot | ENABLED after source-profile review |
+| OFAC Non-SDN Mirror Actor | full snapshot | ENABLED after source-profile review |
+| OFAC Delta Mirror Actor | delta archive | ENABLED after sequence fixtures |
+| OFAC Parser Actor | parser | ENABLED after fixtures |
+| SAM Public Exclusions Mirror Actor | public extract | ENABLED after source-profile review |
+| SAM Exclusions Parser Actor | parser | ENABLED after fixtures |
+| LEIE Full Mirror Actor | full snapshot | ENABLED after source-profile review |
+| LEIE Exclusion Supplement Actor | incremental | ENABLED after fixtures |
+| LEIE Reinstatement Supplement Actor | reinstatement | ENABLED after fixtures |
+| LEIE Parser Actor | parser | ENABLED after fixtures |
+
+** Securities and company filings
+
+| Actor | Mode | Initial state |
+|-------+------+---------------|
+| SEC Submissions Bulk Mirror Actor | nightly full archive | ENABLED after source-profile review |
+| SEC Company Facts Bulk Mirror Actor | nightly full archive | ENABLED after source-profile review |
+| SEC Filing Index Mirror Actor | partition/index | ENABLED after source-profile review |
+| SEC Submission Parser Actor | parser | ENABLED after fixtures |
+| SEC XBRL Company Facts Parser Actor | parser | ENABLED after fixtures |
+| SEC Filing Role Extractor Actor | parser/analysis | ENABLED only for explicitly supported form-role mappings |
+
+** Aviation and communications
+
+| Actor | Mode | Initial state |
+|-------+------+---------------|
+| FAA Aircraft Mirror Actor | daily full snapshot | ENABLED after source-profile review |
+| FAA Aircraft Parser Actor | parser | ENABLED after fixtures |
+| FAA Aircraft Document Index Parser Actor | parser | ENABLED after fixtures |
+| FCC ULS Base Mirror Actor | full/base download | PROFILE_REQUIRED for exact base package contract |
+| FCC ULS Daily Transaction Mirror Actor | incremental | PROFILE_REQUIRED |
+| FCC ULS Weekly Transaction Mirror Actor | incremental/reconciliation aid | PROFILE_REQUIRED |
+| FCC ULS Parser Actor | parser | PROFILE_REQUIRED |
+| FCC LMS Current Dump Mirror Actor | full snapshot | ENABLED after source-profile review |
+| FCC LMS Parser Actor | parser | ENABLED after fixtures |
+
+** Nonprofit and award data
+
+| Actor | Mode | Initial state |
+|-------+------+---------------|
+| IRS EO BMF Mirror Actor | regional/state full datasets | ENABLED after source-profile review |
+| IRS Pub78 Mirror Actor | monthly full dataset | ENABLED after source-profile review |
+| IRS Auto-Revocation Mirror Actor | monthly full dataset | ENABLED after source-profile review |
+| IRS 990-N Mirror Actor | monthly full dataset | ENABLED after source-profile review |
+| IRS 990 XML Partition Catalog Actor | partition discovery | ENABLED after source-profile review |
+| IRS 990 XML Mirror Actor | partition mirror | ENABLED after source-profile review |
+| IRS 990 XML Parser Actor | parser | ENABLED after schema fixtures |
+| IRS 990 Role Extractor Actor | parser/analysis | ENABLED for mapped officer/director/related-org fields |
+| USAspending Bulk Job Actor | generated bulk export | ENABLED after request-contract fixtures |
+| USAspending Bulk Status Actor | async status | ENABLED after fixtures |
+| USAspending Bulk Download Actor | artifact retrieval | ENABLED after fixtures |
+| USAspending Award Parser Actor | parser | ENABLED after fixtures |
+
+* Query Source Actors
+
+These actors operate on bounded requests and retrieval events. They do not claim complete mirrors unless a later design adds a verified bulk source.
+
+** Federal courts
+
+| Actor | Responsibility | State |
+|-------+----------------+-------|
+| CourtListener Docket Query Actor | Search public PACER-derived dockets | ENABLED after API profile |
+| CourtListener Party Query Actor | Query parties and candidate cases | ENABLED after API profile |
+| CourtListener Document Resolver Actor | Resolve available RECAP documents | ENABLED after API profile |
+| RECAP Availability Actor | Check whether needed PACER material already exists publicly | ENABLED after API profile |
+| RECAP Fetch Actor | Acquire missing PACER material using operator PACER credentials where configured | CREDENTIALED |
+| PACER Authentication Actor | Obtain and refresh PACER API token | CREDENTIALED |
+| PACER PCL Case Search Actor | Nationwide case search | CREDENTIALED |
+| PACER PCL Party Search Actor | Nationwide party search | CREDENTIALED |
+| PACER Case Retrieval Actor | Acquire case/docket information | CREDENTIALED |
+| PACER Document Retrieval Actor | Acquire requested documents with charge accounting | CREDENTIALED |
+| PACER Billing Ledger Actor | Record charge units and cost events | CREDENTIALED |
+
+** Corrections and public registries
+
+| Actor | Responsibility | State |
+|-------+----------------+-------|
+| BOP Inmate Locator Actor | Query federal custody records | PROFILE_REQUIRED |
+| Ohio DRC Offender Query Actor | Query Ohio corrections public record | PROFILE_REQUIRED |
+| Jurisdiction Registry Dispatcher | Route to reviewed state/territory/tribal registry adapters | ENABLED when child profile reviewed |
+| NSOPW Browser Check Actor | Optional bounded browser check only; never advertised as API or mirror | DISABLED_BY_DEFAULT |
+
+** Ohio pilot query actors
+
+| Actor | Responsibility | State |
+|-------+----------------+-------|
+| Ohio Business Entity Query Actor | Exact/current business record lookup | PROFILE_REQUIRED |
+| Ohio UCC Query Actor | Financing statement/lien candidate lookup | PROFILE_REQUIRED |
+| Ohio eLicense Query Actor | Public professional-license verification | PROFILE_REQUIRED |
+| Franklin Common Pleas Query Actor | Civil/criminal/domestic/appellate case search as supported | PROFILE_REQUIRED |
+| Franklin Common Pleas Document Actor | Retrieve source documents where public | PROFILE_REQUIRED |
+| Franklin Municipal Court Query Actor | Municipal court case search | PROFILE_REQUIRED |
+| Franklin Auditor Property Query Actor | Owner/address/parcel lookup | PROFILE_REQUIRED |
+| Franklin Recorder Instrument Query Actor | Deed/mortgage/recorded-instrument lookup | PROFILE_REQUIRED |
+
+** Regulatory query actors
+
+| Actor | Responsibility | State |
+|-------+----------------+-------|
+| IAPD Individual Search Actor | Adviser representative search and details | PROFILE_REQUIRED |
+| IAPD Firm Detail Actor | Current firm and Form ADV detail enrichment | PROFILE_REQUIRED |
+| LEIE Identity Verify Actor | Targeted online verification using operator-supplied identifier | CREDENTIALED_INPUT |
+| SEC Current Submission Query Actor | Real-time targeted filer/submission refresh | ENABLED after profile |
+| USAspending Recipient Query Actor | Targeted recipient/award lookup | ENABLED after profile |
+
+* Explicitly Unsupported Actor Names
+
+The following capability names are reserved as negative fixtures and must fail manifest validation if advertised as ordinary enabled actors:
+
+- =fbi-third-party-rap-sheet=
+- =national-public-dmv-person-mirror=
+- =nsopw-api=
+- =nsopw-national-database-mirror=
+- =sam-interactive-site-scraper=
+- =finra-brokercheck-bulk= until a supported bulk contract is researched
+
+* Source-Record Normalization Actors
+
+| Actor | Responsibility |
+|-------+----------------|
+| Person Name Normalizer Pool | Parse and normalize names while preserving original values |
+| Organization Name Normalizer Pool | Normalize legal/entity names without destructive alias collapse |
+| Address Normalizer Pool | Parse addresses and geographic components while preserving source text |
+| Court Record Normalizer Pool | Normalize cases, parties, charges, dispositions, dockets, and source roles |
+| Property Record Normalizer Pool | Normalize parcels, owners, transfers, and assessed values |
+| Recorded Instrument Normalizer Pool | Normalize deeds, mortgages, assignments, releases, and filing roles |
+| Business Filing Normalizer Pool | Normalize entities, filings, agents, officers, and lifecycle events |
+| License Record Normalizer Pool | Normalize source-specific license/certification state |
+| Sanctions/Exclusion Normalizer Pool | Normalize list/program/designation status without cross-list semantic collapse |
+| Aircraft Record Normalizer Pool | Normalize aircraft, registration, owner/registrant, and document-index records |
+| FCC License Normalizer Pool | Normalize licensee, FRN, call sign, service, application, and location records |
+| Nonprofit Record Normalizer Pool | Normalize EO identity and filing metadata |
+| Federal Award Normalizer Pool | Normalize recipients, awards, agencies, amounts, and award periods |
+
+* Entity Resolution Actors
+
+| Actor | Kind | Responsibility |
+|-------+------+----------------|
+| Entity Candidate Generator Pool | router | Produce broad candidate sets from source records |
+| Identity Feature Builder Pool | router | Build evidence features with source lineage and temporal compatibility |
+| Identity Comparator Pool | router | Compare source-record candidates and emit proposed resolution assertions |
+| Identity Resolution Authority | pinned authority | Own canonical same/different/unresolved entity-resolution revisions |
+| Alias Assertion Builder Pool | router | Emit source-backed alias/former-name assertions |
+| Address History Builder Pool | router | Build temporal address assertions from accepted source records |
+| Role Relation Builder Pool | router | Preserve exact officer/agent/owner/licensee/party/etc. roles |
+| Temporal Qualification Pool | router | Attach valid/asserted/observed/processed clocks |
+| Contradiction Detector Pool | router | Emit explicit incompatible-assertion relations |
+| Corroboration Lineage Pool | router | Mark shared upstream artifacts and evidence dependence |
+| Resolution Review Queue Actor | pinned | Queue low-confidence or contradictory merges for independent/human review |
+
+* Finding and Report Actors
+
+| Actor | Kind | Responsibility |
+|-------+------+----------------|
+| Finding Builder Pool | router | Build evidence envelopes from resolved assertions |
+| Current Status Assessor Pool | router | Derive current status without deleting historical assertions |
+| Coverage Basis Authority | pinned authority | Own immutable report coverage-basis revisions |
+| Coverage Gap Builder Pool | router | Materialize source families that were stale, unavailable, unsupported, or not requested |
+| Background Report Assembler Pool | router | Render versioned report sections from findings and coverage basis |
+| Evidence Bundle Builder Pool | router | Package source records, retrievals, hashes, and artifact references supporting a report |
+| Report Diff Actor | router | Compare two report revisions and explain source/finding changes |
+| Report Replay Verifier Pool | router | Re-run deterministic assembly from pinned source and resolver versions |
+| Report Export Policy Actor | pinned | Apply source-specific export/use markers before producing an external report artifact |
+
+* FEC Dataset Actors
+
+FEC data is useful to research but individual-contributor information has a source-specific commercial-use restriction. Therefore separate acquisition from report export.
+
+| Actor | Responsibility | State |
+|-------+----------------+-------|
+| FEC Committee/Candidate Mirror Actor | Mirror non-individual campaign metadata selected by source profile | RESEARCH_REQUIRED |
+| FEC Individual Contribution Mirror Actor | Acquire public bulk data only when approved for internal research scope | RESTRICTED_USE |
+| FEC Source Policy Marker Actor | Attach dataset-specific use policy to source records | REQUIRED if FEC enabled |
+| FEC Commercial Export Gate Actor | Reject disallowed individual-contributor export into commercial report | REQUIRED if FEC enabled |
+
+* Message Classes
+
+Background-specific messages extend the parent government-data v1.1 envelope with payload schemas for:
+
+- =background.run.submit=
+- =background.coverage.plan=
+- =background.mirror.refresh=
+- =background.mirror.accept=
+- =background.mirror.reconcile=
+- =background.query.submit=
+- =background.resolve.candidates=
+- =background.resolve.decide=
+- =background.findings.build=
+- =background.coverage.commit=
+- =background.report.build=
+- =background.report.replay=
+
+Every message pins exact source-profile/source-contract revisions and the background run's policy and capability snapshots.
+
+* Actor Manifest Requirements
+
+Each source actor manifest must declare:
+
+- stable actor and capability identifier
+- source-family identifier
+- source-contract ID/version
+- execution class: mirror, delta, query, parser, resolver, assessment, report
+- accepted input and emitted output types
+- network hosts and method classes
+- credential class if any
+- cost unit if any
+- source-use policy markers
+- cadence/freshness expectation
+- timeout/retry/concurrency defaults
+- maximum requests, bytes, records, pages, and runtime
+- raw-artifact policy
+- checkpoint strategy
+- idempotency key strategy
+- parser schema versions
+- supported and unsupported variants
+- fixture IDs
+- live-probe requirement
+- current capability state
+
+=PROFILE_REQUIRED= and =RESEARCH_REQUIRED= actors may exist as disabled manifests or scaffolds, but capability discovery must not advertise them as runnable.
+
+* Supervision
+
+Background Domain Supervisor uses =:rest-for-one= across ordered authority groups:
+
+1. control and capability projection
+2. mirror registry/acceptance/scheduler
+3. query dispatch
+4. resolution authority
+5. coverage authority
+6. report/export policy
+
+Workers and parsers use one-for-one supervision beneath their family supervisors. A malformed IRS archive cannot restart PACER workers; a PACER authentication failure cannot stop NPPES mirroring.
+
+* Scheduling
+
+Mirror schedules follow source release behavior rather than one global cron:
+
+- Ohio voter: daily after statewide package availability
+- FAA aircraft: daily after source refresh window
+- FAA airmen: monthly
+- NPPES: weekly incrementals plus monthly full/deactivation reconciliation
+- SEC bulk: nightly
+- IRS TEOS/990: source publication checks on monthly/partition cadence
+- LEIE: monthly
+- OFAC: source-change polling plus delta retention
+- SAM exclusions: public extract publication checks
+- FCC ULS: transaction cadence plus full reconciliation when source contract supports it
+- USAspending: scheduled partitioned bulk jobs
+
+The scheduler emits no job when the remote release fingerprint matches the already accepted release.
+
+* Acceptance Criteria
+
+1. Every researched source family maps to an actor, an explicit disabled scaffold, or an explicit unsupported fixture.
+2. Bulk-capable sources use mirror actors rather than per-subject remote lookup as the normal path.
+3. Query-only sources never claim complete source coverage.
+4. Mirror releases are immutable and current projections are rebuildable.
+5. Delta sources reconcile against later authoritative snapshots.
+6. Source roles and source-specific status semantics survive normalization.
+7. Resolution is assertion-based and reversible.
+8. Contradictions and source dependence remain first-class.
+9. Report sections pin a coverage-basis revision.
+10. Report findings trace to source records, retrieval events, and raw artifacts.
+11. Unsupported actors fail capability validation rather than silently scraping alternatives.
+12. Restricted-use source records cannot bypass export policy markers.
+13. Actor crashes cannot advance release acceptance or report coverage state without committed evidence.
+14. Deterministic replay reproduces report findings from pinned artifacts and versions.
+
+* Initial Auto Dig Implementation Slices
+
+** Slice A: common contracts
+
+Implement mirror release, revision event, source record, retrieval cache, identity assertion, finding, coverage basis, and report revision documents.
+
+** Slice B: first complete mirrors
+
+Implement Ohio voter, NPPES, FAA aircraft, FAA airmen, OFAC, SAM exclusions, LEIE, SEC bulk, IRS TEOS/990, FCC LMS, and USAspending bulk actors.
+
+** Slice C: incremental sources
+
+Implement NPPES incrementals/deactivation, OFAC deltas, LEIE supplements, and FCC ULS transaction flow after exact ULS base profile is completed.
+
+** Slice D: federal query sources
+
+Implement CourtListener, RECAP, PACER auth/PCL/case/document, and BOP actors.
+
+** Slice E: Ohio query pack
+
+After source profiling, implement Ohio business/UCC/eLicense/DRC and Franklin court/auditor/recorder actors.
+
+** Slice F: resolution and reports
+
+Implement candidate generation, identity resolution, contradiction/temporal/corroboration actors, coverage basis, report assembly, evidence bundle, report diff, and replay verification.
+
+* Research and Design Gaps
+
+- exact HTTP/package contracts for the actors marked =PROFILE_REQUIRED=
+- source schema fixtures for each bulk archive
+- local storage/index benchmark for the largest mirrors
+- nationwide source-profile generation for state courts, corrections, property, recorder, UCC, and licensing systems
+- supported FINRA BrokerCheck acquisition contract
+- public/contact enrichment sources beyond government records
+
+* Publication Link
+
+- https://auto-research.starintel.actor/notes/design/auto-research/STAR-BACKGROUND-DESIGN-000-source-mirror-and-report-actors.html
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-09 | Created complete source mirror, query, normalization, resolution, coverage, and report actor inventory from BACKGROUND-RESEARCH-000 through 006. | OpenAI design agent under operator direction | Research set, PIPELINE-003, and PIPELINE-004 |
+
+* Footnotes and Glossary
+
+- *Pinned authority*: A stable actor owning serialized canonical state for one domain responsibility.
+- *Source worker*: A restartable actor that performs bounded acquisition or parsing but does not directly own canonical state.
+- *Disabled scaffold*: An actor manifest/code shell present for integration planning but omitted from runnable capability discovery until its source contract is verified.
+- *Coverage basis*: Immutable record of which source profiles, releases, queries, freshness states, gaps, and policy markers support one report revision.

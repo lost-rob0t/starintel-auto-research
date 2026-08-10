@@ -2,71 +2,192 @@
 :ID:       quasar-graph-document-command-protocol-003
 :END:
 #+title: QUASAR-003 Graph Document and Command Protocol
-#+description: Reserved follow-on design for freezing Quasar graph-document serialization and command protocol after the CLOG prototype supplies concrete interaction evidence.
+#+description: Reserved design for freezing shared Quasar graph/document commands, runtime control contracts, revision semantics, reconnect behavior, and conformance fixtures after current implementations supply concrete evidence.
 #+status: BLOCKED
-#+filetags: :starintel:quasar:design:protocol:graph-document:blocked:
+#+filetags: :starintel:quasar:design:protocol:graph-document:commands:blocked:
 #+todo: TODO REVIEW BLOCKED | DONE REJECTED
 #+created: [2026-07-23 Thu]
-#+last_modified: [2026-07-23 Thu]
+#+last_modified: [2026-08-08 Sat]
 
 | Version | Date       | Description of change                                                        | Did nsaspy approve it |
 |---------+------------+------------------------------------------------------------------------------+-----------------------|
 | 0.0.1   | 2026-07-23 | Reserve the protocol design and block it on CLOG prototype evidence.          | No                    |
+| 0.0.2   | 2026-08-08 | Restore protocol-layer ownership here after splitting the combined QUASAR-004 design. | No             |
 
 * Related Nodes
 
 - [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
+- [[file:../../indexes/star-server/QUASAR-INDEX-001-canonical-runtime-alignment.org][QUASAR-INDEX-001 Canonical Runtime Alignment]]
 - [[file:QUASAR-001-basic-typed-graph-editor.org][QUASAR-001 Basic Typed Graph Editor Architecture]]
 - [[file:QUASAR-002-clog-hybrid-prototype.org][QUASAR-002 CLOG Hybrid Prototype Architecture]]
+- [[file:QUASAR-004-canonical-runtime-and-fork-alignment.org][QUASAR-004 Canonical Runtime Authority]]
+- [[file:QUASAR-005-web-edition-standalone-scope.org][QUASAR-005 Web Edition and Standalone Scope]]
+- [[file:QUASAR-006-auto-dig-fork-and-bridge-boundary.org][QUASAR-006 Auto-Dig Fork and Bridge Boundary]]
+- [[file:QUASAR-007-renderer-projection-and-scale-boundary.org][QUASAR-007 Renderer Projection and Scale Boundary]]
+- [[file:../../research/star-server/QUASAR-RESEARCH-005-four-repository-alignment-and-scale.org][QUASAR-RESEARCH-005 Four-Repository Alignment and Scale Review]]
 
 * Status
 
-This design is intentionally blocked until the CLOG hybrid prototype has exercised:
+This design remains intentionally =BLOCKED=. Splitting protocol material out of QUASAR-004 does not mean the protocol is approved or ready to freeze.
 
-- manual node and edge mutations;
-- committed node movement;
-- inspector edits;
-- graph batches;
+The original blocker depended only on the CLOG[fn:clog] prototype. Current Quasar work now spans =lost-rob0t/quasar=, =lost-rob0t/quasar-ui=, and =lost-rob0t/auto-dig-quasar=. Evidence from any of those repositories may satisfy an evidence item when the exact commit and reproducible test are recorded.
+
+The protocol should be frozen from observed operations, not guessed from architecture prose.
+
+* Protocol Layer Ownership
+
+This node owns the shared command and document contracts used across Quasar implementations.
+
+** =star.graph.v1=
+
+=star.graph.v1=[fn:star-graph-v1] is the shared graph/document command layer. When unblocked, this design should specify:
+
+- canonical graph document and graph snapshot shapes;
+- node, relation/edge, metadata, position, viewport, and type-reference fields;
+- graph operations;
+- command batches;
+- command identifiers where evidence justifies them;
+- revision expectations and conflict representation;
+- command result and rejection structures;
+- inverse metadata required for undo and redo;
+- snapshot versus command-log boundaries;
+- conformance fixtures[fn:conformance-fixture].
+
+** =quasar.control.v1=
+
+=quasar.control.v1=[fn:quasar-control-v1] is the runtime-control layer used when the browser or another client is attached to canonical Quasar runtime services. When unblocked, this design should specify:
+
+- runtime capability discovery;
+- workspace snapshot retrieval;
+- migrated graph/document mutation commands that reference =star.graph.v1= objects;
+- persistent actor-runtime commands;
+- privileged tool commands;
+- reconnect, resynchronization, and replay events;
+- structured runtime errors and rejections.
+
+** Auto-Dig host bridge
+
+The Auto-Dig-specific =auto-dig-quasar.v2= envelope belongs to [[file:QUASAR-006-auto-dig-fork-and-bridge-boundary.org][QUASAR-006]]. It must reference or embed the shared =star.graph.v1= and =quasar.control.v1= objects rather than copy their semantics into a host-only dialect.
+
+** Research protocol
+
+Research candidate, evidence, reviewer, evaluation, cancellation, budget, and promotion semantics remain owned by ADARD[fn:adard] and any future =star.research.v1= design. This Quasar protocol node may define how Quasar invokes or displays research operations, but it does not redefine research truth or promotion semantics.
+
+* Required Evidence Before Unblocking
+
+Before this design becomes active, current implementations should record evidence for:
+
+- manual node and relation mutation;
+- committed node movement when position is durable workspace state;
+- inspector/document edits;
+- multi-operation command batches;
 - transaction-level undo and redo;
 - save and reopen;
 - browser refresh and UI-session reconstruction;
-- one in-process Common Lisp action.
-
-The earlier plan assigned protocol work to =QUASAR-002=. The CLOG prototype decision moved that work to =QUASAR-003= so the protocol is derived from observed editor operations rather than guessed before implementation.
-
-* Required Evidence
-
-Before this design becomes active, the prototype should record:
-
+- reconnect after stale client state;
+- one actor or action returning a proposed command batch;
 - the actual graph operation classes used by the core;
-- which renderer events become durable operations;
+- which renderer events remain ephemeral and which become durable operations;
 - the minimum data required to rebuild a UI session;
-- the graph snapshot fields required for lossless save and reopen;
-- the batch structure required by actions;
+- the snapshot fields required for lossless reopen;
 - the inverse data required by undo;
-- whether local command identifiers and revisions provided practical value;
-- reconnect behavior observed through CLOG;
-- whether a separate client remains desirable.
+- whether command identifiers and revisions provide practical value;
+- equivalent Common Lisp[fn:common-lisp] and JavaScript[fn:javascript] fixture behavior for shared commands.
 
-* Intended Scope
+Evidence may come from =quasar=, =quasar-ui=, or =auto-dig-quasar=. The evidence record must include the exact commit and test command or fixture result.
 
-When unblocked, this design should freeze:
+* Revision and Writer Semantics
 
-- canonical graph-document JSON;
-- canonical graph-batch JSON;
-- node, edge, metadata, position, viewport, and type-reference schemas;
-- graph operation and command envelopes;
-- command identifiers where justified;
-- revision rules;
-- batch atomicity;
-- error and rejection representations;
-- inverse-command requirements;
-- snapshot and command-log boundaries;
-- reconnect and resynchronization behavior;
-- Common Lisp bindings;
-- TypeScript bindings only if an independent client is selected;
-- conformance fixtures.
+The protocol must support the authority boundary selected by [[file:QUASAR-004-canonical-runtime-and-fork-alignment.org][QUASAR-004]].
 
-* Non-Goal While Blocked
+For migrated connected state:
 
-No implementation should create a public remote protocol merely to satisfy this reserved design number.
+1. a client submits a command with the revision information required by the final contract;
+2. the canonical runtime validates the command and revision expectation;
+3. accepted commands produce an explicit result and next canonical revision;
+4. stale/conflicting commands produce structured rejection or reconciliation instructions;
+5. browser caches and renderer state do not silently overwrite a newer canonical revision.
+
+Standalone browser behavior remains governed by [[file:QUASAR-005-web-edition-standalone-scope.org][QUASAR-005]].
+
+* Atomicity Boundary
+
+The protocol must distinguish logical command atomicity[fn:logical-atomicity] from physical storage atomicity[fn:physical-atomicity].
+
+A command batch may be accepted or rejected as one logical unit even when a backend cannot physically commit several documents in one storage transaction. If durable crash safety requires a journal[fn:journal], transaction envelope, or commit marker, the protocol must expose enough state to distinguish committed, pending, and failed batches during replay/recovery.
+
+The protocol must not claim cross-document crash-safe atomic persistence merely because a storage API accepts a bulk request.
+
+* Conformance Fixtures
+
+Shared fixtures should become the primary compatibility evidence between Common Lisp and JavaScript implementations.
+
+Minimum fixture groups:
+
+| Fixture group | Purpose |
+|---------------+---------|
+| Graph snapshot | Same canonical graph/document state serializes equivalently. |
+| Valid command | Same command normalizes and produces equivalent accepted result. |
+| Invalid command | Same invalid shape is rejected with the same error category. |
+| Revision conflict | Same stale revision produces equivalent conflict semantics. |
+| Batch + inverse | Same batch produces equivalent inverse metadata for undo/redo. |
+| Reconnect | Same canonical/client revision pair produces equivalent resynchronization decision. |
+| Actor proposal | Deterministic actor result becomes the same proposed shared command batch. |
+
+Byte-for-byte output is required only where the final protocol explicitly makes byte identity normative. Otherwise fixtures should compare normalized semantics.
+
+* Unblock Rule
+
+Move this document from =BLOCKED= to =REVIEW= only when enough current implementation evidence exists to answer the protocol questions above without inventing behavior.
+
+At minimum, an unblock proposal should attach:
+
+1. observed command/operation shapes;
+2. save/reopen and reconnect evidence;
+3. undo/redo evidence;
+4. one actor/action command proposal;
+5. initial Common Lisp/JavaScript conformance fixtures;
+6. unresolved protocol questions listed explicitly rather than silently guessed.
+
+Changing the status still requires a separate review action. Evidence alone does not imply approval.
+
+* Non-Goals While Blocked
+
+- Do not create a public remote protocol merely to satisfy this reserved design number.
+- Do not define Auto-Dig host-only payloads here; QUASAR-006 owns them.
+- Do not choose renderer tiers here; QUASAR-007 owns them.
+- Do not move canonical runtime authority here; QUASAR-004 owns it.
+- Do not remove standalone browser operation; QUASAR-005 owns that boundary.
+
+* Publication Link
+
+- https://auto-research.starintel.actor/notes/design/star-server/QUASAR-003-graph-document-command-protocol.html
+
+* Changelog
+
+| Version | Date       | Change | Evidence | Did nsaspy approve it |
+|---------+------------+--------+----------+-----------------------|
+| 0.0.1 | 2026-07-23 | Reserved protocol design and blocked it on prototype evidence. | QUASAR-001/002 planning | No |
+| 0.0.2 | 2026-08-08 | Recovered shared protocol ownership from the former monolithic QUASAR-004 and broadened evidence sources to current repositories. | QUASAR-RESEARCH-005 and user-requested design split | No |
+
+* Footnotes and Glossary
+
+[fn:clog] CLOG: A Common Lisp browser-application library used by an earlier Quasar prototype to host browser sessions and communicate with them.
+
+[fn:star-graph-v1] star.graph.v1: The proposed version-one shared contract for Quasar graph documents, graph operations, command batches, revisions, results, rejections, inverse metadata, and fixtures.
+
+[fn:conformance-fixture] Conformance fixture: A fixed input and expected normalized behavior used by multiple implementations to prove they interpret the same protocol consistently.
+
+[fn:quasar-control-v1] quasar.control.v1: The proposed version-one control contract between a Quasar client and the canonical runtime for capabilities, snapshots, durable commands, actors, privileged tools, reconnect, and replay.
+
+[fn:adard] ADARD: Adaptive Research DAG, the StarIntel automatic-research system that owns bounded research candidates, evidence, evaluation, review, cancellation, and promotion semantics.
+
+[fn:common-lisp] Common Lisp: The Lisp language used by canonical Quasar runtime services and StarIntel actor infrastructure.
+
+[fn:javascript] JavaScript: The programming language used by the browser-based Quasar web implementation.
+
+[fn:logical-atomicity] Logical command atomicity: Application-level behavior in which a group of operations is considered accepted or rejected as one command unit.
+
+[fn:physical-atomicity] Physical storage atomicity: A storage guarantee that all underlying durable writes commit together or none commit, even across crashes.
+
+[fn:journal] Journal: A durable record of intended and completed operations used to recover or determine transaction state after interruption or crash.

@@ -2,6 +2,7 @@
   "use strict";
 
   const AUTO_DIG_URL = "https://auto-dig.starintel.actor/";
+  const ASSET_VERSION = "graph-workspace-v2";
   const current = document.currentScript;
   const base = current?.src ? new URL(".", current.src) : new URL("./", window.location.href);
   const ICONS = Object.freeze({
@@ -11,11 +12,17 @@
     "Auto-Dig": '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h8M8 13h5M16 13l3 3M19 13l-3 3"/></svg>'
   });
 
+  function assetUrl(name) {
+    const url = new URL(name, base);
+    url.searchParams.set("v", ASSET_VERSION);
+    return url.href;
+  }
+
   function mountShellStyles() {
     if (document.querySelector('link[data-adar-shell="true"]')) return;
     const link = document.createElement("link");
     link.rel = "stylesheet";
-    link.href = new URL("adar-shell.css", base).href;
+    link.href = assetUrl("adar-shell.css");
     link.dataset.adarShell = "true";
     document.head.appendChild(link);
   }
@@ -66,7 +73,7 @@
   }
 
   const runtime = document.createElement("script");
-  runtime.src = new URL(document.getElementById("graph-canvas") ? "graph.js" : "site-core.js", base).href;
+  runtime.src = assetUrl(document.getElementById("graph-canvas") ? "graph.js" : "site-core.js");
   runtime.async = false;
   document.head.appendChild(runtime);
 })();

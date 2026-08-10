@@ -1,0 +1,190 @@
+:PROPERTIES:
+:ID:       starintel-background-research-001-courts-corrections
+:END:
+#+title: BACKGROUND-RESEARCH-001 Courts and Corrections Public Records
+#+description: Research federal and jurisdictional court, incarceration, and registry sources for self-sourced investigative background reports, including mirrorable and query-only surfaces.
+#+status: REVIEW
+#+filetags: :starintel:research:auto-research:background-reports:courts:corrections:pacer:recap:
+#+created: [2026-08-09 Sun]
+#+last_modified: [2026-08-09 Sun]
+
+* Research Question
+
+How should StarIntel acquire court, incarceration, and public-registry records without pretending there is one complete national criminal-record database available to a private investigator?
+
+* Related Nodes
+
+- [[file:STAR-RESEARCH-003-us-government-data-acquisition-landscape.org][STAR-RESEARCH-003 U.S. Government Data Acquisition Landscape]]
+- [[file:../star-server/STAR-RESEARCH-010-first-class-contradictions.org][STAR-RESEARCH-010 First-Class Contradictions]]
+- [[file:../star-server/STAR-RESEARCH-014-temporal-relations.org][STAR-RESEARCH-014 Temporal Relations]]
+- [[file:../star-server/STAR-RESEARCH-016-raw-data-replay.org][STAR-RESEARCH-016 Raw-Data Replay]]
+- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-003-government-data-acquisition-actors.org][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+- [[file:../../indexes/auto-research/STAR-BACKGROUND-INDEX-000-self-sourced-background-reports.org][STAR-BACKGROUND-INDEX-000 Self-Sourced Background Reports]]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Review source findings and semantic caveats | Findings below |
+| Design promotion | StarIntel operator | PENDING | Approve court and corrections actor families | Future design node |
+| Publication | StarIntel auto-research maintainer | PENDING | Main-branch Pages workflow succeeds | Publication link below |
+
+* Executive Finding
+
+*USE A TIERED COURT PIPELINE.* Federal case discovery can be automated through official PACER APIs and supplemented by the public RECAP archive. State and local courts require jurisdiction or vendor-family adapters. Corrections and registry hits must remain source-specific observations rather than being promoted directly to a conviction label.
+
+The strongest federal acquisition order is:
+
+1. search local CourtListener or RECAP mirror/API
+2. resolve docket, parties, attorneys, entries, and available documents
+3. query PACER Case Locator for missing nationwide case/party coverage
+4. fetch specific PACER material only when absent and required
+5. preserve the exact docket/document artifact and billing event
+
+* Federal Court Sources
+
+** PACER authentication and Case Locator APIs
+
+PACER publishes an Authentication API for automated clients. Successful authentication returns a token for subsequent requests. The public PACER Case Locator API provides programmatic nationwide searches for federal cases and parties and uses the same search functionality and dataset as the web Case Locator.
+
+PACER therefore belongs behind a credentialed, cost-aware source adapter rather than a browser scraper. Large automated pulls should respect the Judiciary's published operational guidance and be scheduled through StarIntel's rate and lease authority.
+
+Required PACER retrieval state includes:
+
+- PACER account or credential reference, never the credential itself
+- authentication token lifetime
+- query fingerprint
+- court and case identifiers
+- result/report identifier
+- pages or charge units where applicable
+- retrieval timestamp
+- raw response or document hash
+- billing ledger entry
+
+** CourtListener and RECAP
+
+Free Law Project exposes PACER-derived dockets, docket entries, parties, attorneys, and documents through CourtListener APIs. RECAP fetch can also acquire PACER material using supplied PACER credentials and add acquired material to CourtListener.
+
+For StarIntel, RECAP is a first-look and cache-sharing layer, not proof that PACER has no additional material. A local mirror should preserve upstream CourtListener identifiers and source relationships so a later PACER fetch can corroborate or extend the existing case.
+
+* State and Local Court Sources
+
+No national public state-court API provides complete equivalent coverage. The acquisition unit should be a reusable platform or jurisdiction adapter.
+
+For Ohio and Franklin County, initial adapters should profile:
+
+- Franklin County Common Pleas Case Information Online
+- Franklin County Municipal Court records
+- clerk document and docket retrieval surfaces
+- county-specific appellate or probate sources where separate
+
+The source contract must identify case-number format, party search fields, date filters, result pagination, dispositions, charge/offense text, docket entries, document access, captchas or session state, and update semantics.
+
+* Corrections Sources
+
+** Federal Bureau of Prisons
+
+The BOP Inmate Locator is useful as a federal custody observation. It must not be normalized as a conviction by itself. Federal custody can include statuses not equivalent to a final criminal conviction, so the preferred pivot is from the BOP hit into a federal docket and disposition source.
+
+Store:
+
+- BOP register number when published
+- displayed identity fields
+- custody or release fields
+- source retrieval timestamp
+- query inputs
+- source artifact or response hash
+- linked PACER or court candidate cases
+
+** Sex-offender registries
+
+The Department of Justice NSOPW is a federated search interface over jurisdiction registries, not one downloadable national database. DOJ states that NSOPW does not provide a public API or web service for programmatic searches; the browser interface is the only NSOPW search surface.
+
+Therefore:
+
+- do not model NSOPW as a mirrorable national dataset
+- enumerate the underlying state, territory, and tribal registry sources
+- build adapters only after the individual jurisdiction source contract is profiled
+- preserve jurisdiction-native records as the evidentiary source
+- treat NSOPW as an optional bounded discovery/check surface, not the canonical stored source
+
+* FBI Record Boundary
+
+The FBI allows a person to request their own Identity History Summary but explicitly does not provide another person's arrest record to a private citizen through that process.
+
+Auto Dig should therefore not contain an actor advertised as an arbitrary third-party FBI rap-sheet lookup. A separate import capability may accept a subject-provided FBI Identity History Summary as evidence when the operator lawfully possesses one.
+
+* Semantic Rules
+
+| Source observation | Allowed normalized meaning |
+|--------------------+----------------------------|
+| named party on docket | party-in-case assertion |
+| charge or count listed | charge assertion with case source |
+| disposition entry | disposition assertion with effective date |
+| BOP locator hit | BOP custody-record assertion |
+| sex-offender registry hit | jurisdiction-registry assertion |
+| arrest mention without disposition | arrest assertion, not conviction |
+| dismissed or acquitted count | preserved disposition, never active conviction |
+
+A case can contain contradictory or amended entries. StarIntel should preserve each sourced assertion and construct a later current-status assessment rather than destructively rewriting history.
+
+* Mirroring Decision
+
+** Mirror or cache broadly
+
+- CourtListener public PACER data where bulk terms and distribution permit
+- jurisdiction court releases that provide official bulk files
+- raw docket and document artifacts acquired for a case
+
+** Query on demand
+
+- PACER PCL searches and missing PACER documents
+- BOP Inmate Locator
+- state/local court portals without bulk releases
+- underlying sex-offender jurisdiction registries without bulk releases
+
+** Do not advertise as available
+
+- a national NSOPW API
+- arbitrary third-party FBI Identity History Summaries
+- a complete national public state-court database
+
+* Research Gaps
+
+- Profile CourtListener bulk snapshot coverage, refresh method, and practical mirror size.
+- Profile PACER document acquisition semantics for each CM/ECF court family used by the first actor pack.
+- Enumerate Ohio court platform families and map every county to the correct adapter.
+- Profile Ohio Department of Rehabilitation and Correction public offender search as a separate state-corrections actor.
+- Enumerate jurisdiction sex-offender registries and determine which expose documented APIs, bulk data, or stable public search contracts.
+
+* Source Matrix
+
+Sources retrieved 2026-08-09.
+
+| Source | Evidence used |
+|--------+---------------|
+| https://pacer.uscourts.gov/file-case/developer-resources | Official PCL API availability and automated-access guidance |
+| https://pacer.uscourts.gov/help/pacer/pacer-authentication-api-user-guide | Automated PACER authentication contract |
+| https://pacer.uscourts.gov/help/pacer/pacer-case-locator-pcl-api-user-guide | PCL REST search surface and response formats |
+| https://wiki.free.law/c/courtlistener/help/api/rest/v4/pacer-data | CourtListener PACER-derived docket, party, attorney, entry, and document APIs |
+| https://wiki.free.law/c/courtlistener/help/api/rest/v4/recap | RECAP fetch and PACER acquisition workflow |
+| https://www.nsopw.gov/faqs | NSOPW federation model and explicit absence of public API or web service |
+| https://www.fbi.gov/about/faqs/does-the-fbi-provide-arrest-records-at-the-request-of-private-citizens | FBI third-party Identity History Summary boundary |
+| https://www.bop.gov/inmateloc/ | Federal inmate locator source |
+
+* Publication Link
+
+- https://auto-research.starintel.actor/notes/research/auto-research/BACKGROUND-RESEARCH-001-courts-corrections-public-records.html
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-09 | Created federal, state, and corrections source research for self-sourced background reports. | OpenAI research agent under operator direction | Primary-source review and existing government-data architecture |
+
+* Footnotes and Glossary
+
+- *PACER*: Public Access to Court Electronic Records, the federal Judiciary's electronic court-record access system.
+- *PCL*: PACER Case Locator, the nationwide federal case index.
+- *RECAP*: Free Law Project's public archive and tooling for PACER-derived records.
+- *Disposition*: The procedural or substantive resolution recorded for a charge, claim, or case.

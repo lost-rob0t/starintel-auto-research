@@ -2,16 +2,17 @@
 :ID:       quasar-web-edition-standalone-scope-005
 :END:
 #+title: QUASAR-005 Web Edition and Standalone Scope
-#+description: Define the authority and capabilities of quasar-ui when operating as the browser-based standalone Quasar edition and when attached to canonical Quasar runtime services.
+#+description: Define the authority and capabilities of quasar-ui when operating as the browser-based standalone Quasar edition and when attached to canonical Quasar runtime and StarIntel service capabilities.
 #+status: REVIEW
-#+filetags: :starintel:quasar:design:web-edition:standalone:browser:approval:
+#+filetags: :starintel:quasar:design:web-edition:standalone:browser:capabilities:services:approval:
 #+todo: TODO REVIEW BLOCKED | DONE REJECTED
 #+created: [2026-08-08 Sat]
-#+last_modified: [2026-08-08 Sat]
+#+last_modified: [2026-08-10 Mon]
 
-| Version | Date       | Description of change                                           | Did nsaspy approve it |
-|---------+------------+-----------------------------------------------------------------|-----------------------|
-| 0.1.0   | 2026-08-08 | Split web-edition and standalone authority out of QUASAR-004.   | No                    |
+| Version | Date       | Description of change                                                        | Did nsaspy approve it |
+|---------+------------+------------------------------------------------------------------------------+-----------------------|
+| 0.1.0   | 2026-08-08 | Split web-edition and standalone authority out of QUASAR-004.                | No                    |
+| 0.2.0   | 2026-08-10 | Clarify browser capability subset and StarIntel Server/BBPD service boundary. | No                   |
 
 * Decision
 
@@ -19,7 +20,41 @@
 
 It owns browser presentation, mobile behavior, renderer integration, offline/browser-local operation, and bounded browser workers. It may own browser-local state while disconnected or intentionally running in standalone mode.
 
+It does *not* own the complete Quasar or StarIntel capability set. Persistent runtime supervision, privileged host integrations, backend ingest/storage/search/routing, distributed queues, and external tool services belong to their owning runtime/service repositories.
+
 When a workspace or subject is connected to and migrated behind canonical =lost-rob0t/quasar= runtime commands, =quasar-ui= becomes a client and projection surface for those migrated operations. It must not silently become a competing durable writer.
+
+* Capability Stack
+
+#+begin_src text
+quasar-ui
+  browser UI / graph renderer / standalone subset
+        |
+        | typed commands, projections, capability discovery
+        v
+quasar
+  canonical Common Lisp control plane/runtime
+        |
+        | StarIntel service APIs and adapters
+        v
+starintel-server
+  persistent ingest / storage / search / routing / RabbitMQ
+        |
+        +-----------------------------+
+        |                             |
+        v                             v
+star-bbpd                       other actor services
+  external recon actors          collectors / analyzers / tools
+#+end_src
+
+The layers are complementary rather than mutually exclusive.
+
+- =quasar-ui= presents browser controls, documents, graphs, status, results, and errors.
+- =quasar= owns canonical Common Lisp command/revision authority for migrated durable operations, persistent Sento supervision, privileged local integrations, reconnect/replay, and runtime capability discovery.
+- =starintel-server= owns persistent backend responsibilities assigned to it, including document ingest, storage/query/search, RabbitMQ routing, and distributed service coordination.
+- =star-bbpd= is a concrete external actor service that consumes RabbitMQ targets, runs Subfinder, Nmap, Httpx, Katana, and DNS workflows, and publishes derived StarIntel documents, relations, and actor events.
+
+A browser control that invokes a service does not make that service a browser capability. The UI should discover service availability and expose only capabilities actually present in the connected deployment.
 
 * Approval Table
 
@@ -28,6 +63,7 @@ When a workspace or subject is connected to and migrated behind canonical =lost-
 | User approval | nsaspy / repository owner | PENDING | Approve or request edits to this focused web-edition boundary | Publication link below |
 | Standalone behavior | Quasar UI maintainer | PENDING | Browser opens, edits, imports, exports, and saves locally without canonical runtime | Standalone acceptance gate |
 | Connected behavior | Quasar + Quasar UI maintainers | PENDING | Migrated operations route through canonical command boundary | QUASAR-004 and QUASAR-003 |
+| Service capability boundary | Quasar + StarIntel service maintainers | PENDING | UI discovers backend/external services without reimplementing them in browser code | Capability Stack |
 
 No row is implied approval.
 
@@ -53,6 +89,17 @@ Acceptable standalone capabilities include:
 
 Standalone mode may use browser storage such as IndexedDB[fn:indexeddb] or PouchDB[fn:pouchdb] when the selected implementation requires it.
 
+Standalone mode is a *bounded subset deployment*. It must not be documented as feature-equivalent to a connected Quasar + StarIntel deployment.
+
+Capabilities requiring any of the following are outside the standalone-browser guarantee unless a separate browser-safe implementation is explicitly designed and validated:
+
+- persistent service supervision;
+- privileged host or native process access;
+- server-side CouchDB/search infrastructure;
+- RabbitMQ distributed routing;
+- long-running collectors or analyzers;
+- external native reconnaissance tools.
+
 * Connected Mode
 
 When connected to canonical =quasar= runtime services:
@@ -61,7 +108,27 @@ When connected to canonical =quasar= runtime services:
 2. high-frequency renderer movement may stay local until a commit boundary;
 3. durable migrated mutations must be submitted through the canonical command contract;
 4. command rejection or revision conflict must be surfaced rather than overwritten locally;
-5. reconnect must reconcile browser projection state with canonical runtime state.
+5. reconnect must reconcile browser projection state with canonical runtime state;
+6. backend and external-service capabilities are discovered rather than assumed;
+7. unavailable services disable only their dependent UI and do not break unrelated standalone features;
+8. the browser must not silently substitute weaker JavaScript behavior for a missing privileged/runtime service.
+
+* Service Boundary
+
+Connected Quasar may expose =starintel-server=, BBPD, and other actor/service capabilities through typed adapters and capability discovery.
+
+This does not require those services to run inside the =quasar= process. The runtime may coordinate them while preserving independent deployment, supervision, queue topology, credentials, logs, and failure semantics.
+
+For BBPD specifically, the UI may expose:
+
+- service availability/health;
+- supported recon capability list;
+- target submission;
+- job/progress state;
+- logs and errors;
+- resulting StarIntel documents and graph projections.
+
+The actual Subfinder/Nmap/Httpx/Katana/DNS execution remains in =star-bbpd=.
 
 * Package Boundary
 
@@ -69,7 +136,7 @@ The browser core should remain independent of framework and transport details wh
 
 Core graph/document operations should not require React[fn:react], Cytoscape[fn:cytoscape], a specific storage engine, or a specific network transport merely to represent valid commands and state transitions.
 
-Renderer, storage, provider, and runtime integration layers remain adapters around the core contracts.
+Renderer, storage, provider, runtime, and external-service integration layers remain adapters around the core contracts.
 
 * Accepted Claims
 
@@ -77,6 +144,8 @@ Renderer, storage, provider, and runtime integration layers remain adapters arou
 - Browser-local operation is useful and supported.
 - Browser workers may implement bounded local actors or tools.
 - Connected mode may use canonical runtime capabilities when present.
+- StarIntel Server and external actor services may expand the connected capability set without moving their implementations into browser JavaScript.
+- Quasar UI may present and control a service without owning that service implementation.
 
 * Rejected Claims
 
@@ -84,6 +153,8 @@ Renderer, storage, provider, and runtime integration layers remain adapters arou
 - Common Lisp runtime integration is forbidden rather than optional.
 - Browser-local caches overrule newer canonical runtime revisions.
 - A renderer library is the canonical store.
+- Standalone =quasar-ui= has feature parity with the full Quasar + StarIntel service deployment.
+- BBPD/native recon tooling becomes a browser capability merely because the UI can submit a target or render its results.
 
 * Acceptance Gates
 
@@ -94,6 +165,9 @@ Renderer, storage, provider, and runtime integration layers remain adapters arou
 | Connected mutation | Submit a migrated mutation through the canonical command channel and observe accepted/rejected result handling. |
 | Reconnect | Reconnect after stale browser state and reconcile to the canonical revision without hidden overwrite. |
 | Browser-only fallback | Canonical runtime unavailable; standalone mode remains usable rather than failing the entire application. |
+| Capability discovery | Connected UI reflects which runtime/server/external-service capabilities are actually available. |
+| Missing-service behavior | Removing StarIntel Server/BBPD access disables dependent controls without relabeling browser substitutes as equivalent services. |
+| BBPD boundary | Target submission/result rendering can occur through the UI while native recon execution remains in =star-bbpd=. |
 
 * Non-Goals
 
@@ -101,6 +175,7 @@ Renderer, storage, provider, and runtime integration layers remain adapters arou
 - Do not define graph command schemas here; QUASAR-003 owns them.
 - Do not define large-graph renderer tiers here; QUASAR-007 owns them.
 - Do not define Auto-Dig fork rules here; QUASAR-006 owns them.
+- Do not redefine StarIntel Server or BBPD internal service architecture here.
 
 * Publication Link
 
@@ -108,9 +183,10 @@ Renderer, storage, provider, and runtime integration layers remain adapters arou
 
 * Changelog
 
-| Version | Date       | Change | Evidence | Did nsaspy approve it |
-|---------+------------+--------+----------+-----------------------|
-| 0.1.0 | 2026-08-08 | Split standalone/browser scope out of the previous combined QUASAR-004 document. | QUASAR-RESEARCH-005 and prior QUASAR-004 text | No |
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-08 | Split standalone/browser scope out of the previous combined QUASAR-004 document. | OpenAI design agent under operator direction | QUASAR-RESEARCH-005 and prior QUASAR-004 text |
+| 2026-08-10 | Added explicit Quasar UI subset, StarIntel Server backend, and BBPD external-service capability boundaries to match repository documentation. | OpenAI design agent under operator direction | Current quasar, quasar-ui, starintel-server, and star-bbpd repository boundaries |
 
 * Footnotes and Glossary
 

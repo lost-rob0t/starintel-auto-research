@@ -1,0 +1,302 @@
+:PROPERTIES:
+:ID:       starintel-background-research-006-entity-resolution
+:END:
+#+title: BACKGROUND-RESEARCH-006 Entity Resolution and Report Evidence
+#+description: Research the evidence, temporal, contradiction, confidence, and report-assembly model needed to turn mirrored public records into defensible investigative background reports.
+#+status: REVIEW
+#+filetags: :starintel:research:auto-research:background-reports:entity-resolution:evidence:provenance:reports:
+#+created: [2026-08-09 Sun]
+#+last_modified: [2026-08-10 Mon]
+
+* Research Question
+
+How should Auto Dig resolve source records to people and organizations and assemble a report without collapsing candidates, contradictions, historical states, or source-specific meanings?
+
+* Related Nodes
+
+- [[file:BACKGROUND-RESEARCH-000-identity-address-public-records.org][BACKGROUND-RESEARCH-000 Identity and Address Public Records]]
+- [[file:BACKGROUND-RESEARCH-001-courts-corrections-public-records.org][BACKGROUND-RESEARCH-001 Courts and Corrections Public Records]]
+- [[file:BACKGROUND-RESEARCH-004-dataset-mirroring-refresh-protocol.org][BACKGROUND-RESEARCH-004 Dataset Mirroring and Refresh Protocol]]
+- [[file:BACKGROUND-RESEARCH-005-source-constraints-and-coverage-gaps.org][BACKGROUND-RESEARCH-005 Source Constraints and Coverage Gaps]]
+- [[file:../star-server/STAR-RESEARCH-010-first-class-contradictions.org][STAR-RESEARCH-010 First-Class Contradictions]]
+- [[file:../star-server/STAR-RESEARCH-012-corroboration-aware-deduplication.org][STAR-RESEARCH-012 Corroboration-Aware Deduplication]]
+- [[file:../star-server/STAR-RESEARCH-014-temporal-relations.org][STAR-RESEARCH-014 Temporal Relations]]
+- [[file:../star-server/STAR-RESEARCH-016-raw-data-replay.org][STAR-RESEARCH-016 Raw-Data Replay]]
+- [[file:../../indexes/auto-research/STAR-BACKGROUND-INDEX-000-self-sourced-background-reports.org][STAR-BACKGROUND-INDEX-000 Self-Sourced Background Reports]]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Review resolution and report-evidence model | Findings below |
+| Design promotion | StarIntel operator | PENDING | Approve resolver and report actor design | Future design node |
+| Publication | StarIntel auto-research maintainer | PENDING | Main-branch Pages workflow succeeds | Publication link below |
+
+* Executive Finding
+
+*RESOLVE CLAIMS, NOT JUST NAMES.* Mirroring public datasets only creates source records. A background report requires a second layer that decides which records are candidates for the same person or organization, preserves conflicting candidates, and emits evidence-bearing assertions.
+
+The existing StarIntel research already establishes the required primitives: contradictions remain first-class, duplicate storage is separate from corroboration, relations carry validity time, and important derived state must be replayable from preserved raw inputs. Background-report entity resolution should reuse those primitives directly.
+
+* Source Record Versus Entity
+
+A source record is not the person.
+
+Examples:
+
+- one Ohio voter row
+- one PACER party record
+- one deed grantee
+- one NPPES provider row
+- one FAA airman record
+- one corporate filing role
+- one LEIE exclusion row
+
+Each receives a stable source-record identifier tied to its source release. Resolution creates assertions that one or more source records refer to the same StarIntel entity.
+
+* Resolution Stages
+
+** Stage 1: candidate generation
+
+Generate candidate records using inexpensive deterministic keys:
+
+- normalized full name
+- aliases or former names
+- city/state/ZIP
+- address tokens
+- organization names
+- source-native identifiers
+- known case, license, NPI, CIK, FRN, N-number, entity, or filing identifiers
+
+Candidate generation is recall-oriented. It is allowed to produce false positives.
+
+** Stage 2: evidence comparison
+
+Compare candidate pairs using source-backed attributes:
+
+- name components
+- aliases
+- age or date-of-birth evidence where public and present
+- historical address overlap
+- geography
+- employer or organization overlap
+- related entity overlap
+- unique or semi-unique source identifiers
+- temporal compatibility
+- contradictory fields
+
+** Stage 3: resolution assertion
+
+Emit one of:
+
+- =same-entity-confirmed=
+- =same-entity-probable=
+- =same-entity-possible=
+- =different-entity=
+- =unresolved=
+
+The assertion stores the evidence used, resolver version, score if applicable, threshold version, and contradictory evidence.
+
+No actor destructively rewrites the underlying source records.
+
+* Confidence Is Multi-Dimensional
+
+One scalar score is insufficient for the report surface. At minimum preserve:
+
+- identity confidence
+- source authenticity confidence
+- extraction confidence
+- current-status confidence
+- temporal confidence
+- role confidence
+
+For example, a court PDF may be authentic with high confidence while the identity match between a common-name party and the target remains weak.
+
+* Role Preservation
+
+Source roles must survive normalization.
+
+Do not reduce:
+
+- statutory agent
+- incorporator
+- filing signer
+- beneficial owner
+- director
+- officer
+- trustee
+- grant recipient
+- secured party
+- debtor
+- licensee
+- registrant
+- defendant
+- plaintiff
+- witness
+- attorney
+
+into generic =associated-with= or =employee-of= edges during acquisition.
+
+Generic graph projections can be derived later while the precise role remains available.
+
+* Temporal Model
+
+Every report assertion may require four clocks:
+
+- =validFrom/validThrough= — when the real-world relationship held, if known
+- =sourceAssertedAt= — when the source record or filing asserted it
+- =retrievedAt= — when StarIntel obtained the evidence
+- =processedAt= — when the current parser or resolver produced the assertion
+
+Historical address, business role, license status, court disposition, and ownership assertions must not be overwritten by later states.
+
+* Contradictions
+
+Contradictions are expected and useful.
+
+Examples:
+
+- two different birth years for a same-name candidate
+- two sources reporting different current addresses
+- a stale business filing showing an old statutory agent
+- a court docket amended after an earlier charge listing
+- a monthly exclusion list removing a previously active exclusion
+
+The report layer may present a current assessment, but the evidence graph keeps both source assertions and the explicit contradiction or supersession relationship.
+
+* Corroboration and Source Dependence
+
+Multiple records are not automatically independent corroboration.
+
+Examples of dependent evidence:
+
+- a news page copying a court press release
+- a people-search page reproducing a county record
+- several mirrors of the same government CSV
+- repeated parsing of the same filing
+
+The evidence graph should carry =derivedFrom= or shared-artifact lineage so confidence does not increase merely because the same source was duplicated.
+
+* Finding Record
+
+A report finding should have an evidence envelope similar to:
+
+#+begin_example
+findingId
+subjectEntityId
+predicate
+object
+role
+validFrom
+validThrough
+assessment
+identityConfidence
+statusConfidence
+supportingAssertionIds[]
+contradictingAssertionIds[]
+sourceRecordIds[]
+retrievalEventIds[]
+rawArtifactIds[]
+resolverVersion
+reportAssemblerVersion
+coverageBasisId
+#+end_example
+
+The report assembler does not own these findings. It projects them into a human-readable background report.
+
+* Report Sections as Queries
+
+A background report should be a versioned query over evidence families rather than a separate manually maintained schema.
+
+Initial sections:
+
+- identity candidates and aliases
+- address history
+- court cases and dispositions
+- corrections and public registries
+- property and recorded instruments
+- business entities and filing roles
+- UCC or secured-interest records
+- professional and regulatory licenses
+- sanctions and exclusions
+- securities and adviser records
+- aircraft and FCC licenses
+- nonprofit and Form 990 roles
+- federal awards
+- unresolved candidates
+- contradictions
+- explicit coverage gaps
+
+Each section must report the source coverage and freshness basis used to produce it.
+
+* Report Completeness
+
+Completeness is vector-valued, not boolean.
+
+Example:
+
+#+begin_example
+federalCourts: searched-current
+franklinCountyCommonPleas: searched-current
+ohioOtherCounties: not-requested
+propertyFranklin: searched-current
+nppes: mirrored-current
+leie: mirrored-current
+brokercheck: research-needed
+telecomContactEnrichment: source-not-found
+#+end_example
+
+The report's scope can therefore be reproduced exactly.
+
+* Deterministic Replay Requirement
+
+Given the same:
+
+- source release IDs
+- raw artifacts
+- parser versions
+- normalization versions
+- entity-resolution version
+- threshold configuration
+- report query
+
+StarIntel should regenerate the same evidence graph and report findings, aside from explicitly non-deterministic analyst or model assessments that are stored as separate append-only assertions.
+
+* Research Gaps
+
+- Define deterministic normalization for names, suffixes, transliteration, and business names.
+- Create calibration fixtures with common-name collisions, twins/family members, stale addresses, and amended court records.
+- Decide which resolver stages are rules, statistical models, Prolog rules, or human review.
+- Define confidence thresholds separately by source family and report use.
+- Define report versioning so a later source release can produce a new report without deleting the prior report basis.
+
+* Source Matrix
+
+Sources retrieved 2026-08-09.
+
+| Source | Evidence used |
+|--------+---------------|
+| [[file:../star-server/STAR-RESEARCH-010-first-class-contradictions.org][STAR-RESEARCH-010]] | Preserve incompatible evidence-bearing assertions |
+| [[file:../star-server/STAR-RESEARCH-012-corroboration-aware-deduplication.org][STAR-RESEARCH-012]] | Separate storage deduplication from independent corroboration |
+| [[file:../star-server/STAR-RESEARCH-014-temporal-relations.org][STAR-RESEARCH-014]] | Preserve valid, asserted, observed, and processing time |
+| [[file:../star-server/STAR-RESEARCH-016-raw-data-replay.org][STAR-RESEARCH-016]] | Rebuild derived state from raw inputs and transformation versions |
+| https://wiki.free.law/c/courtlistener/help/api/rest/v4/pacer-data | Example source model separating dockets, entries, parties, attorneys, and documents |
+| https://www.sec.gov/search-filings/edgar-application-programming-interfaces | Example stable filer identifiers and source histories for cross-release resolution |
+
+* Publication Link
+
+- https://auto-research.starintel.actor/notes/research/auto-research/BACKGROUND-RESEARCH-006-entity-resolution-report-evidence.html
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-10 | Recorded the UTC audit date for this research change set; research conclusions and source basis are unchanged. | OpenAI research agent under operator direction | CI changelog audit |
+| 2026-08-09 | Created evidence-preserving entity-resolution and report-assembly research grounded in existing StarIntel contradiction, deduplication, temporal, and replay nodes. | OpenAI research agent under operator direction | Repository research review and primary-source examples |
+
+* Footnotes and Glossary
+
+- *Entity resolution*: Determining whether records from one or more sources refer to the same real-world entity.
+- *Source record*: A parsed record scoped to one source release before cross-source resolution.
+- *Evidence envelope*: Metadata linking a finding to assertions, source records, retrievals, raw artifacts, versions, and coverage basis.
+- *Coverage basis*: The exact set and state of source families searched to produce a report.

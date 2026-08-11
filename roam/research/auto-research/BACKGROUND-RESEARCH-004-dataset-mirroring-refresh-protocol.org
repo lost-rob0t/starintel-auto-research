@@ -1,0 +1,297 @@
+:PROPERTIES:
+:ID:       starintel-background-research-004-mirroring-refresh
+:END:
+#+title: BACKGROUND-RESEARCH-004 Dataset Mirroring and Refresh Protocol
+#+description: Research a source-neutral mirroring model for public background-report datasets using immutable releases, deltas, reconciliation, tombstones, hashes, and replay.
+#+status: REVIEW
+#+filetags: :starintel:research:auto-research:background-reports:mirroring:datasets:refresh:replay:provenance:
+#+created: [2026-08-09 Sun]
+#+last_modified: [2026-08-10 Mon]
+
+* Research Question
+
+How should StarIntel mirror heterogeneous public datasets so Auto Dig can query them locally while retaining exact releases, changes, deletions, source semantics, and replay capability?
+
+* Related Nodes
+
+- [[file:STAR-RESEARCH-003-us-government-data-acquisition-landscape.org][STAR-RESEARCH-003 U.S. Government Data Acquisition Landscape]]
+- [[file:BACKGROUND-RESEARCH-000-identity-address-public-records.org][BACKGROUND-RESEARCH-000 Identity and Address Public Records]]
+- [[file:BACKGROUND-RESEARCH-002-business-assets-public-records.org][BACKGROUND-RESEARCH-002 Business and Asset Public Records]]
+- [[file:BACKGROUND-RESEARCH-003-licenses-regulatory-exclusions.org][BACKGROUND-RESEARCH-003 Licenses, Regulatory Records, Sanctions, and Exclusions]]
+- [[file:../star-server/STAR-RESEARCH-016-raw-data-replay.org][STAR-RESEARCH-016 Raw-Data Replay]]
+- [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-004-government-data-revision-protocol-amendment.org][STAR-RESEARCH-PIPELINE-004 Government Data Revision Protocol Amendment]]
+- [[file:../../indexes/auto-research/STAR-BACKGROUND-INDEX-000-self-sourced-background-reports.org][STAR-BACKGROUND-INDEX-000 Self-Sourced Background Reports]]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Review mirror and refresh invariants | Findings below |
+| Design promotion | StarIntel operator | PENDING | Approve mirror actor protocol | Future design node |
+| Publication | StarIntel auto-research maintainer | PENDING | Main-branch Pages workflow succeeds | Publication link below |
+
+* Executive Finding
+
+*USE IMMUTABLE SOURCE RELEASES PLUS A DERIVED CURRENT PROJECTION.* A mirrored dataset must not be represented as one mutable local table that is silently replaced every refresh. The raw release, release metadata, parsed source records, changes between releases, and current projection are separate layers.
+
+The source-specific acquisition method can vary between full snapshots, incremental files, transaction files, API pages, or generated bulk archives. The local contract should remain the same.
+
+* Canonical Mirror Layers
+
+Every mirrored source should expose five layers.
+
+1. *Source profile* — what the upstream source is and how its releases work.
+2. *Immutable release* — the exact bytes or immutable artifact references acquired at one point in time.
+3. *Parsed source records* — deterministic parsing of that release without cross-source entity resolution.
+4. *Revision events* — additions, removals, changes, reinstatements, deactivations, and source corrections between releases.
+5. *Current projection* — a rebuildable query index representing the latest accepted source state.
+
+The current projection is disposable. The release and revision history are the audit trail.
+
+* Mirror Release Record
+
+A source release requires at minimum:
+
+#+begin_example
+mirrorReleaseId
+sourceProfileId
+sourceProfileRevisionId
+sourceNativeReleaseId
+publishedAt
+observedAt
+retrievedAt
+artifactIds[]
+contentHashes[]
+byteCounts[]
+mediaTypes[]
+compression[]
+schemaVersion
+parserVersion
+recordCount
+partitionKey
+parentReleaseId
+releaseKind
+completenessState
+truncationState
+validationResults[]
+#+end_example
+
+=releaseKind= should distinguish at least:
+
+- =full-snapshot=
+- =incremental=
+- =deactivation=
+- =reinstatement=
+- =transaction-file=
+- =partition=
+- =generated-bulk-export=
+- =historical-archive=
+
+* Revision Events
+
+A diff between accepted source states should emit typed revision events rather than simply overwriting rows.
+
+#+begin_example
+sourceRecordAdded
+sourceRecordChanged
+sourceRecordRemoved
+sourceRecordDeactivated
+sourceRecordReinstated
+sourceRecordCorrected
+sourceRecordRekeyed
+sourceRecordUnknownChange
+#+end_example
+
+A removal from a current full snapshot is a source-state observation. It does not necessarily mean the underlying real-world entity ceased to exist. Source-specific semantics decide whether the event means deletion, reinstatement, withholding, expiration, deactivation, or an unresolved disappearance.
+
+* Full Snapshot Sources
+
+Examples include:
+
+- FAA aircraft daily database
+- FAA airmen monthly database
+- NPPES monthly full release
+- LEIE monthly active exclusions
+- OFAC sanctions-list releases
+- SEC nightly submissions and company-facts archives
+- Ohio daily voter-registration snapshots
+
+For these sources the safest update path is:
+
+1. download new release to an uncommitted artifact location
+2. verify transport completion and expected archive structure
+3. hash every acquired artifact
+4. parse into a release-scoped staging projection
+5. run schema, count, uniqueness, and source-specific consistency checks
+6. diff against the prior accepted release
+7. emit revision events
+8. atomically mark the new release accepted
+9. rebuild or advance the current projection
+10. retain the prior release and validation evidence
+
+A failed validation never advances the accepted release pointer.
+
+* Incremental and Delta Sources
+
+Examples include:
+
+- NPPES weekly incrementals and monthly deactivations
+- LEIE exclusion and reinstatement supplements
+- OFAC delta archives
+- FCC ULS daily or weekly transaction files
+
+Incrementals should advance a derived projection only when their exact parent state is known. Every delta stores:
+
+- expected parent release
+- source range or period
+- sequence information when available
+- row counts
+- before/after state hashes
+- unresolved operations
+
+The next authoritative full snapshot should reconcile the projection. Differences become explicit reconciliation failures or source corrections; they must not be silently discarded.
+
+* Partitioned Sources
+
+Large sources such as IRS Form 990 XML and USAspending award data should be mirrored by stable upstream partitions when possible.
+
+Partition metadata should include:
+
+- source partition identity
+- date/fiscal-year/month range
+- agency or source-defined partition when applicable
+- immutable artifact hashes
+- upstream generation timestamp
+- supersedes relationship
+- completeness markers
+
+A partition replacement is a new release of that partition, not an in-place mutation.
+
+* Generated Bulk Exports
+
+USAspending and some government portals generate bulk archives asynchronously from request parameters. The request itself becomes part of provenance.
+
+Preserve:
+
+- canonicalized request parameters
+- request fingerprint
+- source job/download ID
+- poll status history when asynchronous
+- generation completion time
+- downloaded artifact hash
+- declared filters and time range
+
+Two archives generated from different request parameters are different source releases even if they overlap heavily.
+
+* Query-Only Cache
+
+Not every source can or should be fully mirrored. PACER, BOP, state courts, county recorder systems, professional-license portals, and other query-only systems can still use the same artifact model.
+
+The cache unit is a retrieval event:
+
+- exact query
+- normalized query fingerprint
+- source profile revision
+- session/auth context reference
+- results pages
+- result count and truncation
+- raw artifacts
+- retrieved time
+- cache expiration policy
+
+Cached query results must not masquerade as complete source mirrors.
+
+* Refresh Cadence Matrix
+
+| Source | Published cadence or behavior | Proposed local action |
+|--------+-------------------------------+-----------------------|
+| Ohio voter snapshots | daily; statewide package following day | acquire daily statewide package and retain daily release |
+| FAA aircraft | daily 23:30 Central refresh | acquire once daily after source window |
+| FAA airmen | monthly | acquire each monthly release |
+| NPPES | monthly full, weekly incrementals, monthly deactivation | full monthly plus weekly delta; reconcile monthly |
+| SEC submissions/company facts | real-time API; nightly bulk rebuild | nightly bulk mirror plus targeted current API queries |
+| IRS TEOS | monthly datasets | acquire every published monthly release |
+| IRS 990 XML | year/month archive publication | acquire new or replaced archive partitions |
+| LEIE | monthly full plus supplements | full monthly; supplements optional for early change visibility |
+| OFAC SLS | current lists plus archived deltas | acquire on source change and retain deltas |
+| FCC ULS | base/download surface plus daily/weekly transactions | establish base snapshot then apply transactions with periodic full reconciliation |
+| USAspending | API and generated/monthly bulk files | partitioned scheduled bulk exports plus targeted API |
+| SAM exclusions | public extracts plus historical files | mirror public extract releases; retain historical source releases |
+
+* Storage and Index Separation
+
+The mirror should have separate storage classes:
+
+- raw source artifact store
+- release and revision metadata ledger
+- parsed source-record store
+- local query indexes
+- cross-source StarIntel normalized documents
+
+Deleting and rebuilding an index must not delete raw artifacts or release history.
+
+Content-addressed artifact storage should deduplicate identical bytes while preserving every retrieval and release record that referenced those bytes. This follows the existing corroboration-aware deduplication research: storage deduplication is not evidence deduplication.
+
+* Failure States
+
+Required terminal or review states include:
+
+- transport-failed
+- archive-invalid
+- schema-unsupported
+- record-count-anomaly
+- upstream-empty
+- upstream-truncated
+- unexpected-replacement
+- parent-release-missing
+- delta-sequence-gap
+- reconciliation-mismatch
+- parser-failed
+- hash-mismatch
+- source-retired
+- source-access-changed
+
+A stale but previously accepted projection remains queryable with an explicit freshness state when a refresh fails.
+
+* Research Gaps
+
+- Define source-specific anomaly thresholds and expected cardinality ranges.
+- Measure storage cost for retaining every daily Ohio voter snapshot versus content-addressed compressed releases and derived diffs.
+- Decide which sources need database-native indexes versus Parquet/columnar or search indexes for Auto Dig latency.
+- Define historical compaction rules that preserve replay guarantees.
+- Define an atomic mirror-acceptance transaction compatible with the current StarIntel persistence layer.
+
+* Source Matrix
+
+Sources retrieved 2026-08-09.
+
+| Source | Evidence used |
+|--------+---------------|
+| https://data.ohiosos.gov/voter | Daily immutable-style county snapshots and statewide packages |
+| https://www.faa.gov/licenses_certificates/aircraft_certification/aircraft_registry/releasable_aircraft_download | Daily complete aircraft download |
+| https://www.faa.gov/licenses_certificates/airmen_certification/releasable_airmen_download | Monthly airmen database |
+| https://download.cms.gov/nppes/NPI_Files.html | Monthly full, weekly incremental, and monthly deactivation release model |
+| https://www.sec.gov/search-filings/edgar-application-programming-interfaces | Real-time APIs and nightly bulk archives |
+| https://www.irs.gov/charities-non-profits/tax-exempt-organization-search-bulk-data-downloads | Monthly TEOS bulk datasets |
+| https://oig.hhs.gov/exclusions/leie-database-supplement-downloads/ | Monthly full and supplement model |
+| https://ofac.treasury.gov/sanctions-list-service | Full list data and archived delta files |
+| https://api.usaspending.gov/docs/endpoints | Generated bulk downloads and monthly-file API surfaces |
+| https://sam.gov/data-services/Exclusions | Public exclusions extracts and historical releases |
+
+* Publication Link
+
+- https://auto-research.starintel.actor/notes/research/auto-research/BACKGROUND-RESEARCH-004-dataset-mirroring-refresh-protocol.html
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-10 | Recorded the UTC audit date for this research change set; research conclusions and source basis are unchanged. | OpenAI research agent under operator direction | CI changelog audit |
+| 2026-08-09 | Defined source-neutral immutable-release, delta, reconciliation, and current-projection research model for background-report datasets. | OpenAI research agent under operator direction | Primary-source release models and existing StarIntel replay/revision research |
+
+* Footnotes and Glossary
+
+- *Accepted release*: A source release that passed required validation and is allowed to advance the local current projection.
+- *Current projection*: Rebuildable latest-state representation derived from accepted releases.
+- *Reconciliation*: Comparison of a delta-maintained projection with a later authoritative source snapshot.
+- *Tombstone*: Durable representation that a source record disappeared, retired, or was explicitly removed without deleting its history.

@@ -1,0 +1,160 @@
+:PROPERTIES:
+:ID:       starintel-background-research-002-business-assets
+:END:
+#+title: BACKGROUND-RESEARCH-002 Business and Asset Public Records
+#+description: Research mirrorable and queryable public records for business affiliations, property, secured interests, aircraft, nonprofit roles, securities filings, communications licenses, and federal awards.
+#+status: REVIEW
+#+filetags: :starintel:research:auto-research:background-reports:business:assets:edgar:property:aircraft:
+#+created: [2026-08-09 Sun]
+#+last_modified: [2026-08-10 Mon]
+
+* Research Question
+
+Which public datasets can StarIntel combine to reconstruct business affiliations and publicly recorded asset relationships without relying on a commercial background-report aggregator?
+
+* Related Nodes
+
+- [[file:STAR-RESEARCH-003-us-government-data-acquisition-landscape.org][STAR-RESEARCH-003 U.S. Government Data Acquisition Landscape]]
+- [[file:BACKGROUND-RESEARCH-000-identity-address-public-records.org][BACKGROUND-RESEARCH-000 Identity and Address Public Records]]
+- [[file:../star-server/STAR-RESEARCH-014-temporal-relations.org][STAR-RESEARCH-014 Temporal Relations]]
+- [[file:../star-server/STAR-RESEARCH-016-raw-data-replay.org][STAR-RESEARCH-016 Raw-Data Replay]]
+- [[file:../../indexes/auto-research/STAR-BACKGROUND-INDEX-000-self-sourced-background-reports.org][STAR-BACKGROUND-INDEX-000 Self-Sourced Background Reports]]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Review source-family findings | Findings below |
+| Design promotion | StarIntel operator | PENDING | Approve mirror and query actor families | Future design node |
+| Publication | StarIntel auto-research maintainer | PENDING | Main-branch Pages workflow succeeds | Publication link below |
+
+* Executive Finding
+
+*HIGH-VALUE MIRROR TRACK.* A substantial asset and affiliation report can be assembled from government bulk releases: SEC EDGAR, FAA aircraft records, IRS exempt-organization files, FCC licensing data, USAspending award data, and state business releases. County property, recorder, and UCC systems fill jurisdictional gaps through source-specific query actors.
+
+The data should remain relationship evidence. A name on a filing can represent an owner, signer, officer, statutory agent, inventor, filer, licensee, recipient, or historical contact. The role supplied by the source must be preserved.
+
+* SEC EDGAR
+
+The SEC exposes public filing and XBRL data through =data.sec.gov= without API keys. Submission and XBRL JSON are updated throughout the day. The SEC also republishes bulk ZIP archives nightly, including a submissions archive covering filer histories and a company-facts archive for XBRL facts.
+
+Recommended local assets:
+
+- nightly filer-submission mirror
+- nightly company-facts mirror
+- daily filing-index and document acquisition for selected forms
+- local CIK, name, former-name, ticker, and filing lookup indexes
+
+Useful person and organization relations can be derived from filings only when the source document explicitly supports the role. Signing a filing is not automatically equivalent to beneficial ownership or executive employment.
+
+* State Business and UCC Records
+
+State Secretary of State systems provide the primary legal-entity layer. Ohio exposes business search and downloadable reports; the exact downloadable report schema and cadence still require protocol profiling. UCC systems can add debtor, secured-party, filing, and collateral assertions where the state publishes those records.
+
+State business and UCC ingestion should preserve:
+
+- state-native entity or filing number
+- filing type
+- role type
+- name and address exactly as filed
+- filing/effective/termination dates
+- status
+- source document or image locator
+- amendment chain
+
+* County Property and Recorded Instruments
+
+County auditor or assessor records are the primary parcel layer. County recorder records can provide deeds, mortgages, satisfactions, assignments, and other recorded instruments.
+
+StarIntel should separate:
+
+- assessed or taxable value from estimated market value
+- current titled owner from historical grantee or grantor
+- parcel ownership from mailing address
+- mortgage or lien evidence from current debt balance
+
+* FAA Aircraft Registration
+
+The FAA publishes its entire releasable aircraft registration database as a downloadable archive. The source contains the master registration file, dealer applicants, document index, aircraft and engine references, deregistered aircraft, and reserved N-numbers. The current download is refreshed daily at 11:30 p.m. Central.
+
+The FAA also permits private aircraft owners to request withholding of certain personally identifiable information from broad public dissemination. Missing name or address fields therefore cannot automatically be treated as a parsing error.
+
+This source is an excellent full-mirror candidate because it has a documented layout, modest archive size, daily refresh, and stable identifiers such as N-number and aircraft records.
+
+* IRS Exempt Organizations
+
+The IRS publishes comprehensive public-disclosure datasets for tax-exempt organizations. Bulk surfaces include the Exempt Organizations Business Master File extract, Publication 78, automatic-revocation data, Form 990-N data, and Form 990-series XML filings. Current TEOS bulk datasets are updated monthly; Form 990 XML archives are organized by year and month with index files.
+
+Useful graph edges from Form 990 filings include organization officers, directors, trustees, compensated persons, related organizations, grants, contractors, addresses, and filing relationships when the exact form fields support them.
+
+The raw XML should be retained so derived officer and relationship records remain replayable across parser versions.
+
+* FCC Licensing Data
+
+FCC ULS provides downloadable application and license data, including daily and weekly transaction files. Public ULS datasets expose fields such as call sign, licensee name, FCC Registration Number, location, service, and application status. The FCC LMS system separately publishes a current public database dump for Media Bureau licensing data.
+
+The actor pack should treat ULS and LMS as separate source families with shared normalization where their licensee concepts overlap.
+
+* USAspending
+
+The USAspending public API exposes award, transaction, recipient, agency, and account data without authorization. It also exposes bulk-download endpoints that generate CSV archives for award and transaction datasets and list monthly files.
+
+For background reports, USAspending is most useful for organizations and principals already linked to an entity through stronger sources. A recipient-name match alone is insufficient to merge a company because names and legal entities can collide.
+
+* Mirroring Decision
+
+| Source | Acquisition mode | Refresh strategy |
+|--------+------------------+------------------|
+| SEC submissions bulk | full mirror | nightly archive refresh plus hash comparison |
+| SEC company facts | full mirror | nightly archive refresh |
+| FAA aircraft | full mirror | daily snapshot |
+| IRS TEOS/BMF | full mirror | monthly releases |
+| IRS Form 990 XML | full mirror or partitioned mirror | monthly/year partitions |
+| FCC ULS | full mirror | base plus daily/weekly transaction files |
+| FCC LMS | full mirror | current public dump plus retained releases |
+| USAspending | partitioned mirror | monthly or scoped bulk jobs plus API deltas |
+| state business data | mirror where available | state-specific cadence |
+| county property/recorder | query/cache unless bulk exists | jurisdiction-specific |
+| UCC | query/cache unless bulk exists | jurisdiction-specific |
+
+* Research Gaps
+
+- Profile Ohio business-report and UCC endpoint contracts and historical-release availability.
+- Profile the exact FCC ULS complete-database and transaction-file schemas used by the first implementation.
+- Determine the USAspending partition plan that minimizes duplicate historical downloads while preserving revisions.
+- Map county property and recorder vendor families across Ohio before generating county adapters.
+- Research USPTO bulk patent and trademark person/entity sources as a separate optional affiliation family.
+
+* Source Matrix
+
+Sources retrieved 2026-08-09.
+
+| Source | Evidence used |
+|--------+---------------|
+| https://www.sec.gov/search-filings/edgar-application-programming-interfaces | EDGAR real-time JSON APIs and nightly submissions/company-facts bulk archives |
+| https://www.faa.gov/licenses_certificates/aircraft_certification/aircraft_registry/releasable_aircraft_download | Daily complete releasable aircraft database and included files |
+| https://www.irs.gov/charities-non-profits/public-disclosure-datasets-and-downloads | Comprehensive exempt-organization public datasets |
+| https://www.irs.gov/charities-non-profits/tax-exempt-organization-search-bulk-data-downloads | Monthly TEOS bulk datasets |
+| https://www.irs.gov/charities-non-profits/form-990-series-downloads | Form 990-series XML archives and yearly indexes |
+| https://opendata.fcc.gov/Wireless/FCC-Universal-Licensing-System-ULS-/x28i-i4z4/data | ULS download and transaction-file availability |
+| https://enterpriseefiling.fcc.gov/dataentry/public/tv/lmsDatabase.html | Current LMS public database dump and schema files |
+| https://api.usaspending.gov/docs/endpoints | USAspending API and bulk-download endpoints |
+| https://data.ohiosos.gov/portal/business-services | Ohio business-data portal and downloadable reports |
+
+* Publication Link
+
+- https://auto-research.starintel.actor/notes/research/auto-research/BACKGROUND-RESEARCH-002-business-assets-public-records.html
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-10 | Recorded the UTC audit date for this research change set; research conclusions and source basis are unchanged. | OpenAI research agent under operator direction | CI changelog audit |
+| 2026-08-09 | Created business, asset, filing, aircraft, nonprofit, FCC, and federal-award source research. | OpenAI research agent under operator direction | Primary-source review |
+
+* Footnotes and Glossary
+
+- *Filer*: A person or organization submitting a record to an official filing system.
+- *UCC*: Uniform Commercial Code filing system, commonly used for public financing statements and secured interests.
+- *CIK*: SEC Central Index Key identifying an EDGAR filer.
+- *Partitioned mirror*: A local dataset mirror stored and refreshed by stable source partitions rather than one monolithic archive.

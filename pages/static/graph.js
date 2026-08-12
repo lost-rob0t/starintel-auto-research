@@ -275,7 +275,7 @@
       for (const node of nodes) kindCounts.set(node.kind, (kindCounts.get(node.kind) || 0) + 1);
 
       function nodeVisible(node) {
-        return !hiddenKinds.has(node.kind);
+        return !hiddenKinds.has(node.kind) && (!searchQuery || searchMatches.has(node.id));
       }
 
       function linkVisible(link) {
@@ -650,18 +650,22 @@
         searchMatches = new Set();
         if (!searchQuery) {
           shell.searchMeta.textContent = "Press / to focus";
+          updateHud();
           markDirty();
           return;
         }
         const terms = searchQuery.split(/\s+/).filter(Boolean);
         const matches = nodes.filter((node) => {
-          if (!nodeVisible(node)) return false;
+          if (hiddenKinds.has(node.kind)) return false;
           const haystack = [node.title, node.description, node.kind, ...(node.tags || [])].join(" ").toLowerCase();
           return terms.every((term) => haystack.includes(term));
         });
         searchMatches = new Set(matches.map((node) => node.id));
         shell.searchMeta.textContent = `${matches.length.toLocaleString()} match${matches.length === 1 ? "" : "es"}`;
         if (matches.length === 1) selectNode(matches[0], true);
+        if (selectedNode && !nodeVisible(selectedNode)) closeInspector();
+        if (hovered && !nodeVisible(hovered)) hovered = null;
+        updateHud();
         markDirty();
       }
 

@@ -1,0 +1,911 @@
+:PROPERTIES:
+:ID:       star-discord-001-operations-interface-architecture
+:END:
+#+title: STAR-DISCORD-001 Discord Operations Interface Architecture
+#+description: Define a capability-gated Discord edge and StarIntel gserver architecture for search, document ingest, Auto-Dig jobs, trusted target creation, subscriptions, private DMs, and RabbitMQ-to-Discord projections.
+#+status: REVIEW
+#+filetags: :starintel:design:discord:operations:gserver:auto-dig:rabbitmq:actors:security:
+#+created: [2026-08-12 Wed]
+#+last_modified: [2026-08-12 Wed]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Architecture | StarIntel operator | PENDING | Explicit approval of edge/gserver split and component boundaries | Public review page after deployment |
+| Capability model | StarIntel operator | PENDING | Explicit approval of whitelist tiers and mutation gates | Public review page after deployment |
+| Auto-Dig integration | StarIntel operator | PENDING | Explicit approval of supervised job adapter and publication behavior | Public review page after deployment |
+| RabbitMQ projection | StarIntel operator | PENDING | Explicit approval of allowed binding profiles and disclosure policy | Public review page after deployment |
+| Implementation | StarIntel operator | NOT STARTED | Approved design plus implementation issue/slot | Future implementation record |
+
+Publication and green CI do not approve implementation.
+
+* Related Nodes
+
+- [[id:star-discord-index-000-operations-interface][STAR-DISCORD-INDEX-000 StarIntel Discord Operations Interface]]
+- [[id:star-discord-research-001-operations-interface][STAR-DISCORD-RESEARCH-001 Discord Operations Interface Feature Research]]
+- [[id:star-server-000-composable-intelligence-gservers][STAR-SERVER-000 Composable Intelligence GServer Domains]]
+- [[id:starintel-fourth-generation-index-000][STAR-INDEX-000 StarIntel Fourth Generation]]
+
+* Objective
+
+Turn =lost-rob0t/starintel-discord-tool= into a controlled operations interface without making Discord a trusted StarIntel runtime boundary.
+
+The design must provide:
+
+- gserver-backed StarIntel database search;
+- document submission by explicitly authorized Discord users;
+- private direct-message operation;
+- higher-trust target creation;
+- supervised interaction with =starintel-gpt-auto-dig=;
+- durable user/channel subscriptions for newly created related documents;
+- operator-approved RabbitMQ event projection into selected Discord channels;
+- complete authorization, provenance, idempotency, audit, backpressure, and terminal failure behavior.
+
+* Decision
+
+Use two processes and one authoritative policy boundary.
+
+1. =starintel-discord-tool= is the Discord edge. Keep the current Nim direction if desired, but make it stateless except for transport/session caches and request correlation.
+2. =starintel-server= owns a new supervised =discord-ops-bridge= gserver. It is authoritative for Discord principal mapping, capability authorization, request validation, audit, StarIntel search/ingest/target dispatch, Auto-Dig job orchestration, subscriptions, and RabbitMQ projection configuration.
+3. =starintel-gpt-auto-dig= remains a separate Git-backed research engine. A supervised adapter invokes only its canonical scripts in isolated job workspaces.
+4. RabbitMQ remains the event transport. Discord receives bounded projections, never unrestricted broker access.
+
+Do not give the Discord edge direct CouchDB credentials, unrestricted RabbitMQ credentials, generic shell execution, or authority to edit Auto-Dig's canonical DB files.
+
+* System Context
+
+#+begin_src plantuml
+@startuml
+skinparam componentStyle rectangle
+
+actor "Discord User" as User
+component "Discord Platform" as Discord
+component "starintel-discord-tool\nDiscord Edge" as Edge
+component "Authenticated Bridge Transport" as Transport
+
+package "starintel-server" {
+  component "discord-ops-bridge\nGServer" as Bridge
+  component "Authorization Actor" as Auth
+  component "Search Actor" as Search
+  component "Submission Coordinator" as Submit
+  component "Target Coordinator" as Target
+  component "Auto-Dig Job Coordinator" as Dig
+  component "Subscription Registry" as Subs
+  component "Rabbit Projection Supervisor" as RabbitProj
+  component "Notification Dispatcher" as Notify
+  component "Audit Journal" as Audit
+}
+
+database "StarIntel Storage" as Store
+queue "RabbitMQ" as Rabbit
+component "starintel-gpt-auto-dig\nIsolated Job Adapter" as AutoDig
+
+User --> Discord
+Discord --> Edge : interactions / Gateway
+Edge --> Transport : typed request
+Transport --> Bridge
+Bridge --> Auth
+Auth --> Search
+Auth --> Submit
+Auth --> Target
+Auth --> Dig
+Auth --> Subs
+Auth --> RabbitProj
+Search --> Store
+Submit --> Store
+Target --> Rabbit
+Dig --> AutoDig
+Store --> Rabbit : document events
+Rabbit --> RabbitProj
+Rabbit --> Subs
+Subs --> Notify
+RabbitProj --> Notify
+Notify --> Bridge
+Bridge --> Edge : typed result / notification
+Edge --> Discord
+Bridge --> Audit
+Submit --> Audit
+Target --> Audit
+Dig --> Audit
+RabbitProj --> Audit
+@enduml
+#+end_src
+
+* Trust Boundaries
+
+** Discord edge
+
+Trusted only to:
+
+- verify Discord interaction signatures or maintain an authenticated Gateway session;
+- parse Discord snowflakes and interaction metadata;
+- upload bounded attachment bytes to the bridge's quarantine endpoint;
+- render already-authorized StarIntel responses;
+- perform Discord rate-limit handling;
+- correlate Discord request IDs with StarIntel request IDs.
+
+Not trusted to:
+
+- decide whether a user may search a dataset;
+- decide whether a document may be disclosed;
+- create canonical StarIntel documents locally;
+- add targets directly;
+- choose arbitrary Auto-Dig commands;
+- open arbitrary RabbitMQ bindings;
+- hold CouchDB administrator credentials.
+
+** =discord-ops-bridge= gserver
+
+Trusted to enforce policy and dispatch typed operations. It does not itself replace domain gservers or storage actors. It routes requests to existing StarIntel capabilities and records the decision context.
+
+** Auto-Dig adapter
+
+Trusted only inside a constrained job worker. It receives an immutable job plan, resolves a pinned checkout, invokes approved commands, validates outputs, and reports results. It never receives a Discord bot token.
+
+* Actor Tree
+
+Recommended StarIntel subtree:
+
+#+begin_example
+/user/services/discord-ops
+/user/services/discord-ops/auth
+/user/services/discord-ops/search
+/user/services/discord-ops/submissions
+/user/services/discord-ops/targets
+/user/services/discord-ops/autodig
+/user/services/discord-ops/subscriptions
+/user/services/discord-ops/rabbit-projections
+/user/services/discord-ops/notifications
+/user/services/discord-ops/audit
+#+end_example
+
+Use one supervisor for the service and one-for-one restart by default. A poison RabbitMQ projection or failed Auto-Dig job must not restart the authorization or search actors.
+
+Recommended workload split:
+
+- control dispatcher: authorization, configuration, subscription CRUD, health;
+- interactive dispatcher: search, document lookup, job status;
+- ingest dispatcher: attachment hashing, parsing, validation, persistence coordination;
+- job dispatcher: Auto-Dig lifecycle;
+- notification dispatcher: Discord delivery and retry;
+- RabbitMQ reactor/consumer components: event intake with bounded mailboxes.
+
+* Typed Request Envelope
+
+Every Discord-originated request becomes an immutable envelope before it reaches business logic.
+
+#+begin_src lisp
+(defstruct discord-ops-request
+  request-id
+  idempotency-key
+  principal-id
+  discord-user-id
+  guild-id
+  channel-id
+  interaction-context
+  capability
+  operation
+  resource
+  arguments
+  attachment-refs
+  observed-at
+  deadline
+  trace-id)
+#+end_src
+
+The =idempotency-key= should derive from the Discord interaction ID for commands and from the stable Discord message ID plus operation name for message-context submissions.
+
+Never use mutable display names as identity keys.
+
+* Principal and Capability Model
+
+A =discord-principal= record maps a Discord user snowflake to a StarIntel principal.
+
+Minimum fields:
+
+#+begin_example
+principal-id
+discord-user-id
+state                 active | suspended | revoked
+capabilities[]
+resource-scopes[]
+guild-scopes[]
+channel-scopes[]
+created-at
+updated-at
+granted-by
+grant-evidence
+expires-at optional
+#+end_example
+
+Capabilities:
+
+| Capability | Meaning |
+|------------+---------|
+| =star.read= | Basic access to the operations interface. |
+| =star.document.read= | Read documents permitted by disclosure policy. |
+| =star.document.submit= | Submit source material for validated ingest. |
+| =star.watch.manage= | Create/remove subscriptions within authorized scope. |
+| =star.target.read= | Inspect targets. |
+| =star.target.create= | Create bounded targets. Higher trust than submission. |
+| =star.autodig.read= | Read job state and results permitted to the principal. |
+| =star.autodig.start= | Start bounded Auto-Dig jobs. |
+| =star.rabbit.read= | View projection profiles and status. |
+| =star.rabbit.bind= | Bind an approved profile to an approved Discord channel. |
+| =star.admin= | Manage principals/config through the administrative control plane. |
+
+Authorization decision:
+
+#+begin_example
+authorize(principal, capability, resource, context, current-policy-revision)
+  -> allow(decision-id, obligations)
+  -> deny(decision-id, reason)
+#+end_example
+
+Obligations may require DM-only output, result-count limits, redaction, confirmation, maximum job budget, or a specific dataset.
+
+* Discord Command Surface
+
+Use one top-level command namespace where practical.
+
+** P0 read-only
+
+#+begin_example
+/star whoami
+/star capabilities
+/star search query:<text> [dataset] [dtype] [limit]
+/star document id:<id>
+/star target show id:<id>
+/star target list [actor] [dataset]
+/star jobs [mine|all-authorized]
+/star dig status job:<id>
+/star subscriptions
+#+end_example
+
+** P1 controlled mutations
+
+#+begin_example
+/star submit attachment:<file> [dataset] [target] [watch:true]
+/star target add type:<type> value:<value> [dataset] [actor] [recurring]
+/star dig start target:<id-or-query> profile:<budget-profile> [watch:true]
+/star watch add selector:<...> destination:<dm|channel>
+/star watch remove subscription:<id>
+#+end_example
+
+** P2 broker projection
+
+#+begin_example
+/star listen profiles
+/star listen add profile:<name> channel:<channel>
+/star listen status binding:<id>
+/star listen remove binding:<id>
+#+end_example
+
+Do not expose raw =exchange=, =queue=, or arbitrary routing-key arguments to ordinary users. The =profile= resolves to an operator-owned manifest.
+
+* Discord Context Rules
+
+** Guild channels
+
+- commands are allowed only in configured guild/channel scopes;
+- sensitive search detail can be redirected to an ephemeral response or DM;
+- mutations must identify the acting principal and resource scope;
+- public output uses a stricter disclosure policy than DM output.
+
+** Private DMs
+
+- DM is a transport context, not an authorization grant;
+- read and mutation commands still require capabilities;
+- DM is the default destination for submission receipts and user-specific watch notifications;
+- commands referring to guild-owned resources still require resource authorization.
+
+** Passive channel listening
+
+Not part of the initial implementation. If later approved, isolate it as a separate Discord message-ingest actor with explicit guild/channel allowlists and Message Content intent review. Do not make passive listening a side effect of installing the bot.
+
+* Search Flow
+
+#+begin_src plantuml
+@startuml
+actor User
+participant "Discord Edge" as Edge
+participant "discord-ops-bridge" as Bridge
+participant "Authorization" as Auth
+participant "Search GServer/Adapter" as Search
+participant "StarIntel Storage" as Store
+
+User -> Edge : /star search
+Edge -> Bridge : SearchRequest
+Bridge -> Auth : authorize star.document.read
+Auth --> Bridge : allow + obligations
+Bridge -> Search : bounded typed query
+Search -> Store : search
+Store --> Search : documents/hits
+Search --> Bridge : typed result
+Bridge -> Bridge : redact + cap + audit
+Bridge --> Edge : SearchResult
+Edge --> User : summary / DM / ephemeral
+@enduml
+#+end_src
+
+Search requirements:
+
+- hard maximum result count;
+- hard response byte ceiling;
+- deadline and cancellation;
+- dataset/dtype/resource scoping before storage query when possible;
+- output redaction after retrieval as a second layer;
+- no direct pass-through of arbitrary CouchDB administrative query parameters;
+- stable document IDs in output so results can be followed up without reposting full content.
+
+* Document Submission Flow
+
+#+begin_src plantuml
+@startuml
+actor User
+participant "Discord Edge" as Edge
+participant "Submission Coordinator" as Submit
+participant "Authorization" as Auth
+participant "Quarantine" as Q
+participant "Document Parser/Validator" as Validate
+participant "StarIntel Ingest" as Ingest
+participant "Subscription Registry" as Subs
+participant "Audit" as Audit
+
+User -> Edge : /star submit + attachment
+Edge -> Submit : metadata + bounded stream
+Submit -> Auth : authorize star.document.submit
+Auth --> Submit : allow
+Submit -> Q : store bytes + hash + metadata
+Q --> Submit : source-ref
+Submit -> Validate : parse candidate
+Validate --> Submit : validated docs or typed failure
+Submit -> Ingest : canonical ingest
+Ingest --> Submit : persisted IDs / accepted job
+Submit -> Subs : optional watch selectors
+Submit -> Audit : receipt + provenance + result
+Submit --> Edge : durable receipt
+Edge --> User : receipt + status
+@enduml
+#+end_src
+
+Submission invariants:
+
+1. Attachment bytes are size-bounded before full buffering.
+2. Compute a cryptographic content hash and preserve observed Discord metadata.
+3. Media type is detected independently of the supplied filename when possible.
+4. Parser output is never persisted until authoritative schema validation passes.
+5. Duplicate Discord retries resolve to the same submission receipt.
+6. Canonical source/provenance records preserve where the material came from and who submitted it.
+7. A submitting principal does not become a source proving the truth of the content; they are provenance for the submission action.
+8. A rejected candidate retains a typed terminal reason without becoming a canonical document.
+9. Watch creation occurs only after a stable produced resource or explicit approved selector exists.
+
+* Submission State Machine
+
+#+begin_src plantuml
+@startuml
+hide empty description
+[*] --> Received
+Received --> Quarantined : capability allowed
+Received --> Rejected : authorization/shape/size failure
+Quarantined --> Parsing
+Parsing --> Validating
+Parsing --> Failed : parser failure
+Validating --> Persisting : valid
+Validating --> Failed : schema/provenance failure
+Persisting --> Accepted : durable ingest accepted/persisted
+Persisting --> Failed : persistence conflict/terminal error
+Accepted --> Watching : watch requested and created
+Accepted --> Completed : no watch requested
+Watching --> Completed
+Rejected --> [*]
+Failed --> [*]
+Completed --> [*]
+@enduml
+#+end_src
+
+* Auto-Dig Job Architecture
+
+Do not call arbitrary shell text from Discord.
+
+Define a typed =autodig-job-plan=:
+
+#+begin_example
+job-id
+request-id
+principal-id
+target-selector
+mode
+budget-profile
+max-depth
+max-documents
+deadline
+source-policy
+publication-policy
+watch-policy
+auto-dig-revision
+#+end_example
+
+The =autodig-job-coordinator=:
+
+1. authorizes =star.autodig.start=;
+2. resolves the requested budget profile to server-owned limits;
+3. allocates an isolated worker/worktree;
+4. pins the Auto-Dig revision;
+5. invokes only approved repository commands;
+6. streams bounded progress events into job state;
+7. enforces cancellation/deadline;
+8. validates all produced documents using Auto-Dig's canonical gate;
+9. records terminal state and produced document IDs;
+10. optionally creates a branch/PR only when the configured publication policy permits it;
+11. emits job/document events for subscriptions.
+
+Initial job profiles:
+
+| Profile | Purpose | Mutation |
+|---------+---------+----------|
+| =lookup= | Search existing Auto-Dig DB and return references. | none |
+| =select-targets= | Run deterministic recursive target selection. | produces candidate records only |
+| =research-small= | One bounded research pass. | isolated job output |
+| =research-recursive= | Multi-pass recursive research. | higher-trust, strict budget |
+
+The exact executable command mapping is an implementation manifest and must match the current Auto-Dig repository rather than this design prose.
+
+* Target Creation
+
+Target creation is deliberately a higher-trust capability than document submission.
+
+Request fields should be typed by target family rather than accepting one free-form blob. The bridge resolves the target type to an approved actor manifest and validates:
+
+- dataset/operation scope;
+- target value shape;
+- actor capability compatibility;
+- recurrence limits;
+- delay/frequency bounds;
+- source/authorization evidence where required;
+- duplicate target policy;
+- caller budget/quota.
+
+High-impact target types may add a two-step confirmation:
+
+#+begin_example
+/star target add ...
+-> proposed target T-123, expires in 10m
+/star confirm T-123
+#+end_example
+
+Confirmation is an obligation returned by authorization, not Discord-only UI state.
+
+* Durable Subscription Model
+
+A subscription is a StarIntel record owned by the subscription registry.
+
+#+begin_example
+subscription-id
+owner-principal-id
+selector
+destination-kind       dm | discord-channel
+destination-id
+created-at
+expires-at optional
+status
+redaction-profile
+digest-policy
+last-event-id
+last-delivered-at
+failure-count
+#+end_example
+
+Supported selector families for v1:
+
+- =document-id=;
+- =target-id=;
+- =dataset-id=;
+- =job-id=;
+- =source-lineage-id=.
+
+Query-expression subscriptions are deferred until a bounded query/watch compiler exists.
+
+On each candidate event:
+
+1. match selector;
+2. deduplicate by event ID and document ID;
+3. re-authorize owner against the current document/resource;
+4. apply current redaction obligations;
+5. coalesce if the destination is rate-limited or digest mode is active;
+6. deliver through the notification dispatcher;
+7. record success or terminal failure.
+
+* RabbitMQ Projection Architecture
+
+A Rabbit projection profile is operator-owned configuration:
+
+#+begin_example
+profile-name
+exchange
+routing-pattern
+message-types[]
+discord-formatter
+redaction-profile
+allowed-guilds[]
+allowed-channels[]
+rate-limit
+burst-window
+prefetch
+retry-policy
+dead-letter-policy
+#+end_example
+
+A user with =star.rabbit.bind= can bind only a named profile to a permitted channel.
+
+Runtime model:
+
+- one =rabbit-projection-supervisor=;
+- one managed consumer component per active binding or profile shard;
+- long-lived RabbitMQ consumer;
+- bounded prefetch;
+- manual acknowledgement;
+- typed decode before Discord formatting;
+- durable dedupe key from message/event identity;
+- channel rate limiter and digest/coalescer;
+- dead-letter/failure state after bounded retries;
+- automatic cancellation when the binding expires or is revoked.
+
+Ack policy:
+
+- ack after successful Discord delivery; or
+- ack after durable enqueue into the notification retry journal.
+
+Never ack merely because the message reached the Discord bridge mailbox.
+
+* Notification Dispatcher
+
+The notification dispatcher is the only component allowed to send unsolicited Discord messages for StarIntel events.
+
+Responsibilities:
+
+- resolve destination;
+- verify current principal/channel authorization;
+- apply redaction;
+- format concise messages with stable StarIntel IDs;
+- use =allowed_mentions= policy that prevents unintended mass mentions;
+- enforce Discord rate limits and StarIntel quotas;
+- retry transient failures with jitter;
+- mark permanent Discord failures such as missing channel/blocked DM as terminal;
+- expose delivery telemetry.
+
+Default notification message contents should include:
+
+- event type;
+- document/job/target ID;
+- short title/summary;
+- why the user is receiving it;
+- timestamp;
+- follow-up command hint.
+
+Do not dump raw document JSON by default.
+
+* Audit Model
+
+Every request and mutation produces an audit record containing:
+
+#+begin_example
+audit-id
+request-id
+principal-id
+discord-user-id
+guild-id/channel-id or dm
+operation
+capability
+resource
+authorization-decision-id
+policy-revision
+idempotency-key
+result-kind
+result-resource-ids[]
+started-at
+completed-at
+trace-id
+#+end_example
+
+Do not store bot tokens, authorization headers, raw secret fields, or complete attachment bytes in audit records.
+
+* Output and Disclosure Policy
+
+Define response classes:
+
+| Class | Guild channel | Ephemeral | DM | Example |
+|-------+---------------+-----------+----+---------|
+| =public-summary= | allowed when resource permits | allowed | allowed | job state, counts, public IDs |
+| =restricted-summary= | no by default | allowed | allowed | document snippets, target details |
+| =sensitive= | no | no unless Discord guarantees visibility model required | maybe, policy-dependent | raw evidence, private personal data |
+| =never-discord= | no | no | no | secrets, credentials, restricted raw datasets |
+
+The bridge returns a response class and redacted payload; the edge does not independently upgrade disclosure.
+
+* Backpressure and Resource Limits
+
+Required hard limits:
+
+- maximum concurrent interactive requests per principal;
+- maximum search result rows and response bytes;
+- maximum attachment bytes and parse time;
+- maximum submissions per principal/window;
+- maximum active Auto-Dig jobs per principal;
+- maximum job wall-clock deadline and document budget;
+- maximum active subscriptions per principal;
+- maximum Rabbit projection bindings per guild/channel;
+- bounded actor mailboxes;
+- bounded Rabbit prefetch;
+- bounded notification retry journal;
+- global circuit breaker for Discord outage.
+
+Return typed overload errors rather than silently dropping mutations.
+
+* Failure Taxonomy
+
+#+begin_example
+auth.denied
+auth.revoked
+request.invalid
+request.duplicate
+request.deadline-exceeded
+search.unavailable
+search.too-broad
+document.unsupported-media
+document.too-large
+document.parse-failed
+document.validation-failed
+document.persistence-conflict
+target.invalid
+target.duplicate
+autodig.capacity-exhausted
+autodig.failed
+autodig.cancelled
+subscription.invalid
+notification.undeliverable
+rabbit.profile-denied
+rabbit.consumer-failed
+rabbit.poison-event
+internal.unavailable
+#+end_example
+
+Failures must resolve to one terminal request/job/submission state. Internal retries must not create a second logical operation.
+
+* Transport Between Edge and GServer
+
+Preferred order:
+
+1. use the production Star Router/secure remoting boundary if it has a stable authenticated request/reply contract when implementation starts;
+2. otherwise provide a narrow authenticated local transport dedicated to the Discord edge, such as a Unix-domain socket or loopback mTLS endpoint that maps directly into =discord-ops-bridge= typed requests;
+3. do not expose the current unauthenticated =starintel-server= HTTP API to Discord.
+
+The transport protocol must support:
+
+- mutual authentication or a comparably strong local credential boundary;
+- request ID and idempotency key;
+- deadlines and cancellation;
+- bounded streaming upload for attachments;
+- typed errors;
+- server-initiated notification delivery or a separate authenticated notification stream;
+- protocol version negotiation.
+
+* Repository Responsibility Split
+
+** =starintel-discord-tool=
+
+Owns:
+
+- Discord application setup;
+- interaction/Gateway transport;
+- command registration;
+- Discord request parsing;
+- edge client for StarIntel bridge protocol;
+- attachment streaming;
+- response rendering;
+- Discord rate-limit mechanics;
+- edge health/metrics.
+
+Does not own StarIntel business authorization or persistence.
+
+** =starintel-server=
+
+Owns:
+
+- =discord-ops-bridge= actor subtree;
+- principal/capability policy;
+- resource authorization;
+- search and document dispatch;
+- submission state;
+- target state;
+- Auto-Dig job state;
+- subscription registry;
+- Rabbit projection manifests/bindings;
+- audit and notification policy.
+
+** =starintel-gpt-auto-dig=
+
+Owns:
+
+- canonical Auto-Dig document schema and DB conventions;
+- research/select-target commands;
+- validation;
+- generated research packets/site artifacts;
+- repository publication workflow.
+
+The Discord integration may invoke those contracts but must not create a parallel document writer.
+
+* Configuration Sketch
+
+Illustrative data-only configuration:
+
+#+begin_src json
+{
+  "discord_ops": {
+    "enabled": true,
+    "default_response_mode": "ephemeral-or-dm",
+    "limits": {
+      "search_rows": 25,
+      "active_jobs_per_principal": 2,
+      "active_subscriptions_per_principal": 50
+    },
+    "rabbit_profiles": {
+      "document-events": {
+        "exchange": "star.events",
+        "routing_pattern": "documents.#",
+        "redaction_profile": "document-summary",
+        "prefetch": 20
+      }
+    }
+  }
+}
+#+end_src
+
+Exchange and routing names are placeholders until verified against the deployed runtime. Configuration must be validated against the actual broker/event manifest.
+
+* Implementation Phases
+
+** Phase 0: Protocol and policy fixtures
+
+- define request/result/error schemas;
+- define principal/capability fixtures;
+- define idempotency store contract;
+- define Discord interaction replay fixtures;
+- define output-class/redaction fixtures;
+- no live mutations.
+
+** Phase 1: Read-only edge
+
+- implement Discord application commands;
+- =whoami= and =capabilities=;
+- bounded =search= and =document=;
+- DM and guild-context behavior;
+- audit every request;
+- verify no direct database credentials exist in the edge.
+
+** Phase 2: Document submission
+
+- bounded attachment stream;
+- quarantine + hash;
+- parser/validation adapter;
+- canonical ingest;
+- durable receipt and idempotency;
+- terminal failures;
+- submission status command.
+
+** Phase 3: Subscriptions
+
+- document/target/dataset/job/source-lineage selectors;
+- DM delivery;
+- re-authorization at delivery time;
+- retry/dedupe/digest;
+- revoke and expiration.
+
+** Phase 4: Targets and Auto-Dig
+
+- =target.create= authorization;
+- target-type manifests;
+- confirmation obligations where configured;
+- isolated Auto-Dig job coordinator;
+- bounded budget profiles;
+- status/cancel support;
+- output/document events feed subscriptions.
+
+** Phase 5: Rabbit projections
+
+- operator-owned profiles;
+- channel binding permissions;
+- long-lived consumers with manual ack/prefetch;
+- formatter/redaction;
+- rate limiting/coalescing/dead-letter behavior;
+- admin visibility and cancellation.
+
+** Phase 6: Hardening
+
+- chaos tests for Discord outage, Rabbit outage, storage outage, Auto-Dig crash, duplicate events, expired capabilities, and restart replay;
+- security review;
+- load tests;
+- secret scanning;
+- documented recovery/runbook.
+
+* Required Tests
+
+** Deterministic tests
+
+- principal mapping uses immutable snowflakes;
+- every command maps to one required capability;
+- deny-by-default for missing principal/capability/resource scope;
+- revoked user cannot receive a previously configured notification;
+- duplicate interaction creates one target/submission/job;
+- duplicate Rabbit event creates at most one logical Discord notification;
+- search limits and redaction are enforced;
+- unsupported/oversized attachments fail before persistence;
+- schema-invalid document never reaches canonical storage;
+- Auto-Dig adapter rejects arbitrary command/path injection;
+- Rabbit binding rejects non-manifest exchange/routing patterns;
+- poisoned Rabbit event reaches terminal failure after bounded retries;
+- notification outage respects circuit breaker and retry journal ceilings.
+
+** Integration tests
+
+- Discord interaction fixture -> bridge -> fake StarIntel search -> rendered result;
+- submission fixture -> quarantine -> validator -> fake ingest -> receipt;
+- target request -> gserver -> Rabbit publish acknowledgement/result;
+- Auto-Dig fake worker lifecycle including cancel/deadline;
+- subscription event -> re-authorization -> Discord fake delivery;
+- Rabbit fake broker -> projection -> Discord fake delivery -> acknowledgement.
+
+** Optional live tests
+
+Use a dedicated test Discord guild/application and test Rabbit vhost only. Live tests must never use production credentials in pull-request contexts or public logs.
+
+* Acceptance Criteria
+
+The design is implementation-ready when:
+
+1. the operator explicitly approves the capability tiers and edge/gserver split;
+2. an authenticated edge-to-gserver transport is selected from current runtime evidence;
+3. canonical StarIntel document ingest/search contracts are version-aligned for the implementation branch;
+4. deployed RabbitMQ exchange/routing manifests are identified;
+5. a concrete Auto-Dig job command manifest is derived from the current repository revision;
+6. disclosure classes for guild, ephemeral, DM, and never-Discord data are approved;
+7. all mutation paths define idempotency and terminal state;
+8. the test plan covers restart, duplicates, revocation, partial failure, and overload.
+
+* Explicit Non-Goals
+
+- running arbitrary shell commands from Discord;
+- arbitrary CouchDB queries or administrative operations;
+- exposing raw RabbitMQ credentials or topology creation to users;
+- treating Discord roles as the sole authorization authority;
+- passive collection of every server message by default;
+- allowing document submission to imply target creation;
+- allowing a DM to bypass resource authorization;
+- letting an LLM autonomously grant capabilities;
+- using Discord as canonical storage or an audit database.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-12 | Created the in-depth Discord operations architecture covering gserver search, submissions, private DMs, trusted targets, Auto-Dig jobs, subscriptions, RabbitMQ projections, authorization, idempotency, audit, and implementation phases. | GPT-5.6 Sol | [[id:star-discord-research-001-operations-interface][STAR-DISCORD-RESEARCH-001]] and current StarIntel/Discord/RabbitMQ source review |
+
+* Footnotes and Glossary
+
+[fn:gserver] A supervised actor-style StarIntel service boundary that owns state and processes typed messages.
+
+[fn:edge] The network-facing Discord process responsible for Discord protocol mechanics but not authoritative StarIntel policy.
+
+[fn:principal] A durable StarIntel identity mapped to an immutable Discord user snowflake.
+
+[fn:obligation] An authorization result constraint such as DM-only response, confirmation, redaction, result cap, or budget ceiling.
+
+[fn:idempotency] The guarantee that repeating one logical request does not repeat its durable effect.
+
+[fn:quarantine] Bounded temporary storage used to inspect and validate untrusted attachments before canonical ingest.
+
+[fn:dead-letter] A terminal destination or durable failure record for events that cannot be processed after bounded retries.
+
+[fn:projection-profile] Operator-approved configuration mapping a bounded internal event stream to a redacted Discord channel output.

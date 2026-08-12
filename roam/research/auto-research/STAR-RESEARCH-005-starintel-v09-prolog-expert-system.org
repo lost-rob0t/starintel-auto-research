@@ -1,0 +1,397 @@
+:PROPERTIES:
+:ID:       star-research-005-starintel-v09-prolog-expert-system
+:END:
+#+title: STAR-RESEARCH-005 StarIntel v0.9 Prolog Projection and Expert-System Architecture
+#+description: Research a schema-faithful Prolog port and derived expert-system projection for StarIntel v0.9, using Auto-Dig relations as the fact boundary while preserving provenance, uncertainty, temporal validity, and CouchDB authority.
+#+status: REVIEW
+#+filetags: :starintel:research:auto-research:prolog:expert-system:relations:v09:couchdb:logic:
+#+created: [2026-08-11 Tue]
+#+last_modified: [2026-08-12 Wed]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Review the v0.9 projection and expert-system findings | Findings and recommended architecture below |
+| Schema direction | StarIntel document-contract maintainer | PENDING | Conformance review against canonical v0.9 schema and cross-language fixtures | Port and conformance plan below |
+| Runtime direction | StarIntel operator and star-server maintainer | PENDING | Review against current star-prolog and hybrid-runtime decisions | Related nodes and integration boundary below |
+| Security | StarIntel security reviewer | PENDING | Review rule loading, named-query, sandbox, and untrusted-data boundaries | Rule and query safety section below |
+| Implementation | Repository maintainer | NOT STARTED | Passing implementation, conformance, CI, replay, and publication checks | Acceptance gates below |
+
+* Research Question
+
+How should StarIntel v0.9 be represented in Prolog so that the existing Auto-Dig corpus can become an auditable expert-system knowledge base without creating a second canonical data model, losing relation metadata, or making the Prolog engine the durable database?
+
+This research is specifically about the document-to-logic boundary. It complements, rather than replaces, the existing engine-selection, supervised Prolog actor, internal =star-prolog=, and hybrid-runtime research.
+
+* Related Nodes
+
+- [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
+- [[file:STAR-RESEARCH-001-logic-engine-selection-for-adard.org][STAR-RESEARCH-001 Logic Engine Selection for ADARD]]
+- [[file:../star-server/STAR-RESEARCH-003-budgeted-supervised-prolog-inference-actors.org][STAR-RESEARCH-003 Budgeted Supervised Prolog Inference Actors]]
+- [[file:../star-server/STAR-RESEARCH-004-internal-prolog-server-library-swi-nprolog.org][STAR-RESEARCH-004 Internal Prolog Server Library: SWI-Prolog and N-Prolog]]
+- [[file:../../design/star-server/STAR-ADR-002-hybrid-logic-runtime-model.org][STAR-ADR-002 Hybrid Logic Runtime Model]]
+- [[file:../star-server/STAR-RESEARCH-014-temporal-relations.org][STAR-RESEARCH-014 Temporal Relations]]
+- [[file:../star-server/STAR-RESEARCH-016-raw-data-replay.org][STAR-RESEARCH-016 Raw-Data Replay]]
+
+* Corpus Review: What Auto-Dig Already Gives the Expert System
+
+The current Auto-Dig repository uses the strict StarIntel v0.9.0 envelope and states that =starintel_doc/= plus the generated v0.9.0 JSON Schema are the canonical document contract. The normalized database stores one compact document per =db/<dtype>/<_id>.ndjson= file and requires relation endpoints to resolve to canonical records unless represented as explicitly unresolved endpoints.
+
+The relation dtype is already close to an expert-system fact model. Its declared data fields include:
+
+- =subject=
+- =predicate=
+- =object=
+- =directed=
+- =inverse_predicate=
+- =relation_type=
+- =qualifiers=
+- =weight=
+- =confidence=
+- =start_at=
+- =end_at=
+- =active=
+- =note=
+
+Endpoints may be canonical StarIntel IDs or structured endpoint objects with identifiers, dtype, labels, roles, unresolved state, aliases, qualifiers, and metadata. The object may also be a list. This means a correct Prolog projection must preserve relation identity and endpoint occurrence; it cannot assume every relation is a simple binary atom pair.
+
+The envelope around the relation is equally important. Sources, evidence, temporal metadata, provenance, assessment, verification, handling, lineage, quality, workflow, related IDs, and document versioning carry the information needed to decide whether an edge is usable for a particular inference and to explain why a conclusion was reached.
+
+A concrete Auto-Dig relation demonstrates the desired shape. The current Club of Rome membership record contains a canonical relation ID, =member_of= predicate, directed and active flags, an inverse predicate, relation confidence, source-backed verification, source credibility, collection provenance, and qualifiers from the official public roster. A Prolog layer that reduces this document to only =member_of(Person, Org)= would discard most of the audit surface.
+
+* Finding
+
+*KEEP STARINTEL v0.9 AS THE CANONICAL DATA MODEL AND ADD A PROLOG PORT PLUS A DERIVED LOGIC PROJECTION.*
+
+The expert system should not define a parallel Prolog-only schema. It should have two explicit layers:
+
+1. a StarIntel v0.9 Prolog implementation that can parse, validate, inspect, and emit the same document contract used by the other language ports;
+2. a deterministic projection from validated v0.9 documents into a small, controlled Prolog fact vocabulary used by rule packages and named queries.
+
+The first layer is a document-contract port. The second layer is a derived index. CouchDB and canonical StarIntel documents remain authoritative.
+
+* Proposed StarIntel v0.9 Prolog Port
+
+Create a Prolog document-contract implementation, provisionally named =starintel-doc.prolog=, parallel to the existing Python, Common Lisp, Nim, and JavaScript implementations.
+
+The port should not hand-maintain a divergent field list. It should consume the canonical generated v0.9 JSON Schema or a generated Prolog representation of that schema and run against the same cross-language conformance fixtures.
+
+Suggested modules:
+
+#+begin_example
+starintel_schema.pl        generated or generated-from-schema constraints
+starintel_json.pl          JSON dict read/write and canonicalization boundary
+starintel_validate.pl      envelope and dtype validation
+starintel_document.pl      document accessors and constructors
+starintel_relation.pl      endpoint and relation helpers
+starintel_project.pl       document -> logic fact projection
+starintel_fact_ids.pl      stable projected-fact identity
+starintel_query.pl         named-query boundary
+starintel_conformance.pl   cross-language fixture runner
+#+end_example
+
+SWI-Prolog's JSON library maps JSON objects to dicts and JSON string values to Prolog strings. That is a useful lossless host representation for v0.9 documents. Arbitrary StarIntel IDs, titles, source strings, URLs, and other corpus text should remain strings. Controlled program symbols may use atoms only through an explicit registry. Data values must never be converted into callable predicate names by =call/1=, univ, term expansion, or equivalent dynamic execution.
+
+* Projection Vocabulary
+
+The base projection should be intentionally boring. Keep relation identity explicit and attach metadata by relation ID.
+
+#+begin_src prolog
+si_document(Id, DType, Dataset, SchemaVersion, Version).
+si_document_verified(Id, Status, Verified).
+si_document_confidence(Id, Confidence).
+si_document_source(Id, SourceId).
+si_document_evidence(Id, EvidenceId).
+si_document_validity(Id, ValidFrom, ValidTo).
+
+si_relation(RelId, SubjectId, Predicate, ObjectId).
+si_relation_object(RelId, Ordinal, ObjectId).
+si_relation_directed(RelId, Directed).
+si_relation_inverse(RelId, InversePredicate).
+si_relation_type(RelId, RelationType).
+si_relation_weight(RelId, Weight).
+si_relation_confidence(RelId, Confidence).
+si_relation_active(RelId, Active).
+si_relation_validity(RelId, StartAt, EndAt).
+si_relation_qualifier(RelId, Key, Value).
+
+si_endpoint(RelId, Side, Ordinal, EndpointId, DType, Label, Role, Unresolved).
+si_endpoint_qualifier(RelId, Side, Ordinal, Key, Value).
+
+si_fact(FactId, DocumentId, MappingVersion, FieldPath, ValueHash).
+#+end_src
+
+=si_relation/4= is a convenience view for resolved endpoint IDs. =si_endpoint/8= preserves structured and unresolved endpoints. =si_relation_object/3= preserves multi-object occurrence and order. Every projected fact is attributable to one canonical document and mapping version.
+
+Do not generate a new predicate functor for every relation predicate by default. In particular, do not dynamically create =member_of/2=, =owned_by/2=, =founded/2=, and arbitrary future functors from corpus strings. Rule packages may define controlled convenience views:
+
+#+begin_src prolog
+member_of(Subject, Object) :-
+    si_relation(Rel, Subject, "member_of", Object),
+    usable_relation(Rel).
+#+end_src
+
+This keeps corpus data inert and makes the executable vocabulary reviewable.
+
+* Relation Usability Is Policy, Not Parsing
+
+Projection must preserve facts without silently declaring them true enough for every rule.
+
+A rule package may define a policy such as:
+
+#+begin_src prolog
+usable_relation(Rel) :-
+    si_relation_active(Rel, true),
+    si_document_verified(Rel, _, true),
+    si_relation_confidence(Rel, C),
+    C >= 0.80.
+#+end_src
+
+That threshold is a rule-package policy and must be versioned with the package. The projector itself must not discard low-confidence, unverified, contradictory, historical, or inactive records merely because one current query would ignore them.
+
+Confidence scores are annotations, not probabilities that may be multiplied or combined without a declared uncertainty model. Deterministic SWI-Prolog rules should use them only through explicit policy. Probabilistic inference remains a separately selected capability routed to ProbLog, cplint, PITA, or another reviewed backend when the semantics actually require probability.
+
+* Temporal Semantics
+
+The projector must preserve at least two different time concepts:
+
+- relation validity from =data.start_at= and =data.end_at=;
+- document-level observation, collection, publication, first/last-seen, and validity fields from =temporal=.
+
+Rules that ask whether a relation held at time =T= should query declared valid time rather than the document creation timestamp. Unknown starts and ends must remain unknown, not be silently mapped to negative infinity or positive infinity unless the rule package explicitly chooses that interpretation.
+
+The temporal-relations research remains the authority for final interval semantics.
+
+* CouchDB and Actor Integration Boundary
+
+Current =starintel-server= is already event driven: CouchDB is the durable corpus, RabbitMQ is the distributed bus, and local actors receive post-insert document events. That gives the logic layer a natural projection boundary.
+
+Recommended topology:
+
+#+begin_example
+CouchDB canonical StarIntel v0.9 documents
+                |
+                | documents.new/update + reconciliation
+                v
+Common Lisp Logic Projection Actor
+        | validate v0.9
+        | project deterministic fact batch
+        | checkpoint document revision / sequence
+                v
+Supervised SWI-Prolog worker
+        | si_* dynamic facts
+        | tabled named rule packages
+                v
+answers + proof fact references
+                |
+                v
+Common Lisp normalizer
+        | validate output
+        v
+canonical claim / analysis documents -> CouchDB
+#+end_example
+
+The Prolog worker is a derived reasoning index. It is disposable and rebuildable from canonical documents plus pinned rule packages. It must not become the only place where facts, provenance, or inference outputs exist.
+
+For the first implementation, prefer immutable per-run snapshots as already recommended by the supervised Prolog research. This maximizes reproducibility and case isolation.
+
+A later resident monitor mode may maintain incremental dynamic predicates. SWI-Prolog incremental tabling can invalidate and lazily recompute dependent tables when incremental dynamic facts change. Monotonic tabling can propagate additions for monotonic programs, while retractions fall back to invalidation and normal incremental recomputation. This is a strong fit for append-heavy relation streams, but it should be introduced only after snapshot conformance and replay are proven.
+
+CouchDB's =_changes= feed is appropriate for synchronization and catch-up, but not as the sole immutable event journal. CouchDB documents that only the most recent change for a document is guaranteed in a changes feed and that results are partially ordered across calls. StarIntel should therefore use its existing document-event path for normal updates and use =_changes= plus revision-aware reconciliation to detect drift or rebuild a projection.
+
+* Rule Packages and Rules as Documents
+
+The current v0.9 registry does not define a dedicated rule or ruleset dtype. Do not hide executable rule source in undeclared fields or treat =extensions= as a shortcut around schema design.
+
+Phase 1 should use digest-locked rule packages referenced by the existing =star-prolog= / actor-manifest boundary. Packages export only named, typed queries. Clients submit a query ID and typed parameters, never arbitrary Prolog source.
+
+If StarIntel wants rules themselves to be editable, queryable CouchDB documents, add explicit =logic-rule= and =logic-rule-package= dtypes in a reviewed v0.9.x schema revision. Those documents should carry at minimum:
+
+- stable rule ID and package ID;
+- rule language and semantic capability;
+- rule source or normalized rule IR;
+- declared inputs and outputs;
+- named query exports;
+- engine compatibility requirements;
+- version and content digest;
+- dependencies;
+- provenance and authoring information;
+- activation state;
+- validity interval;
+- review and approval state;
+- test and conformance fixture IDs.
+
+A rule-document loader must compile only approved packages into an isolated module and must verify the stored digest before execution.
+
+* v0.9 Output Correction
+
+Existing Prolog actor research predates the current v0.9 contract and uses illustrative output names such as =starintel.conclusion/1= and =starintel.proof-trace/1=. Those names are not current v0.9 dtypes.
+
+The current v0.9 registry already provides =claim= and =analysis=. For a schema-faithful first implementation:
+
+- a derived conclusion should be persisted as a =claim= document with =claim_type= set to an inference-specific value, explicit certainty, supporting evidence IDs, status, and adjudication state;
+- a run-level explanation should be persisted as an =analysis= document referencing input IDs, finding IDs, method, limitations, unresolved questions, and confidence;
+- a detailed proof graph may be stored as a content-addressed attachment referenced by the analysis until a dedicated proof dtype is approved.
+
+If queryable proof steps, inference-run state, or rule-level provenance require first-class records, add those dtypes through the normal schema revision process rather than creating a Prolog-private document dialect.
+
+* Proof and Explanation Contract
+
+A useful expert system must answer =why= as well as =what=.
+
+Every normalized answer should carry:
+
+- query ID;
+- rule-package ID, version, and digest;
+- selected engine and engine version;
+- input document snapshot or revision set;
+- conclusion binding set;
+- source projected-fact IDs;
+- source document IDs;
+- rule IDs used;
+- temporal assumptions;
+- uncertainty policy;
+- resource-budget result;
+- proof artifact hash.
+
+Proof generation should use proof-carrying predicates or a rule transformation that threads proof nodes through derivations. Do not scrape the interactive debugger trace.
+
+* Named Query and Sandbox Boundary
+
+Arbitrary user-supplied Prolog is not an acceptable query API.
+
+Rule packages export a registry such as:
+
+#+begin_src prolog
+star_query(beneficial_owner_path,
+           [organization_id-string, maximum_hops-integer],
+           claim,
+           [tabled, explainable]).
+#+end_src
+
+The Common Lisp side resolves the query ID, validates parameter types and budgets, and invokes one fixed wrapper predicate. SWI-Prolog's sandbox library can statically reject goals that expand to non-whitelisted operations, but sandboxing is a defense in depth rather than a substitute for a closed named-query API and process isolation.
+
+* Prolog Runtime Modes
+
+The port should support two different execution modes rather than forcing one lifecycle onto every expert-system workload.
+
+** Snapshot mode
+
+- load one validated dataset/case snapshot;
+- project facts deterministically;
+- load pinned rule package;
+- run named query under budgets;
+- emit normalized answer and proof references;
+- destroy worker.
+
+This is the default implementation target.
+
+** Resident projection mode
+
+- keep a bounded dataset projection in a supervised worker;
+- apply idempotent document revision deltas;
+- use incremental or monotonic tabling where semantics permit;
+- checkpoint projection revision;
+- rebuild from CouchDB on drift, corruption, incompatible mapping version, or rule-package change.
+
+Resident mode is an optimization for monitoring and repeated queries, not a new source of truth.
+
+* Conformance and Acceptance Gates
+
+A StarIntel v0.9 Prolog port is not complete until it passes all of the following:
+
+1. Parse every canonical v0.9 conformance fixture accepted by the other ports.
+2. Reject every canonical invalid fixture for the same schema reason class where practical.
+3. Round-trip document JSON without semantic data loss; canonical hashing must use one explicitly shared canonicalization algorithm rather than accidental dict key order.
+4. Preserve every relation endpoint shape: string endpoint, structured endpoint, multi-object relation, unresolved endpoint, qualifiers, inverse predicate, confidence, validity, and active state.
+5. Produce deterministic projected fact IDs from document ID, mapping version, field path or endpoint ordinal, and canonical value hash.
+6. Never turn untrusted corpus strings into callable functors or module-qualified goals.
+7. Preserve source, evidence, verification, provenance, temporal, and assessment references needed by inference policy and proof output.
+8. Demonstrate a recursive relation query with tabling on an immutable fixture.
+9. Demonstrate identical answer and proof hashes on repeated replay of the same snapshot, rule package, mapping version, and query.
+10. Demonstrate one update/retraction fixture for resident mode and prove incremental table invalidation or rebuild behavior.
+11. Demonstrate full projection rebuild from canonical CouchDB documents without requiring prior Prolog state.
+12. Validate normalized inference outputs as canonical v0.9 =claim= and =analysis= documents.
+13. Add cross-language CI so schema drift in v0.9 cannot silently diverge between Python, Common Lisp, Nim, JavaScript, and Prolog.
+
+* Recommended Implementation Order
+
+1. Freeze the exact v0.9 schema commit and conformance fixture set used by the port.
+2. Implement JSON dict parsing and schema validation in Prolog.
+3. Add relation endpoint helpers and semantic round-trip tests.
+4. Define projection mapping version 1 and stable fact-ID rules.
+5. Project Auto-Dig relation fixtures into =si_*= facts.
+6. Implement named query registry with no arbitrary source execution.
+7. Implement one tabled graph rule package and proof-carrying answer fixture.
+8. Integrate snapshot projection with the existing supervised =star-prolog= worker boundary.
+9. Persist conclusions using current v0.9 =claim= and =analysis= documents.
+10. Add CouchDB rebuild and reconciliation tests.
+11. Only then prototype a resident incremental worker.
+12. If CouchDB-native rules are still desired, design =logic-rule= and =logic-rule-package= as a separately reviewed v0.9.x schema change.
+
+* What Not to Do
+
+- Do not make Prolog the canonical database.
+- Do not hand-copy the v0.9 schema into an independently maintained rule file.
+- Do not flatten relation documents into bare binary predicates and discard relation IDs.
+- Do not treat confidence as probability without an explicit probabilistic semantics.
+- Do not drop contradictory, unverified, inactive, or historical facts during projection.
+- Do not accept raw Prolog queries or rule text from ordinary API clients.
+- Do not use arbitrary document predicate strings as callable functors.
+- Do not persist non-v0.9 conclusion or proof dtypes before a schema revision approves them.
+- Do not depend on =_changes= as a complete immutable mutation journal.
+
+* Research Gaps
+
+- Define the shared canonical JSON hashing algorithm used by all StarIntel language ports.
+- Decide whether the Prolog port validates directly from JSON Schema or from generated Prolog constraints.
+- Specify exact precedence between relation =data.start_at/end_at= and envelope =temporal.valid_from/valid_to= when both exist.
+- Define contradiction and defeasibility semantics for simultaneously source-backed incompatible relations.
+- Decide whether long-lived resident rule workers need well-founded negation under updates or can stay monotonic for the first monitoring workloads.
+- Measure projection size and query latency on a representative Auto-Dig relation corpus before selecting resident-worker memory limits.
+- Decide whether first-class rule and proof dtypes belong in v0.9.1 or a later contract revision.
+
+* Source Matrix
+
+Sources retrieved 2026-08-11 unless otherwise stated.
+
+| Source | Evidence used |
+|--------+---------------|
+| https://github.com/lost-rob0t/starintel-gpt-auto-dig/blob/main/README.md | Auto-Dig v0.9 canonical contract, normalized DB convention, validation and relation endpoint requirements |
+| https://github.com/lost-rob0t/starintel-gpt-auto-dig/blob/main/docs/starintel-doc-v0.9.0.md | Canonical v0.9 envelope, dtype registry, relation semantics, endpoint objects |
+| https://github.com/lost-rob0t/starintel-gpt-auto-dig/blob/main/starintel_doc/spec.py | Exact relation fields and current =claim= / =analysis= output fields |
+| https://github.com/lost-rob0t/starintel-gpt-auto-dig/blob/main/starintel_doc/linking.py | Current canonical relation resolution and neighbor traversal behavior |
+| https://github.com/lost-rob0t/starintel-gpt-auto-dig/blob/main/db/relation/starintel:relation:club-of-rome:keri-yemi-member_of-club-of-rome.ndjson | Real relation example with inverse predicate, confidence, verification, provenance, qualifiers, and source metadata |
+| https://github.com/lost-rob0t/starintel-server/blob/master/docs/architecture.org | CouchDB authority, event-driven Common Lisp server, document event path, actors, and durable-data boundary |
+| https://www.swi-prolog.org/pldoc/man?section=jsonsupport | JSON objects as dicts and JSON strings as Prolog strings |
+| https://www.swi-prolog.org/pldoc/man?section=tabling | Tabled execution, memoization, recursion termination, well-founded and related capabilities |
+| https://www.swi-prolog.org/pldoc/man?section=tabling-incremental | Incremental table dependency invalidation and lazy recomputation after dynamic fact updates |
+| https://www.swi-prolog.org/pldoc/man?section=tabling-monotonic | Monotonic propagation for append-only dynamic facts and fallback invalidation on retraction |
+| https://www.swi-prolog.org/pldoc/man?section=db | Dynamic database transactions and use with deductive tabling |
+| https://www.swi-prolog.org/pldoc/doc/_SWI_/library/sandbox.pl | =safe_goal/1= / =safe_call/1= sandbox model and whitelist limitations |
+| https://docs.couchdb.org/en/stable/api/database/changes.html | =_changes= synchronization semantics, latest-change guarantee, and partial ordering warning |
+
+* Publication Link
+
+- https://auto-research.starintel.actor/notes/research/auto-research/STAR-RESEARCH-005-starintel-v09-prolog-expert-system.html
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-11 | Reviewed Auto-Dig v0.9 relations and current StarIntel logic/runtime boundaries; added the schema-faithful Prolog port and expert-system projection recommendation. | OpenAI research agent under operator direction | Auto-Dig v0.9 source review, star-server source review, current SWI-Prolog and CouchDB primary documentation |
+| 2026-08-12 | Recorded the current UTC audit date required by the changed-document CI gate. | OpenAI research agent under operator direction | Org-roam Pages changed-document audit for PR 103 |
+
+* Footnotes and Glossary
+
+- *Canonical document* — The authoritative StarIntel v0.9 record persisted independently of any derived search or logic index.
+- *Projection* — A deterministic derived representation built from canonical documents for a specific query or runtime purpose.
+- *Expert system* — A rule-based system that derives conclusions from explicit facts and a versioned knowledge/rule base.
+- *Fact identity* — A stable identifier tying one projected logic fact back to its source document, mapping version, and source field or endpoint occurrence.
+- *Named query* — A reviewed query exported by a rule package and invoked by identifier plus typed parameters rather than arbitrary executable source.
+- *Tabling* — Prolog execution that memoizes calls and answers, supporting efficient recursive reasoning and avoiding many left-recursive loops.
+- *Incremental tabling* — Maintenance of table dependencies so changes to declared dynamic facts invalidate and later recompute affected tables.
+- *Monotonic rule* — A rule whose conclusions do not need to be withdrawn when new facts are added; this permits addition-oriented propagation optimizations.
+- *Primary source* — Original authoritative material used as direct evidence.
+- *Inference* — A conclusion derived from evidence and rules and kept distinct from a verified source fact.

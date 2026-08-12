@@ -36,6 +36,13 @@ class GraphWorkspaceTests(unittest.TestCase):
         self.assertIn("Focus neighborhood", runtime)
         self.assertIn("graph-search", runtime)
 
+    def test_graph_search_filters_visibility_live(self) -> None:
+        runtime = (STATIC / "graph.js").read_text(encoding="utf-8")
+        self.assertIn("!searchQuery || searchMatches.has(node.id)", runtime)
+        self.assertIn("if (hiddenKinds.has(node.kind)) return false;", runtime)
+        self.assertIn('shell.search.addEventListener("input", updateSearch)', runtime)
+        self.assertIn("updateHud();", runtime)
+
     def test_graph_styles_define_workspace_and_mobile_inspector(self) -> None:
         css = (STATIC / "graph.css").read_text(encoding="utf-8")
         self.assertIn(".graph-workspace", css)

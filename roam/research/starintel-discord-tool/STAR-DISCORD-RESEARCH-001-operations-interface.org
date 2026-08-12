@@ -2,9 +2,9 @@
 :ID:       star-discord-research-001-operations-interface
 :END:
 #+title: STAR-DISCORD-RESEARCH-001 Discord Operations Interface Feature Research
-#+description: Research the feasible and safe feature surface for a StarIntel Discord operations bot spanning gserver-backed search, document ingest, Auto-Dig control, private DMs, trusted target creation, notifications, and RabbitMQ projections.
+#+description: Research the feasible and safe feature surface for a Python StarIntel Discord operations bot spanning gserver-backed search, document ingest, Auto-Dig control, private DMs, trusted target creation, notifications, and RabbitMQ projections.
 #+status: REVIEW
-#+filetags: :starintel:research:discord:operations:gserver:auto-dig:rabbitmq:security:
+#+filetags: :starintel:research:discord:python:operations:gserver:auto-dig:rabbitmq:security:
 #+created: [2026-08-12 Wed]
 #+last_modified: [2026-08-12 Wed]
 
@@ -14,9 +14,9 @@
 |---------------+--------------------+-------+-------------------+--------------------|
 | Feature scope | StarIntel operator | PENDING | Explicit review of proposed capabilities and exclusions | Public review page after deployment |
 | Authorization model | StarIntel operator | PENDING | Explicit review of whitelist and capability tiers | Public review page after deployment |
-| External platform assumptions | StarIntel maintainer | PENDING | Re-check Discord and RabbitMQ contracts at implementation time | Source links retrieved 2026-08-12 |
+| External platform assumptions | StarIntel maintainer | PENDING | Re-check Discord, Python library, and RabbitMQ contracts at implementation time | Source links retrieved 2026-08-12 |
 
-No approval is implied by publication or CI success.
+No approval is implied by publication, CI success, or approval of a linked design. This research node remains in review until separately approved.
 
 * Research Question
 
@@ -24,6 +24,7 @@ What should =starintel-discord-tool= become if it is used as an operator and tru
 
 The requested feature set is:
 
+- implement the Discord edge as a Python bot;
 - search the StarIntel database through a gserver-backed interface;
 - interact with =starintel-gpt-auto-dig=;
 - submit documents through Discord for whitelisted users;
@@ -56,6 +57,12 @@ Retrieved 2026-08-12.
 - https://docs.discord.com/developers/resources/message
 - https://docs.discord.com/developers/resources/channel
 
+** Python implementation documentation
+
+- https://discordpy.readthedocs.io/en/stable/
+- https://discordpy.readthedocs.io/en/stable/interactions/api.html
+- https://docs.python.org/3.14/library/asyncio-task.html
+
 ** RabbitMQ primary documentation
 
 - https://www.rabbitmq.com/docs/4.1/consumers
@@ -70,6 +77,8 @@ Retrieved 2026-08-12.
 The repository currently contains a minimal README and Nim package metadata. Its README describes the bot as an operations-management interface and lists unimplemented command ideas including =/createOperation=, =/deleteOperation=, =/newDataset=, =/operationAddDataset=, =createTarget=, =/deleteTarget=, =/jobs=, =/search=, and =/debug=.
 
 There is no existing production bot architecture to preserve. This is a favorable point to define the trust boundary before commands become coupled directly to storage or broker internals.
+
+The operator has now selected Python for the bot implementation. The existing Nim metadata is therefore historical repository state rather than the intended runtime. The implementation pass should replace or retire the Nim edge scaffolding instead of treating it as a second supported bot implementation.
 
 ** Auto-Dig is Git-backed and CLI-oriented
 
@@ -88,6 +97,23 @@ This makes the existing API useful as evidence that the underlying operations ex
 The approved composable-gserver design defines one managed actor system per StarIntel server process, supervised domain/service subtrees, typed ingress, shared service components, actor manifests, dataset manifests, scoped event buses, lifecycle policy, and optional remoting/ZeroMQ adapters. A Discord operations bridge fits this model as a shared service or SOCMINT-adjacent edge bridge without making Discord itself authoritative.
 
 * External Platform Findings
+
+** Python and =discord.py= fit the selected edge role
+
+The =discord.py= documentation describes an asynchronous Discord API wrapper with application-command support and rate-limit handling. Its interaction API exposes slash/context commands through =discord.app_commands= and includes guild/user installation and command-context controls. Python's standard =asyncio= runtime provides cancellation, timeouts, and structured task groups suitable for a long-lived network edge.
+
+This makes a Python edge a strong fit for the selected boundary: Discord protocol handling, command registration, attachment streaming, bridge request/reply, notification delivery, and rate-limit behavior can remain asynchronous without moving StarIntel policy into the bot.
+
+Implementation guidance:
+
+- use =discord.py= application commands as the primary command surface;
+- use =asyncio= for lifecycle, cancellation, deadlines, and supervised background tasks;
+- keep blocking filesystem or subprocess work out of the Gateway event loop;
+- pin the Python interpreter and dependencies in the repository's actual reproducible environment rather than relying on system Python;
+- keep command handlers thin: parse Discord input, create typed bridge requests, await typed results, and render already-authorized output;
+- do not add a direct CouchDB client, generic shell runner, or unrestricted RabbitMQ client to the Discord edge merely because Python libraries make those integrations easy.
+
+The research does not require a second Nim implementation. One Python edge reduces duplicate protocol/security surfaces.
 
 ** Discord interactions support the required command surfaces
 
@@ -317,15 +343,19 @@ A broad topic binding can overwhelm a Discord channel. Require bounded routing p
 
 The current unauthenticated HTTP API must not be exposed to Discord or the Internet as the bot backend. Add a proper authenticated bridge or trusted local adapter first.
 
+** Python event-loop starvation
+
+A Python Discord bot can become unresponsive if command handlers perform blocking I/O or CPU-heavy parsing on the event loop. Keep handlers thin, enforce deadlines, isolate blocking work, and keep document parsing/Auto-Dig execution behind the StarIntel bridge rather than inside the bot process.
+
 * Recommended Architecture Conclusion
 
-Keep =starintel-discord-tool= as a thin Discord edge process. The existing Nim package can remain the edge implementation if desired, because the important architectural choice is not the edge language.
+Implement =starintel-discord-tool= as a thin Python Discord edge using =discord.py=. This is now a selected implementation constraint, not an open language choice. Retire the current Nim edge scaffolding during implementation unless a separately approved compatibility requirement appears later.
 
 Put authoritative behavior in a new =discord-ops-bridge= gserver under =starintel-server=. That gserver owns principal mapping, capability checks, typed request validation, idempotency, audit, search dispatch, document-ingest coordination, target mutation, Auto-Dig jobs, subscriptions, RabbitMQ projections, and output policy.
 
-The edge process should know Discord protocol details and render responses; it should not own StarIntel authorization rules, canonical documents, raw CouchDB credentials, arbitrary RabbitMQ credentials, or Auto-Dig repository mutation logic.
+The Python edge process should know Discord protocol details and render responses; it should not own StarIntel authorization rules, canonical documents, raw CouchDB credentials, arbitrary RabbitMQ credentials, or Auto-Dig repository mutation logic.
 
-This split allows a later Common Lisp, Nim, or other Discord client to reuse the same StarIntel contract without changing the security model.
+The Python edge should use =discord.py= application commands and =asyncio= lifecycle primitives, with a separately testable typed StarIntel bridge client. This keeps Discord-specific code small and lets other future clients reuse the same StarIntel contract without duplicating policy.
 
 * Unresolved Questions Before Implementation
 
@@ -336,11 +366,13 @@ This split allows a later Common Lisp, Nim, or other Discord client to reuse the
 5. Which target types may trusted collaborators create, and which require operator confirmation?
 6. Should Auto-Dig jobs publish branches/PRs automatically, or only produce local validated results pending operator action?
 7. Which document classes are safe to return in guild channels versus DM-only versus never through Discord?
+8. Which exact CPython and =discord.py= versions should the implementation repository pin after its current packaging/Nix state is reconciled? The language/library family is selected; exact versions remain an implementation-time pin.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-08-12 | Updated the complete Discord feature research to make Python the selected bot language, add current =discord.py=/=asyncio= implementation evidence, retire Nim as the target edge direction, and preserve this research node's unapproved =REVIEW= state. | GPT-5.6 Sol | Explicit operator request on 2026-08-12 naming =STAR-DISCORD-001=: "I want python bot" and "I only approve that document with the requested change"; Python/discord.py documentation retrieved 2026-08-12 |
 | 2026-08-12 | Created feature research from the current Discord stub, Auto-Dig write/search contracts, starintel-server API/gserver architecture, and current Discord/RabbitMQ primary documentation. | GPT-5.6 Sol | Repository inspection and sources listed above, retrieved 2026-08-12 |
 
 * Footnotes and Glossary
@@ -356,3 +388,7 @@ This split allows a later Common Lisp, Nim, or other Discord client to reuse the
 [fn:projection] A bounded consumer that transforms internal events into a non-authoritative external view such as Discord notifications.
 
 [fn:quarantine] Temporary bounded storage for untrusted files before parsing, validation, and canonical persistence.
+
+[fn:discord-py] The asynchronous Python Discord API wrapper selected for the edge implementation; it handles Discord protocol mechanics but is not an authorization authority for StarIntel.
+
+[fn:asyncio] Python's standard asynchronous I/O runtime used for tasks, cancellation, timeouts, and long-lived network concurrency in the Discord edge.

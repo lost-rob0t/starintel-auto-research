@@ -1,0 +1,372 @@
+:PROPERTIES:
+:ID:       star-lang-research-016-resolver-fetch-digest-ports
+:END:
+#+title: STAR-LANG-RESEARCH-016 Resolver Fetch and Digest Ports
+#+description: Research how StarLang should remove direct curl and sha256sum process execution from specification resolution while preserving locked, bounded, network-disabled-by-default imports.
+#+status: REVIEW
+#+filetags: :starintel:research:star-lang:resolver:imports:http:sha256:ports:common-lisp:security:
+#+created: [2026-08-13 Thu]
+#+last_modified: [2026-08-13 Thu]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Primary-source review of the current loader, Ironclad digest API, Dexador HTTP API, and existing StarLang import requirements | This document; STAR-LANG-RESEARCH-006 |
+| Architecture | Project maintainer | PENDING | Agreement that resolver effects should be injected ports and that compilation remains network/process free | Proposed architecture in this document |
+| Security | Security reviewer | PENDING | Review of TLS, redirect, proxy, byte-limit, timeout, digest-before-parse, and cache-integrity invariants | Security invariants section |
+| Operations | Operator | PENDING | Confirm dependency/Nix closure and offline cache behavior remain explicit and reproducible | Packaging and Nix section |
+| Implementation | Repository maintainer | NOT STARTED | Green StarLang CI/Nix implementation removing direct shell dependence from resolver core | Future StarLang PR |
+
+* Question
+
+How should StarLang preserve exact digest-locked specification imports while
+removing direct =curl= and =sha256sum= process execution from the resolver?
+
+* Existing requirement baseline
+
+[[file:STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org][STAR-LANG-RESEARCH-006]] already settled the important semantic boundary:
+
+- import resolution is an explicit build operation;
+- every remote artifact requires an exact content digest;
+- resolution is bounded by source size, dependency depth/count, and redirects;
+- the compiler and runtime consume a local immutable graph rather than reaching
+  the network during expansion or execution;
+- remote specification files are parsed through the same closed StarLang reader
+  as local source.
+
+The current Common Lisp implementation preserves most of those semantics, but
+=prototype/star-loader.lisp= directly invokes two external processes:
+
+#+begin_example
+sha256sum PATH
+curl --fail --silent --show-error --location ... URL
+#+end_example
+
+That couples the resolver core to ambient executables and makes the effect
+boundary harder to test, package, and eventually extract into final ASDF
+systems.
+
+* Current implementation audit
+
+The current loader has several good properties that must survive refactoring:
+
+1. URL imports accept only =https://=.
+2. Network loading is disabled unless =:allow-network= is true.
+3. Remote artifacts are addressed in the cache by expected SHA-256 digest.
+4. Existing cache entries are size checked and digest verified before reuse.
+5. Downloaded content is written to a temporary path, size checked, digest
+   verified, and only then renamed into the content-addressed cache.
+6. The parser consumes local octets only after resolution.
+7. Loader conditions preserve source spans and import-origin chains.
+8. Root URL loading also requires exact name, version, and digest.
+
+The architectural defect is therefore not the import policy. It is that
+transport and cryptographic hashing are hard-coded as process execution inside
+the same module that owns resolution semantics.
+
+* Candidate Common Lisp digest adapter
+
+** Ironclad
+
+Ironclad is the strongest default candidate for SHA-256.
+
+Its primary documentation exposes:
+
+- SHA-256 as a supported digest;
+- =digest-file= for hashing a pathname;
+- =make-digest=, =update-digest=, and =produce-digest= for incremental hashing;
+- =byte-array-to-hex-string= for canonical hexadecimal output;
+- a narrower =ironclad/digest/sha256= subsystem in addition to the complete
+  Ironclad system.
+
+This matches StarLang well because the adapter can hash either cached files or
+received octets without spawning a process. Incremental hashing also permits a
+future fetch adapter to hash while streaming under the same byte limit.
+
+Recommendation: use Ironclad behind a StarLang digest port rather than exposing
+Ironclad objects in resolver APIs.
+
+* Candidate Common Lisp HTTP adapter
+
+** Dexador
+
+Dexador provides the controls needed for a first native HTTPS adapter:
+
+- connection timeout;
+- read timeout;
+- redirect limit;
+- streaming response bodies;
+- binary response mode;
+- TLS certificate verification unless insecure mode is explicitly enabled;
+- proxy configuration.
+
+There are two important wrapper requirements.
+
+First, Dexador may obtain a default proxy from process environment state. A
+hermetic StarLang resolver must not silently inherit that policy. The adapter
+should pass no proxy unless one is explicitly supplied through resolver
+configuration.
+
+Second, automatic redirect handling is not sufficient as the StarLang policy
+boundary. The adapter should either prove that every redirect remains HTTPS or
+handle redirects explicitly and reject any scheme downgrade before following
+the next location.
+
+Dexador describes itself as beta. That is a dependency-stability tradeoff, but
+it is acceptable behind a small port because the rest of StarLang does not
+become coupled to its concrete request/response API.
+
+* Port architecture
+
+The resolver should depend on two injected effect ports.
+
+** Digest port
+
+Conceptual contract:
+
+#+begin_src lisp
+(digest-octets digest-port :sha256 octets)
+(digest-file digest-port :sha256 pathname)
+#+end_src
+
+The returned value is the canonical StarLang digest string:
+
+#+begin_example
+sha256:<64 lowercase hex digits>
+#+end_example
+
+The core resolver owns canonical digest validation. The adapter owns only the
+cryptographic computation.
+
+** Fetch port
+
+Conceptual contract:
+
+#+begin_src lisp
+(fetch-specification fetch-port
+                     url
+                     :maximum-bytes maximum-source-bytes
+                     :connect-timeout 10
+                     :read-timeout 10
+                     :deadline 60
+                     :maximum-redirects 5
+                     :proxy explicit-proxy-or-nil)
+#+end_src
+
+A fetch result should be transport-neutral data, for example:
+
+#+begin_src lisp
+(:requested-uri "https://specs.example/a.star"
+ :final-uri "https://cdn.example/a.star"
+ :status 200
+ :headers (...)
+ :octets #(40 115 112 101 99 ...))
+#+end_src
+
+The first implementation may stream directly to a temporary cache file instead
+of materializing all octets, provided the port still enforces the byte limit and
+does not expose a Dexador stream outside the adapter boundary.
+
+* Ownership split
+
+The clean split is:
+
+#+begin_example
+StarLang resolver core
+  owns:
+    import declarations
+    exact expected digests
+    network-enabled policy
+    cache identity
+    cache promotion
+    source/import provenance
+    typed failures
+
+fetch port
+  owns:
+    HTTPS request mechanics
+    redirect traversal
+    response byte streaming
+    timeout/deadline mechanics
+    explicit proxy configuration
+
+ digest port
+  owns:
+    SHA-256 calculation
+#+end_example
+
+The compiler, macro expander, deterministic dispatcher, and runtime MUST NOT
+receive either port. Only the explicit resolver/build operation owns effects.
+
+* Security invariants
+
+A native Common Lisp adapter is not permission to weaken the current curl
+policy. The adapter must preserve or strengthen these invariants.
+
+** Transport
+
+- initial URI must use HTTPS;
+- every redirect target must use HTTPS;
+- TLS certificate verification remains enabled;
+- redirect count is bounded;
+- no credentials are inferred from StarLang import syntax;
+- proxy use is explicit rather than ambient.
+
+** Resource bounds
+
+- maximum response bytes are enforced while streaming, not after unbounded
+  buffering;
+- connect and read timeouts are finite;
+- an overall deadline is finite;
+- oversized responses fail before cache promotion;
+- partial temporary files are deleted after failure/cancellation.
+
+** Integrity
+
+- expected digest syntax is validated before network work;
+- content is SHA-256 verified before parsing or compilation;
+- a cached file is reverified before reuse;
+- mismatched content never replaces the digest-addressed cache entry;
+- cache promotion remains temporary-file then rename, avoiding partially written
+  final cache paths.
+
+** Determinism
+
+- =:allow-network nil= means no fetch-port invocation;
+- fake fetch/digest ports can drive resolver tests with zero network/process
+  access;
+- compiler/runtime tests consume already resolved local artifacts.
+
+* Failure model
+
+The resolver should keep StarLang-facing typed conditions independent of the
+adapter library.
+
+Suggested stable categories:
+
+- =network-disabled-error=
+- =fetch-error=
+- =redirect-policy-error=
+- =source-too-large-error= or existing =source-error=
+- =digest-error=
+- =dependency-error=
+
+Concrete Dexador, TLS, socket, or Ironclad conditions should be preserved as
+cause/details where useful but should not become the public compiler error
+contract.
+
+* Two-phase implementation plan
+
+** Phase 1 — effect-boundary extraction
+
+Do this first without adding new dependencies.
+
+1. Define fetch-port and digest-port interfaces in Common Lisp.
+2. Make =load-star-file= and =load-star-url= accept/inherit those ports.
+3. Move current =uiop:run-program= based curl/sha256sum behavior into explicit
+   compatibility adapters.
+4. Make resolver semantics call only the port interfaces.
+5. Add deterministic fake ports proving network/process execution is not needed
+   by resolver tests.
+6. Add an architectural regression check that resolver-core functions do not
+   directly invoke =uiop:run-program=.
+
+This creates the correct seam while keeping dependency and Nix changes out of
+one refactor.
+
+** Phase 2 — native adapters
+
+1. Add an Ironclad SHA-256 adapter.
+2. Add a bounded HTTPS adapter, initially Dexador unless implementation testing
+   invalidates the choice.
+3. Wire the dependencies into ASDF and the Nix closure.
+4. Run cache hit/miss, digest mismatch, redirect, size-limit, timeout, offline,
+   and malformed-response tests.
+5. Remove the shell compatibility adapters once native adapter parity is green.
+6. Mark the shell-removal acceptance item complete only after no normal resolver
+   path requires =curl= or =sha256sum=.
+
+* Packaging and Nix consequences
+
+The final package layout should keep dependency direction one-way:
+
+#+begin_example
+resolver-core
+  -> port protocols
+
+resolver-ironclad-adapter
+  -> resolver-core protocol + Ironclad
+
+resolver-http-adapter
+  -> resolver-core protocol + HTTP client
+#+end_example
+
+The StarLang compiler package should not need an HTTP client merely to compile a
+pre-resolved graph. Nix validation should separately prove:
+
+- offline/compiler-only closure loads without invoking network tools;
+- resolver-enabled closure contains the selected Common Lisp adapters;
+- CI tests do not require ambient =curl= or =sha256sum= once Phase 2 lands.
+
+* Rejected approaches
+
+** Keep direct shell execution permanently
+
+Rejected as the final architecture. It obscures effects, relies on ambient
+executables, complicates Windows/portable CL support, and makes deterministic
+resolver tests less direct.
+
+** Put network access in the compiler
+
+Rejected. It violates the already approved resolver/compiler phase split.
+
+** Let the HTTP library own digest verification
+
+Rejected. Expected content identity is StarLang resolution semantics and must
+remain above the transport adapter.
+
+** Accept non-HTTPS redirects because the initial URL was HTTPS
+
+Rejected. The transport invariant applies to every hop.
+
+** Buffer an unbounded response then check its size
+
+Rejected. The resource limit must be enforced during receipt.
+
+* Acceptance criteria for the research direction
+
+The direction is ready for design/implementation when reviewers agree that:
+
+1. resolver effects are represented as injected ports;
+2. compile/runtime paths remain network/process free;
+3. StarLang owns cache/digest/provenance semantics;
+4. adapter-specific conditions do not leak into the public error contract;
+5. fake adapters provide deterministic tests;
+6. native SHA-256 uses a Common Lisp cryptographic library, with Ironclad as the
+   current preferred candidate;
+7. HTTPS behavior is bounded and explicit, with redirects, TLS, proxy, timeout,
+   and byte limits specified by StarLang policy;
+8. shell adapters are transitional only and are removed after native parity.
+
+* Primary sources
+
+- StarLang current loader: https://github.com/lost-rob0t/star-lang/blob/main/prototype/star-loader.lisp
+- Existing locked-import requirements: [[file:STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org][STAR-LANG-RESEARCH-006]]
+- Ironclad project documentation: https://github.com/sharplispers/ironclad/blob/master/README.org
+- Dexador project documentation: https://github.com/fukamachi/dexador/blob/master/README.markdown
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-13 | Initial resolver fetch/digest port research; audit current shell boundary and compare native Common Lisp adapter direction | ChatGPT agent | Current StarLang loader plus Ironclad and Dexador primary documentation |
+
+* Footnotes and Glossary
+
+- *Resolver core* — StarLang code that turns explicit import requests into a verified local immutable specification graph.
+- *Port* — An injected protocol boundary through which resolver semantics request an effect without depending on its concrete implementation.
+- *Fetch adapter* — Concrete implementation of the fetch port, responsible for bounded HTTPS transport mechanics.
+- *Digest adapter* — Concrete implementation of the digest port, responsible for cryptographic digest calculation.
+- *Cache promotion* — Moving fully received and verified content from a temporary path into its digest-addressed final cache path.
+- *Ambient dependency* — Behavior implicitly inherited from host state, such as PATH executables or proxy environment variables, rather than supplied explicitly through configuration.

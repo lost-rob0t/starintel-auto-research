@@ -1,0 +1,352 @@
+:PROPERTIES:
+:ID:       star-lang-research-017-final-package-boundary-audit
+:END:
+#+title: STAR-LANG-RESEARCH-017 Final Package Boundary Audit
+#+description: Audit the current prototype monolith and empty final ASDF systems to identify an acyclic extraction order for StarLang actor protocol, compiler, runtime, journal, lease, and adapter ownership.
+#+status: REVIEW
+#+filetags: :starintel:research:star-lang:asdf:packages:runtime:compiler:actors:protocol:extraction:
+#+created: [2026-08-13 Thu]
+#+last_modified: [2026-08-13 Thu]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Repository audit identifies current ownership/dependency knots and final-system shells | This document; lost-rob0t/star-lang current main |
+| Architecture | Project maintainer | PENDING | Agreement on dependency direction and extraction order | Proposed boundary map |
+| Security | Security reviewer | NOT APPLICABLE | This research changes code ownership only; security semantics must remain unchanged during extraction | Migration invariants |
+| Operations | Operator | PENDING | Confirm final ASDF/Nix/CI systems can be loaded independently after migration | Acceptance plan |
+| Implementation | Repository maintainer | NOT STARTED | Green extraction PRs moving authority out of prototype without duplicate implementations | Future StarLang PRs |
+
+* Question
+
+What package boundaries let StarLang move its proven implementation out of
+=prototype/= without either copying the monolith into another directory or
+creating cyclic compiler/runtime dependencies?
+
+* Current repository state
+
+The repository has two different architectural realities.
+
+** Final system surface
+
+Final ASDF systems already exist for areas including:
+
+- =star-actor-protocol=;
+- =star-canonical-json=;
+- =star-journal=;
+- =star-lease=;
+- =star-mailbox=;
+- =star-adapter-sdk=;
+- =star-http-port=;
+- =star-process-port=;
+- =starlang-compiler=;
+- =starlang-runtime=.
+
+However, several of these systems currently contain only package placeholders
+and trivial test shells. They do not yet own the implementation advertised by
+their names.
+
+** Authoritative implementation surface
+
+The actual implementation remains concentrated in =prototype/=, especially the
+package =star-lang.core-surface.prototype=.
+
+The first section of =prototype/core-surface-prototype.lisp= alone owns or
+exports:
+
+- normalized IR version/schema;
+- source spans;
+- provenance/origin frames;
+- syntax objects;
+- parser limits;
+- compiler/source error hierarchy;
+- generic =fail= behavior that attaches current syntax/span context;
+- field/name validation helpers;
+- parser/compiler entry points;
+- actor compilation;
+- wire-envelope validation.
+
+Additional files then reopen that same package and add service URI, actor wire,
+canonical JSON, message lifecycle, dispatcher, runtime directory, journal,
+remoting, lease, domain server, and other behavior.
+
+This means file boundaries are not package boundaries. Moving one prototype file
+verbatim usually leaves it dependent on private helpers and condition types from
+the large prototype package.
+
+* Concrete dependency knots
+
+** Service URI
+
+=prototype/service-uri-prototype.lisp= appears small and self-contained, but it
+inherits =star-lang-core-error= and calls =fail=. A verbatim move into
+=star-actor-protocol= would therefore make the final protocol system depend on
+the prototype compiler/source-error package, defeating the migration.
+
+** Runtime journal
+
+=prototype/runtime-journal-port-prototype.lisp= depends on:
+
+- the shared prototype error hierarchy;
+- plist validation helpers;
+- lifecycle envelope validation;
+- lifecycle command representation.
+
+The correct final dependency is journal -> actor protocol/lifecycle data, not
+journal -> compiler/prototype.
+
+** Runtime/dispatcher
+
+Runtime directory and dispatch code depend on portable actor/service identities
+plus runtime-only liveness/references. They should consume protocol objects but
+must not depend on parser syntax objects.
+
+** Actor wire
+
+=prototype/actor-wire-prototype.lisp= currently mixes concerns that will need a
+semantic split during extraction:
+
+- portable actor contract/wire data belongs in =star-actor-protocol=;
+- syntax-aware lowering/validation belongs in =starlang-compiler=;
+- runtime actor binding belongs in =starlang-runtime=.
+
+Moving the whole file to any one final system would preserve the coupling rather
+than solve it.
+
+* Rejected extraction strategies
+
+** Copy prototype files into final directories
+
+Rejected. It creates duplicate authoritative definitions and makes later fixes
+ambiguous.
+
+** Make final systems depend on starlang-prototype
+
+Rejected. It reverses the migration direction and permanently turns the
+prototype into a hidden foundation package.
+
+** Extract a generic utility/core god-package
+
+Rejected. The current problem is excessive cross-layer ownership. Moving
+=fail=, syntax, plist validation, service identity, and runtime helpers into a
+new generic package would recreate the same architectural issue under a new
+name.
+
+** Make protocol packages depend on compiler source-span types
+
+Rejected. Runtime/protocol-only programs must be independently loadable without
+loading the parser/compiler.
+
+* Proposed semantic ownership
+
+The extraction should split by semantic authority rather than current file.
+
+** star-actor-protocol
+
+Own portable, runtime-neutral actor protocol data:
+
+- canonical STAR service URI parsing/formatting;
+- portable actor/service identity types;
+- lifecycle/wire envelope data and validation that requires no source syntax;
+- protocol-specific conditions such as invalid service URI or invalid envelope;
+- portable actor contract structures that contain no live runtime references.
+
+It should not own source spans, parser state, actor instances, sockets, queues,
+or compiler syntax objects.
+
+** starlang-compiler
+
+Own source-language concerns:
+
+- source spans and origin frames;
+- syntax objects and parser limits;
+- closed reader/parser;
+- macro expansion;
+- syntax-aware semantic validation/lowering;
+- compiler/source diagnostic hierarchy;
+- wrapping protocol-level validation failures with source-span/origin context;
+- compilation from source declarations into portable protocol/IR objects.
+
+The compiler may depend on =star-actor-protocol= and
+=star-canonical-json=. The reverse dependency is forbidden.
+
+** star-canonical-json
+
+Own deterministic canonical JSON serialization/validation primitives. It must
+accept portable data and not import compiler syntax state.
+
+** star-journal
+
+Own journal port abstractions, validation of durable lifecycle journal records,
+memory/file journal adapters, and replay ordering. It depends on portable
+lifecycle protocol data, not compiler internals.
+
+** star-lease
+
+Own lease tokens/state/transitions and runtime-neutral lease validation. It may
+depend on protocol identity where needed but not on compiler source syntax.
+
+** star-mailbox
+
+Own mailbox policy/value definitions and runtime-neutral capacity/drop policy.
+Concrete actor runtime mailbox implementation belongs in =starlang-runtime= or
+a runtime adapter if implementation-specific.
+
+** starlang-runtime
+
+Own live execution:
+
+- actor registration/instances/lifecycle;
+- runtime directory and liveness;
+- deterministic dispatch orchestration;
+- runtime service resolution;
+- domain-server execution;
+- journal/lease/mailbox coordination;
+- runtime-specific opaque references behind ports.
+
+It depends on protocol/journal/lease/mailbox packages but not on compiler parser
+internals.
+
+** star-adapter-sdk and concrete ports
+
+Own effect/transport interfaces and implementations. Runtime may depend on the
+SDK abstractions; concrete adapters depend inward on the SDK/protocol and are
+selected/configured by deployment code.
+
+* Error boundary
+
+The existing source-aware =fail= function should remain a compiler concern.
+Final protocol/runtime packages should define narrow condition types carrying
+portable failure details.
+
+When source compilation invokes a protocol validator:
+
+#+begin_example
+source syntax with span
+  -> compiler lowering
+  -> protocol validator
+  -> protocol condition
+  -> compiler catches and re-signals/wraps with current span/origin
+#+end_example
+
+When runtime code invokes the same protocol validator directly, it receives the
+protocol condition without manufacturing a source span that does not exist.
+
+This preserves precise diagnostics while keeping protocol packages compiler
+independent.
+
+* Dependency graph
+
+Target direction:
+
+#+begin_example
+star-actor-protocol      star-canonical-json
+        ^                       ^
+        |                       |
+        +------- starlang-compiler
+        |
+        +------- star-journal
+        +------- star-lease
+        +------- star-mailbox
+                    ^
+                    |
+              starlang-runtime
+                    ^
+                    |
+              star-adapter-sdk
+                    ^
+                    |
+          concrete transport ports
+
+starlang-prototype
+        |
+        +---- compatibility/end-to-end shell over final systems
+#+end_example
+
+The exact adapter arrow direction may vary by interface placement, but concrete
+ports must not become dependencies of portable compiler/protocol packages.
+
+* Extraction order
+
+A low-risk order is:
+
+1. extract canonical service URI plus protocol conditions into
+   =star-actor-protocol=;
+2. adapt prototype compiler/runtime callers through thin compatibility imports
+   or wrappers;
+3. extract lifecycle/wire envelope portable validation into
+   =star-actor-protocol=;
+4. extract =star-canonical-json=;
+5. move journal to =star-journal= now that lifecycle validation is final-owned;
+6. move lease/mailbox policy into their final systems;
+7. move runtime directory and deterministic dispatch orchestration into
+   =starlang-runtime=;
+8. split actor-wire responsibilities: protocol data to actor protocol, lowering
+   to compiler, runtime binding to runtime;
+9. move remaining parser/lowering implementation into =starlang-compiler=;
+10. reduce =starlang-prototype= to compatibility/end-to-end tests, then remove
+    it when final entry points own all product behavior.
+
+This order intentionally starts with a small but foundational portable boundary
+instead of migrating the entire runtime in one PR.
+
+* Migration invariants
+
+Every extraction PR should satisfy:
+
+- one authoritative implementation for each moved symbol;
+- final system does not load files from =prototype/=;
+- prototype compatibility layer may import/re-export final symbols but does not
+  retain a second implementation;
+- no final package depends on =starlang-prototype= or
+  =star-lang.core-surface.prototype=;
+- source-language behavior and frozen canonical-manifest bytes remain stable
+  unless a compatibility change is explicitly documented;
+- all final systems touched by the slice have real =asdf:test-system= coverage;
+- =asdf:test-system :starlang-prototype= remains green during transition;
+- Nix loads/tests both final touched systems and the transitional aggregate.
+
+* First implementation slice recommendation
+
+The first honest package-extraction slice should be the STAR service URI.
+
+It is small enough to isolate, already has strong behavior/tests from
+=STAR-LANG-004=, and provides the identity primitive required by runtime
+directory and actor protocol migration.
+
+The slice should:
+
+1. define protocol-local condition classes in =star-actor-protocol=;
+2. move the URI structure/parser/canonical formatter into that system;
+3. provide final-system tests for valid Quasar/BBP examples and malformed forms;
+4. replace the prototype implementation with compatibility imports/wrappers;
+5. keep compiler errors source-aware by translating protocol errors where the
+   compiler has syntax context;
+6. prove loading =star-actor-protocol= does not load =starlang-prototype=;
+7. keep all existing StarLang URI/manifest/dispatch tests green.
+
+* Relationship to open StarLang PR #17
+
+PR #17 correctly states the desired final runtime ownership but its initial
+scope spans actor protocol, compiler, runtime directory, dispatcher, domain
+servers, ingest servers, adapters, tests, CLI, Nix, and removal of prototype
+authority.
+
+This audit recommends treating that PR as an umbrella migration branch/contract
+and implementing narrow dependency-ordered slices rather than attempting one
+large mechanical move.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-13 | Initial audit of prototype-to-final-system dependency knots and recommended extraction order | ChatGPT agent | Current lost-rob0t/star-lang final ASDF shells and prototype implementation |
+
+* Footnotes and Glossary
+
+- *Semantic ownership* — The package that defines the authoritative meaning and implementation of a concept, independent of the historical file it came from.
+- *Protocol condition* — Error representing malformed or invalid portable protocol data without compiler source-location assumptions.
+- *Compiler wrapping* — Translating or re-signaling a protocol failure with the source span/origin available at a compilation site.
+- *Compatibility shell* — Transitional package/system that forwards to final-owned implementation without duplicating it.
+- *God-package* — Broad shared package that accumulates unrelated helpers and recreates hidden coupling across layers.

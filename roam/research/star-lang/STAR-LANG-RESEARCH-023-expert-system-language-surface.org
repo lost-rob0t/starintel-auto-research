@@ -1,0 +1,1142 @@
+:PROPERTIES:
+:ID:       star-lang-research-023-expert-system-language-surface
+:END:
+#+title: STAR-LANG-RESEARCH-023 Expert-System Language Surface
+#+description: Deep language-design research for adding safe declarative expert-system syntactic sugar to StarLang that lowers into closed backend-neutral logic IR and can target LISA, SWI-Prolog, or N-Prolog when semantic capabilities permit.
+#+status: REVIEW
+#+filetags: :starintel:star-lang:expert-systems:dsl:syntax:rules:prolog:lisa:proofs:uncertainty:
+#+created: [2026-08-13 Thu]
+#+last_modified: [2026-08-13 Thu]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Verify expert-system constructs against StarLang parser/macro invariants and backend source semantics | Current StarLang source, LISA source, Prolog research |
+| Language surface | StarLang maintainer | PENDING | Approve proposed =expert-system=, fact, rule, goal, question, conclusion, proof, and uncertainty forms | Proposed surface below |
+| Portability | Logic runtime maintainer | PENDING | Approve semantic-profile split and backend lowering restrictions | Portability model below |
+| Security | Security reviewer | PENDING | Confirm no host evaluation, raw engine source, unrestricted effects, or prompt-driven executable goals enter the language | Closed lowering and effect model |
+| Implementation | Repository maintainer | NOT STARTED | Implement only after core syntax/IR ownership is in final compiler systems | STAR-LANG-006 and STAR-LANG-007 |
+
+* Related Nodes
+
+- [[file:STAR-LANG-RESEARCH-022-three-backend-logic-runtime-selection.org][STAR-LANG-RESEARCH-022 Three-Backend Logic Runtime Selection]]
+- [[file:STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
+- [[file:STAR-LANG-RESEARCH-020-hygienic-macro-expansion.org][STAR-LANG-RESEARCH-020 Hygienic Macro Expansion]]
+- [[file:../../design/star-lang/STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
+- [[file:../../design/star-lang/STAR-LANG-006-final-package-extraction.org][STAR-LANG-006 Dependency-Ordered Final Package Extraction]]
+- [[file:../star-server/LISA-RESEARCH-001-performance-and-feature-extension.org][LISA-RESEARCH-001 LISA Performance and Feature Extension]]
+
+* Research Question
+
+What additional StarLang syntax should make expert systems pleasant to author without exposing Common Lisp =EVAL=, native LISA macros, raw Prolog source, engine-specific handles, or ambiguous semantics?
+
+The intended author experience should support:
+
+- declaring typed expert facts;
+- declaring rules and named goals;
+- expressing existence, absence, comparisons, and joins;
+- deriving conclusions with structured reasons;
+- asking for missing information through a typed effect boundary;
+- selecting =auto=, =lisa=, =swi-prolog=, or =n-prolog=;
+- declaring explanation/proof requirements;
+- optionally declaring a versioned uncertainty algebra;
+- running experts as supervised actor-owned sessions;
+- compiling all sugar away before normalized runtime execution.
+
+* Source Boundary Finding
+
+The current StarLang implementation uses a custom closed reader and first-class syntax/source-span objects. Its parser does not pass untrusted =.star= source to the Common Lisp reader, and normalized IR is already intended to contain portable data rather than live runtime objects.
+
+That is the correct foundation for expert-system sugar. The new forms should extend the closed parser/expander and lower into ordinary checked core nodes. They must not be implemented by reading arbitrary Lisp =defrule= forms or by injecting text into a Prolog evaluator.
+
+The maintained LISA engine is useful as semantic research because its language already demonstrates concepts such as rule salience, contexts, belief annotations, assertions, retractions, modification, agendas, and forward-chaining execution.[fn:lisa-language]
+
+Those concepts should inspire the StarLang surface. LISA syntax itself is not the StarLang syntax contract.
+
+* Design Principle: Sugar Describes Knowledge, Not Engine Instructions
+
+The expert language should answer these questions:
+
+1. What facts exist?
+2. What conditions make a rule applicable?
+3. What conclusion follows?
+4. What information is missing?
+5. What goal is the expert trying to establish?
+6. Why did a conclusion follow?
+7. Which uncertainty algebra, if any, combines evidence?
+8. Which backend semantics are required?
+
+It should not expose these implementation questions:
+
+- which LISA node receives a token;
+- which SWI module is called;
+- which N-Prolog heap is active;
+- which CLOS class instance represents a fact;
+- which Prolog variable or attributed-variable object exists;
+- which socket or process owns the session.
+
+* Proposed Top-Level Form
+
+Introduce =expert-system= as syntactic sugar over existing StarLang library/schema/logic constructs.
+
+#+begin_src lisp
+(expert-system transactionRisk
+  (:version "1.0.0"
+   :backend auto
+   :profile expertSession
+   :uncertainty boolean
+   :explain required)
+
+  (facts
+    (transaction
+      (id string :required)
+      (amount decimal :required)
+      (country string :required)
+      (customerConfirmed boolean :optional))
+
+    (risk
+      (transactionId string :required)
+      (level riskLevel :required)))
+
+  (rules
+    ...)
+
+  (goals
+    (goal classifyRisk
+      (risk targetTransaction ?level))))
+#+end_src
+
+This is proposed StarLang source notation, not executable Common Lisp. The exact parser vocabulary must be added deliberately to the closed source grammar.
+
+* Minimal Expert Vocabulary
+
+Initial sugar should be intentionally small.
+
+#+begin_example
+expert-system
+facts
+fact
+rules
+rule
+when
+all
+any
+exists
+absent
+notProvable
+equals
+different
+lessThan
+lessOrEqual
+greaterThan
+greaterOrEqual
+member
+then
+conclude
+assertSessionFact
+retractSessionFact
+because
+goals
+goal
+questions
+ask
+needs
+explain
+uncertainty
+backend
+#+end_example
+
+Every form must have a closed grammar and compile-time type rules.
+
+* Typed Fact Declarations
+
+Facts should reuse StarLang's existing type/schema system rather than create a second expert-only type language.
+
+Example:
+
+#+begin_src lisp
+(facts
+  (transaction
+    (id string :required)
+    (amount decimal :required)
+    (currency string :required)
+    (country string :required)
+    (customerConfirmed boolean :optional))
+
+  (risk
+    (transactionId string :required)
+    (level riskLevel :required)))
+#+end_src
+
+Compiler lowering creates ordinary schema/type references plus logic mapping metadata. It does not create a LISA class or a Prolog predicate during source reading.
+
+Fact types should declare one of these roles:
+
+- =source= — projected from declared input data;
+- =session= — mutable only inside one expert session;
+- =derived= — produced by inference and backed by a justification;
+- =questionAnswer= — produced by a typed question effect.
+
+This distinction prevents a rule from rewriting canonical source data.
+
+* Rule Form
+
+Proposed rule syntax:
+
+#+begin_src lisp
+(rule highValueForeignTransaction
+  (:salience 80)
+  (when
+    (transaction
+      (:bind ?tx)
+      (id ?transactionId)
+      (amount ?amount)
+      (country ?country))
+    (greaterThan ?amount 10000)
+    (member ?country highRiskCountries))
+  (then
+    (conclude
+      (risk
+        (transactionId ?transactionId)
+        (level high))
+      (because highValueForeignTransaction))))
+#+end_src
+
+Semantics:
+
+- rule names are stable IDs within a package;
+- variables are lexical to the rule;
+- fact patterns introduce typed bindings;
+- conditions are pure declarative predicates;
+- actions are restricted expert actions;
+- every derived conclusion can carry a structured reason;
+- salience is legal only for semantic profiles that define agenda ordering.
+
+* Why Rule Actions Must Be Closed
+
+A rule RHS must not be arbitrary Common Lisp or Prolog.
+
+Allowed initial actions:
+
+- =conclude=;
+- =assertSessionFact=;
+- =retractSessionFact= when the package mutation profile allows it;
+- =requestQuestion= indirectly through =ask=/=needs=;
+- =emitExpertEvent= through an explicitly typed output port if later approved.
+
+Disallowed by default:
+
+- file I/O;
+- HTTP;
+- shell/process launch;
+- database mutation;
+- arbitrary actor send;
+- arbitrary function call;
+- host evaluation;
+- arbitrary native-engine goal invocation.
+
+External effects belong in ordinary StarLang actors/tools after a checked conclusion is emitted. The inference engine should reason; it should not become an unrestricted effect executor.
+
+* Conditions and Boolean Structure
+
+Use explicit forms rather than overloading host-language operators.
+
+** Conjunction
+
+#+begin_src lisp
+(all
+  (transaction (id ?id))
+  (account (transactionId ?id) (status open)))
+#+end_src
+
+A plain sequence in =when= may be shorthand for =all=.
+
+** Disjunction
+
+#+begin_src lisp
+(any
+  (countryEquals ?country "IR")
+  (countryEquals ?country "KP"))
+#+end_src
+
+** Existence
+
+#+begin_src lisp
+(exists
+  (priorAlert (customerId ?customerId)))
+#+end_src
+
+** Absence in working memory
+
+#+begin_src lisp
+(absent
+  (customerConfirmation (transactionId ?transactionId)))
+#+end_src
+
+=absent= is a production/expert-session concept evaluated at a logical session sequence. It is not automatically equivalent to Prolog negation as failure.
+
+** Negation as failure
+
+#+begin_src lisp
+(notProvable
+  (knownSafeMerchant ?merchantId))
+#+end_src
+
+This is legal only in semantic profiles with defined closed-world/query semantics.
+
+** Inequality
+
+#+begin_src lisp
+(different ?left ?right)
+#+end_src
+
+Do not spell inequality and negation with the same =not= form.
+
+* Variable Model
+
+Expert variables should have source-level names beginning with =?= for readability, but they are compiler bindings—not native Prolog variables.
+
+Rules:
+
+1. every variable must be introduced by a fact pattern, parameter, or explicit binder before use;
+2. one binding has one static type;
+3. variables cannot escape the rule except through checked output fields;
+4. shadowing inside nested quantifiers should be rejected in v1 rather than made clever;
+5. normalized IR assigns stable compiler binding IDs independent of source variable spelling;
+6. backend lowering maps those IDs to LISA match bindings or Prolog variables privately.
+
+* Joins
+
+Relational joins should emerge naturally from shared variables.
+
+#+begin_src lisp
+(rule suspiciousOwnerChain
+  (when
+    (organization (id ?orgId))
+    (ownership (sourceId ?orgId) (targetId ?ownerId))
+    (person (id ?ownerId) (riskLevel high)))
+  (then
+    (conclude
+      (organizationRisk
+        (organizationId ?orgId)
+        (level high))
+      (because suspiciousOwnerChain))))
+#+end_src
+
+The compiler can derive join keys and selective indexes for LISA/Rete lowering while SWI/N-Prolog lower to ordinary relational goals. This is a useful portable subset because the declarative relation is clear even though execution strategy differs.
+
+* Rule Metadata
+
+Proposed metadata:
+
+#+begin_example
+:salience
+:group
+:enabled
+:uncertainty
+:explain
+:tags
+#+end_example
+
+Only metadata with defined semantics belongs in the core language.
+
+** =:salience=
+
+Defines activation priority for production-rule profiles. It must not silently alter Prolog goal ordering. A backend-neutral expert package that depends on salience therefore requires a production-rule/expert-session semantic profile that defines agenda behavior.
+
+** =:group=
+
+Optional rule grouping/focus policy. Defer from the minimal portable subset unless the expert-session profile defines a deterministic group schedule.
+
+** =:enabled=
+
+Compile/deployment predicate only. Runtime toggling must be a journaled session operation, not ambient mutable global state.
+
+** =:uncertainty=
+
+Rule evidence contribution under the package's named uncertainty algebra.
+
+** =:explain=
+
+Can require explanation nodes even when the package default is summary-only.
+
+* Conclusions
+
+=conclude= is distinct from mutating source facts.
+
+#+begin_src lisp
+(conclude
+  (risk
+    (transactionId ?transactionId)
+    (level high))
+  (because highValueForeignTransaction)
+  (:evidence ?transactionId))
+#+end_src
+
+Lowering creates a conclusion template with:
+
+- conclusion schema/type;
+- normalized field expressions;
+- rule ID;
+- support binding IDs;
+- uncertainty contribution if present;
+- explanation requirement;
+- stable conclusion identity policy.
+
+A conclusion is derived state. It may be revoked when supports disappear if the selected semantic profile includes truth maintenance.
+
+* Structured =because=
+
+Avoid free-form explanation strings as the only provenance.
+
+Preferred:
+
+#+begin_src lisp
+(because highValueForeignTransaction
+  (:supports ?tx)
+  (:code risk.highValueForeign)
+  (:message "High-value transaction in a configured risk geography."))
+#+end_src
+
+Portable proof identity uses rule/code/support IDs. Human message text is presentation metadata and may be localized without changing logical semantics.
+
+* Goals
+
+A goal defines what an expert session wants to establish or retrieve.
+
+#+begin_src lisp
+(goals
+  (goal classifyRisk
+    (risk
+      (transactionId targetTransaction)
+      (level ?level))
+    (:answers many
+     :required true)))
+#+end_src
+
+Goal metadata can declare:
+
+- one or many answers;
+- required vs advisory;
+- answer schema;
+- completion policy;
+- explanation requirement;
+- per-goal budget.
+
+For Prolog, goals naturally lower to named queries. For LISA, a goal may compile to a target conclusion pattern and run-until condition. The normalized goal semantics must be defined before claiming equivalence.
+
+* Questions and Interactive Expert Systems
+
+Classic expert systems often need to ask for missing facts. This is where syntactic sugar can provide major value.
+
+Proposed form:
+
+#+begin_src lisp
+(questions
+  (ask customerConfirmed
+    (:returns boolean
+     :scope session
+     :cache once)
+    (needs
+      (transaction
+        (id ?transactionId)
+        (customerConfirmed missing)))
+    (prompt
+      "Did the customer confirm transaction {transactionId}?")))
+#+end_src
+
+Critical semantic rule: the inference backend does not directly talk to a human or LLM.
+
+=ask= compiles to a typed =expert-question-request= effect. The owning ExpertSessionActor publishes that request through a configured question port. A UI, CLI, agent, or test harness returns a checked =expert-question-answer=. The answer becomes a journaled session fact.
+
+This keeps interaction deterministic and testable.
+
+* Question IR
+
+#+begin_src lisp
+(defstruct expert-question-ir
+  id
+  trigger-condition
+  parameter-bindings
+  answer-type
+  answer-schema
+  prompt-template-id
+  cache-policy
+  maximum-attempts
+  redaction-policy
+  timeout-policy)
+#+end_src
+
+Prompts are presentation resources. Logical identity uses question ID and typed parameters.
+
+* Preventing Question Loops
+
+Interactive experts require loop prevention.
+
+A question request key should include:
+
+#+begin_example
+(expert-session-id question-id normalized-parameters fact-generation)
+#+end_example
+
+Policies:
+
+- =once= — ask once for a parameter tuple for the whole session;
+- =perGeneration= — re-ask only after relevant facts change generation;
+- =untilAnswered= — bounded retries for malformed/declined responses;
+- =neverCache= — allowed only with an explicit bounded question budget.
+
+The journal records requested, delivered, answered, declined, timed-out, and superseded question states.
+
+* Expert Session State Machine
+
+#+begin_example
+CREATED
+  -> MATERIALIZED
+  -> READY
+  -> RUNNING
+       |-> WAITING-FOR-ANSWER -> RUNNING
+       |-> QUIESCENT
+       |-> GOAL-SATISFIED
+       |-> BUDGET-EXHAUSTED
+       |-> FAILED
+       `-> CANCELLED
+  -> CLOSED
+#+end_example
+
+A session is actor-owned. The backend cannot invent transitions outside the session protocol.
+
+* Expert Session Actor Topology
+
+#+begin_example
+ExpertSystemSupervisor
+|
+`-- ExpertSessionActor(session-id)
+    +-- BackendLease
+    +-- FactProjectionWorker
+    +-- QuestionBrokerPort
+    +-- ConclusionStore
+    +-- ExplanationBuilder
+    +-- BudgetLedger
+    `-- SessionJournal
+#+end_example
+
+The ExpertSessionActor serializes mutations to one logical expert state. Backend-specific concurrency occurs below or across independent sessions.
+
+* Session Event Vocabulary
+
+Required journal events:
+
+#+begin_example
+expert.session.opened
+expert.backend.selected
+expert.fact.asserted
+expert.fact.retracted
+expert.question.requested
+expert.question.answered
+expert.question.declined
+expert.rule.activated
+expert.rule.fired
+expert.goal.started
+expert.goal.satisfied
+expert.conclusion.derived
+expert.conclusion.revoked
+expert.explanation.produced
+expert.budget.exhausted
+expert.session.failed
+expert.session.closed
+#+end_example
+
+Backend adapters may attach diagnostic events, but portable replay is defined by normalized events.
+
+* Explanation Sugar
+
+Package-level policy:
+
+#+begin_src lisp
+(:explain required)
+#+end_src
+
+Possible values:
+
+- =none= — no portable proof required;
+- =summary= — rule/query IDs and supporting facts;
+- =required= — full normalized derivation graph;
+- =requiredBounded= — full graph up to explicit node/byte/depth bounds with truncation markers.
+
+For high-stakes or debugging experts, =requiredBounded= is a safer default than an unbounded proof graph.
+
+* Why/How Queries
+
+Convenience sugar can compile to proof-graph queries rather than backend-native tracing.
+
+#+begin_src lisp
+(explain
+  (why
+    (risk
+      (transactionId "tx-123")
+      (level high))))
+#+end_src
+
+#+begin_src lisp
+(explain
+  (how
+    (goal classifyRisk)))
+#+end_src
+
+=why= asks for supports of an existing conclusion. =how= asks for the derivation path or failed-goal diagnostics. In v1, failed-goal diagnostics should report known unsatisfied rule conditions only when the backend can produce them deterministically.
+
+* Partial-Match / Missing-Fact Support
+
+LISA exposes partial-match introspection concepts and is naturally suitable for determining which production rules are close to firing. A StarLang expert should not depend on LISA-private introspection APIs, but the semantic feature is useful.
+
+Define optional capability:
+
+#+begin_example
+expert.partial-match/1
+#+end_example
+
+Normalized result:
+
+#+begin_src lisp
+(defstruct expert-partial-match
+  rule-id
+  satisfied-condition-ids
+  missing-condition-ids
+  bound-parameters
+  blockers)
+#+end_src
+
+Question planning can use this capability when present. If absent, explicitly declared =needs= triggers still work.
+
+* Uncertainty Sugar
+
+Uncertainty must be explicit at the expert-system level.
+
+#+begin_src lisp
+(expert-system diagnosis
+  (:uncertainty dempsterShaferV1)
+  ...)
+#+end_src
+
+Rule contribution:
+
+#+begin_src lisp
+(rule evidenceForHypothesis
+  (:support 0.7)
+  ...)
+#+end_src
+
+Negative evidence should be explicit:
+
+#+begin_src lisp
+(rule evidenceAgainstHypothesis
+  (:oppose 0.6)
+  ...)
+#+end_src
+
+Avoid one backend-specific field such as LISA =:belief= becoming the universal syntax until its numeric meaning is fixed. =support= and =oppose= can lower through the selected algebra, while the canonical IR records the algebra and normalized evidence operation.
+
+Initial algebras may include:
+
+- =boolean=;
+- =certaintyFactorV1=;
+- =dempsterShaferV1=.
+
+Only =boolean= should be mandatory for every expert backend in v1. Other algebras require explicit capability claims and conformance fixtures.
+
+* Conflict and Contradiction
+
+Do not collapse contradictory facts by last-write-wins.
+
+An expert session may contain explicit evidence both for and against a proposition. The semantic profile declares whether this is:
+
+- rejected as inconsistent input;
+- represented as separate propositions;
+- combined by a declared uncertainty algebra;
+- handled through explicit contradiction rules.
+
+A conclusion must record contradiction status when relevant.
+
+* Defaults
+
+Default reasoning is dangerous because multiple expert-system traditions assign different meanings to defaults.
+
+Do not add bare =default= in v1.
+
+Potential future constructs must state semantics precisely, such as:
+
+- =assumeIfUnknown=;
+- =defaultValue= for schema filling, which is not inference;
+- =defeasibleRule= with explicit priority/override semantics.
+
+Until a dedicated non-monotonic semantics research pass exists, default/defeasible logic stays out of the portable surface.
+
+* Temporal Expert Rules
+
+Many StarIntel experts will reason over observations with time.
+
+Do not bake wall-clock reads into rules. Time is explicit fact data or an injected logical-time parameter.
+
+Example:
+
+#+begin_src lisp
+(rule staleObservation
+  (when
+    (observation
+      (id ?id)
+      (observedAt ?observedAt))
+    (logicalNow ?now)
+    (olderThan ?observedAt ?now "P30D"))
+  (then
+    (conclude
+      (stale (observationId ?id))
+      (because staleObservation))))
+#+end_src
+
+Replay passes the same logical time unless intentionally migrating the run.
+
+* Collections and Aggregates
+
+Aggregates are useful but differ substantially across engines.
+
+Proposed future-safe form:
+
+#+begin_src lisp
+(aggregate count ?alert
+  (where
+    (alert (customerId ?customerId)))
+  (as ?alertCount))
+#+end_src
+
+Do not include aggregates in =expert-portable/1= until count/min/max/sum grouping, duplicates, null/missing values, ordering, and update semantics are specified and tested across backend lowerings.
+
+* Expert Package Model
+
+An =expert-system= compiles into a versioned expert package manifest plus executable backend artifacts.
+
+Manifest fields:
+
+- package ID;
+- semantic version;
+- source digest;
+- normalized expert IR digest;
+- declared backend policy;
+- semantic profile;
+- fact schema IDs/versions;
+- rule IDs;
+- goal IDs;
+- question IDs;
+- uncertainty algebra;
+- explanation policy;
+- mutation profile;
+- required capabilities;
+- optional capabilities;
+- backend compatibility declarations;
+- backend artifact digests;
+- fixtures;
+- benchmark identity;
+- forbidden effects.
+
+Backend artifacts are outputs of trusted compilation. They are not source-language escape hatches.
+
+* Backend-Neutral Expert IR
+
+#+begin_src lisp
+(defstruct expert-system-ir
+  id
+  version
+  source-span
+  backend-policy
+  semantic-profile
+  fact-type-ids
+  rule-ids
+  goal-ids
+  question-ids
+  uncertainty-policy
+  explanation-policy
+  mutation-policy
+  budget-policy
+  required-capabilities)
+
+(defstruct expert-rule-ir
+  id
+  source-span
+  condition-tree
+  actions
+  salience
+  group
+  uncertainty-contribution
+  explanation-policy)
+
+(defstruct expert-condition-ir
+  id
+  kind
+  arguments
+  child-condition-ids
+  binding-ids
+  type)
+
+(defstruct expert-action-ir
+  id
+  kind
+  target-schema-id
+  field-expressions
+  support-binding-ids
+  reason-code)
+#+end_src
+
+These are schematic Common Lisp structures describing final data ownership. Canonical JSON remains strings/closed records and never serializes CLOS runtime instances.
+
+* Sugar Expansion Phases
+
+Expert syntax should fit the existing compiler phase model.
+
+#+begin_example
+closed source read
+  -> syntax object with span/origin
+  -> hygienic macro expansion
+  -> expert sugar expansion
+  -> core syntax validation
+  -> type/binding analysis
+  -> expert semantic validation
+  -> backend-policy validation
+  -> backend-neutral expert IR
+  -> plan materialization/backend selection
+  -> backend artifact lowering
+#+end_example
+
+Expert sugar must disappear before runtime interpretation in the same spirit as ordinary macros.
+
+* Backend Lowering: LISA
+
+A LISA package compiler maps:
+
+- fact type -> safe LISA template/class adapter representation;
+- rule conditions -> LISA conditional elements;
+- shared bindings -> LISA rule variables;
+- =absent= -> negative conditional element where semantics match;
+- =exists= -> existential conditional element where semantics match;
+- salience -> LISA salience;
+- group -> LISA context only when the StarLang profile defines matching semantics;
+- =conclude= -> adapter-owned derived-fact/justification operation;
+- uncertainty -> LISA belief adapter only for a conformance-proven algebra.
+
+The adapter must not splice arbitrary user forms into =defrule= bodies.
+
+* Backend Lowering: SWI-Prolog
+
+A SWI package compiler maps a compatible expert package into named predicates and wrapper goals.
+
+Potential strategy:
+
+- fact types -> module-scoped typed predicates or immutable snapshot predicates;
+- rules -> generated clauses for query-oriented experts;
+- goals -> exported named query IDs;
+- =notProvable= -> negation-as-failure only under the declared profile;
+- recursive relationships -> tabled predicates when the package requires it;
+- questions -> remain outside Prolog as session effect requests;
+- explanations -> proof-carrying generated predicates or instrumented clause wrappers.
+
+A production-rule package whose semantics depend on agenda order, salience, or retraction-driven activation must not be translated to ordinary Prolog clauses and called equivalent.
+
+* Backend Lowering: N-Prolog
+
+N-Prolog lowering uses only =star.logic.portable-prolog/1= plus N-Prolog-specific packages that explicitly pin the backend.
+
+Restrictions in the initial portable expert subset should be stronger than SWI:
+
+- no tabled-query requirement;
+- no SWI-specific dictionaries/attributed variables/directives;
+- no assumption that CLP(FD) heuristics or domains match SWI;
+- one query per worker process initially;
+- named wrappers only;
+- bounded answer materialization;
+- explicit JSON/string-mode bootstrap in the adapter.
+
+* Portable Expert Profiles
+
+Do not create one misleading =portable= boolean. Define named profiles.
+
+** =expert.relational/1=
+
+Good candidate for SWI-Prolog and N-Prolog portability:
+
+- immutable/source facts;
+- pure fact patterns;
+- conjunction/disjunction;
+- equality/inequality/comparisons;
+- bounded pure recursion that does not require backend-specific tabling;
+- named goals;
+- boolean conclusions;
+- explicit proof-carrying wrappers when implemented.
+
+** =expert.production/1=
+
+LISA-oriented semantics:
+
+- working memory;
+- fact deltas;
+- agenda activations;
+- salience;
+- negative/existential conditional elements;
+- assertion/retraction;
+- quiescence;
+- optional truth maintenance;
+- rule-firing trace.
+
+** =expert.consultation/1=
+
+Higher-level session semantics:
+
+- typed questions;
+- goals;
+- conclusions;
+- explanations;
+- bounded interaction;
+- explicit backend implementation profile.
+
+An expert package may implement =expert.consultation/1= using either relational or production semantics if its manifest includes tested backend artifacts.
+
+* Static Diagnostics
+
+The compiler should produce specific errors such as:
+
+#+begin_example
+expertUnknownFactType
+expertUnboundVariable
+expertBindingTypeMismatch
+expertIllegalSourceMutation
+expertUnsupportedNegation
+expertSalienceRequiresProductionProfile
+expertQuestionTypeInvalid
+expertQuestionCycleUnbounded
+expertUncertaintyUnsupported
+expertExplanationUnavailable
+expertBackendIncompatible
+expertRuleActionEffectDenied
+expertPortableSubsetViolation
+#+end_example
+
+Every diagnostic carries source span and macro-origin chain.
+
+* Linting and Expert-System Quality Checks
+
+Beyond syntax/type checking, add non-fatal lints:
+
+- unreachable rule;
+- rule with no possible producer for a required derived fact;
+- conclusion never consumed and not exported;
+- question answer never used;
+- question trigger impossible under current schemas;
+- mutually recursive goals without a termination-capable backend/profile;
+- contradictory salience/group policy;
+- duplicate rule condition;
+- low-selectivity cross product;
+- conclusion cycle;
+- potential unbounded question loop;
+- proof-required rule with unsupported explanation path;
+- uncertainty contribution outside algebra domain;
+- backend-specific feature prevents declared portability.
+
+Static lint must distinguish proven error from heuristic performance warning.
+
+* Explain the Compiler's Choice
+
+Add a compiler inspection command/API that answers why a backend was selected.
+
+Normalized explanation:
+
+#+begin_example
+requested: auto
+profile: expert.production/1
+required capabilities:
+  - working-memory.delta
+  - agenda.salience
+  - proof.justification
+candidates:
+  lisa: accepted
+  swi-prolog: rejected (agenda.salience unavailable)
+  n-prolog: rejected (agenda.salience unavailable)
+selected: lisa
+policy: star.logic.default-routing/1
+#+end_example
+
+This is critical for operator trust and debugging.
+
+* Testing Strategy
+
+** Parser tests
+
+- all new forms parse through closed reader;
+- malformed syntax reports exact source span;
+- unknown keywords/forms fail closed;
+- no Common Lisp reader execution path.
+
+** Binding/type tests
+
+- introduction/use rules;
+- shared-variable joins;
+- invalid shadowing;
+- incompatible comparison types;
+- action field typing.
+
+** Semantic tests
+
+- =absent= and =notProvable= are distinct;
+- source facts cannot be mutated;
+- salience rejected outside supported profile;
+- uncertainty algebra is explicit;
+- question effects are typed and bounded.
+
+** Lowering tests
+
+- fake backend receives identical normalized expert IR;
+- LISA lowering contains no raw source splice;
+- SWI/N-Prolog wrappers use named operations;
+- backend artifacts are digest-stable for identical normalized input.
+
+** Runtime tests
+
+- session question/resume;
+- conclusion/revocation;
+- backend crash/restart on same pinned backend;
+- budget exhaustion;
+- cancellation;
+- recorded replay;
+- verify replay;
+- cross-backend migration comparison.
+
+** Golden expert fixtures
+
+Create small canonical experts:
+
+1. animal classification — pure relational rules;
+2. transaction risk — joins, thresholds, explanation;
+3. equipment troubleshooting — questions and missing facts;
+4. MYCIN-inspired uncertainty fixture without copying copyrighted prose/data;
+5. graph ownership — recursive SWI-only profile;
+6. streaming alert expert — LISA production profile;
+7. portable Prolog arithmetic/relations — SWI/N-Prolog equivalence fixture.
+
+* Documentation Requirements
+
+User-facing StarLang documentation should teach expert systems in this order:
+
+1. define facts;
+2. write one boolean rule;
+3. run with =backend auto=;
+4. inspect a conclusion and explanation;
+5. add a goal;
+6. add a typed question;
+7. explain backend selection;
+8. pin LISA/SWI/N-Prolog;
+9. understand portability profiles;
+10. add uncertainty only after boolean experts are understood.
+
+Do not lead with native LISA or Prolog syntax. StarLang users should first learn the semantic language.
+
+* Rejected Sugar
+
+** =(prolog "...")=
+
+Rejected. Raw text defeats static checking, source provenance, named-query restriction, and portable replay.
+
+** =(lisa (defrule ...))=
+
+Rejected. It executes or embeds host-specific rule language and couples StarLang source to Common Lisp/LISA internals.
+
+** Generic =(call predicate args...)=
+
+Rejected as a logic primitive. It can become an arbitrary executable-goal escape hatch. Use named declared queries/conditions.
+
+** Bare =not=
+
+Rejected because absence, negation as failure, inequality, and contradiction are distinct semantics.
+
+** Rule RHS arbitrary actor sends
+
+Rejected. Inference should emit checked conclusions/events. Effects stay behind typed StarLang actor/tool boundaries.
+
+** Implicit uncertainty
+
+Rejected. Numeric weights without an algebra are meaningless across engines.
+
+* Implementation Dependency Order
+
+1. land backend-neutral =star-logic= types/policy from STAR-LANG-RESEARCH-022;
+2. add expert syntax nodes to the closed reader without execution semantics;
+3. implement expert sugar expansion and stable source maps;
+4. add binding/type analysis;
+5. define expert IR and canonical JSON;
+6. implement fake expert backend;
+7. implement package manifest/digest generation;
+8. lower the production profile to LISA;
+9. lower relational profile to SWI-Prolog;
+10. lower portable relational subset to N-Prolog;
+11. add ExpertSessionActor and question port;
+12. add proof/explanation normalization;
+13. add uncertainty algebras after boolean expert conformance is green;
+14. add backend-selection explanation tooling;
+15. publish tutorial fixtures only after code paths are executable.
+
+* Acceptance Criteria
+
+1. Expert syntax is parsed only by the closed StarLang reader.
+2. =expert-system= lowers completely into closed checked IR before runtime execution.
+3. No normalized expert IR contains raw Common Lisp, Prolog source, LISA objects, engine handles, or sockets.
+4. Facts reuse existing StarLang type/schema contracts.
+5. Rule variables are lexical, typed, and source-traceable.
+6. =absent=, =notProvable=, inequality, and contradiction remain semantically distinct.
+7. Derived conclusions are separated from canonical source facts.
+8. Questions are typed effect requests owned by ExpertSessionActor, not direct backend I/O.
+9. Explanation requirements normalize to the shared derivation graph.
+10. Uncertainty names an explicit algebra; boolean reasoning works without uncertainty support.
+11. Salience/group semantics cannot be used under a backend/profile that cannot honor them.
+12. Cross-backend expert portability is declared by named semantic profile and proven by fixtures.
+13. Backend pinning is optional in source but deterministic and immutable after plan materialization.
+14. Compiler diagnostics retain source spans and macro-origin chains.
+15. A complete expert can be tested using a fake backend with no LISA/SWI/N-Prolog installed.
+
+* Result
+
+StarLang should gain a compact expert-system layer, not a new embedded language. The layer declares typed facts, rules, goals, questions, conclusions, proofs, and optional uncertainty. It lowers through the existing closed compiler into engine-neutral expert/logic IR. LISA, SWI-Prolog, and N-Prolog are then implementation backends selected only when their advertised semantic profiles satisfy the expert package.
+
+The most important UX feature is not a fancy =defrule= clone. It is making correct expert systems easy to express while making semantic mistakes—ambiguous negation, hidden effects, accidental source mutation, unsupported backend features, unbounded questions, and unexplained conclusions—hard to express.
+
+* Sources
+
+Sources were retrieved and reviewed on 2026-08-13.
+
+- [fn:lisa-language] LISA rule language implementation: https://github.com/youngde811/Lisa/blob/master/src/core/language.lisp
+- LISA MYCIN example and belief-bearing rules: https://github.com/youngde811/Lisa/blob/master/examples/mycin.lisp
+- Sasagawa N-Prolog README: https://github.com/sasagawa888/nprolog
+- Sasagawa N-Prolog CLP(FD): https://github.com/sasagawa888/nprolog/blob/master/document/CLPFD.md
+- Sasagawa N-Prolog JSON: https://github.com/sasagawa888/nprolog/blob/master/document/JSON.md
+- SWI-Prolog Machine Query Interface: https://www.swi-prolog.org/pldoc/package/mqi.html
+- SWI-Prolog tabled execution: https://www.swi-prolog.org/pldoc/man?section=tabling
+- SWI-Prolog incremental tabling: https://www.swi-prolog.org/pldoc/man?section=tabling-incremental
+- StarLang current closed parser/compiler surface: https://github.com/lost-rob0t/star-lang/blob/main/prototype/core-surface-prototype.lisp
+- StarLang current schema fixture style: https://github.com/lost-rob0t/star-lang/blob/main/fixtures/star-cl.star
+- [[file:STAR-LANG-RESEARCH-020-hygienic-macro-expansion.org][STAR-LANG-RESEARCH-020 Hygienic Macro Expansion]]
+- [[file:STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
+- [[file:STAR-LANG-RESEARCH-022-three-backend-logic-runtime-selection.org][STAR-LANG-RESEARCH-022 Three-Backend Logic Runtime Selection]]
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-13 | Define expert-system source forms, fact/rule/goal/question semantics, session actor protocol, uncertainty/proof rules, backend lowering restrictions, diagnostics, and conformance strategy | ChatGPT agent | StarLang source audit plus LISA, SWI-Prolog, and N-Prolog primary sources |
+
+* Footnotes and Glossary
+
+- *Expert system* — A declarative knowledge package containing facts/schemas, inference rules or queries, goals, and explanation behavior, optionally including interactive questions and uncertainty.
+- *Syntactic sugar* — Source-level convenience syntax that expands into a smaller checked core and does not survive as an independent runtime construct.
+- *Conclusion* — Derived expert state with a justification, distinct from canonical source data.
+- *Question port* — Typed effect boundary through which an expert session requests missing information from a UI, agent, test harness, or operator.
+- *Salience* — Production-rule activation priority. It has no automatic portable meaning in ordinary Prolog resolution.
+- *Negation as failure* — Query semantics where inability to prove a goal is treated as failure/negative evidence under a declared closed-world profile; distinct from absence in working memory.
+- *Uncertainty algebra* — Versioned formal rule for combining positive/negative evidence, such as a certainty-factor or Dempster-Shafer profile.
+- *Partial match* — Information about a production rule whose conditions are only partly satisfied.
+- *Backend lowering* — Trusted compiler step that turns backend-neutral expert IR into an engine-specific artifact without exposing native syntax in StarLang source.

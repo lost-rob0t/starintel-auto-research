@@ -1,0 +1,123 @@
+:PROPERTIES:
+:ID:       star-lang-design-008-runtime-review-amendment
+:END:
+#+title: STAR-LANG-008 Runtime Review Amendment
+#+description: Record the 2026-08-13 operator decisions that amend STAR-LANG-002 without changing its approved semantic sections.
+#+status: REVIEW
+#+filetags: :starintel:design:star-lang:runtime:compiler:review:
+#+created: [2026-08-13 Thu]
+#+last_modified: [2026-08-13 Thu]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Static rejections | StarLang maintainer | APPROVED | Operator approval of the STAR-LANG-002 rejection set | Operator review 2026-08-13 |
+| Runtime model | Runtime maintainer | APPROVED | Operator approval | Operator review 2026-08-13 |
+| Deterministic runtime | Runtime maintainer | APPROVED | Operator approval | Operator review 2026-08-13 |
+| Fault model | Runtime maintainer | APPROVED | Operator approval | Operator review 2026-08-13 |
+| Portability | Runtime maintainer | APPROVED | Operator approval | Operator review 2026-08-13 |
+| Compatibility policy | Runtime maintainer | APPROVED | Operator approval | Operator review 2026-08-13 |
+| Conformance gates | Runtime maintainer | APPROVED | Operator approval | Operator review 2026-08-13 |
+| Implementation order | Repository maintainer | APPROVED | Operator approval | Operator review 2026-08-13 |
+| Repository gate | Repository maintainer | APPROVED | Operator approval | Operator review 2026-08-13 |
+| Runtime compiler policy | StarLang maintainer | APPROVED | Expose EVAL as a selectable runtime compiler in CLI and Lisp API | Operator review 2026-08-13 |
+| Implementation completion | Repository maintainer | NOT STARTED | Implement and test the approved changes in lost-rob0t/star-lang | Current source audit 2026-08-13 |
+
+* Scope
+
+This node amends the review decisions in [[file:STAR-LANG-002-durable-actor-runtime.org][STAR-LANG-002 Durable Actor Runtime]]. It does not replace the approved static rejection list, deterministic-runtime semantics, fault model, portability model, compatibility policy, conformance gates, implementation order, or repository gate.
+
+* Domain-Neutral Core
+
+StarLang is a reusable language and actor runtime. Franklin County is an application of StarLang, not part of the generic language contract.
+
+Generic StarLang design, examples, naming, runtime systems, and conformance material should use domain-neutral actors and data. Franklin-specific source profiles, names, applicability rules, and adapters belong in government-data application material.
+
+A downstream Franklin integration test may exist where it provides real integration evidence, but the generic runtime must not use Franklin as its architectural vocabulary.
+
+* Test-Only Synthetic Material
+
+Generated fake or simulated material is allowed only for tests and conformance.
+
+The generic compiler/runtime must not generate fabricated production records, fake source material, or fake production state. Deterministic test ports, test actors, controlled failure injection, and generated fixtures remain valid when clearly confined to the test/conformance path.
+
+* Runtime Compiler Decision
+
+Common Lisp =EVAL= is an approved runtime compiler strategy. It is not globally prohibited.
+
+The intended public command-line selection is:
+
+#+begin_example
+starlang ... --runtime-compiler eval
+#+end_example
+
+The Lisp API selection is:
+
+#+begin_src lisp
+(load-star-runtime source :runtime-compiler :eval ...)
+#+end_src
+
+The existing Lisp API style uses =&rest= arguments with keyword options; the runtime compiler option should follow that style and be forwarded to the implementation that materializes generated StarLang actors or constructors.
+
+Runtime compiler selection occurs after ordinary StarLang parsing and validation. Changing the runtime compiler must not change StarLang source semantics or normalized IR semantics.
+
+* Current Source Evidence
+
+The implementation repository already exists at [[https://github.com/lost-rob0t/star-lang][lost-rob0t/star-lang]]. Its current README states that =prototype/= remains the authoritative working implementation while final systems are extracted incrementally.
+
+The current constructor runtime already materializes generated constructor forms using Common Lisp =EVAL=. The problem is therefore not the mere existence of EVAL; the missing piece is an explicit runtime-compiler policy and public selection surface.
+
+Two command-line layers currently exist and must not be conflated:
+
+- =prototype/run-star.lisp= is a real argument parser for =load= and =load-url= and accepts loader/network/cache/manifest/import-identity options, but no runtime-compiler option.
+- the installed Nix =bin/starlang= wrapper currently starts SBCL with =starlang-prototype= loaded and passes its arguments to SBCL; it does not currently invoke =run-star.lisp= as the product CLI.
+
+Therefore implementing the approved =starlang ... --runtime-compiler eval= interface requires deciding/wiring the installed =bin/starlang= entry point to the StarLang CLI, not merely adding one parser branch to =run-star.lisp=.
+
+The current Lisp API accepts extensible keyword arguments but has no explicit runtime-compiler policy.
+
+* Replacement Blockers for STAR-LANG-002
+
+The earlier blocker section contains stale planning statements. Replace it conceptually with the following current blockers:
+
+1. *Runtime compiler selection is not implemented.* Add =--runtime-compiler eval= to the actual StarLang product CLI and =:runtime-compiler :eval= to the Lisp API/runtime materialization path, with tests. The installed =bin/starlang= entry point currently starts SBCL directly, so CLI wiring is part of this work.
+2. *Repository license records disagree.* The provisioning design records GPL-3.0 while the canonical =lost-rob0t/star-lang= LICENSE declares =AGPL-3.0-only=. Reconcile the research record to the repository.
+3. *The parent government-data protocol is defined but remains under review.* =STAR-RESEARCH-PIPELINE-004 Government Data Revision Protocol Amendment= exists; the old statement that it still needs to be defined is obsolete.
+4. *Final package extraction remains incomplete.* The canonical repository still identifies =prototype/= as authoritative and explicitly says full research conformance has not yet been reached.
+5. *Sento compatibility still requires conformance evidence before any fork decision.*
+6. *Persistence, artifact delivery, outbox/recovery, and crash-recovery work still require implementation evidence.*
+7. *Runtime-compiler equivalence tests are missing.* The selected strategy must produce the same validated StarLang behavior expected by the existing conformance contract.
+
+* Repository Gate Correction
+
+The repository gate is no longer a pre-creation gate because =lost-rob0t/star-lang= exists. Treat it as a verification/reconciliation gate covering repository identity, current license, maintainers, branch policy, ASDF naming, dependency locking, Nix/Roswell entry points, CI matrix, release/changelog policy, and upstream contribution policy.
+
+Current repository evidence overrides stale provisioning prose when the two disagree.
+
+* Implementation Order Amendment
+
+Keep the approved STAR-LANG-002 implementation order. Remove application coupling from the generic steps:
+
+- compiler generation for actor systems includes explicit runtime-compiler selection;
+- the generic conformance step uses a domain-neutral reference deployment;
+- application-specific live adapters come later under their own approved application designs.
+
+* Decision
+
+STAR-LANG-002 remains the durable runtime design. This amendment records the operator-approved interpretation: domain-neutral core, synthetic material only for tests, explicit runtime compiler selection with =eval= as an approved strategy, and the corrected blocker/repository-gate state based on current tracked source.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-13 | Clarify that installed bin/starlang currently starts SBCL directly and must be wired as part of CLI runtime-compiler support | ChatGPT agent | lost-rob0t/star-lang README, flake.nix, prototype/run-star.lisp |
+| 2026-08-13 | Record operator approvals, EVAL runtime compiler policy, domain-neutralization, test-only synthetic material, and corrected blockers | ChatGPT agent | Operator review and current repository source audit 2026-08-13 |
+
+* Footnotes and Glossary
+
+- *Runtime compiler* — The selected Common Lisp mechanism used to materialize compiler-produced StarLang forms at runtime.
+- *Product CLI* — The installed =bin/starlang= entry point exposed to users; it is distinct from an internal/prototype argument parser until explicitly wired together.
+- *Domain-neutral* — Generic language/runtime semantics that do not depend on one application, jurisdiction, dataset, or customer.
+- *Conformance fixture* — Test-only controlled input, substitute, failure condition, or expected output used to verify runtime semantics.
+- *Repository gate* — Verification that the research record matches the canonical implementation repository's current packaging and maintenance decisions.

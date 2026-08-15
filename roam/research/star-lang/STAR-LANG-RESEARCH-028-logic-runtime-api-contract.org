@@ -1,0 +1,601 @@
+:PROPERTIES:
+:ID:       star-lang-research-028-logic-runtime-api-contract
+:END:
+#+title: STAR-LANG-RESEARCH-028 Logic and Expert Runtime API Contract
+#+description: Source- and backend-grounded research enumerating the StarLang logic/expert runtime API, Prolog-inspired operations, portable semantic core, backend-only extensions, and hard failure boundaries for LISA, SWI-Prolog, and N-Prolog.
+#+status: REVIEW
+#+filetags: :starintel:star-lang:logic:expert-systems:api:prolog:lisa:swi-prolog:n-prolog:semantics:capabilities:
+#+created: [2026-08-15 Sat]
+#+last_modified: [2026-08-15 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Verify pinned StarLang source audit and primary backend API evidence | Source Audit; Primary Sources |
+| Portable API boundary | Logic runtime maintainer | PENDING | Confirm portable operations do not smuggle Prolog/LISA-specific semantics into the common layer | Portable Core Findings |
+| Backend capability matrix | Backend maintainers | PENDING | Reproduce every YES/PARTIAL claim with adapter fixtures | Backend Capability Matrix |
+| Language ergonomics | StarLang maintainer | PENDING | Review Lisp-native source operation candidates against the closed reader/compiler | Source API Candidates |
+| Security | Security reviewer | PENDING | Confirm no raw engine source, arbitrary callable goal, host evaluation, or unbounded native introspection is exposed | Security Findings |
+| Implementation | Repository maintainer | NOT STARTED | Implement only after STAR-LANG-009 is approved and conformance fixtures exist | Implementation Consequences |
+
+* Related Nodes
+
+- [[file:STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
+- [[file:STAR-LANG-RESEARCH-022-three-backend-logic-runtime-selection.org][STAR-LANG-RESEARCH-022 Three-Backend Logic Runtime Selection]]
+- [[file:STAR-LANG-RESEARCH-023-expert-system-language-surface.org][STAR-LANG-RESEARCH-023 Expert-System Language Surface]]
+- [[file:STAR-LANG-RESEARCH-026-explicit-logic-backend-selection.org][STAR-LANG-RESEARCH-026 Explicit Logic Backend Selection]]
+- [[file:STAR-LANG-RESEARCH-027-lisp-native-pragma-compiler-directives.org][STAR-LANG-RESEARCH-027 Lisp-Native Pragma and Compiler Directives]]
+- [[file:../../design/star-lang/STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
+- [[file:../../design/star-lang/STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Research Archive]]
+- Canonical implementation: [[https://github.com/lost-rob0t/star-lang][lost-rob0t/star-lang]]
+
+* Research Question
+
+What exact API should StarLang expose for logic programming and expert-system execution if the surface should feel natural to Prolog users, remain unmistakably Lisp-like, and still tell the truth about the semantic differences among LISA, SWI-Prolog, and N-Prolog?
+
+The required outcome is not a largest-common-denominator wrapper and not a union of every native predicate. The required outcome is:
+
+1. a small engine-neutral runtime control protocol;
+2. explicit semantic profiles for operations whose meaning is not portable;
+3. source forms that lower to closed compiler-owned IR;
+4. compile/materialization-time rejection when the selected backend cannot provide the requested semantics;
+5. normalized results, failures, proofs, usage, and cancellation;
+6. no raw engine source, native engine handles, or arbitrary host evaluation.
+
+* Method
+
+This pass audited:
+
+- current =lost-rob0t/star-lang= source at commit =067f12506f429c8d34f0383729972e3ee1337c05=;
+- the current closed reader and core-surface tests;
+- current constructor declarations and runtime-constructor tests;
+- the extracted =starlang-compiler= package state versus transitional =prototype/= compiler authority;
+- existing STAR-LANG-RESEARCH-021/022/023/026/027 and STAR-LANG-007;
+- current SWI-Prolog database, transaction, tabling, and query behavior from official SWI documentation;
+- current LISA public package exports and maintained source;
+- current N-Prolog manual and project documentation.
+
+Backend documentation was retrieved on 2026-08-15.
+
+* Current StarLang Source Audit
+
+** Pinned source baseline
+
+Canonical StarLang commit inspected:
+
+#+begin_example
+067f12506f429c8d34f0383729972e3ee1337c05
+#+end_example
+
+This is important because the design must distinguish existing implementation from proposed language/runtime surface.
+
+** Closed reader is a real constraint
+
+The current =prototype/core-surface-prototype.lisp= implements a closed StarLang source reader. The corresponding tests prove rejection of Common Lisp reader evaluation, structures, pathnames, vectors, package-qualified symbols, malformed source, and multiple top-level forms.
+
+The reader also validates a closed keyword vocabulary. Therefore a source form such as:
+
+#+begin_src lisp
+(pragma :backend :swi-prolog)
+#+end_src
+
+requires deliberate additions to reader/compiler vocabulary and tests. It is not automatically legal merely because Common Lisp would read it.
+
+The same warning applies to a tempting fact syntax such as:
+
+#+begin_src lisp
+(assert! (entity :type "analyst" :confidence 0.97))
+#+end_src
+
+Three separate issues exist:
+
+1. =assert!= is not currently a StarLang core form;
+2. schema-specific keywords such as =:type= cannot simply bypass the closed keyword rules;
+3. the current source reader intentionally accepts a conservative numeric literal set, so a decimal literal must not be assumed legal without a reader change.
+
+Research conclusion: keep the =assert!= operation shape, but do not hard-code arbitrary field keywords or decimal-reader expansion into the logic API itself.
+
+** Constructor machinery is useful precedent
+
+=fixtures/star-cl-constructors.star= already describes generated/custom constructors using checked document identities, lambda lists, bindings, and =:rest-keywords=. =prototype/runtime-compiler-tests.lisp= shows the trusted Common Lisp runtime API invoking generated constructors with keyword arguments.
+
+This supports two different ergonomic layers:
+
+- trusted Common Lisp host constructors may remain keyword-friendly;
+- untrusted =.star= fact construction should remain compiler/schema checked and must not require arbitrary keyword interning.
+
+A source-safe fact candidate is therefore:
+
+#+begin_src lisp
+(assert!
+  (entity
+    (type "analyst")
+    (confidence ?confidence)))
+#+end_src
+
+The earlier plist-shaped form remains a possible future surface only if the closed reader gains a safe schema-aware field-label mechanism.
+
+** Compiler extraction is transitional
+
+The extracted =starlang-compiler= ASDF system is currently much smaller than the compiler authority still present under =prototype/=. Existing research already specifies final package extraction, but this audit must not claim that =star-logic-*= systems or the full expert compiler exist today.
+
+Research conclusion: STAR-LANG-009 should specify final ownership while explicitly marking every logic API implementation as future work.
+
+** No implemented logic backend runtime was found
+
+The canonical source tree contains logic-related design/gap documentation but no current =star-logic-protocol=, LISA adapter, SWI adapter, or N-Prolog adapter implementation.
+
+Therefore the API defined from this research is a design contract, not documentation of a shipped runtime.
+
+* Backend Model: Why One Flat API Would Be Wrong
+
+** SWI-Prolog
+
+SWI is a relational Prolog runtime with nondeterministic answer enumeration, dynamic predicate updates, =asserta/1= versus =assertz/1= clause ordering, =retract/1= and =retractall/1=, transactions and snapshots over the dynamic database, and tabled execution.
+
+These semantics are observable. For example:
+
+- =asserta= versus =assertz= affects clause order;
+- =retract= unifies against clauses and participates in the logical update view;
+- =transaction= provides isolated dynamic-database updates that commit atomically;
+- =snapshot= reasons over a frozen dynamic-database state and discards modifications;
+- tabling memoizes answers and changes recursive termination behavior.
+
+They must not be represented as generic operations unless StarLang defines equivalent observable semantics.
+
+** N-Prolog
+
+The maintained N-Prolog manual documents Prolog-style unification, conjunction/disjunction, =assert=, =asserta=, =assertz=, =retract=, =retractall=, =abolish=, =call=, =clause=, =once=, =findall=, =bagof=, =setof=, negation as failure, exception handling, dynamic predicates, and occurs-check unification.
+
+The project explicitly states it is not ISO Prolog although it covers much of the ISO core for its intended use. Its manual also documents behavior differences such as restricted =atom_concat/3= decomposition.
+
+Research conclusion: N-Prolog can support a conformance-tested portable-Prolog profile, but “same predicate name” is not sufficient evidence of complete SWI equivalence.
+
+** LISA
+
+LISA is a forward-chaining RETE expert-system shell. Its public package exports include =ASSERT=, =ASSERT-INSTANCE=, =RETRACT=, =RETRACT-INSTANCE=, =MODIFY=, =RUN=, =HALT=, =AGENDA=, =FOCUS=, =FOCUS-STACK=, =CONTEXTS=, =RESET=, =RULES=, =FACTS=, =DEPENDENCIES=, =WITH-SIMPLE-QUERY=, and rule/network inspection. Its maintained package also exposes belief-system machinery separately.
+
+These are production-system semantics, not aliases for SLD resolution. Agenda ordering, focus/context state, RETE activations, working-memory mutation, and belief combination have no automatic Prolog equivalent.
+
+Research conclusion: LISA should expose production/expert profiles directly. It should not be forced to pretend that forward chaining is merely another implementation of unrestricted Prolog query semantics.
+
+* API Taxonomy
+
+The API should be divided by semantic authority rather than by backend brand.
+
+** Layer A: engine-neutral runtime control
+
+These operations can be normalized without claiming identical inference semantics:
+
+#+begin_example
+backendDescriptor
+startBackend
+stopBackend
+openSession
+closeSession
+sessionDescriptor
+loadPackage
+applyFactDelta
+invokeOperation
+nextResult
+cancelOperation
+operationStatus
+logicUsage
+logicHealth
+#+end_example
+
+The runtime protocol should use stable IDs and normalized records. Native sessions, engines, clauses, RETE tokens, sockets, and process handles stay adapter-private.
+
+** Layer B: portable session-fact projection
+
+A useful common layer is possible if StarLang defines its own semantics:
+
+#+begin_example
+assertSessionFact
+retractSessionFactById
+listSessionFacts
+#+end_example
+
+The key is that these are *StarLang session facts*, not native Prolog database clauses and not arbitrary LISA CLOS objects.
+
+The adapter projects a typed StarLang fact into backend-native state. The StarLang fact has a stable identity and schema. Retraction is by StarLang identity, not by native pattern matching.
+
+A portable atomic replacement operation is deliberately not assumed. Portable replacement can be expressed as explicit retract+assert without claiming atomicity; a future exact atomic-replace profile may be researched separately.
+
+This makes a Lisp-native convenience such as =assert!= viable without promising Prolog =assertz/1= semantics.
+
+** Layer C: named query protocol
+
+The normalized query protocol should support:
+
+#+begin_example
+solve
+next
+solutions
+exists?
+cancel!
+#+end_example
+
+but only over compiler-declared named queries/goals.
+
+A caller does not pass arbitrary Prolog source or a native callable term. Query parameter values are typed StarLang data. Results are normalized bindings plus optional derivation/proof data.
+
+Observable contract decisions required:
+
+- logical failure is not an exception;
+- zero answers is represented distinctly from backend failure;
+- answer duplication is preserved unless a collector explicitly requests distinctness;
+- answer order is *not portable* unless the semantic profile declares an ordering contract;
+- query cancellation has a terminal normalized state;
+- an answer stream belongs to exactly one operation/session;
+- replay records the selected backend, package digest, query ID, inputs, terminal state, and result/proof digest.
+
+** Layer D: relational logic operations
+
+Prolog-shaped condition operations are meaningful under a relational profile:
+
+#+begin_example
+unify
+notProvable
+different
+once
+findAll
+distinctSolutions
+sortedDistinctSolutions
+#+end_example
+
+Do not blindly expose =bagof= and =setof= as portable language primitives. Their free-variable grouping semantics are useful Prolog behavior but make the source contract more engine-shaped than necessary.
+
+A StarLang collector can instead normalize the intent:
+
+#+begin_example
+(solutions query-id ...
+  (duplicates preserve)
+  (order unspecified))
+
+(solutions query-id ...
+  (duplicates remove)
+  (order canonical))
+#+end_example
+
+If exact Prolog =bagof/3= or =setof/3= semantics are required, that belongs to a portable-Prolog or native-Prolog profile.
+
+** Layer E: Prolog dynamic-database extension
+
+These operations are not generic fact-store operations:
+
+#+begin_example
+assertClauseFront
+assertClauseBack
+retractClause
+retractAllClauses
+abolishPredicate
+inspectClause
+#+end_example
+
+They require a profile such as =star.logic.prolog-db/1=.
+
+Reason: clause position, clause unification, predicate properties, logical update view, and abolishing a predicate definition are observable Prolog semantics.
+
+StarLang should not spell the portable fact API =asserta!= or =assertz!=.
+
+** Layer F: SWI transactional/tabled extensions
+
+Candidate semantic profiles:
+
+#+begin_example
+star.logic.tabled/1
+star.logic.incremental-tabled/1
+star.logic.transactional-db/1
+star.logic.snapshot/1
+#+end_example
+
+Operations include:
+
+#+begin_example
+transaction
+snapshot
+table
+invalidateTable
+#+end_example
+
+The public contract must define exact supported behavior rather than forwarding arbitrary SWI directives.
+
+** Layer G: production-system extension
+
+Candidate production operations:
+
+#+begin_example
+runRules
+haltRules
+agenda
+focus!
+focusStack
+contexts
+facts
+rules
+dependencies
+partialMatches
+modifyFact!
+resetWorkingMemory!
+#+end_example
+
+These belong to production/expert profiles and map naturally to LISA. They are not required of Prolog backends.
+
+=runRules= must define quiescence/limit behavior. =agenda= and =focus!= expose observable conflict-resolution state and therefore require the production profile.
+
+** Layer H: uncertainty/belief extension
+
+Belief operations must declare an algebra, e.g. boolean, certainty-factor, or Dempster-Shafer.
+
+A generic numeric =confidence= field is not enough to define inference math.
+
+Candidate normalized operations:
+
+#+begin_example
+belief
+beliefEvidence
+combineEvidence
+#+end_example
+
+The actual combination operation should normally remain inside the compiled expert package. Runtime callers should inspect normalized conclusions rather than arbitrarily invoking native belief combinators.
+
+* Backend Capability Matrix
+
+Legend:
+
+- YES: reasonable initial capability claim, still fixture-gated before implementation advertising;
+- PROFILE: available only through a named semantic profile;
+- PARTIAL: native support exists but not enough evidence for the broad StarLang contract;
+- NO: no initial equivalence claim.
+
+| Operation or semantic family | LISA | SWI-Prolog | N-Prolog | StarLang treatment |
+|------------------------------+------+------------+----------+--------------------|
+| backend/session lifecycle | YES | YES | YES | portable runtime protocol |
+| typed session-fact assert | YES | YES | YES | portable StarLang fact projection |
+| retract StarLang fact by stable ID | YES | YES | YES | portable fact projection with adapter-maintained identity |
+| raw clause-front insertion | NO | YES | YES | =prolog-db/1= only |
+| raw clause-back insertion | NO | YES | YES | =prolog-db/1= only |
+| pattern clause retract | NO | YES | YES | =prolog-db/1= only |
+| abolish predicate definition | NO | YES | YES | =prolog-db/1= only |
+| named relational query | NO initial equivalence | YES | YES/PARTIAL | =query/1=; N-Prolog fixture-gated |
+| nondeterministic answer stream | NO initial equivalence | YES | YES | relational profile |
+| unification | pattern matching, not claimed equivalent | YES | YES | relational profile |
+| negation as failure | NO initial equivalence | YES | YES | relational profile; never alias =absent= |
+| ordinary recursion | NO initial equivalence | YES | YES | relational profile |
+| tabling | NO | YES | NO initial claim | SWI tabled profile |
+| incremental tabling | NO | YES | NO | SWI-only initial profile |
+| transaction over dynamic DB | NO | YES | NO evidence | SWI transactional profile |
+| snapshot over dynamic DB | NO | YES | NO evidence | SWI snapshot profile |
+| finite-domain constraints | NO native profile | YES | PARTIAL | separate exact constraint profiles |
+| production agenda | YES | NO equivalence | NO | production profile |
+| salience | YES | NO equivalence | NO | production profile |
+| focus/context stack | YES | NO equivalence | NO | production profile |
+| modify working-memory fact | YES | via DB update, different semantics | via DB update, different semantics | production profile; portable replacement uses explicit fact-ID deltas |
+| run to quiescence | YES | NO equivalent engine concept | NO equivalent engine concept | production profile |
+| partial match introspection | YES/current maintained tooling | NO equivalent claim | NO | production introspection profile |
+| belief algebra | YES | library/package-dependent | library/package-dependent | named expert uncertainty profile only |
+| normalized proof/explanation | adapter work required | wrapper work required | wrapper work required | StarLang proof contract, capability-gated |
+| cancellation | cooperative/actor boundary | process/query control | process control | normalized runtime control with backend-specific strength |
+| hard resource limits | adapter-dependent | multiple mechanisms, not one universal bound | process/container limits | explicit descriptor dimensions |
+
+* Portable Core Findings
+
+The smallest useful hard core is:
+
+1. backend descriptor/capability discovery;
+2. start/stop backend;
+3. open/close logic session;
+4. load a digest-locked logic/expert package;
+5. apply typed StarLang fact deltas;
+6. invoke a *named compiled operation*;
+7. enumerate normalized results;
+8. cancel an operation;
+9. inspect operation terminal state and resource usage;
+10. request normalized explanation/proof where the plan requires it.
+
+Everything else is a semantic profile.
+
+This is intentionally smaller than Prolog. It is also more truthful.
+
+* Source API Candidates
+
+** Candidate retained: =assert!=
+
+The name is concise, Lisp-native, and familiar.
+
+Hard semantic candidate:
+
+#+begin_src lisp
+(assert!
+  (entity
+    (type "analyst")
+    (confidence ?confidence)))
+#+end_src
+
+Meaning: construct one typed *session fact* using compiler-resolved schema/constructor data and add it to the current logic session. Return a stable StarLang fact ID/handle.
+
+It does *not* mean:
+
+- SWI/N-Prolog =assertz=;
+- LISA's raw =ASSERT= macro;
+- arbitrary clause compilation;
+- canonical source-document mutation.
+
+** Candidate retained: =retract!= by identity
+
+#+begin_src lisp
+(retract! fact-id)
+#+end_src
+
+Meaning: remove the session fact identified by =fact-id= from the current session projection.
+
+Pattern-based native Prolog retraction is a separate profiled API.
+
+** Candidate retained: =solve=
+
+#+begin_src lisp
+(solve ownership-path
+  (from source-id)
+  (to ?target))
+#+end_src
+
+Meaning: invoke a compiler-declared named operation with typed bindings. It does not accept source text or a dynamically constructed callable native goal.
+
+** Candidate retained: =solutions=
+
+#+begin_src lisp
+(solutions ownership-path
+  (from source-id)
+  (to ?target)
+  (duplicates preserve)
+  (order unspecified)
+  (limit 100))
+#+end_src
+
+This child-form spelling aligns with the closed reader and the normative STAR-LANG-009 direction. The semantic contract distinguishes duplicate policy, order policy, and limits.
+
+** Candidate retained: =exists?=
+
+Boolean first-solution query over a named operation. It is not a substitute for working-memory =absent=.
+
+** Candidate retained: =explain=
+
+Requests the normalized proof/derivation attached to a result or conclusion. If the selected profile/package does not support the required proof contract, compilation/materialization must fail when explanations are required.
+
+* Operations That Should Not Enter the Portable Source Core
+
+Do not make these generic v1 operations:
+
+#+begin_example
+asserta!
+assertz!
+cut!
+call
+consult
+reconsult
+abolish!
+clause
+table!
+transaction
+snapshot
+agenda
+focus!
+modify!
+belief-combine!
+eval-prolog
+eval-lisp
+#+end_example
+
+Some are valid profiled extensions. =eval-prolog= and =eval-lisp= are denied escape hatches.
+
+* Failure Model Findings
+
+At minimum the final API needs typed failures for:
+
+#+begin_example
+logic-capability-unavailable
+logic-profile-mismatch
+logic-backend-unavailable
+logic-package-mismatch
+logic-mapping-mismatch
+logic-invalid-operation
+logic-invalid-binding
+logic-session-closed
+logic-operation-cancelled
+logic-operation-timeout
+logic-resource-limit
+logic-backend-failure
+logic-proof-unavailable
+logic-state-conflict
+logic-unsafe-backend-override
+#+end_example
+
+Logical query failure is *not* =logic-backend-failure=. It is a normal zero-answer terminal outcome.
+
+* Security Findings
+
+The safest common model is named, compiled operations plus typed values.
+
+The following must remain denied:
+
+- caller-selected raw Prolog text;
+- arbitrary native =call/1= equivalents from untrusted StarLang data;
+- Common Lisp =READ= or =EVAL=;
+- arbitrary LISA RHS host calls;
+- unbounded native module/file loading;
+- passing native clause references, RETE nodes, engine pointers, process handles, or sockets through normalized IR;
+- treating an engine-native exception string as a stable StarLang error code.
+
+Rule/query packages are executable artifacts and must be versioned/digest locked.
+
+* Conformance Requirements Suggested by the Research
+
+Every advertised operation/profile should have:
+
+1. positive fixture;
+2. unsupported-backend fixture;
+3. zero-answer/logical-failure fixture;
+4. duplicate-answer fixture where applicable;
+5. cancellation fixture;
+6. budget/limit fixture;
+7. replay fixture;
+8. state-mutation fixture where applicable;
+9. proof/explanation fixture if advertised;
+10. differential fixture against another backend only where semantics are declared equivalent.
+
+Cross-backend tests compare normalized semantics, not native output strings.
+
+* Unresolved Questions
+
+1. Whether source fact field labels should eventually allow a schema-aware keyword form such as =:type= without weakening the reader's closed vocabulary.
+2. Whether a decimal literal extension belongs in core StarLang before expert-system syntax uses literal confidence values.
+3. Whether a future exact atomic-replace profile is useful enough to justify semantics beyond portable explicit retract+assert.
+4. Whether the first N-Prolog adapter can enforce cooperative query cancellation or must treat process termination as the only hard cancellation boundary.
+5. Which exact proof/derivation subset can be normalized across all three backends without fabricating proof detail.
+6. Whether LISA =WITH-SIMPLE-QUERY= should ever satisfy a narrow named fact-query profile distinct from relational =star.logic.query/1=.
+
+* Research Conclusion
+
+StarLang should be Prolog-inspired at the *logic vocabulary* level, not by copying the entire Prolog builtin namespace into every backend.
+
+The stable portable contract should own sessions, typed fact projection, named operation invocation, result enumeration, cancellation, usage, and normalized proof envelopes.
+
+Relational control, Prolog dynamic-database semantics, SWI tabling/transactions, LISA agenda/focus/working-memory behavior, and belief systems must remain explicit versioned profiles.
+
+This gives the language an ergonomic =assert!=/=retract!=/=solve= family while preserving semantic honesty.
+
+* Primary Sources
+
+Retrieved 2026-08-15.
+
+- StarLang current source: https://github.com/lost-rob0t/star-lang/tree/067f12506f429c8d34f0383729972e3ee1337c05
+- StarLang closed reader/tests: https://github.com/lost-rob0t/star-lang/blob/067f12506f429c8d34f0383729972e3ee1337c05/prototype/core-surface-tests.lisp
+- StarLang constructors: https://github.com/lost-rob0t/star-lang/blob/067f12506f429c8d34f0383729972e3ee1337c05/fixtures/star-cl-constructors.star
+- StarLang runtime constructor tests: https://github.com/lost-rob0t/star-lang/blob/067f12506f429c8d34f0383729972e3ee1337c05/prototype/runtime-compiler-tests.lisp
+- SWI-Prolog dynamic database: https://www.swi-prolog.org/pldoc/man?section=dynpreds
+- SWI-Prolog transactions/snapshots: https://www.swi-prolog.org/pldoc/man?section=db
+- SWI-Prolog tabling: https://www.swi-prolog.org/pldoc/man?section=tabling
+- LISA package exports: https://github.com/youngde811/Lisa/blob/master/src/packages/pkgdecl.lisp
+- LISA repository/readme: https://github.com/youngde811/Lisa
+- N-Prolog manual: https://github.com/sasagawa888/nprolog/blob/master/document/MANUAL.md
+- N-Prolog repository/readme: https://github.com/sasagawa888/nprolog
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-15 | Create exhaustive logic/expert runtime API inventory, source audit, semantic layering, capability matrix, source candidates, and failure/conformance requirements | ChatGPT agent | StarLang commit 067f125; SWI docs; LISA source; N-Prolog manual; STAR-LANG-RESEARCH-021/022/023/026/027 |
+
+* Footnotes and Glossary
+
+- *Portable core* — Operations whose StarLang-level observable contract does not depend on one backend's native inference algorithm.
+- *Semantic profile* — Versioned declaration of exact observable logic behavior required or provided by a package/backend.
+- *Session fact* — Typed StarLang-owned mutable fact projected into one logic session; distinct from a canonical source document and from a raw native clause/object.
+- *Named operation* — Compiler-declared query, goal, rule execution entrypoint, or expert operation referenced by stable ID rather than native source.
+- *Logical failure* — Normal query outcome with no solution; not an infrastructure/backend error.
+- *Native escape hatch* — API that accepts engine source, native callable terms, engine handles, or host code; denied in the portable StarLang contract.
+- *Fact projection* — Adapter mapping from a StarLang typed fact and stable identity into backend-native working state.
+- *Quiescence* — Production-system state in which no eligible activation remains to fire.

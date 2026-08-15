@@ -1,0 +1,1289 @@
+:PROPERTIES:
+:ID:       star-lang-research-027-lisp-native-pragma-compiler-directives
+:END:
+#+title: STAR-LANG-RESEARCH-027 Lisp-Native Pragma and Compiler Directives
+#+description: Define a small typed Lisp-native pragma system for scoped StarLang compiler configuration, backend tuning, verification policy, resource defaults, developer artifacts, explanation, reproducibility, and deployment-safe resolution.
+#+status: REVIEW
+#+filetags: :starintel:research:star-lang:compiler:pragma:directives:lisp:configuration:verification:reproducibility:safety:review:
+#+created: [2026-08-15 Sat]
+#+last_modified: [2026-08-15 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Verify source audit, Nim/Common Lisp comparison, option taxonomy, and rejected designs | Research Basis and Sources |
+| Language surface | StarLang maintainer | PENDING | Approve canonical pragma grammar, legal scopes, namespace syntax, and duplicate/unknown behavior | Canonical Grammar and Scope Model |
+| Compiler semantics | Compiler maintainer | PENDING | Approve normalization, typed registry, precedence, identity classes, and explanation contract | Normalized Option Model and Resolution Pipeline |
+| Logic integration | Logic runtime maintainer | PENDING | Confirm =:backend= authority remains in STAR-LANG-RESEARCH-026 and backend-specific tuning is statically checked | Logic Backend and Namespaced Pragmas |
+| Verification policy | Verification maintainer | PENDING | Approve safety floors, source tightening rules, and verification option semantics | Verification Pragmas |
+| Security | Security reviewer | PENDING | Confirm source pragmas cannot execute host code, grant capabilities, or weaken mandatory deployment restrictions | Safety and Authority Boundary |
+| Operations | Operator | PENDING | Approve project/deployment configuration interaction and runtime-policy limit semantics | Project, CLI, and Deployment Interaction |
+| Implementation | Repository maintainer | NOT STARTED | Implement only after research and language/compiler authority are approved | Implementation Consequences |
+
+* Related Nodes
+
+- [[file:STAR-LANG-RESEARCH-020-hygienic-macro-expansion.org][STAR-LANG-RESEARCH-020 Hygienic Macro Expansion and Language Extensibility]]
+- [[file:STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
+- [[file:STAR-LANG-RESEARCH-022-three-backend-logic-runtime-selection.org][STAR-LANG-RESEARCH-022 Three-Backend Logic Runtime Selection]]
+- [[file:STAR-LANG-RESEARCH-023-expert-system-language-surface.org][STAR-LANG-RESEARCH-023 Expert-System Language Surface]]
+- [[file:STAR-LANG-RESEARCH-026-explicit-logic-backend-source-selection.org][STAR-LANG-RESEARCH-026 Explicit Logic Backend Source Selection]]
+- [[file:STAR-LANG-RESEARCH-024-proof-obligations-for-documents-actors-and-ingest.org][STAR-LANG-RESEARCH-024 Proof Obligations for Documents, Actors, and Domain Ingest]]
+- [[file:STAR-LANG-RESEARCH-025-verification-experiment-program-for-actor-ingest.org][STAR-LANG-RESEARCH-025 Verification Experiment Program for Actor Ingest]]
+- [[file:../../design/star-lang/STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Research Archive]]
+
+* Research Question
+
+How should StarLang gain the ergonomic benefits of source-local compiler directives—optimization choices, warnings, backend selection/tuning, verification requests, resource defaults, and developer artifacts—without importing Nim punctuation, exposing Common Lisp evaluation, creating an arbitrary option bag, or allowing source code to grant itself deployment authority?
+
+The desired source remains unmistakably Lisp-family code:
+
+#+begin_src lisp
+(pragma :optimize :speed)
+(pragma :warnings :strict)
+(pragma :backend :swi-prolog)
+#+end_src
+
+The rejected visual direction is:
+
+#+begin_example
+{. optimize: speed .}
+#+end_example
+
+Nim is relevant because its pragmas are compiler-recognized annotations/options, support scoped override concepts, and can affect code generation. Its punctuation and broad compile-time extension mechanisms are not StarLang syntax or authority models.
+
+* Executive Decision
+
+StarLang should adopt one regular compiler-directive form:
+
+#+begin_src lisp
+(pragma <name> <value> ...)
+#+end_src
+
+V1 should use repeated =pragma= forms as the only canonical source spelling. Every recognized pragma is declared in a compiler-owned typed option registry. The registry defines its value schema, legal scopes, option category, merge/resolution rule, backend namespace if any, authority floor/ceiling behavior, reproducibility class, conflicts, and diagnostics.
+
+Pragmas are *data interpreted by the StarLang compiler*. They are not executable Common Lisp, macro calls, arbitrary compile-time functions, or runtime effects.
+
+The source configuration model is intentionally smaller than Nim's. StarLang should copy the useful ergonomic principle—nearby, scoped, compiler-visible configuration—while rejecting unsafe or ambiguous mechanisms such as compile-time shell commands, native-library loading, arbitrary user-defined compiler pragmas, and source-granted capabilities.
+
+The normalized policy pipeline is:
+
+#+begin_example
+compiler defaults
+       ↓
+project configuration
+       ↓
+module pragmas
+       ↓
+declaration pragmas
+       ↓
+operation pragmas
+       ↓
+deployment restrictions
+       ↓
+validated compiler policy
+#+end_example
+
+Deployment restrictions are authoritative constraints, not another source default. Source may request or tighten policy, but cannot grant authority forbidden by deployment configuration.
+
+* Research Basis
+
+** Current StarLang source boundary
+
+The current =lost-rob0t/star-lang= prototype exposes first-class =star-syntax= objects, source spans, origin frames, expansion traces, parser limits, and structured compiler errors. That is a suitable foundation for pragma diagnostics and explanation because a directive can retain the exact source span that introduced a value.
+
+The current compiler boundary remains closed StarLang syntax. Pragmas therefore should be parsed as ordinary StarLang syntax objects and normalized into compiler-owned data; they must not be handed to the Common Lisp reader or evaluator.
+
+Current source evidence:
+
+- [[https://github.com/lost-rob0t/star-lang/blob/main/prototype/core-surface-prototype.lisp][StarLang core surface prototype]]
+- [[https://github.com/lost-rob0t/star-lang/blob/main/prototype/compiler-ir-prototype.lisp][StarLang compiler IR prototype]]
+
+** Common Lisp declaration lessons
+
+Common Lisp declarations provide a useful Lisp-native precedent without defining StarLang semantics. A declaration specifier is list-shaped metadata whose identifier determines how the remaining data is interpreted. =declare= expressions are recognized in defined contexts and are not evaluated as ordinary code. Common Lisp also has explicit declaration scope and an =optimize= declaration.
+
+Useful design lessons:
+
+- compiler metadata can remain ordinary Lisp-shaped data;
+- it can be legal only at specified lexical locations;
+- it does not need a punctuation sublanguage;
+- local compiler policy can have explicit scope;
+- optimization metadata is distinct from executable source.
+
+StarLang should not copy Common Lisp's implementation-defined declaration extensibility or host evaluation model. StarLang needs a closed, typed, reproducible option registry.
+
+Sources reviewed 2026-08-15:
+
+- [[https://www.lispworks.com/documentation/HyperSpec/Body/03_c.htm][Common Lisp HyperSpec 3.3 Declarations]]
+- [[https://www.lispworks.com/documentation/HyperSpec/Body/03_cb.htm][Common Lisp HyperSpec 3.3.2 Declaration Specifiers]]
+- [[https://www.lispworks.com/documentation/HyperSpec/Body/s_declar.htm][Common Lisp HyperSpec DECLARE]]
+- [[https://www.lispworks.com/documentation/HyperSpec/Body/03_cd.htm][Common Lisp HyperSpec Declaration Scope]]
+- [[https://www.lispworks.com/documentation/HyperSpec/Body/d_optimi.htm][Common Lisp HyperSpec OPTIMIZE]]
+
+** Nim pragma lessons
+
+The current Nim manual describes pragmas as compiler information/commands processed during semantic checking. It provides compilation-option pragmas and push/pop forms for temporary scoped override. Nim also supports user-defined/custom pragmas.
+
+StarLang should retain only the useful concepts:
+
+- compiler-recognized source-local metadata;
+- typed values;
+- lexical/scoped effect;
+- compiler options near the declaration they affect;
+- explicit diagnostics for unsupported combinations.
+
+StarLang should reject these aspects for ordinary source:
+
+- Nim's ={. ... .}= punctuation;
+- arbitrary user-defined pragma semantics;
+- pragma mechanisms that can reach native compiler/linker commands;
+- implicit compile-time execution;
+- push/pop state as the primary scope model.
+
+Source reviewed 2026-08-15:
+
+- [[https://nim-lang.org/docs/manual.html#pragmas][Nim Manual — Pragmas]]
+- [[https://nim-lang.org/docs/manual.html#pragmas-compilation-option-pragmas][Nim Manual — Compilation option pragmas]]
+- [[https://nim-lang.org/docs/manual.html#pragmas-push-and-pop-pragmas][Nim Manual — Push and pop pragmas]]
+- [[https://nim-lang.org/docs/manual.html#user-defined-pragmas][Nim Manual — User-defined pragmas]]
+- [[https://nim-lang.org/docs/nimc.html][Nim Compiler User Guide]]
+
+* Canonical Grammar
+
+The V1 surface should be deliberately small.
+
+Conceptual grammar:
+
+#+begin_example
+pragma-form       ::= (pragma pragma-name pragma-argument*)
+pragma-name       ::= keyword | namespaced-keyword
+namespaced-keyword ::= :backend-namespace/option-name
+pragma-argument   ::= typed-literal
+                   | typed-literal-list
+#+end_example
+
+A =typed-literal= is a closed StarLang literal accepted by the registered option schema, for example:
+
+- boolean;
+- integer within a declared range;
+- string where explicitly allowed;
+- keyword from a closed enum;
+- list of closed typed literals where explicitly allowed.
+
+The grammar does *not* make arbitrary StarLang expressions valid pragma arguments.
+
+Canonical examples:
+
+#+begin_src lisp
+(pragma :optimize :speed)
+(pragma :warnings :strict)
+(pragma :debug-info :full)
+(pragma :backend :swi-prolog)
+(pragma :inference-limit 500000)
+(pragma :emit-bindings (:python :typescript))
+#+end_src
+
+Illegal because the value position is executable syntax rather than the registered literal schema:
+
+#+begin_src lisp
+(pragma :memory-limit (calculate-limit environment))
+(pragma :backend (load "engine.lisp"))
+#+end_src
+
+* Why One =pragma= Form
+
+A single shape gives the compiler one normalization path:
+
+#+begin_example
+source syntax object
+      ↓
+lookup pragma descriptor
+      ↓
+validate arity/value schema
+      ↓
+validate legal scope
+      ↓
+record source layer + span
+      ↓
+resolve against inherited layers
+      ↓
+apply deployment constraints
+      ↓
+validated option value
+#+end_example
+
+It also makes formatter behavior, static search, syntax highlighting, documentation lookup, error recovery, duplicate detection, and =--explain-options= output regular.
+
+The language should not create different syntactic families for optimization, verification, backend tuning, and artifact emission.
+
+* Typed Option Registry
+
+Every supported pragma should have a compiler-owned descriptor conceptually equivalent to:
+
+#+begin_src lisp
+(pragma-descriptor
+  :name :inference-limit
+  :category :resource-policy
+  :value-schema (:integer :minimum 1)
+  :legal-scopes (:project :module :declaration :operation)
+  :resolution :replace-nearest
+  :reproducibility :runtime-policy
+  :authority :deployment-bounded
+  :backend nil
+  :conflicts ()
+  :deprecated-by nil)
+#+end_src
+
+This is conceptual compiler data, not proposed user source syntax.
+
+A descriptor needs at least:
+
+- canonical option name;
+- category;
+- exact value schema and arity;
+- legal scopes;
+- inheritance/resolution rule;
+- default source;
+- reproducibility class;
+- artifact/run-plan identity effect;
+- deployment authority rule;
+- backend association for namespaced options;
+- conflicts and dependencies;
+- deprecation/replacement metadata;
+- stable diagnostic identifier family;
+- documentation key.
+
+Unknown options do not dynamically create descriptors.
+
+* Typed Pragma Categories
+
+The registry should classify pragmas by purpose rather than exposing one unstructured property list.
+
+** Compiler behavior
+
+Initial candidates:
+
+#+begin_src lisp
+(pragma :optimize :speed)
+(pragma :warnings :strict)
+(pragma :debug-info :full)
+#+end_src
+
+Recommended initial schemas:
+
+| Pragma | Values | Category | Reproducibility class | Notes |
+|--------+--------+----------+-----------------------+-------|
+| =:optimize= | =:none :speed :space :balanced= | compiler behavior | =:code-generation= | optimization policy, not authority |
+| =:warnings= | =:default :strict :quiet= | compiler behavior | =:diagnostic-only= | cannot suppress mandatory errors |
+| =:debug-info= | =:none :line :full= | compiler behavior | =:code-generation= | changes emitted artifact/debug metadata |
+| =:warnings-as-errors= | boolean | verification/compiler behavior | =:diagnostic-only= | changes build acceptance, not runtime semantics |
+
+=:warnings :quiet= must never downgrade required semantic/safety errors into silence. It affects warnings only.
+
+The candidate =:source-map= duplicates the clearer developer-output name =:emit-source-map=. V1 should keep only =:emit-source-map= to avoid two controls for the same artifact.
+
+** Logic backend
+
+Canonical backend selection belongs to STAR-LANG-RESEARCH-026:
+
+#+begin_src lisp
+(pragma :backend :auto)
+(pragma :backend :lisa)
+(pragma :backend :swi-prolog)
+(pragma :backend :n-prolog)
+#+end_src
+
+The general pragma system owns parsing, typing, scoping, inheritance, explanation, and normalization of this option. It does *not* redefine the backend IDs, =:auto= semantics, compatibility model, or backend authority.
+
+Candidate semantic requirement:
+
+#+begin_src lisp
+(pragma :logic-profile :tabled)
+#+end_src
+
+=:logic-profile= is a semantic requirement. It is checked independently from =:backend=. An incompatible explicit backend pin fails instead of silently weakening the profile.
+
+** Verification
+
+Candidates:
+
+#+begin_src lisp
+(pragma :verify-documents t)
+(pragma :verify-messages t)
+(pragma :deadlock-check :required)
+(pragma :model-check :bounded)
+(pragma :warnings-as-errors t)
+#+end_src
+
+These need authority-aware resolution rather than naive last-write-wins behavior.
+
+Recommended rules:
+
+| Pragma | Source role | Resolution rule |
+|--------+-------------+-----------------|
+| =:verify-documents= | request verification | source may enable; cannot disable a mandatory deployment/compiler floor |
+| =:verify-messages= | request verification | source may enable; cannot disable a mandatory deployment/compiler floor |
+| =:deadlock-check= | request verification level | resolve against minimum required verification level |
+| =:model-check= | request model-check level | source may request stronger supported mode; deployment may require a floor |
+| =:warnings-as-errors= | build acceptance policy | ordinary replace-nearest unless project policy requires strict diagnostics |
+
+If deployment policy requires message verification, this source is invalid:
+
+#+begin_src lisp
+(pragma :verify-messages nil)
+#+end_src
+
+The compiler should reject the attempted relaxation and identify both source and deployment authorities. Silent clamping is inferior because it hides a disagreement between author intent and deployment policy.
+
+Conceptual diagnostic:
+
+#+begin_example
+error STAR-PRAGMA-006: source pragma weakens mandatory policy
+option:           :verify-messages
+source request:   nil
+required minimum: t
+authority:        deployment profile prod-ingest
+#+end_example
+
+Mandatory semantic/safety checks are never disableable by ordinary source pragmas.
+
+** Resource policy
+
+Candidates:
+
+#+begin_src lisp
+(pragma :timeout-ms 10000)
+(pragma :memory-limit 268435456)
+(pragma :mailbox-limit 4096)
+(pragma :retry-limit 3)
+(pragma :inference-limit 500000)
+(pragma :answer-limit 250)
+#+end_src
+
+These are *resource-policy category* options. Their primary reproducibility class is =:runtime-policy= because changing them can change termination, backpressure, retry behavior, answer enumeration, or failure outcomes.
+
+Recommended authority model:
+
+| Option | Source meaning | Deployment role |
+|--------+----------------+-----------------|
+| =:timeout-ms= | requested/default wall-time budget | may impose a lower maximum or mandatory bound |
+| =:memory-limit= | requested/default memory budget | may impose a lower maximum |
+| =:mailbox-limit= | requested actor/mailbox bound | may impose allowed range/maximum |
+| =:retry-limit= | requested retry policy bound | may impose maximum and idempotency requirements |
+| =:inference-limit= | requested logic inference budget | may impose maximum/minimum-required boundedness |
+| =:answer-limit= | requested answer enumeration bound | may impose maximum |
+
+The compiler should distinguish *semantic intent* from *enforcement mechanism*. A timeout value is runtime policy even when an adapter enforces it. A source limit is not permission to consume that many resources if deployment grants less.
+
+** Developer output
+
+Candidates:
+
+#+begin_src lisp
+(pragma :emit-ir t)
+(pragma :emit-manifest t)
+(pragma :emit-source-map t)
+(pragma :emit-bindings (:python :typescript))
+#+end_src
+
+These affect build products rather than StarLang runtime authority.
+
+Recommended classification:
+
+| Option | Reproducibility class | Identity effect |
+|--------+-----------------------+-----------------|
+| =:emit-ir= | =:code-generation= | build receipt/artifact set; not semantic run-plan identity by itself |
+| =:emit-manifest= | =:code-generation= | build artifact set |
+| =:emit-source-map= | =:code-generation= | build artifact set |
+| =:emit-bindings= | =:code-generation= | generated binding artifact identity |
+| =:pretty-diagnostics= | =:diagnostic-only= | excluded from executable/run-plan identity |
+| =:trace= | =:diagnostic-only= or deployment-bounded runtime diagnostics | excluded only if proven not to alter semantics/timing contract |
+
+=:trace= deserves care. If tracing can alter runtime buffering, persistence, or timing guarantees, it should be modeled as runtime policy rather than assumed diagnostic-only. The registry must classify the concrete implementation honestly.
+
+* Logic Backend and Namespaced Pragmas
+
+Backend-specific tuning should use flat namespaced keywords while preserving the same grammar:
+
+#+begin_src lisp
+(pragma :swi/tabling :incremental)
+(pragma :swi/inference-limit 500000)
+
+(pragma :lisa/agenda-strategy :salience)
+(pragma :lisa/working-memory-limit 100000)
+
+(pragma :n-prolog/compatibility :portable)
+#+end_src
+
+The slash is part of a compiler-recognized pragma name. It does not introduce Common Lisp package syntax, host symbols, or a general StarLang namespace operator.
+
+The closed reader/compiler should recognize namespaced pragma keywords through the pragma grammar only. Native package interning is not required.
+
+** Why flat namespaced keywords are canonical
+
+Compare:
+
+#+begin_src lisp
+(pragma :swi/tabling :incremental)
+(pragma :swi/inference-limit 500000)
+#+end_src
+
+with:
+
+#+begin_src lisp
+(pragma :swi
+  (:tabling :incremental)
+  (:inference-limit 500000))
+#+end_src
+
+The flat form wins because it:
+
+- preserves exactly one grammar: =(pragma <name> <value> ...)=;
+- gives every option one canonical registry key;
+- makes duplicate detection local;
+- gives each option its own source span;
+- makes =--explain-options= paths direct;
+- avoids a backend-specific nested mini-language;
+- makes hashing/canonical normalization simpler;
+- makes static search straightforward;
+- allows precise deprecation of one backend option.
+
+The nested form is rejected for V1.
+
+** Static backend checking
+
+A backend-specific source pragma is legal only when the resolved source backend policy is an explicit compatible pin.
+
+Valid:
+
+#+begin_src lisp
+(reason ownership-path
+  (pragma :backend :swi-prolog)
+  (pragma :logic-profile :tabled)
+  (pragma :swi/tabling :incremental)
+  (pragma :swi/inference-limit 500000)
+  ...)
+#+end_src
+
+Invalid:
+
+#+begin_src lisp
+(reason ownership-path
+  (pragma :backend :lisa)
+  (pragma :swi/tabling :incremental)
+  ...)
+#+end_src
+
+Required result: compiler error, never silent ignore.
+
+Also invalid in V1:
+
+#+begin_src lisp
+(reason ownership-path
+  (pragma :backend :auto)
+  (pragma :swi/tabling :incremental)
+  ...)
+#+end_src
+
+Reason: a backend-specific tuning pragma would otherwise influence or depend on =:auto= selection, creating a circular/implicit selection rule. If an author needs SWI-specific tuning, the author should explicitly pin =:swi-prolog=. Generic semantic requirements such as =:logic-profile :tabled= remain portable and can participate in =:auto= selection.
+
+Conceptual diagnostic:
+
+#+begin_example
+error STAR-PRAGMA-005: backend-specific pragma does not match resolved source backend
+pragma:   :swi/tabling
+requires: :swi-prolog
+resolved: :lisa
+#+end_example
+
+* Scope Model
+
+Pragma scopes are:
+
+1. project;
+2. module;
+3. declaration;
+4. operation.
+
+Project options live in project configuration rather than being free-floating StarLang source before a module.
+
+Module example:
+
+#+begin_src lisp
+(module ownership-analysis
+  (pragma :optimize :speed)
+  (pragma :warnings :strict)
+  ...)
+#+end_src
+
+Declaration example:
+
+#+begin_src lisp
+(actor crawler
+  (pragma :mailbox-limit 4096)
+  (pragma :retry-limit 3)
+  ...)
+#+end_src
+
+An =expert-system= is also a declaration scope for pragma purposes unless a future language node explicitly defines a narrower category.
+
+Operation example:
+
+#+begin_src lisp
+(reason ownership-path
+  (pragma :backend :swi-prolog)
+  (pragma :inference-limit 500000)
+  ...)
+#+end_src
+
+Every pragma descriptor states its legal scopes. A pragma in an illegal scope is a compiler error rather than being ignored or hoisted.
+
+Example: if =:mailbox-limit= is declaration-only for actors, placing it inside a pure expression or unrelated operation fails.
+
+* Inheritance
+
+Inheritance is lexical and explicit through normalized option environments.
+
+For a simple =:replace-nearest= option:
+
+#+begin_example
+compiler default
+    ↓
+project value
+    ↓
+module value
+    ↓
+declaration value
+    ↓
+operation value
+#+end_example
+
+The nearest defined legal source value wins before deployment constraints are applied.
+
+Absence means inherit. Absence is not the same as explicitly selecting a value equal to the current default because explanation/provenance should distinguish them.
+
+* Resolution Is Typed, Not Always Last-Write-Wins
+
+Different options require different resolution operators.
+
+Recommended initial resolution classes:
+
+- =:replace-nearest= — nearest legal source value replaces inherited source value;
+- =:minimum-floor= — resolved value may not fall below a required safety/verification level;
+- =:maximum-ceiling= — requested resource value may not exceed deployment maximum;
+- =:set-union= — only where accumulating independent output targets is intentional;
+- =:intersection= — source requirement and deployment allowance must overlap;
+- =:exact-match= — selected value must equal a deployment-required value when such a requirement exists.
+
+The registry declares one rule per option. Source syntax does not choose the merge rule.
+
+* Duplicate Pragmas
+
+Two occurrences of the same canonical option in the same scope should be a hard error, even if values are identical.
+
+Rejected:
+
+#+begin_src lisp
+(module example
+  (pragma :optimize :speed)
+  (pragma :optimize :speed)
+  ...)
+#+end_src
+
+Reason: duplicates usually indicate generated-source mistakes, copy/paste errors, or hidden ordering assumptions. Same-scope "last one wins" creates unnecessary ambiguity.
+
+A narrower scope overriding a broader scope is not a duplicate.
+
+* =with-pragmas= Research
+
+Candidate:
+
+#+begin_src lisp
+(with-pragmas
+    ((:optimize :speed)
+     (:warnings :strict))
+  ...)
+#+end_src
+
+V1 recommendation: reject/defer.
+
+Reasons:
+
+- module/declaration/operation scopes already cover the useful ownership boundaries;
+- it introduces an arbitrary lexical block whose relation to declarations, macro expansion, and normalized IR must be separately specified;
+- it resembles Common Lisp =locally= but StarLang does not yet need arbitrary expression-local compiler environments;
+- resource/runtime options inside arbitrary expression blocks would be difficult to map to actor/reason execution plans;
+- it increases formatter/parser/compiler complexity without a demonstrated use case.
+
+If future evidence requires local blocks, they should be researched as a general lexical configuration construct rather than smuggled in as pragma sugar.
+
+* =pragmas= Bundle Research
+
+Candidate:
+
+#+begin_src lisp
+(pragmas
+  (:optimize :speed)
+  (:warnings :strict)
+  (:trace :messages))
+#+end_src
+
+V1 recommendation: reject as canonical syntax.
+
+Prefer:
+
+#+begin_src lisp
+(pragma :optimize :speed)
+(pragma :warnings :strict)
+(pragma :trace :messages)
+#+end_src
+
+The repeated form gives each directive an independent syntax object/span, avoids a second grammar for pragma entries, and keeps tooling trivial. If a future formatter chooses to visually group adjacent pragmas, that is presentation rather than language syntax.
+
+* Configuration Resolution Pipeline
+
+The canonical pipeline is exactly:
+
+#+begin_example
+compiler defaults
+       ↓
+project configuration
+       ↓
+module pragmas
+       ↓
+declaration pragmas
+       ↓
+operation pragmas
+       ↓
+deployment restrictions
+       ↓
+validated compiler policy
+#+end_example
+
+Each step produces a normalized option environment with provenance.
+
+Conceptual normalized entry:
+
+#+begin_src lisp
+(resolved-option
+  :name :backend
+  :value :swi-prolog
+  :category :logic-backend
+  :reproducibility :semantic
+  :source-layer :module
+  :source-span <span>
+  :resolution :replace-nearest
+  :deployment-status :allowed)
+#+end_src
+
+The compiler should keep both the final value and the resolution trace used to obtain it.
+
+* Deployment Restrictions Are Not Source Overrides
+
+Deployment policy can:
+
+- forbid a backend;
+- require verification;
+- enforce maximum resource consumption;
+- require boundedness;
+- deny runtime capabilities;
+- restrict generated artifact targets;
+- require particular isolation/proof profiles.
+
+Source cannot reverse those decisions.
+
+A conceptual source directive such as:
+
+#+begin_src lisp
+(pragma :network :allow)
+#+end_src
+
+should not be interpreted as a capability grant. In V1, =:network= should not be a pragma at all if its purpose is runtime capability authority.
+
+Capability requirement/declaration and compiler tuning are separate concepts. A StarLang component may declare that it *requires* a network effect through the language's capability/effect model, while deployment decides whether that requirement is authorized. A pragma cannot manufacture authorization.
+
+* Project Configuration
+
+Project configuration should use the same typed option registry and normalized values as source pragmas, but it is a distinct configuration layer.
+
+The exact project-file syntax is not fixed by this research. Whatever syntax is chosen must:
+
+- be declarative data, not executable Common Lisp;
+- name only registered options;
+- use the same value schemas as source;
+- record source path/span or equivalent provenance;
+- validate legal project scope;
+- participate in the same explanation output;
+- be included in relevant artifact/run-plan identity.
+
+A project configuration value is a default for narrower source scopes unless its descriptor says it is a project-only constraint.
+
+* CLI Interaction
+
+The CLI should not create an undocumented highest-precedence escape hatch.
+
+Canonical required facility:
+
+#+begin_example
+starlang compile foo.star --explain-options
+#+end_example
+
+Exact command syntax remains subject to CLI design, but the semantics are clear: print the normalized resolution trace without inventing new policy.
+
+A future CLI may select a project profile or deployment profile. Dedicated command-line settings must normalize into one of those existing layers rather than becoming an untyped layer above deployment authority.
+
+Rejected V1 concept:
+
+#+begin_example
+starlang compile foo.star --set-anything :verify-messages=nil
+#+end_example
+
+There should be no generic command capable of bypassing typed schemas or deployment floors.
+
+* Option Explanation Facility
+
+The compiler should be able to explain every resolved option.
+
+Conceptual output:
+
+#+begin_example
+:backend
+  compiler default: :auto
+  project default:  :auto
+  module pragma:    :swi-prolog  ownership.star:3:3
+  declaration:      <none>
+  operation:        <none>
+  deployment:       allowed [:swi-prolog :lisa]
+  final:            :swi-prolog
+
+:optimize
+  compiler default: :balanced
+  project:          :speed
+  module:           <none>
+  actor pragma:     :debug
+  final:            :debug
+
+:deadlock-check
+  compiler default: :advisory
+  source request:   :off       ownership.star:21:5
+  deployment floor: :required
+  final:            rejected
+  diagnostic:       STAR-PRAGMA-006
+#+end_example
+
+The output should expose:
+
+- option name;
+- value at every participating layer;
+- source span for every source/project contribution;
+- resolution rule;
+- deployment constraint;
+- final value or rejection;
+- reproducibility class;
+- backend namespace requirement where applicable;
+- deprecation information;
+- stable diagnostic code when rejected.
+
+Machine-readable JSON output should eventually mirror this structure for IDE/build tooling, but its exact schema is not fixed here.
+
+* Unknown Pragma Behavior
+
+Unknown pragmas are hard compiler errors.
+
+#+begin_src lisp
+(pragma :optmize :speed)
+#+end_src
+
+must not be silently ignored.
+
+Conceptual diagnostic:
+
+#+begin_example
+error STAR-PRAGMA-001: unknown pragma :optmize
+suggestion: :optimize
+#+end_example
+
+The compiler may offer spelling suggestions, but it must not guess and continue.
+
+The same rule applies to unknown backend namespaces/options:
+
+#+begin_src lisp
+(pragma :swi/tabeling :incremental)
+#+end_src
+
+Ordinary StarLang source cannot register a new pragma name to suppress the error.
+
+* Validation and Diagnostics
+
+Recommended stable diagnostic families:
+
+| Code | Meaning |
+|------+---------|
+| =STAR-PRAGMA-001= | unknown pragma name |
+| =STAR-PRAGMA-002= | wrong arity or value type/range |
+| =STAR-PRAGMA-003= | pragma illegal in current scope |
+| =STAR-PRAGMA-004= | duplicate same-scope pragma |
+| =STAR-PRAGMA-005= | backend-specific namespace mismatch or ambiguous =:auto= use |
+| =STAR-PRAGMA-006= | attempted relaxation below mandatory safety/verification floor |
+| =STAR-PRAGMA-007= | deployment policy rejects requested value |
+| =STAR-PRAGMA-008= | resolved options conflict |
+| =STAR-PRAGMA-009= | macro-generated pragma is forbidden |
+| =STAR-PRAGMA-010= | deprecated pragma requires replacement or explicit compatibility mode |
+
+Diagnostics should carry StarLang source spans/origin data rather than only text file names.
+
+* Macro Interaction
+
+STAR-LANG-RESEARCH-020 separates StarLang macro expansion from host Common Lisp execution. Pragmas should preserve an even stronger visibility rule in V1:
+
+1. the closed reader creates syntax objects;
+2. direct source pragmas are collected and validated for their enclosing recognized scope;
+3. general macro expansion proceeds under that resolved compile environment where relevant;
+4. macro output containing new =pragma= forms is rejected with =STAR-PRAGMA-009=;
+5. semantic compilation consumes the normalized options, not raw pragma syntax.
+
+This keeps compiler configuration visible in authored source and prevents a macro library from secretly changing verification, backend, optimization, or resource policy.
+
+It also has a useful Common Lisp precedent: =declare= expressions must be explicit in their allowed source positions rather than being manufactured by ordinary macro expansion.
+
+Trusted compiler extensions, if ever added, are a separate privileged mechanism and may have a reviewed API for contributing option descriptors. That capability is not granted to ordinary =.star= macros.
+
+* Reproducibility Classes
+
+Every pragma descriptor must declare exactly one primary reproducibility class:
+
+#+begin_example
+:semantic
+:code-generation
+:runtime-policy
+:diagnostic-only
+#+end_example
+
+** =:semantic=
+
+Changes the meaning or required semantic interpretation of the program.
+
+Examples:
+
+- =:backend= source policy and concrete selected backend semantics;
+- =:logic-profile=;
+- verification semantics that determine whether inputs/messages are accepted;
+- future semantic-mode switches.
+
+Semantic options participate in semantic artifact identity and executable run-plan identity.
+
+** =:code-generation=
+
+Changes emitted artifacts without necessarily changing source-level semantics.
+
+Examples:
+
+- =:optimize=;
+- =:debug-info=;
+- =:emit-ir=;
+- =:emit-manifest=;
+- =:emit-source-map=;
+- =:emit-bindings=.
+
+Code-generation options participate in build artifact identity when they can alter emitted bytes or the artifact set. They need not all participate in semantic run-plan identity.
+
+** =:runtime-policy=
+
+Changes bounded execution behavior, operational failure, retry, buffering, or answer limits.
+
+Examples:
+
+- =:timeout-ms=;
+- =:memory-limit=;
+- =:mailbox-limit=;
+- =:retry-limit=;
+- =:inference-limit=;
+- =:answer-limit=.
+
+Runtime-policy options participate in run-plan identity because changing them can change observable terminal outcomes even when the logical program is unchanged.
+
+** =:diagnostic-only=
+
+Changes presentation or build diagnostics without changing executable semantics or runtime policy.
+
+Examples:
+
+#+begin_src lisp
+(pragma :pretty-diagnostics t)
+(pragma :warnings :strict)
+#+end_src
+
+Diagnostic-only values are excluded from executable and run-plan identity. They should still be recorded in a build receipt when useful for reproduction of the developer experience.
+
+=:warnings-as-errors= is diagnostic-only for executable identity but affects whether a build is accepted. The build receipt should therefore record it even though a successful executable does not need a different run-plan identity solely because warnings were fatal.
+
+* Artifact Identity Model
+
+A build should distinguish at least:
+
+1. *semantic option digest* — resolved =:semantic= options plus compiler/language version and other semantic inputs;
+2. *code-generation option digest* — =:code-generation= options that affect emitted artifacts;
+3. *runtime-policy digest* — =:runtime-policy= values included in the materialized run plan;
+4. *diagnostic receipt* — =:diagnostic-only= values recorded for observability but excluded from executable semantic identity.
+
+For logic execution, the run-plan identity continues to include the concrete backend/build/adapter/package/mapping/proof evidence required by STAR-LANG-RESEARCH-022 and STAR-LANG-RESEARCH-026.
+
+Changing:
+
+#+begin_src lisp
+(pragma :pretty-diagnostics t)
+#+end_src
+
+should not invalidate a semantically identical executable cache.
+
+Changing:
+
+#+begin_src lisp
+(pragma :backend :swi-prolog)
+#+end_src
+
+or:
+
+#+begin_src lisp
+(pragma :inference-limit 500000)
+#+end_src
+
+must invalidate any run-plan cache whose identity depends on those values.
+
+* Safety and Authority Boundary
+
+Ordinary StarLang pragmas must never provide mechanisms equivalent to:
+
+#+begin_src lisp
+(eval ...)
+(load ...)
+(shell ...)
+(require-native-library ...)
+#+end_src
+
+They also must not provide unrestricted compile-time:
+
+- filesystem access;
+- network access;
+- process execution;
+- environment-variable reads;
+- host package lookup/interning;
+- arbitrary Common Lisp function invocation;
+- arbitrary linker/compiler flag injection;
+- native-library loading;
+- engine-native source evaluation.
+
+The pragma value parser accepts only the closed literal schema declared for that option.
+
+Runtime StarLang is not being sandboxed out of normal useful effects. Actors/adapters may perform filesystem, network, process, scraping, database, and other declared runtime effects when the language capability model and deployment policy authorize them. The prohibition here is specifically against turning compiler pragmas into an unreviewed compile-time escape hatch.
+
+* Trusted Compiler Extensions
+
+Future trusted compiler extensions may need to add an option or transformation. They must be a distinct privileged mechanism, for example a reviewed/digest-locked compiler plugin package installed by the operator.
+
+Such a mechanism should require:
+
+- explicit installation outside ordinary StarLang source;
+- stable extension ID/version/digest;
+- declared option descriptors;
+- deterministic behavior contract;
+- explicit compile-time capabilities;
+- inclusion in compiler/build identity;
+- security review;
+- no ambient authority inherited from a source file.
+
+Ordinary source cannot say "trust this extension" through a pragma.
+
+* Complete Example: Logic Analysis Module
+
+#+begin_src lisp
+(module ownership-analysis
+  (pragma :optimize :speed)
+  (pragma :warnings :strict)
+  (pragma :verify-documents t)
+  (pragma :verify-messages t)
+  (pragma :emit-manifest t)
+
+  (actor crawler
+    (pragma :mailbox-limit 4096)
+    (pragma :retry-limit 3)
+    (pragma :trace :messages)
+
+    ...)
+
+  (reason ownership-path
+    (pragma :backend :swi-prolog)
+    (pragma :logic-profile :tabled)
+    (pragma :swi/tabling :incremental)
+    (pragma :swi/inference-limit 500000)
+    (pragma :answer-limit 250)
+
+    ...))
+#+end_src
+
+Normalized intent:
+
+- module compilation favors speed and strict warnings;
+- document/message verification is requested and may also be mandatory from deployment;
+- manifest emission changes build artifacts;
+- crawler receives bounded mailbox/retry defaults within deployment maxima;
+- =ownership-path= explicitly pins SWI-Prolog;
+- the operation requires tabled semantics;
+- SWI-specific incremental tabling is legal because the source backend pin matches;
+- inference/answer limits participate in runtime-plan identity.
+
+* Complete Example: LISA Expert System
+
+#+begin_src lisp
+(module transaction-analysis
+  (pragma :warnings :strict)
+  (pragma :verify-messages t)
+
+  (expert-system transaction-risk
+    (pragma :backend :lisa)
+    (pragma :lisa/agenda-strategy :salience)
+    (pragma :lisa/working-memory-limit 100000)
+    (pragma :timeout-ms 10000)
+
+    ...))
+#+end_src
+
+The pragma layer does not define the expert-system rule syntax. That remains under review in STAR-LANG-RESEARCH-023. This example only shows configuration attached to a declaration scope.
+
+* Complete Example: Portable =:auto= Logic
+
+#+begin_src lisp
+(reason portable-relationship-query
+  (pragma :backend :auto)
+  (pragma :logic-profile :portable-prolog)
+  (pragma :inference-limit 200000)
+  (pragma :answer-limit 100)
+
+  ...)
+#+end_src
+
+No SWI- or N-Prolog-specific pragma is legal here. The compiler/deployment planner may use the deterministic =:auto= policy from STAR-LANG-RESEARCH-022/026 and then pin one concrete compatible backend in the materialized run plan.
+
+* Invalid Example: Backend Namespace Mismatch
+
+#+begin_src lisp
+(reason broken-query
+  (pragma :backend :lisa)
+  (pragma :swi/tabling :incremental)
+  ...)
+#+end_src
+
+Required result: =STAR-PRAGMA-005=.
+
+* Invalid Example: Source Attempts to Weaken Mandatory Verification
+
+Suppose deployment requires message verification.
+
+#+begin_src lisp
+(actor ingest
+  (pragma :verify-messages nil)
+  ...)
+#+end_src
+
+Required result: =STAR-PRAGMA-006= with the source span and deployment policy evidence. The compiler must not silently accept the attempted relaxation.
+
+* Invalid Example: Capability Grant Disguised as Tuning
+
+#+begin_src lisp
+(actor scraper
+  (pragma :network :allow)
+  ...)
+#+end_src
+
+If =:network= is not a registered tuning option, this is =STAR-PRAGMA-001=. Network capability must flow through the language's capability/effect model and deployment authorization, not through compiler pragmas.
+
+* Rejected Designs
+
+** Nim punctuation
+
+Rejected:
+
+#+begin_example
+{. optimize: speed .}
+{. backend: swi-prolog .}
+#+end_example
+
+Reason: StarLang is a Lisp-family language and already has a closed list syntax capable of representing compiler data directly.
+
+** Arbitrary property-list metadata bags
+
+Rejected as the pragma model:
+
+#+begin_src lisp
+(actor crawler
+  (:options
+   :optimize :speed
+   :backend :swi-prolog
+   :anything-at-all 42)
+  ...)
+#+end_src
+
+Reason: it obscures option typing, scope, diagnostics, provenance, duplicate handling, and authority.
+
+** Bundled =pragmas= form
+
+Rejected for V1 because it adds a second entry grammar and reduces per-option source precision without solving a demonstrated problem.
+
+** =with-pragmas= lexical blocks
+
+Rejected/deferred for V1 because declaration/operation scopes are sufficient and arbitrary expression-local configuration creates substantial semantic complexity.
+
+** Nested backend tuning forms
+
+Rejected:
+
+#+begin_src lisp
+(pragma :swi
+  (:tabling :incremental)
+  (:inference-limit 500000))
+#+end_src
+
+Reason: flat namespaced option keys preserve the uniform grammar and registry.
+
+** Silent unknown pragmas
+
+Rejected. Typos and unsupported options are errors.
+
+** Same-scope last-one-wins
+
+Rejected. Duplicate canonical option names in one scope are errors.
+
+** Backend-specific pragma under =:auto=
+
+Rejected in V1. Generic semantic requirements should drive =:auto=; backend-specific tuning requires an explicit matching pin.
+
+** Source-defined arbitrary pragmas
+
+Rejected for ordinary StarLang source. Trusted extension registration is privileged compiler configuration.
+
+** Generic CLI override above deployment policy
+
+Rejected. CLI inputs normalize into existing typed project/deployment layers and cannot bypass deployment restrictions.
+
+** Compile-time effect pragmas
+
+Rejected:
+
+#+begin_src lisp
+(pragma :shell "generate.sh")
+(pragma :load "plugin.lisp")
+(pragma :fetch "https://example.test/compiler-extension")
+#+end_src
+
+Reason: they would make compilation ambient-authority execution rather than deterministic interpretation of source data.
+
+* Open Questions
+
+The following remain review questions rather than blockers to the core model:
+
+- exact project configuration filename and surface syntax;
+- exact CLI spelling for selecting project/deployment profiles and machine-readable explanation output;
+- whether =:trace= can be proven diagnostic-only or must be runtime-policy in the final runtime;
+- exact enum for =:optimize= and whether =:balanced= is necessary;
+- exact verification lattices for =:deadlock-check= and =:model-check= after STAR-LANG-RESEARCH-024/025 are reviewed;
+- whether some developer-output options should be project-only rather than legal in operation scope;
+- whether backend-specific resource limits such as =:swi/inference-limit= should normalize into the same semantic budget field as generic =:inference-limit= or remain adapter tuning with an explicit conflict rule;
+- exact JSON schema and stability promise for =--explain-options= output.
+
+These questions do not change the central architecture: one typed Lisp-native pragma grammar, lexical scope, explicit normalization, deployment authority after source resolution, and no arbitrary compile-time execution.
+
+* Implementation Consequences
+
+If approved, implementation should proceed in dependency order:
+
+1. define a compiler-owned immutable pragma descriptor registry;
+2. add explicit pragma syntax recognition to the closed StarLang parser/compiler without invoking Common Lisp =READ= or =EVAL=;
+3. preserve one syntax object/source span per pragma;
+4. collect only direct authored pragmas before general macro expansion;
+5. reject macro-generated pragmas;
+6. implement project/module/declaration/operation option environments;
+7. implement typed resolution operators and deployment constraints;
+8. register the initial compiler/logic/verification/resource/developer-output options;
+9. register backend-specific namespaced options with explicit backend requirements;
+10. implement duplicate, unknown, type, scope, namespace, conflict, and authority diagnostics;
+11. implement =--explain-options= human-readable output and then a versioned machine-readable form;
+12. include semantic/codegen/runtime-policy digests in appropriate artifact/run-plan identities;
+13. add fixtures proving source cannot disable mandatory verification or grant capabilities;
+14. add fixtures proving backend mismatch is an error and backend-specific options under =:auto= are rejected;
+15. add fixtures proving diagnostic-only changes do not alter semantic/run-plan identity;
+16. keep STAR-LANG-RESEARCH-023 in REVIEW until separately approved.
+
+No implementation authority is granted by this research node while approval rows remain pending.
+
+* Acceptance Tests for a Future Implementation
+
+A future compiler should demonstrate at minimum:
+
+- repeated canonical =pragma= forms parse and retain exact spans;
+- valid module/declaration/operation inheritance resolves deterministically;
+- project defaults are inherited when source is absent;
+- narrower legal source scope overrides broader source scope for replace-nearest options;
+- duplicate same-scope options fail;
+- unknown options fail;
+- wrong types/ranges fail;
+- illegal scopes fail;
+- mandatory verification cannot be disabled by source;
+- deployment resource ceilings cannot be exceeded by source;
+- source cannot grant network/filesystem/process capability through pragmas;
+- =:backend :lisa= plus =:swi/tabling= fails;
+- =:backend :auto= plus =:swi/tabling= fails in V1;
+- =:backend :swi-prolog= plus valid SWI tuning passes static namespace checking;
+- =--explain-options= reports all contributing layers and source spans;
+- semantic option changes alter semantic/run-plan identity where specified;
+- runtime-policy changes alter run-plan identity;
+- code-generation changes alter build artifact identity where specified;
+- diagnostic-only changes do not alter executable/run-plan identity;
+- macro-generated pragma forms fail;
+- no pragma argument can cause Common Lisp evaluation or compile-time shell/network/filesystem access.
+
+* Relationship to STAR-LANG-RESEARCH-023
+
+This node deliberately does not approve or substantially redesign STAR-LANG-RESEARCH-023.
+
+It establishes only the compiler-directive mechanism that expert-system declarations may eventually use. For example, if the expert-system surface is later approved, its backend metadata should use the shared pragma mechanism rather than inventing a second compiler-option syntax:
+
+#+begin_src lisp
+(expert-system transaction-risk
+  (pragma :backend :lisa)
+  ...)
+#+end_src
+
+The facts/rules/goals/questions/uncertainty/proof surface remains a separate review decision in STAR-LANG-RESEARCH-023.
+
+* Relationship to STAR-LANG-RESEARCH-026
+
+STAR-LANG-RESEARCH-026 is the authority for the meaning of:
+
+#+begin_src lisp
+(pragma :backend :auto)
+(pragma :backend :lisa)
+(pragma :backend :swi-prolog)
+(pragma :backend :n-prolog)
+#+end_src
+
+This node provides the general typed pragma infrastructure around that option but does not merge backend selection research into the compiler-directive research.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-15 | Create separate Lisp-native pragma/compiler-directive research with canonical grammar, typed categories, scoping/inheritance, backend namespaces, deployment-constrained resolution, explanation, reproducibility, safety, complete examples, and rejected designs | ChatGPT agent | STAR-LANG-RESEARCH-020/021/022/023/026, current StarLang core source, Nim manual, Common Lisp HyperSpec |
+
+* Footnotes and Glossary
+
+- *Pragma* — Closed StarLang source data that requests a registered compiler option; it is interpreted by the compiler and is not executable host code.
+- *Pragma descriptor* — Compiler-owned typed metadata defining one option's schema, legal scopes, resolution rule, authority model, reproducibility class, and diagnostics.
+- *Source option environment* — Normalized inherited map of project/module/declaration/operation option contributions before deployment constraints.
+- *Deployment restriction* — Operator-controlled constraint that can deny or narrow source requests and cannot be overridden by ordinary source.
+- *Reproducibility class* — =:semantic=, =:code-generation=, =:runtime-policy=, or =:diagnostic-only= classification used to determine identity/cache effects.
+- *Namespaced pragma* — Compiler-registered backend-specific option such as =:swi/tabling=; the slash is part of the option key, not a Common Lisp package escape.
+- *Safety floor* — Minimum verification or semantic requirement that lower-precedence source cannot weaken.
+- *Resource ceiling* — Maximum runtime resource allowance imposed by deployment policy.
+- *Materialized run plan* — Immutable executable plan after backend selection, deployment validation, and runtime-policy resolution.

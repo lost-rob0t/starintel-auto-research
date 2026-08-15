@@ -2,16 +2,27 @@
 :ID:       starintel-star-lang-research-020
 :END:
 #+title: STAR-LANG-RESEARCH-020 Hygienic Macro Expansion and Language Extensibility
-#+description: Audit the canonical StarLang source and define a safe, deterministic, source-preserving macro architecture for review.
+#+description: Audit the canonical StarLang source and define a safe, deterministic, source-preserving macro architecture for review without permanently foreclosing an explicitly authorized future self-hosting direction.
 #+status: REVIEW
-#+filetags: :starintel:research:star-lang:macros:hygiene:compiler:common-lisp:review:
+#+filetags: :starintel:research:star-lang:macros:hygiene:compiler:common-lisp:self-hosting:review:
 #+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE DENIED
 #+created: [2026-07-29 Wed]
-#+last_modified: [2026-07-29 Wed]
+#+last_modified: [2026-08-15 Sat]
 
-| Version | Date       | Description of change                                      | Did nsaspy approve it |
-|---------+------------+------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-29 | Audit canonical source and propose hygienic macro pipeline | Pending review        |
+| Version | Date       | Description of change                                                                                              | Did nsaspy approve it |
+|---------+------------+--------------------------------------------------------------------------------------------------------------------+-----------------------|
+| 0.2.0   | 2026-08-15 | Keep Common Lisp canonical for the current generation while permitting future self-hosting only with explicit nsaspy planning authorization | Policy change: Yes    |
+| 0.1.0   | 2026-07-29 | Audit canonical source and propose hygienic macro pipeline                                                         | Pending review        |
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Revalidate macro precedents and current compiler constraints before approval | Research Findings and Canonical Source Audit |
+| Macro architecture | StarLang maintainer | PENDING | Approve declarative V1 macros, scope-set hygiene, expansion phases, and resource limits | Recommended Macro Model through Review Decisions Required |
+| Current-generation host boundary | nsaspy | APPROVED | Keep Common Lisp canonical for the current-generation compiler | STAR-LANG-RESEARCH-018 and STAR-LANG-001 |
+| Future self-hosting policy | nsaspy | APPROVED | Permit self-hosting as a future direction but require explicit nsaspy authorization before planning it | nsaspy direction, 2026-08-15 |
+| Implementation | Repository maintainer | NOT STARTED | Implement only after macro architecture approval and prerequisite compiler work | Implementation Order |
 
 * Related Nodes
 
@@ -25,9 +36,15 @@
 
 This pass reviews the canonical StarLang[fn:starlang] implementation in =lost-rob0t/star-lang= and asks one narrow language-design question:
 
-How should StarLang gain macros[fn:macro] without losing its closed parser, deterministic compiler, source diagnostics, reproducible manifests, and Common Lisp-only implementation boundary?
+How should StarLang gain macros[fn:macro] without losing its closed parser, deterministic compiler, source diagnostics, reproducible manifests, and current-generation Common Lisp implementation boundary?
 
-This is implementation research, not a reopened host-language comparison. Common Lisp[fn:cl] remains the sole approved implementation language. Racket, Scheme, Rust, Lean, and Julia are examined only as evidence about macro-system design; none is proposed as a StarLang implementation host.
+This is implementation research, not a reopened current-generation host-language comparison. Common Lisp[fn:cl] remains the sole approved implementation language for current-generation StarLang. This node does not ban future StarLang self-hosting[fn:self-hosting]: that remains a possible next-generation direction, but no self-hosting research plan, roadmap, design, prototype, migration, or implementation effort may begin without explicit nsaspy authorization. Racket, Scheme, Rust, Lean, and Julia are examined only as evidence about macro-system design; none is proposed as a current-generation StarLang implementation host.
+
+* Relationship to Future Self-Hosting
+
+The macro architecture researched here should not depend on Common Lisp-specific observable semantics. Syntax objects, hygiene, expansion provenance, deterministic locking, expansion budgets, and the core-form boundary are language/compiler contracts that a future authorized StarLang-hosted compiler could reimplement.
+
+That compatibility is a design property, not an active self-hosting plan. Current-generation implementation remains Common Lisp, and this document grants no authority to create a self-hosting roadmap or prototype. Planning such work requires explicit nsaspy authorization under STAR-LANG-RESEARCH-018 and STAR-LANG-001.
 
 * Executive Finding
 
@@ -140,7 +157,7 @@ For StarLang, this is a better V1 fit than unrestricted procedural macros. The l
 
 ** Host macros are useful internally but are not the language boundary
 
-Common Lisp =DEFMACRO= defines expansion functions over host forms, and =MACROEXPAND= repeatedly applies host macro expansion. Those facilities are appropriate for implementing the StarLang compiler itself and for trusted internal code generation.
+Common Lisp =DEFMACRO= defines expansion functions over host forms, and =MACROEXPAND= repeatedly applies host macro expansion. Those facilities are appropriate for implementing the current-generation StarLang compiler itself and for trusted internal code generation.
 
 Sources:
 
@@ -196,7 +213,7 @@ This example is a proposed StarLang form, not Common Lisp code. Identifiers begi
 
 A future procedural tier may be useful for complex schema generation or adapter declarations. It must not be defined inside ordinary =.star= source.
 
-A trusted transformer would instead be:
+For the current generation, a trusted transformer would instead be:
 
 - implemented in Common Lisp inside a reviewed ASDF[fn:asdf] system;
 - registered through an explicit compiler port;
@@ -205,6 +222,8 @@ A trusted transformer would instead be:
 - denied direct I/O and runtime access unless a narrowly defined capability[fn:capability] is granted;
 - required to return syntax objects plus structured diagnostics;
 - included in the compilation lock and manifest.
+
+A future explicitly authorized self-hosted compiler generation may choose a different internal implementation while preserving the same externally approved transformer, determinism, provenance, and capability contracts.
 
 This tier should not begin until Tier 1, syntax objects, provenance, determinism tests, and expansion limits are complete.
 
@@ -222,7 +241,7 @@ Every parsed occurrence should become a StarLang syntax object with at least:
  :introduced-by <macro-id-or-nil>)
 #+end_src
 
-The representation may be a Common Lisp structure, but it must remain internal compiler data. It must not expose Common Lisp package symbols as StarLang identifiers.
+In the current generation the representation may be a Common Lisp structure, but it must remain internal compiler data. It must not expose Common Lisp package symbols as StarLang identifiers.
 
 Required properties:
 
@@ -432,6 +451,8 @@ Reason: semantic validators would need to understand both surface macros and cor
 13. Add conformance fixtures and adversarial tests.
 14. Consider trusted packaged procedural transformers only after the declarative system is approved and stable.
 
+This implementation order applies to the current-generation Common Lisp compiler. It does not constitute or authorize a self-hosting migration plan.
+
 * Acceptance Tests
 
 The macro system is not complete until automated tests prove at least the following:
@@ -469,6 +490,8 @@ The research recommends approval of the architecture, but the following details 
 6. choose whether expansion traces are embedded in manifests or stored as separate compiler artifacts referenced by digest;
 7. choose whether the first release includes explicit intentional capture; this research recommends no.
 
+The separate question of self-hosting is not one of these macro review decisions. It remains dormant unless nsaspy explicitly authorizes a self-hosting planning effort.
+
 * Conclusion
 
 StarLang can gain Lisp-grade language extensibility without becoming arbitrary Common Lisp source.
@@ -477,11 +500,22 @@ The safe path is not to expose host macros. It is to build a small StarLang expa
 
 The immediate source task is therefore syntax identity and provenance, not template substitution. Implementing raw list macros first would be fast but structurally wrong and would force a rewrite as soon as StarLang gains imported macro libraries, nested bindings, or serious diagnostics.
 
+Nothing in this macro design permanently prohibits a future StarLang-hosted compiler. Such a compiler would need to preserve these language-level expansion contracts, but planning that work requires separate explicit nsaspy authorization.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-15 | Clarify that Common Lisp exclusivity is current-generation only and that future self-hosting is possible but dormant until explicitly authorized for planning by nsaspy | ChatGPT agent | nsaspy direction; STAR-LANG-RESEARCH-018; STAR-LANG-001 |
+| 2026-07-29 | Audit canonical source and propose hygienic macro architecture | Research loop | v0.1.0 research pass |
+
 * Footnotes and Glossary
 
-[fn:starlang] StarLang: the Common Lisp-implemented domain-specific language and runtime that defines StarIntel documents, actors, domain servers, capabilities, adapters, and dataflows.
+[fn:starlang] StarLang: the current-generation Common Lisp-implemented domain-specific language and runtime that defines StarIntel documents, actors, domain servers, capabilities, adapters, and dataflows.
 
-[fn:cl] Common Lisp (CL): the standardized Lisp language used as the sole approved implementation language for the StarLang parser, compiler, runtime, and supporting systems.
+[fn:cl] Common Lisp (CL): the standardized Lisp language used as the sole approved implementation language for the current-generation StarLang parser, compiler, runtime, and supporting systems. This does not permanently prohibit a future StarLang-hosted compiler.
+
+[fn:self-hosting] Self-hosting: a possible future architecture in which some or all of the StarLang compiler is implemented in StarLang itself. Under current policy, any planning toward that direction requires explicit nsaspy authorization.
 
 [fn:macro] Macro: a compile-time language feature that transforms one source form into other source forms before ordinary semantic compilation. For example, one compact worker-pool declaration could expand into several ordinary actor declarations.
 
@@ -493,7 +527,7 @@ The immediate source task is therefore syntax identity and provenance, not templ
 
 [fn:ir] Intermediate representation (IR): the normalized compiler data produced after parsing, expansion, and validation. Runtime adapters consume this representation rather than raw StarLang source.
 
-[fn:asdf] ASDF: Another System Definition Facility, the standard Common Lisp build and system-loading tool used to package StarLang components.
+[fn:asdf] ASDF: Another System Definition Facility, the standard Common Lisp build and system-loading tool used to package current-generation StarLang components.
 
 [fn:capability] Capability: an explicit authorization object or declaration granting a narrowly defined operation. A capability-based transformer interface denies all undeclared powers by default.
 
@@ -505,4 +539,4 @@ The immediate source task is therefore syntax identity and provenance, not templ
 
 [fn:tcb] Trusted computing base (TCB): the code and components that must behave correctly to preserve system security. Adding arbitrary procedural macro execution would make the TCB much larger.
 
-[fn:cl-gserver] CL-GServer (Sento): the optional Common Lisp actor runtime adapter used by StarLang after compilation; it must not define source-language macro semantics.
+[fn:cl-gserver] CL-GServer (Sento): the optional Common Lisp actor runtime adapter used by current-generation StarLang after compilation; it must not define source-language macro semantics.

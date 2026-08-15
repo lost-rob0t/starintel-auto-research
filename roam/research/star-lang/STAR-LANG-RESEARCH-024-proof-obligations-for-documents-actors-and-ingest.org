@@ -1,0 +1,427 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-024
+:END:
+#+title: STAR-LANG-RESEARCH-024 Proof Obligations for Documents, Actors, and Domain Ingest
+#+description: Research the verification contract Star-Lang needs to validate StarIntel documents, prove actor protocol conformance, terminate poison-message delivery, and establish deadlock-freedom for declared actor topologies without overstating factual truth or arbitrary host-code correctness.
+#+status: REVIEW
+#+last_modified: [2026-08-15 Sat]
+#+filetags: :starintel:star-lang:proofs:verification:documents:actors:domain-servers:ingest:deadlock:poison-messages:model-checking:research:
+
+* Related Nodes
+
+- [[file:STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org][STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers]]
+- [[file:STAR-LANG-RESEARCH-010-message-lifecycle-and-delivery-semantics.org][STAR-LANG-RESEARCH-010 Message Lifecycle and Delivery Semantics]]
+- [[file:STAR-LANG-RESEARCH-011-deterministic-dispatcher.org][STAR-LANG-RESEARCH-011 Deterministic Dispatcher]]
+- [[file:STAR-LANG-RESEARCH-012-transport-port-and-settlement.org][STAR-LANG-RESEARCH-012 Transport Port and Settlement]]
+- [[file:STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
+- [[file:../../design/star-server/STAR-SERVER-033-proof-carrying-domain-ingest-and-actor-runtime.org][STAR-SERVER-033 Proof-Carrying Domain Ingest and Actor Runtime]]
+
+* Research Question
+
+What should the word =proof= mean in Star-Lang when the practical goal is not to turn StarIntel into a theorem prover, but to establish useful guarantees that:
+
+1. ingested documents satisfy their declared Star-Lang specification and domain invariants;
+2. actors only receive and emit messages that conform to the language contract they claim to implement;
+3. poison deliveries cannot be requeued forever on the active ingest path; and
+4. the declared StarIntel actor/domain-ingest topology is free of deadlock under the supported waiting semantics?
+
+A secondary question is how stronger theorem-prover or SMT certificates can be added later without making them part of the trusted runtime core.
+
+* Executive Finding
+
+Star-Lang already contains most of the operational ingredients needed for a verification layer, but they are distributed across document specifications, actor message contracts, dispatcher semantics, transport settlement, replay, provenance, and backend proof normalization.
+
+The missing piece is a single verification model that states explicit obligations, assumptions, evidence, and confidence class.
+
+The recommended direction is therefore *proof-carrying execution data*, not a second actor runtime and not a new logic language.
+
+Every important boundary should be able to produce a compact checked artifact saying what was verified, against which immutable specification, by which verifier, under which assumptions, and over which exact content hash.
+
+The smallest useful assurance hierarchy is:
+
+| Class | Meaning | Example |
+|-------+---------+---------|
+| P0 evidence | identity and provenance evidence only | source URL, content hash, dataset, retrieval metadata |
+| P1 checked conformance | a small Star-Lang verifier checked a closed contract | document schema, actor message type, relation predicate contract |
+| P2 lifecycle verification | the runtime checked a finite state-machine obligation | legal command/reply/error/cancel transition, terminal poison disposition |
+| P3 model/constraint certificate | an external analyzer proved or exhaustively checked a declared abstraction | no reachable actor wait cycle in a bounded topology; SMT invariant |
+| P4 theorem artifact | an external theorem prover establishes a stronger mathematical result | machine-checked theorem over a stable semantic model |
+
+StarIntel should be precise about which class it has. A derivation graph is not automatically a P4 theorem, and a schema-valid document is not proof that a real-world claim is true.
+
+* Existing Star-Lang Baseline
+
+** Typed documents and domain servers
+
+STAR-LANG-RESEARCH-006 already makes specifications data-only, digest-locked, and semantically normalized. It defines typed documents, typed messages, predicate source/destination contracts, additive extension, and keyed supervised domain servers.
+
+This is enough to define a deterministic subject for document verification:
+
+#+begin_example
+(document-bytes,
+ schema-major-id,
+ exact locked specification graph,
+ validator version,
+ domain policy)
+#+end_example
+
+The resulting certificate can prove that the bytes conform to those rules. It cannot prove that the contents correspond to reality.
+
+** Message lifecycle
+
+STAR-LANG-RESEARCH-010 defines typed command/event/reply payloads and closed built-in acknowledgement, error, and cancellation messages. It also separates =messageId=, =correlationId=, =causationId=, =attempt=, and =idempotencyKey=.
+
+That gives Star-Lang a finite protocol vocabulary on which lifecycle obligations can be checked.
+
+** Deterministic dispatcher
+
+STAR-LANG-RESEARCH-011 already requires that a command execute only when:
+
+- the lifecycle envelope validates;
+- the target actor exists in the portable manifest;
+- the actor accepts the command message type; and
+- a deterministic handler is registered.
+
+That is already a protocol-conformance checker in embryo.
+
+** Poison settlement
+
+STAR-LANG-RESEARCH-012 defines a transport-neutral =reject= operation for poison input and requires invalid routes or poison deliveries to be rejected and dead-lettered instead of following the normal lifecycle path.
+
+The missing requirement is stronger: a terminal poison disposition must be provably one-way. The active input path must not automatically route the same poisoned delivery back into itself.
+
+** Logic derivations
+
+STAR-LANG-RESEARCH-021 proposes backend-normalized proof/justification graphs and explicitly separates stable proof contracts from interactive traces. That is the right approach for explanations, but it does not yet define semantic checking for the proof graph itself and should not be used as a blanket correctness claim for the actor runtime.
+
+* What Document Verification Can Prove
+
+A StarIntel document verifier can soundly establish closed properties over a specific immutable input and specification bundle.
+
+Recommended obligations:
+
+1. input bytes satisfy bounded canonical parsing rules;
+2. the declared schema exists in the locked specification graph;
+3. required fields are present exactly where required;
+4. field values satisfy declared scalar, enum, collection, and nested-document contracts;
+5. document field naming and canonical JSON rules hold;
+6. a relation uses canonical =source=, =predicate=, and =destination= positions;
+7. the predicate accepts the source and destination schema identities;
+8. persistence, dataset, case, and provenance requirements hold;
+9. domain-specific invariants declared in the specification bundle hold;
+10. the canonical document hash matches the certificate subject hash.
+
+A verifier should reject unknown fields when the active schema is closed, reject schema/version ambiguity, and reject fallback to an unpinned specification.
+
+A successful result should produce a certificate such as:
+
+#+begin_src lisp
+(:schema "star.verify.certificate/1"
+ :class "checked-conformance"
+ :subjectType "star.document/1"
+ :subjectHash "sha256:..."
+ :specificationDigest "sha256:..."
+ :verifier "star.document.verify/1"
+ :verifierVersion "..."
+ :obligations ("parse" "schema" "predicate" "domain-invariants")
+ :result "valid"
+ :evidenceHashes (...))
+#+end_src
+
+The certificate proves conformance to a contract. Factual truth, source reliability, corroboration, and analytical confidence remain separate StarIntel concerns.
+
+* Actor Language Conformance
+
+The phrase "the actor speaks Star-Lang" should have a precise operational meaning.
+
+An actor speaks a Star-Lang protocol version when its immutable runtime manifest binds:
+
+- actor identity and generation semantics;
+- Star-Lang wire version;
+- exact specification bundle digest;
+- accepted command message types;
+- accepted event message types where applicable;
+- emitted reply and event message types;
+- required capabilities;
+- deadline and cancellation policy;
+- idempotency scope;
+- generated binding or native adapter version; and
+- protocol-conformance test fixture digest.
+
+The dispatcher then verifies every input before enqueue or handler invocation, and every output before publication.
+
+This is stronger than checking JSON shape at the transport edge. The message must be valid for the *specific actor authority* selected by routing.
+
+For external actors, generated bindings should be treated as convenience, not as proof. The runtime still validates the received envelope and output against the pinned manifest.
+
+A later compatibility handshake may advertise the actor manifest digest, but a remote self-assertion must never replace local verification.
+
+* Poison Messages: Required Progress Property
+
+A poison message is a delivery that is structurally or semantically unprocessable by the selected Star-Lang authority and cannot become valid merely by retrying the same bytes under the same pinned contract.
+
+Examples include:
+
+- malformed canonical encoding;
+- unsupported Star-Lang envelope version;
+- unknown actor route;
+- message type not accepted by the target actor;
+- schema-invalid document payload;
+- invalid relation predicate endpoints;
+- forbidden capability or case boundary;
+- deterministic domain-invariant violation.
+
+Infrastructure failures are not poison. Database unavailability, broker publication failure, temporary backend outage, or deadline pressure may be retryable system failures.
+
+The required poison progress property is:
+
+#+begin_example
+once classified terminal-poison,
+that delivery can never transition back to active-processing
+under the same message identity and verification context.
+#+end_example
+
+A conforming transport adapter must therefore map terminal poison to a terminal transport disposition: reject without requeue, dead-letter to a non-cyclic quarantine route, or persist to a quarantine store and settle the original delivery.
+
+RabbitMQ explicitly distinguishes reject/nack with =requeue=false= from requeue, supports delivery limits for quorum queues, and warns about dead-letter cycles. StarIntel should not rely on broker cycle detection as its correctness mechanism; the Star-Lang transport contract should forbid a quarantine route from automatically binding back to the originating active queue.
+
+A poison certificate should retain:
+
+- envelope hash;
+- original transport delivery identity where available;
+- actor route requested;
+- specification digest;
+- classification code;
+- first failing obligation;
+- redelivery count and Star-Lang attempt;
+- terminal disposition;
+- quarantine/dead-letter identity when retained.
+
+Sensitive payload bytes need not be duplicated in the certificate; the artifact may point to access-controlled retained evidence by hash.
+
+* Deadlock Freedom: Scope the Claim Correctly
+
+A useful StarIntel guarantee must be narrower than "Common Lisp can never deadlock."
+
+Arbitrary host code can acquire locks, block on files, wait on foreign runtimes, or call unknown libraries. No Star-Lang manifest can prove the absence of all such behavior unless every effect is modeled and constrained.
+
+The tractable claim is:
+
+#+begin_quote
+For a compiled Star-Lang actor topology, under the declared mailbox, ask, timeout, cancellation, and port semantics, no reachable protocol state contains a cycle in which every participant is permanently waiting for another participant in that cycle and no enabled transition can make progress.
+#+end_quote
+
+This should be split into structural and model-checked obligations.
+
+** Structural obligation: do not block the actor mailbox on actor-to-actor asks
+
+Erlang's =gen_server:call= documentation is a useful warning: a call waits for a response, and calling self would hang indefinitely. StarIntel should avoid inheriting that class of failure by construction.
+
+The strongest practical rule is:
+
+- =tell= is asynchronous;
+- a Star-Lang =ask= is split-phase;
+- sending the request returns control to the mailbox;
+- the logical operation resumes from a continuation when reply/error/deadline/cancel arrives;
+- an actor handler may not synchronously wait for another actor while holding the only mailbox-execution slot.
+
+This removes the most common actor wait-cycle from the language-level semantics instead of trying to detect it after deployment.
+
+** Static wait-for graph
+
+Some ports may still be declared blocking, for example a local storage transaction or foreign call. Every such edge must be explicit in the immutable plan.
+
+Build-time verification constructs a wait-for graph from blocking edges. A hard blocking cycle is rejected unless a stronger protocol model proves that one edge cannot be simultaneously held.
+
+All blocking edges require finite deadlines. =infinity= is not an acceptable StarIntel production default for an inter-authority wait.
+
+** Protocol model checking
+
+Static acyclicity is insufficient for multi-step protocols because a cycle can depend on state. The compiled actor/message topology can be lowered into a finite verification model containing:
+
+- actor protocol states;
+- bounded mailbox abstraction;
+- send, receive, reply, cancel, retry, timeout, stop, and restart transitions;
+- deferred work states;
+- allowed blocking port states;
+- terminal poison settlement;
+- supervision transitions relevant to progress.
+
+TLC, the TLA+ model checker, can check safety and liveness properties over executable finite models. This is a good engineering fit for detecting reachable deadlock and protocol-level liveness failures before a topology is promoted.
+
+The model is an abstraction. The certificate must record its bounds and assumptions so a bounded check is never presented as an unrestricted theorem.
+
+* Deadlock and Livelock Are Distinct
+
+A topology can avoid a literal wait cycle and still fail to make useful progress by retrying forever.
+
+StarIntel should therefore check a stronger progress family:
+
+- no permanent actor wait cycle;
+- every accepted command eventually reaches a terminal result, explicit deferred state with an external completion condition, or bounded retry exhaustion under fairness assumptions;
+- terminal poison cannot return to active-processing;
+- retry counters or retry budgets decrease toward a terminal boundary;
+- deadlines eventually fire in models that assume clock progress;
+- cancellation eventually reaches terminal acknowledgement/error when the target remains reachable.
+
+A failed external dependency can of course prevent success. The property is that the runtime reaches an explicit terminal or degraded outcome rather than silently waiting forever.
+
+* Proof Objects Versus Trusted Checkers
+
+There are two useful integration styles.
+
+** Small native checker
+
+For document schemas, actor message compatibility, lifecycle transitions, hash identities, wait-for graph cycles, retry budgets, and poison disposition, StarIntel should prefer small deterministic Common Lisp checkers. These properties are simple enough that importing a theorem prover into the trusted core would increase risk more than assurance.
+
+** Untrusted proof producer plus checker
+
+For richer constraint problems, an external SMT solver may produce a certificate that a smaller checker verifies. cvc5 supports proof production and Alethe output, with independent proof-checking tooling available. This is a better long-term trust model than accepting an external solver's =unsat= answer as authoritative without evidence.
+
+Proof-carrying code research provides the general architectural lesson: the producer can do expensive reasoning while the consumer keeps a comparatively small proof-checking responsibility.
+
+StarIntel should apply that lesson to *plans and verification claims*, not necessarily to executable machine code.
+
+* Trusted Computing Base
+
+For P1/P2 Star-Lang verification, the intended trusted computing base should be limited to:
+
+1. the closed Star-Lang parser and canonical decoder;
+2. specification graph resolution and digest verification;
+3. canonical hashing/serialization;
+4. document and message validators;
+5. lifecycle state-machine checker;
+6. actor manifest router;
+7. poison terminal-disposition checker;
+8. static wait-for graph checker;
+9. verification artifact parser/checker;
+10. the implementation of any externally claimed certificate checker.
+
+Transport brokers, logic engines, external actors, generated bindings, and model-checking tools are not automatically trusted to assert correctness. They provide events, outputs, or certificates that the StarIntel verification boundary checks and records.
+
+* Canonical Verification Artifact
+
+A single envelope should carry verification evidence across subsystems without collapsing all proofs into one strength level.
+
+Recommended minimal fields:
+
+#+begin_src lisp
+(:schema "star.verify.certificate/1"
+ :certificateId "..."
+ :class "checked-conformance"
+ :claim "star.actor.accepts-message"
+ :subjectType "star.protocol/envelope@1"
+ :subjectHash "sha256:..."
+ :specificationDigest "sha256:..."
+ :planDigest "sha256:..."
+ :verifier "star.actor.verify/1"
+ :verifierVersion "..."
+ :assumptions (...)
+ :bounds (...)
+ :evidence (...)
+ :result "valid")
+#+end_src
+
+The artifact is immutable. Timestamps and storage location may be attached as provenance but should not change the semantic identity of an otherwise identical verification result.
+
+The certificate must never contain a generic boolean =proved=true= without a claim identifier, verification class, assumptions, and subject hash.
+
+* Recommended Verification Matrix
+
+| Goal | Primary mechanism | Stronger optional mechanism |
+|------+-------------------+----------------------------|
+| document shape/types | native schema checker | SMT for complex cross-field constraints |
+| relation legality | native predicate checker | SMT for additional domain invariants |
+| actor speaks protocol | manifest/message checker | session/global-protocol analysis |
+| lifecycle correctness | deterministic state-machine checker | model checking |
+| poison removed | terminal settlement + routing checker | model checking of retry/quarantine topology |
+| no blocking actor cycle | static wait-for graph + split-phase ask | TLA+ protocol model |
+| no retry livelock | bounded retry/deadline invariants | TLA+ liveness model |
+| logic explanation | normalized derivation checker | external theorem/SMT proof where required |
+
+* Actor Session Types: Relevant but Not a Prerequisite
+
+Multiparty session types are directly relevant research because they aim to guarantee communication safety, protocol conformance, and deadlock freedom for message-passing systems. Recent work has applied these ideas specifically to actors while retaining event-driven handlers and supervision.
+
+Star-Lang does not need to adopt a full session-type language immediately. Its existing typed actor manifests can first be normalized into explicit local protocol automata and checked as data. If later experiments show that a global protocol notation materially improves safety without duplicating the Star-Lang surface, it can be added as a compile-time verification layer.
+
+* Required Research Experiments Before Implementation Promotion
+
+1. Define a tiny Person ingest domain with one typed command and one typed result.
+2. Generate one valid and several invalid documents and verify deterministic certificates.
+3. Define two actors with incompatible message manifests and prove the router rejects the mismatch before handler invocation.
+4. Inject a deterministic poison message and prove that no transition returns it to the active queue after terminal classification.
+5. Define a deliberately synchronous A->B->A wait cycle and require the static checker to reject it.
+6. Define the same workflow using split-phase asks and show the model has progress under reply/timeout fairness assumptions.
+7. Model retry, cancellation, actor restart, and a temporarily unavailable persistence port in TLA+.
+8. Record exact model bounds and ensure the resulting artifact says =model-checked= rather than =theorem=.
+9. Encode one nontrivial cross-field document/domain constraint into SMT and compare plain solver trust with cvc5+Alethe proof checking.
+10. Compare the implementation and trusted-code cost of native graph checks, TLA+, and SMT before selecting any mandatory external verifier.
+
+* Rejected Directions
+
+** Treat every explanation trace as a proof
+
+Rejected. A trace can explain what happened without establishing that every transition was legal or that the conclusion follows from a sound calculus.
+
+** Claim schema-valid means factually true
+
+Rejected. Structural/domain conformance and real-world truth are different claims.
+
+** Requeue every failure
+
+Rejected. Deterministic poison must terminate; otherwise one malformed message can consume capacity forever.
+
+** Depend on broker dead-letter cycle detection
+
+Rejected. Transport-specific safeguards are defense in depth, not the Star-Lang semantic guarantee.
+
+** Allow actor handlers to synchronously wait on arbitrary actors
+
+Rejected as the default Star-Lang semantic model. It creates hidden wait-for edges that defeat compositional deadlock analysis.
+
+** Put Lean, Rocq, ACL2, TLA+, or cvc5 inside the normal runtime path
+
+Rejected for version one. External formal tools belong at build, promotion, audit, or high-assurance verification boundaries unless a specific runtime claim justifies their cost.
+
+* Result
+
+Star-Lang should define proof as a typed verification claim over immutable subjects, not as a single monolithic theorem-proving feature.
+
+For StarIntel's immediate goals, the highest-value guarantees are obtainable with relatively small mechanisms:
+
+- closed document and relation validators;
+- actor manifest/message compatibility checking;
+- deterministic lifecycle verification;
+- one-way poison settlement;
+- split-phase actor asks;
+- explicit blocking-edge declarations;
+- static wait-for graph rejection;
+- bounded protocol model checking for concurrency/liveness; and
+- immutable verification certificates that state exactly what was checked.
+
+Formal theorem proving remains available for selected invariants later, but it should strengthen this architecture rather than replace it.
+
+* Sources
+
+** StarIntel and Star-Lang internal research
+
+- STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers.
+- STAR-LANG-RESEARCH-010 Message Lifecycle and Delivery Semantics.
+- STAR-LANG-RESEARCH-011 Deterministic Dispatcher.
+- STAR-LANG-RESEARCH-012 Transport Port and Settlement.
+- STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration.
+
+** External primary and official sources
+
+- RabbitMQ, Dead Letter Exchanges: https://www.rabbitmq.com/docs/dlx
+- RabbitMQ, Negative Acknowledgements: https://www.rabbitmq.com/docs/nack
+- RabbitMQ, Quorum Queues / poison-message handling and delivery limits: https://www.rabbitmq.com/docs/quorum-queues
+- Erlang/OTP, =gen_server=: https://www.erlang.org/doc/apps/stdlib/gen_server.html
+- Leslie Lamport, TLA+ tools and TLC model checker: https://lamport.azurewebsites.net/tla/tools.html
+- Leslie Lamport, PlusCal deadlock tutorial: https://lamport.azurewebsites.net/tla/tutorial/deadlock.html
+- Leslie Lamport, PlusCal liveness/deadlock-freedom tutorial: https://lamport.azurewebsites.net/tla/tutorial/session9.html
+- cvc5 proof production: https://cvc5.github.io/docs-ci/docs-main/proofs/proofs.html
+- cvc5 Alethe proof format: https://cvc5.github.io/docs-ci/docs-main/proofs/output_alethe.html
+- George C. Necula, proof-carrying code papers and bibliography: https://people.eecs.berkeley.edu/~necula/papers.html
+- Simon Fowler and Raymond Hu, "Speak Now: Safe Actor Programming with Multiparty Session Types" (2026 preprint): https://arxiv.org/abs/2602.24054

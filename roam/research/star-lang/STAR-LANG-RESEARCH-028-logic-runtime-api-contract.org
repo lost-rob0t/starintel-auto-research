@@ -195,13 +195,14 @@ A useful common layer is possible if StarLang defines its own semantics:
 #+begin_example
 assertSessionFact
 retractSessionFactById
-replaceSessionFactById
 listSessionFacts
 #+end_example
 
 The key is that these are *StarLang session facts*, not native Prolog database clauses and not arbitrary LISA CLOS objects.
 
 The adapter projects a typed StarLang fact into backend-native state. The StarLang fact has a stable identity and schema. Retraction is by StarLang identity, not by native pattern matching.
+
+A portable atomic replacement operation is deliberately not assumed. Portable replacement can be expressed as explicit retract+assert without claiming atomicity; a future exact atomic-replace profile may be researched separately.
 
 This makes a Lisp-native convenience such as =assert!= viable without promising Prolog =assertz/1= semantics.
 
@@ -250,8 +251,13 @@ Do not blindly expose =bagof= and =setof= as portable language primitives. Their
 A StarLang collector can instead normalize the intent:
 
 #+begin_example
-(solutions query-id ... :duplicates preserve)
-(solutions query-id ... :duplicates remove :order canonical)
+(solutions query-id ...
+  (duplicates preserve)
+  (order unspecified))
+
+(solutions query-id ...
+  (duplicates remove)
+  (order canonical))
 #+end_example
 
 If exact Prolog =bagof/3= or =setof/3= semantics are required, that belongs to a portable-Prolog or native-Prolog profile.
@@ -367,7 +373,7 @@ Legend:
 | production agenda | YES | NO equivalence | NO | production profile |
 | salience | YES | NO equivalence | NO | production profile |
 | focus/context stack | YES | NO equivalence | NO | production profile |
-| modify working-memory fact | YES | via DB update, different semantics | via DB update, different semantics | production profile; portable replacement uses fact ID |
+| modify working-memory fact | YES | via DB update, different semantics | via DB update, different semantics | production profile; portable replacement uses explicit fact-ID deltas |
 | run to quiescence | YES | NO equivalent engine concept | NO equivalent engine concept | production profile |
 | partial match introspection | YES/current maintained tooling | NO equivalent claim | NO | production introspection profile |
 | belief algebra | YES | library/package-dependent | library/package-dependent | named expert uncertainty profile only |
@@ -444,12 +450,12 @@ Meaning: invoke a compiler-declared named operation with typed bindings. It does
 (solutions ownership-path
   (from source-id)
   (to ?target)
-  (:duplicates preserve
-   :order unspecified
-   :limit 100))
+  (duplicates preserve)
+  (order unspecified)
+  (limit 100))
 #+end_src
 
-Exact option spelling remains subject to the closed keyword vocabulary, but the semantic contract should distinguish duplicate policy, order policy, and limits.
+This child-form spelling aligns with the closed reader and the normative STAR-LANG-009 direction. The semantic contract distinguishes duplicate policy, order policy, and limits.
 
 ** Candidate retained: =exists?=
 
@@ -546,7 +552,7 @@ Cross-backend tests compare normalized semantics, not native output strings.
 
 1. Whether source fact field labels should eventually allow a schema-aware keyword form such as =:type= without weakening the reader's closed vocabulary.
 2. Whether a decimal literal extension belongs in core StarLang before expert-system syntax uses literal confidence values.
-3. Whether =replaceSessionFactById= should be a portable atomic operation or remain syntactic lowering to retract+assert unless an exact atomicity profile is requested.
+3. Whether a future exact atomic-replace profile is useful enough to justify semantics beyond portable explicit retract+assert.
 4. Whether the first N-Prolog adapter can enforce cooperative query cancellation or must treat process termination as the only hard cancellation boundary.
 5. Which exact proof/derivation subset can be normalized across all three backends without fabricating proof detail.
 6. Whether LISA =WITH-SIMPLE-QUERY= should ever satisfy a narrow named fact-query profile distinct from relational =star.logic.query/1=.

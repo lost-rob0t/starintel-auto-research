@@ -148,6 +148,10 @@ RestartB ==
     /\ outstandingBA' = FALSE
     /\ UNCHANGED << payloadClass, retry, genA, persistence, poisonTerminal >>
 
+TerminalQuiesce ==
+    /\ phase \in Terminal
+    /\ UNCHANGED vars
+
 Next ==
     RejectPoison
     \/ ValidateValid
@@ -164,6 +168,7 @@ Next ==
     \/ Cancel
     \/ RestartA
     \/ RestartB
+    \/ TerminalQuiesce
 
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 

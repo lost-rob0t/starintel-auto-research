@@ -6,7 +6,7 @@
 #+status: ACTIVE
 #+filetags: :starintel:index:star-lang:implementation:common-lisp:active:
 #+created: [2026-07-26 Sun]
-#+last_modified: [2026-08-13 Thu]
+#+last_modified: [2026-08-15 Sat]
 
 * Final Language Decision
 
@@ -26,6 +26,7 @@ LISA, SWI-Prolog, and N-Prolog are inference backends called by the Common Lisp 
 | Durable runtime design | Runtime maintainer | PENDING | Approve active durable actor/runtime design | STAR-LANG-002 |
 | Final package extraction | Repository maintainer | PENDING | Approve one-authority package extraction and final dependency direction | STAR-LANG-006 |
 | Logic and expert-system design | StarLang maintainer | PENDING | Approve three backend IDs, semantic profiles, expert DSL, and implementation slices | STAR-LANG-007 |
+| Logic runtime API specification | StarLang maintainer | PENDING | Approve =star.logic.api/1= portable operations, profile gates, state/error contracts, and conformance requirements | STAR-LANG-009 |
 | Implementation completion | Repository maintainer | NOT STARTED | All acceptance gates, CI/Nix, replay, and conformance complete | Completion Gate |
 
 * Approved Architecture
@@ -37,12 +38,15 @@ LISA, SWI-Prolog, and N-Prolog are inference backends called by the Common Lisp 
 - [[file:../../design/star-lang/STAR-LANG-002-durable-actor-runtime.org][STAR-LANG-002 Durable Actor Runtime]]
 - [[file:../../design/star-lang/STAR-LANG-006-final-package-extraction.org][STAR-LANG-006 Dependency-Ordered Final Package Extraction]]
 - [[file:../../design/star-lang/STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
+- [[file:../../design/star-lang/STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
 
 =STAR-LANG-002= extends the approved Common Lisp host with bounded actor mailboxes, supervision strategies, durable jobs, replay, lease fencing, capabilities, artifact custody, durable evidence-delivery intents, process isolation, and compiler-generated actor systems. It does not reverse the Common Lisp-only decision.
 
 =STAR-LANG-006= defines the dependency-ordered one-authority migration from =starlang-prototype= into final ASDF systems.
 
 =STAR-LANG-007= defines explicit =lisa=, =swi-prolog=, and =n-prolog= inference backends plus the closed =expert-system= source/IR/runtime architecture. It extends the Common Lisp runtime through adapters rather than introducing alternate StarLang implementations.
+
+=STAR-LANG-009= hard-locks the logic runtime API beneath the expert-system surface: portable session-fact identity, named operation invocation, result/cancellation/failure semantics, and explicit profiles for Prolog database, SWI tabling/transactions, LISA production behavior, and belief systems.
 
 * Runtime Repository
 
@@ -65,16 +69,23 @@ The real Common Lisp prototype implementation now lives in =lost-rob0t/star-lang
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-022-three-backend-logic-runtime-selection.org][STAR-LANG-RESEARCH-022 Three-Backend Logic Runtime Selection]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-023-expert-system-language-surface.org][STAR-LANG-RESEARCH-023 Expert-System Language Surface]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-026-explicit-logic-backend-selection.org][STAR-LANG-RESEARCH-026 Explicit Logic Backend Selection]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-027-lisp-native-pragma-compiler-directives.org][STAR-LANG-RESEARCH-027 Lisp-Native Pragma and Compiler Directives]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-028-logic-runtime-api-contract.org][STAR-LANG-RESEARCH-028 Logic and Expert Runtime API Contract]]
 
 The library audit recommends adopting mature Common Lisp primitives, wrapping Sento behind a compatibility port, building missing durable actor systems as reusable ASDF libraries, and forking only after conformance tests prove a wrapper is insufficient.
 
-The macro research proposes a closed, deterministic, hygienic macro-expansion phase. The logic research adds a Common Lisp =star-logic= capability layer and now refines the engine model into three explicit selectable runtime IDs. The expert research adds source sugar that lowers to checked engine-neutral IR rather than exposing native engine code.
+The macro research proposes a closed, deterministic, hygienic macro-expansion phase. The logic research adds a Common Lisp =star-logic= capability layer and now refines the engine model into three explicit selectable runtime IDs. The expert research adds source sugar that lowers to checked engine-neutral IR rather than exposing native engine code. The logic API research audits current StarLang source and backend APIs so the public surface can be hard-locked without pretending every engine implements the same semantics.
 
 * Logic Runtime Decision
 
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-022-three-backend-logic-runtime-selection.org][STAR-LANG-RESEARCH-022 Three-Backend Logic Runtime Selection]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-023-expert-system-language-surface.org][STAR-LANG-RESEARCH-023 Expert-System Language Surface]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-026-explicit-logic-backend-selection.org][STAR-LANG-RESEARCH-026 Explicit Logic Backend Selection]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-027-lisp-native-pragma-compiler-directives.org][STAR-LANG-RESEARCH-027 Lisp-Native Pragma and Compiler Directives]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-028-logic-runtime-api-contract.org][STAR-LANG-RESEARCH-028 Logic and Expert Runtime API Contract]]
+- [[file:../../design/star-lang/STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
 - [[file:../../research/star-server/LISA-RESEARCH-001-performance-and-feature-extension.org][LISA-RESEARCH-001 LISA Performance and Feature Extension]]
 - [[file:../../design/star-server/STAR-ADR-002-hybrid-logic-runtime-model.org][STAR-ADR-002 Hybrid Logic Runtime Model]]
 - [[file:../../research/star-server/STAR-RESEARCH-004-internal-prolog-server-library-swi-nprolog.org][STAR-RESEARCH-004 Internal Prolog Server Library]]
@@ -87,7 +98,14 @@ Initial backend contract:
 | =lisa= | Production-rule, agenda/salience, persistent working-memory, and classic expert-session runtime; large-workload =auto= promotion remains benchmark-gated |
 | =n-prolog= | Explicitly supported portable-Prolog/compatibility runtime with fixture-backed capability claims |
 
-StarLang source may use =:backend auto= or explicitly pin any of the three runtimes. =auto= selects deterministically during plan materialization. The selected backend is then immutable for the run; runtime load/failure cannot silently switch engine type.
+StarLang source selects backend policy only through =(pragma :backend ...)= as specified by STAR-LANG-RESEARCH-026. =:auto= selects deterministically during plan materialization. The selected backend is then immutable for the run; runtime load/failure cannot silently switch engine type.
+
+The portable =star.logic.api/1= contract does not expose native engine semantics through misleading generic names. In particular:
+
+- =assert!= adds one typed StarLang session fact; it is not Prolog =assertz= and not raw LISA =ASSERT=;
+- =retract!= retracts by stable StarLang fact identity; it is not Prolog pattern =retract/1=;
+- =solve=/=solutions=/=exists?= invoke compiler-declared named operations, never caller-selected raw native goals;
+- Prolog clause order/retraction, SWI transactions/snapshots/tabling, and LISA agenda/focus/modify/belief behavior require explicit semantic profiles.
 
 The proposed future =star-rules= optimization may replace or extend the LISA adapter implementation only after its semantic compatibility and benchmark gates pass. StarLang source must not depend on that internal optimization name unless it becomes a genuinely distinct semantic backend.
 
@@ -109,6 +127,8 @@ Initial expert features under review:
 
 Raw =(prolog "...")= and raw LISA/Common Lisp =defrule= escape hatches are denied.
 
+STAR-LANG-009 does not approve the complete STAR-LANG-RESEARCH-023 surface. It specifies the runtime/API contract that any approved expert sugar must lower into.
+
 * First Conformance Application
 
 - [[file:../../design/government-data/STAR-GOVDATA-DESIGN-004-franklin-county-starlang-actor-system.org][STAR-GOVDATA-DESIGN-004 Franklin County StarLang Actor System]]
@@ -119,6 +139,10 @@ Logic/expert-system work adds dedicated fake and engine-specific conformance fix
 
 * Decision Record
 
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-028-logic-runtime-api-contract.org][STAR-LANG-RESEARCH-028 Logic and Expert Runtime API Contract]]
+- [[file:../../design/star-lang/STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-027-lisp-native-pragma-compiler-directives.org][STAR-LANG-RESEARCH-027 Lisp-Native Pragma and Compiler Directives]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-026-explicit-logic-backend-selection.org][STAR-LANG-RESEARCH-026 Explicit Logic Backend Selection]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-023-expert-system-language-surface.org][STAR-LANG-RESEARCH-023 Expert-System Language Surface]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-022-three-backend-logic-runtime-selection.org][STAR-LANG-RESEARCH-022 Three-Backend Logic Runtime Selection]]
 - [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
@@ -158,13 +182,15 @@ No Racket, Scheme, Guile, or other alternate Star-Lang parser or runtime is reta
 16. execute the Franklin fake deployment conformance suite;
 17. add end-to-end replay, orphan-artifact recovery, and state-hash tests;
 18. extract and release stable Common Lisp packages after boundaries stabilize;
-19. add normalized =logic-call= IR and canonical JSON schema;
-20. implement portable =star-logic= protocol, backend descriptors, deterministic materialization, and fake adapter;
-21. implement explicit =lisa=, =swi-prolog=, and =n-prolog= backend policy with immutable replay-pinned selection;
-22. implement SWI MQI, N-Prolog process, and LISA session adapters behind final ASDF systems;
-23. implement closed =expert-system= syntax, expert IR, static diagnostics, and fake expert runtime;
-24. implement ExpertSessionActor question/proof/replay behavior and backend-specific expert lowering;
-25. enable nontrivial benchmark-based =auto= routing only after semantic conformance and workload benchmark gates pass.
+19. freeze =star.logic.api/1= normalized records, states, error codes, source-operation semantics, and fake-adapter conformance;
+20. add normalized =logic-call=/fact-delta IR and canonical JSON schema;
+21. implement portable =star-logic= protocol, backend descriptors, deterministic materialization, and fake adapter;
+22. implement explicit =lisa=, =swi-prolog=, and =n-prolog= backend policy with immutable replay-pinned selection;
+23. implement SWI MQI, N-Prolog process, and LISA session adapters behind final ASDF systems;
+24. land per-profile conformance before descriptors advertise Prolog DB, tabling, transactions, production introspection, constraints, belief, or proof features;
+25. implement closed =expert-system= syntax, expert IR, static diagnostics, and fake expert runtime;
+26. implement ExpertSessionActor question/proof/replay behavior and backend-specific expert lowering;
+27. enable nontrivial benchmark-based =auto= routing only after semantic conformance and workload benchmark gates pass.
 
 * Invariants
 
@@ -191,24 +217,30 @@ No Racket, Scheme, Guile, or other alternate Star-Lang parser or runtime is reta
 - Expert source facts cannot be mutated by inference rules; conclusions and session facts are separate state classes.
 - Expert questions are typed effect requests and are journaled before answers become facts.
 - Ambiguous bare negation is denied; absence, negation as failure, inequality, and contradiction remain distinct.
+- Portable =assert!= and =retract!= operate on stable StarLang session-fact identity, never native clause ordering or pattern semantics.
+- Logical zero-answer completion is distinct from backend failure.
+- Native Prolog =call=/cut/consult and raw LISA/Common Lisp execution are denied as portable source operations.
+- Backend-specific API semantics require versioned profiles and fixture-backed descriptor claims.
 - Research nodes never extend the StarIntel schema.
 - Auto-dig and Quasar consume contracts rather than defining them.
 - Alternate implementation languages remain DENIED.
 
 * Completion Gate
 
-Move this index to =APPROVED= only after the implementation tracker is complete, canonical Common Lisp CI validates the final package layout, the durable actor conformance suite passes, the Franklin fake deployment replays to the same authority state hash, final logic systems load without =starlang-prototype=, the three backend adapters pass their declared conformance suites, and expert-system fake/runtime/replay acceptance gates are green.
+Move this index to =APPROVED= only after the implementation tracker is complete, canonical Common Lisp CI validates the final package layout, the durable actor conformance suite passes, the Franklin fake deployment replays to the same authority state hash, final logic systems load without =starlang-prototype=, the fake adapter passes =star.logic.api/1= conformance, the three backend adapters pass every semantic profile they advertise, unsupported profile operations fail before mutation, and expert-system fake/runtime/replay acceptance gates are green.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-08-15 | Index STAR-LANG-RESEARCH-028 and STAR-LANG-009; hard-lock portable logic API semantics and put backend-specific operations behind conformance-gated profiles | ChatGPT agent | STAR-LANG-RESEARCH-028, STAR-LANG-009 |
 | 2026-08-13 | Add STAR-LANG-006/007, three explicit inference runtimes, expert-system compiler/runtime work, expanded work order, and logic/expert completion gates | ChatGPT agent | STAR-LANG-RESEARCH-022, STAR-LANG-RESEARCH-023, STAR-LANG-007 |
 
 * Footnotes and Glossary
 
 - *Implementation index* — Active ledger connecting approved architecture, research/design under review, work order, invariants, and completion gates.
 - *Inference backend* — LISA, SWI-Prolog, or N-Prolog engine accessed by the Common Lisp StarLang runtime through a checked adapter.
-- *Backend policy* — =auto= or an explicit backend pin in StarLang source/deployment configuration.
+- *Backend policy* — =auto= or an explicit backend pin in StarLang source/deployment configuration; source syntax is =(pragma :backend ...)=.
 - *Expert system surface* — Closed StarLang syntax for facts, rules, goals, questions, conclusions, proofs, and uncertainty that lowers to engine-neutral IR.
 - *Engine conformance* — Fixture-backed evidence that an adapter implements the semantic profiles/capabilities it advertises.
+- *Logic API contract* — =star.logic.api/1= portable session/fact/query/result/cancellation contract, separate from profiled backend-native semantics.

@@ -1,0 +1,652 @@
+:PROPERTIES:
+:ID:       starintel-star-lang-research-025
+:END:
+#+title: STAR-LANG-RESEARCH-025 Verification Experiment Program for Actor Ingest
+#+description: Execute the ten verification experiments required by STAR-LANG-RESEARCH-024 against the current StarLang runtime, transport, protocol, TLC, and SMT proof-checking candidates before implementation promotion.
+#+status: REVIEW
+#+last_modified: [2026-08-15 Sat]
+#+filetags: :starintel:star-lang:verification:proofs:actors:ingest:poison-messages:deadlock:liveness:tla:smt:research:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Experiment conclusions | Project maintainer | PENDING | Review repo-grounded findings and executed formal fixtures | This document; formal run 31893307344 |
+| Verification architecture promotion | Project maintainer | NOT STARTED | Accept conclusions and implementation promotion gates | STAR-LANG-RESEARCH-024 and STAR-SERVER-033 |
+| Mandatory external verifier selection | Project maintainer | NOT STARTED | Decide whether TLC and optional cvc5/Alethe become production promotion dependencies | E7-E10 |
+
+* Related Nodes
+
+- [[file:STAR-LANG-RESEARCH-024-proof-obligations-for-documents-actors-and-ingest.org][STAR-LANG-RESEARCH-024 Proof Obligations for Documents, Actors, and Domain Ingest]]
+- [[file:STAR-LANG-RESEARCH-006-specification-libraries-and-domain-servers.org][STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers]]
+- [[file:STAR-LANG-RESEARCH-010-message-lifecycle-and-delivery-semantics.org][STAR-LANG-RESEARCH-010 Message Lifecycle and Delivery Semantics]]
+- [[file:STAR-LANG-RESEARCH-011-deterministic-dispatcher.org][STAR-LANG-RESEARCH-011 Deterministic Dispatcher]]
+- [[file:STAR-LANG-RESEARCH-012-transport-port-and-settlement.org][STAR-LANG-RESEARCH-012 Transport Port and Settlement]]
+- [[file:../../design/star-server/STAR-SERVER-033-proof-carrying-domain-ingest-and-actor-runtime.org][STAR-SERVER-033 Proof-Carrying Domain Ingest and Actor Runtime]]
+- [[file:../../indexes/star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Research Archive]]
+
+* Research Scope
+
+STAR-LANG-RESEARCH-024 required ten experiments before implementation promotion. This node executes the research phase against the current StarLang codebase and now includes real formal-tool evidence.
+
+Evidence is separated into four classes:
+
+1. *repo-grounded evidence* — behavior directly visible in current final StarLang packages and tests;
+2. *bounded sanity-model evidence* — small explicit-state Python models used to find state-machine mistakes before formalization;
+3. *bounded model-check evidence* — a concrete TLA+ model checked by TLC with exact bounds and hashes; and
+4. *solver-certificate evidence* — a concrete SMT-LIB QF_LIA fixture proved unsatisfiable by cvc5, exported as Alethe, and independently accepted by pinned Carcara.
+
+No result here is an unrestricted theorem. The formal results apply to the exact research fixtures and bounds recorded below. A production StarLang plan-to-model generator and promotion certificate pipeline do not exist yet.
+
+The StarLang source snapshot inspected for runtime behavior was =lost-rob0t/star-lang= main at commit =197a4759f1b756bb24e20477c3ddff58c410c493= on 2026-08-15.
+
+* Executive Findings
+
+The experiment program supports the architecture in STAR-LANG-RESEARCH-024 and STAR-SERVER-033, but it exposes one concrete runtime gap.
+
+1. Final =star-actor-protocol= already owns lifecycle envelopes, correlation/causation rules, terminal classification, actor-manifest lookup, accepts-membership, and portable payload validation.
+2. Final =starlang-runtime= already owns bounded actor mailboxes, generations, restart, input/output validators, asynchronous =tell=, correlated =ask= cells, and non-reentrant dispatch.
+3. Current local =ask= is still synchronous from inside an actor handler. It enqueues a request and repeatedly calls =dispatch-next= until reply/error/timeout.
+4. Because =dispatch-next= refuses to re-enter an actor whose =processing-p= flag is true, an A -> B -> A synchronous request cycle does not hang forever; the nested request deterministically reaches =actor-ask-timeout-error=. That is bounded failure, not the split-phase mailbox-progress guarantee required by STAR-SERVER-033.
+5. The current prototype poison fixture proves reject/dead-letter behavior, but not the stronger semantic identity rule that terminal poison cannot automatically re-enter active processing under the same verification context.
+6. Native deterministic checkers remain the correct low-TCB baseline for document shape, actor compatibility, lifecycle legality, poison state, hashes, and static wait-graph cycles.
+7. A bounded TLA+ actor-ingest model now passes TLC safety and liveness checks for the recorded abstraction: 83 states generated, 40 distinct states, search depth 13, no errors.
+8. The first TLC attempt correctly exposed a model defect: terminal =quarantined= quiescence had not been represented explicitly and was reported as deadlock. Adding explicit terminal quiescence repaired the model. This is useful evidence that the model checker is detecting semantic model mistakes rather than merely rubber-stamping a trace.
+9. The Person age/minor QF_LIA fixture now produces =unsat= under cvc5 1.3.4, emits an Alethe proof, and the pinned Carcara 1.1.0 checker exits 0 on that proof.
+10. TLA+/TLC and SMT/Alethe should remain build/promotion tools, not ordinary per-message runtime dependencies.
+
+* Current Runtime Baseline
+
+** Final wire lifecycle
+
+=star-actor-protocol/src/message-lifecycle.lisp= owns lifecycle version 1, command/event/reply/ack/error/cancel kinds, idempotency keys, message/correlation/causation identities, control-payload consistency, terminal classification, command idempotency scope, and cancellation target identity.
+
+Experiments E3, E4, E7, and E8 therefore consume the final protocol package. A verification package MUST NOT duplicate lifecycle parsing or transition ownership.
+
+** Final actor runtime
+
+The final =starlang-runtime= actor definition already carries =accepts=, =produces=, =input-validator=, =output-validator=, restart policy, and bounded mailbox capacity. Actor instances carry generation, invocation count, last error, mailbox state, and a =processing-p= re-entry guard.
+
+Input validation occurs before native handler invocation. Output validation occurs before proposed actor state is committed.
+
+** Current ask semantics
+
+Current =ask=:
+
+1. resolves the target actor;
+2. allocates one correlation id and reply cell;
+3. enqueues a runtime message;
+4. repeatedly calls =dispatch-next= on the target until the cell replies/fails or =timeout-steps= expires.
+
+A handler that asks another actor remains =processing-p=true= until the nested operation returns. That is the exact semantic gap targeted by E5 and E6.
+
+** Existing test coverage
+
+Current runtime tests already cover FIFO =tell=, bounded mailbox full behavior, state/restart generation, stale =ActorRef= rejection, failure rollback, output-contract rollback, successful A -> B ask, non-reentrant self-ask timeout, shutdown, and the external transport boundary.
+
+The missing runtime fixture is the synchronous A -> B -> A cycle and its split-phase replacement.
+
+* Experiment Status Summary
+
+| Experiment | Research result | Evidence class | Remaining implementation work |
+|------------+-----------------+----------------+-------------------------------|
+| E1 Person domain | minimal fixture contract frozen below | research design | implement real StarIntel fixture/domain server |
+| E2 deterministic certificates | valid/invalid matrix and semantic identity rules frozen | research design | implement P1 certificate emitter over final validators |
+| E3 incompatible actor manifests | final protocol/runtime expose all required rejection seams | repo-grounded | add direct conformance fixture/test |
+| E4 poison terminality | one-way invariant defined and included in TLC model | repo-grounded + TLC fixture | add transport-topology validator and durable disposition identity |
+| E5 synchronous A -> B -> A | current runtime deterministically times out nested ask while A stays busy | repo-grounded | static wait graph + removal from verified execution |
+| E6 split-phase A -> B -> A | continuation trace modeled and included in passing TLC model | sanity model + TLC fixture | implement continuation semantics in final runtime authority |
+| E7 retry/cancel/restart/persistence | bounded model executed successfully under TLC | P3 research fixture | generate model from real immutable plan |
+| E8 model certificate bounds | exact model/checker hashes and bounds now available | P3 research fixture | emit production =model-checked= certificate |
+| E9 SMT/Alethe | cvc5 UNSAT + Alethe + independent Carcara exit 0 | solver-certificate research fixture | integrate only if domain constraint benefit justifies TCB/cost |
+| E10 verifier cost | layered native/TLC/optional-SMT recommendation survives experiment | research synthesis | maintainer decision |
+
+* E1 — Tiny Person Ingest Domain
+
+The minimal domain should use one typed command, one typed result, one domain server, and no unrelated ontology surface.
+
+Recommended schema identity:
+
+#+begin_example
+org.starintel/core@1/person
+#+end_example
+
+Minimal fields:
+
+| Field | Type | Purpose |
+|-------+------+---------|
+| =id= | string | stable subject identity |
+| =name= | string | required scalar |
+| =birthYear= | integer | arithmetic invariant input |
+| =observationYear= | integer | arithmetic invariant input |
+| =minor= | boolean | derived/domain-consistency claim |
+| =sourceId= | string/reference | StarIntel provenance boundary |
+
+Command: =starintel.person/ingest@1=
+
+Result: =starintel.person/ingested@1=
+
+The fixture is deliberately small. It is intended to test verification semantics, not ontology completeness. The domain server remains the one authoritative ingest handler; verification wraps that path and does not create another persistence authority.
+
+* E2 — Deterministic Document Certificates
+
+The valid Person fixture should be accompanied by at least:
+
+1. unknown schema revision;
+2. missing =sourceId=;
+3. wrong scalar type for =birthYear=;
+4. undeclared field under a closed schema;
+5. =observationYear < birthYear=;
+6. =minor=true= when computed age is at least 18;
+7. age above the configured human-domain bound;
+8. valid bytes with a deliberately wrong claimed subject hash.
+
+Certificate semantic identity should be a function of:
+
+#+begin_example
+canonical subject bytes/hash
++ exact specification digest
++ verification profile digest
++ claim identifier
++ verifier identity/version
++ assumptions/bounds
++ result/evidence hashes
+#+end_example
+
+Wall-clock time and storage location may be provenance, but should not mutate semantic identity.
+
+This experiment does not require a new canonical JSON implementation. Existing =star-canonical-json= remains authoritative.
+
+* E3 — Incompatible Actor Manifest Rejection
+
+Define:
+
+- =person-domain= accepts =starintel.person/ingest@1=;
+- =company-domain= accepts =starintel.company/ingest@1=;
+- submit a valid Person command to =company-domain=.
+
+Required result:
+
+1. route resolves exactly one authority;
+2. actor manifest lookup succeeds;
+3. accepts-membership fails;
+4. handler invocation count remains unchanged;
+5. actor-local state does not commit;
+6. failure becomes a typed protocol/dispatch outcome;
+7. the same immutable input and manifest/spec digest produce the same rejection.
+
+This is a P1 =checked-conformance= property. SMT is unnecessary.
+
+* E4 — Poison Terminality
+
+The existing prototype transport fixture proves:
+
+#+begin_example
+invalid route -> :rejected -> transport :reject -> fake dead-letter collection
+#+end_example
+
+The stronger semantic invariant is:
+
+#+begin_example
+terminal-poison(messageId, envelopeHash, specDigest, verifierVersion, activeRoute)
+  => NOT reachable(active-processing for same verification context)
+#+end_example
+
+Allowed terminal progression:
+
+#+begin_example
+terminal-poison -> dead-lettered
+terminal-poison -> quarantined
+terminal-poison -> discarded
+#+end_example
+
+Forbidden automatic transitions:
+
+#+begin_example
+terminal-poison -> active-processing
+dead-lettered -> active-processing
+quarantined -> active-processing
+discarded -> active-processing
+#+end_example
+
+Manual/operator replay is a new verification context and must be explicit.
+
+The TLC fixture represents poison as a terminal =quarantined= path and checks =PoisonTerminalInvariant= and =PoisonCannotComplete=. Both passed in the bounded run described under E7.
+
+This does not prove a real RabbitMQ/CouchDB/Valkey deployment topology cannot be misconfigured. A deployment validator still needs to prove that quarantine/dead-letter routing cannot automatically bind back to the active ingest route.
+
+* E5 — Deliberate Synchronous A -> B -> A Cycle
+
+Current source semantics produce this sequence:
+
+#+begin_example
+external caller asks A
+A synchronously asks B
+B synchronously asks A
+#+end_example
+
+A is already =processing-p=true= when B's nested request returns toward A. =dispatch-next A= refuses re-entry, so the B -> A request cannot progress until the nested deterministic ask budget expires. The inner ask raises =actor-ask-timeout-error= and the failure unwinds B then A.
+
+That is safer than an infinite host-level hang, but it is not protocol deadlock freedom. The hard wait graph is:
+
+#+begin_example
+A -> B
+B -> A
+#+end_example
+
+and should be rejected before deployment.
+
+The existing self-ask timeout test is the one-node special case of the same structural problem.
+
+* E6 — Split-Phase A -> B -> A
+
+The desired semantic trace is:
+
+#+begin_example
+A receives command
+A sends cAB to B; stores kA; releases mailbox
+B receives cAB
+B sends cBA to A; stores kB; releases mailbox
+A receives cBA and replies
+B receives reply cBA; resumes kB; replies to A
+A receives reply cAB; resumes kA; completes original command
+#+end_example
+
+A six-state sanity model reached completion without an actor synchronously holding its mailbox while waiting.
+
+The TLA+ fixture then modeled the same split-phase shape using phases =a_wait_b=, =b_wait_a=, =b_resume=, and =a_resume= with independent progress actions. The bounded TLC run reached no safety or liveness error.
+
+The model uses weak fairness over =Next=. This is deliberately scoped. Fairness does not imply an external database or network eventually recovers. If persistence remains unavailable, bounded retry exhaustion, cancellation, restart failure, or another explicit terminal result provides progress.
+
+* E7 — Executed TLA+/TLC Model
+
+Research fixtures:
+
+- =experiments/star-lang/verification/StarActorIngest.tla=
+- =experiments/star-lang/verification/StarActorIngest.cfg=
+
+The model contains:
+
+- payload class =valid/poison=;
+- phases for receive, actor A execution, split-phase A -> B -> A request progression, persistence-ready, retry wait, and terminal outcomes;
+- retry budget =0..2=;
+- persistence =up/down=;
+- A/B generation =0..1=;
+- outstanding A -> B and B -> A request flags;
+- cancellation;
+- restart of A or B;
+- poison terminal state;
+- explicit terminal quiescence.
+
+Checked invariants:
+
+- =TypeOK=;
+- =PoisonTerminalInvariant=;
+- =TerminalClearsOutstanding=;
+- =PoisonCannotComplete=.
+
+Checked liveness property:
+
+- =EventuallyTerminal=.
+
+Specification fairness:
+
+#+begin_example
+Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
+#+end_example
+
+** First TLC run: useful model failure
+
+The first run parsed and entered model checking, then TLC reported deadlock at a correctly terminal =quarantined= state. The model had failed to distinguish terminal quiescence from stuck nonterminal progress.
+
+The repair added explicit =TerminalQuiesce= for terminal states. The second run then completed the full bounded state space with no error.
+
+This history matters: a promotion pipeline should retain failing model/counterexample evidence rather than hide it.
+
+** Successful TLC evidence
+
+Run: GitHub Actions =31893307344=
+
+Tool: =TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)= from the TLA+ v1.7.4 =tla2tools.jar= release.
+
+Published jar SHA1:
+
+#+begin_example
+bee4a54f3ee3d4afc347c3240ec2d9e93b075104
+#+end_example
+
+Observed result:
+
+#+begin_example
+4 distinct initial states
+83 states generated
+40 distinct states found
+0 states left on queue
+complete graph depth 13
+temporal properties checked over complete state space
+Model checking completed. No error has been found.
+#+end_example
+
+TLC reported an optimistic fingerprint-collision probability estimate of =9.3E-17= for the checked run.
+
+Fixture hashes:
+
+#+begin_example
+StarActorIngest.tla
+sha256:2329f5c90c1086d946dad1d740f326181cdb52dd5c3e575f35353e19e909eea6
+
+StarActorIngest.cfg
+sha256:452e1eccbc0234c17b056b37ffc799679e3e00c3fb33a7901db2a098888a2883
+#+end_example
+
+This is a valid bounded =model-checked= research result for this fixture. It is not an unrestricted deadlock theorem and it is not yet a deployment certificate for arbitrary StarIntel plans.
+
+** Earlier Python sanity model
+
+The pre-TLA+ abstraction explored 94 states and 204 transitions with no modeled poison-reactivation or retry-bound violations. It remains useful as research history, but the TLC run supersedes it as the stronger bounded model-check evidence for the formal fixture.
+
+* E8 — Model Bounds and Certificate Semantics
+
+A production P3 certificate should preserve the exact model inputs and bounds rather than only storing =passed=true=.
+
+Research example:
+
+#+begin_src json
+{
+  "schema": "star.verify.certificate/1",
+  "class": "model-checked",
+  "claim": "star.actor.topology.progress",
+  "subjectType": "star.execution-plan/1",
+  "subjectHash": "sha256:...",
+  "planDigest": "sha256:...",
+  "verifier": "star.verify.tlc/1",
+  "verifierVersion": "TLC2-2.19",
+  "assumptions": ["weak-fair-next"],
+  "bounds": {
+    "actors": 2,
+    "retryLimit": 2,
+    "generationMax": 1,
+    "payloadClasses": ["valid", "poison"],
+    "persistenceModes": ["up", "down"]
+  },
+  "modelHash": "sha256:2329f5c90c1086d946dad1d740f326181cdb52dd5c3e575f35353e19e909eea6",
+  "configHash": "sha256:452e1eccbc0234c17b056b37ffc799679e3e00c3fb33a7901db2a098888a2883",
+  "result": "valid"
+}
+#+end_src
+
+A production certificate must also bind the real plan digest, model-generator version, checker invocation/options, state-space bounds, fairness assumptions, result, and counterexample artifact when failed.
+
+The correct label is =model-checked=, never =theorem-artifact=, unless a separate theorem proof exists.
+
+* E9 — Executed SMT/Alethe Experiment
+
+The Person fixture uses a nontrivial but decidable arithmetic invariant:
+
+#+begin_example
+age = observationYear - birthYear
+0 <= age <= 130
+minor = true  => age <= 17
+minor = false => age >= 18
+#+end_example
+
+Negative fixture:
+
+#+begin_example
+birthYear = 2000
+observationYear = 2026
+minor = true
+#+end_example
+
+This implies age 26 and contradicts the minor invariant. The checked fixture is:
+
+=experiments/star-lang/verification/person-minor-unsat.smt2=
+
+Input SHA256:
+
+#+begin_example
+9d3ec57479f75a503f69d2f5bcbad0fd078b73bee2a90157779712c54d68fc81
+#+end_example
+
+** Plain cvc5 result
+
+Run =31893307344= used =cvc5 1.3.4 [git f3b21c4]=. The pinned Linux static release archive matched SHA256:
+
+#+begin_example
+6cbc48ad8812b72abed32418a9f8b928c56c776d67377e63bc6b8f6bb2e40ac5
+#+end_example
+
+cvc5 returned:
+
+#+begin_example
+unsat
+#+end_example
+
+** Alethe proof production
+
+The same cvc5 binary ran with:
+
+#+begin_example
+--dump-proofs --proof-format-mode=alethe
+#+end_example
+
+The resulting proof artifact was non-empty and had SHA256:
+
+#+begin_example
+3a6bf20e254fe9dd51527b85b19700ef835b7988ecdef792ee73fc35e2791aa3
+#+end_example
+
+** Independent Carcara check
+
+Carcara was built from pinned commit:
+
+#+begin_example
+6624ea80cf1985ada473c0705869c78353e4282d
+#+end_example
+
+Observed checker identity:
+
+#+begin_example
+carcara 1.1.0 [git master 6624ea8]
+#+end_example
+
+The independent check emitted the literal output =holey= and exited with code =0=. This document records that output verbatim and treats exit code 0 as the successful checker result; it does not assign extra semantics to the word =holey=.
+
+The result demonstrates the intended proof-producer/checker architecture for this fixture:
+
+#+begin_example
+StarIntel SMT encoding -> cvc5 -> Alethe proof -> pinned independent Carcara check
+#+end_example
+
+This reduces trust in the solver result itself, but it does not remove trust from the StarIntel-to-SMT encoding or the selected proof checker.
+
+Formal evidence was retained in Actions artifact =9249135467=. The uploaded artifact ZIP digest reported by GitHub Actions was:
+
+#+begin_example
+sha256:ac263f16435979a36ced7ec5f7f9be6c4d141cfed2ac5d46dfa2fed3acb7987e
+#+end_example
+
+This is a solver-certificate *research fixture*. It is not yet a generic StarIntel solver-certificate implementation.
+
+* E10 — Native Checks vs TLA+ vs SMT
+
+| Mechanism | Best use | Strength | Cost/risk | Recommended role |
+|-----------+----------+----------+-----------+------------------|
+| native deterministic checker | schema, actor manifest, lifecycle, hashes, poison state | smallest TCB; direct runtime semantics | proves only encoded local properties | mandatory P1/P2 baseline |
+| static wait graph | hard blocking cycles | extremely cheap structural rejection | cannot express state-dependent protocols | mandatory promotion precheck |
+| TLA+/TLC | concurrency, retry, restart, cancellation, timeout, progress | temporal safety/liveness plus counterexamples | model generation, fairness discipline, state explosion | P3 promotion evidence once generated from real plans |
+| SMT | arithmetic/domain constraints | strong automation in decidable fragments | encoding trust; poor fit for temporal actor progress | optional domain-specific P3 |
+| cvc5 + Alethe + checker | high-assurance SMT constraints | separates proof production from proof checking | proof-format/checker integration | optional stronger P3 |
+| theorem prover | selected stable semantic theorems | strongest machine-checked claim | highest proof/maintenance cost | exceptional P4 only |
+
+The experiment supports a layered stack:
+
+1. native checks always;
+2. static hard-wait graph for verified actor plans;
+3. TLA+/TLC at build/promotion once plans can generate the model deterministically;
+4. SMT/Alethe only for constraints that materially benefit from it;
+5. theorem artifacts only where stronger assurance justifies the proof-maintenance cost.
+
+No external formal tool should be required for ordinary document parsing or every actor message.
+
+* Formal-Tool Execution Status
+
+| Tool/evidence | Status on 2026-08-15 | Claim strength |
+|---------------+----------------------+----------------|
+| StarLang source/test audit | EXECUTED | repo-grounded behavior and gaps |
+| Python poison reachability sanity model | EXECUTED | bounded sanity evidence |
+| Python split-phase trace model | EXECUTED | bounded sanity evidence |
+| Python retry/restart/persistence model | EXECUTED | 94-state/204-transition sanity evidence |
+| TLA+ SANY parser | EXECUTED | model syntax/semantic processing succeeded |
+| TLC 2.19 | EXECUTED, PASS | bounded P3 research fixture: 83 generated / 40 distinct states, depth 13, no error |
+| cvc5 1.3.4 | EXECUTED, UNSAT | bounded solver result for QF_LIA Person fixture |
+| cvc5 Alethe proof export | EXECUTED | proof artifact hash retained |
+| Carcara 1.1.0 @ 6624ea8 | EXECUTED, EXIT 0 | independent proof-check research evidence |
+| Lean/Rocq/ACL2 | NOT RUN | no P4 theorem claim |
+
+This table is normative for interpreting the evidence strength.
+
+* Promotion Gates Derived from the Experiments
+
+Research gates now divide into *demonstrated* and *still implementation-blocked* requirements.
+
+Demonstrated by the research fixtures:
+
+1. split-phase actor progression can be represented without a synchronous hard A -> B -> A wait;
+2. terminal poison can be modeled as one-way terminal state;
+3. bounded retry/restart/cancel/persistence behavior can be checked by TLC;
+4. exact bounds, model hashes, and checker versions can be retained;
+5. the Person QF_LIA violation is UNSAT under cvc5;
+6. cvc5 can emit a proof that a pinned independent Carcara build accepts for the fixture.
+
+Still required before implementation promotion:
+
+1. deterministic Person document fixtures must exercise real final document validators and emit stable P1 certificate identities;
+2. incompatible actor messages must be rejected before handler invocation in a direct final-runtime conformance fixture;
+3. transport deployment validation must forbid automatic quarantine/dead-letter return to the active route;
+4. synchronous actor hard waits must be removed from verified StarLang execution or rejected statically;
+5. split-phase continuation semantics must be implemented in the one authoritative runtime path;
+6. every verified blocking port must have a finite deadline;
+7. the immutable StarLang execution plan must deterministically generate the TLA+ model/config rather than relying on a handwritten research model;
+8. generated production certificates must bind exact plan/model/config/checker hashes and assumptions;
+9. optional solver certificates must bind the exact normalized SMT query, solver/options, proof hash, checker identity/version, and checker result;
+10. no verification package may create a second dispatcher, lifecycle, actor runtime, settlement authority, or persistence stack.
+
+* Implementation Consequences
+
+Proof implementation should consume the final authorities already extracted from =prototype/=.
+
+Do not implement a verifier-owned actor message parser, manifest matcher, lifecycle, or dispatcher.
+
+Recommended proof implementation order after current dispatcher extraction settles:
+
+1. freeze =star.verify.certificate/1= and claim vocabulary;
+2. add pure certificate-producing wrappers around final protocol/document checks;
+3. strengthen poison terminal-disposition identity and route-topology validation;
+4. replace verified synchronous actor waits with split-phase continuation semantics in the one authoritative runtime;
+5. add static hard-wait graph verification;
+6. generate the TLA+ model/config deterministically from the immutable plan and run TLC at promotion;
+7. integrate the Person fixture into one real StarIntel domain-ingest server;
+8. add optional SMT/Alethe certificate production/checking only for approved domain constraints.
+
+* Rejected Research Conclusions
+
+** Current ask timeouts prove deadlock freedom
+
+Rejected. A finite timeout prevents an infinite local hang, but the actor still holds progress until failure.
+
+** RabbitMQ delivery limits prove poison termination
+
+Rejected. Broker safeguards are defense in depth; StarLang owns semantic terminal classification and active-route non-return.
+
+** The passing TLC fixture proves all StarIntel actor systems deadlock-free
+
+Rejected. TLC proved the exact finite research model under its recorded bounds and weak-fairness assumption. A production claim requires deterministic generation from the actual immutable plan.
+
+** The passing TLC fixture is a theorem
+
+Rejected. It is =model-checked= evidence, not =theorem-artifact= evidence.
+
+** Alethe removes all trust
+
+Rejected. Independent proof checking reduces trust in cvc5, but the StarIntel SMT encoding and selected checker remain in the trust boundary.
+
+** SMT should prove actor liveness
+
+Rejected as the default architecture. TLA+ is the better semantic fit for temporal actor behavior; SMT remains for selected constraint domains.
+
+** Every StarIntel document should invoke cvc5 at runtime
+
+Rejected. Native deterministic checks remain the normal ingest path. Solver proofs are optional promotion/audit evidence where justified.
+
+* Decision
+
+The ten-experiment research program supports the proof-carrying architecture and upgrades two previously hypothetical claims into reproducible formal research evidence:
+
+- a bounded actor-ingest model covering split-phase A -> B -> A progress, poison termination, retry, persistence availability, cancellation, and restart passes TLC with no errors over its complete 40-state distinct state space; and
+- a concrete Person cross-field violation is proved UNSAT by cvc5, exported as Alethe, and accepted by a pinned independent Carcara checker.
+
+The primary runtime conclusion remains unchanged: current StarLang =ask= is mailbox-backed but still synchronous while a handler waits and must not be treated as the final verified ask semantics.
+
+The target verified runtime should combine final StarLang P1/P2 checkers, split-phase continuations, finite blocking ports, static hard-wait rejection, generated TLA+/TLC promotion models, optional SMT/Alethe domain certificates, and one immutable =star.verify.certificate/1= vocabulary.
+
+The experiment conclusions remain =PENDING= maintainer review. The formal runs demonstrate feasibility and evidence shape; they do not themselves approve implementation architecture or promote the research node.
+
+* Sources
+
+Retrieved 2026-08-15 unless otherwise stated.
+
+** StarLang repository evidence
+
+- =starlang-runtime/src/runtime.lisp= — actor validators, bounded mailbox, =processing-p=, =tell=, synchronous =ask=, timeout, restart/generation:
+  https://github.com/lost-rob0t/star-lang/blob/main/starlang-runtime/src/runtime.lisp
+- =starlang-runtime/tests/starlang-runtime-tests.lisp= — two-actor ask, self-ask timeout, contracts, restart/generation:
+  https://github.com/lost-rob0t/star-lang/blob/main/starlang-runtime/tests/starlang-runtime-tests.lisp
+- =star-actor-protocol/src/message-lifecycle.lisp= — final lifecycle contract:
+  https://github.com/lost-rob0t/star-lang/blob/main/star-actor-protocol/src/message-lifecycle.lisp
+- =prototype/transport-port-tests.lisp= — current poison reject/dead-letter fixture:
+  https://github.com/lost-rob0t/star-lang/blob/main/prototype/transport-port-tests.lisp
+
+** Formal experiment fixtures
+
+- =experiments/star-lang/verification/StarActorIngest.tla=
+- =experiments/star-lang/verification/StarActorIngest.cfg=
+- =experiments/star-lang/verification/person-minor-unsat.smt2=
+- GitHub Actions formal evidence run =31893307344=; artifact =9249135467=.
+
+** External primary and official sources
+
+- Leslie Lamport, TLA+ Tools / TLC: https://lamport.azurewebsites.net/tla/tools.html
+- Leslie Lamport, PlusCal Tutorial Session 9 — liveness/fairness: https://lamport.azurewebsites.net/tla/tutorial/session9.html
+- Leslie Lamport, PlusCal deadlock tutorial: https://lamport.azurewebsites.net/tla/tutorial/deadlock.html
+- Erlang/OTP =gen_server=: https://www.erlang.org/doc/apps/stdlib/gen_server.html
+- RabbitMQ quorum queues: https://www.rabbitmq.com/docs/quorum-queues
+- RabbitMQ negative acknowledgements: https://www.rabbitmq.com/docs/nack
+- SMT-LIB logics / QF_LIA: https://smt-lib.org/logics.shtml
+- SMT-LIB language: https://smt-lib.org/language.shtml
+- cvc5 proof production: https://cvc5.github.io/docs-ci/docs-main/proofs/proofs.html
+- cvc5 Alethe output: https://cvc5.github.io/docs-ci/docs-main/proofs/output_alethe.html
+- cvc5 1.3.4 release: https://github.com/cvc5/cvc5/releases/tag/cvc5-1.3.4
+- Carcara: https://github.com/ufmg-smite/carcara
+- Simon Fowler and Raymond Hu, "Speak Now: Safe Actor Programming with Multiparty Session Types": https://arxiv.org/abs/2602.24054
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-15 | Execute the ten-experiment research program against current StarLang source; define Person, actor mismatch, poison, wait-cycle, split-phase, model, and SMT fixtures | ChatGPT agent | StarLang main at 197a4759f1b756bb24e20477c3ddff58c410c493 |
+| 2026-08-15 | Execute real formal fixtures: repair terminal-quiescence model defect; TLC checks 83 generated/40 distinct states at depth 13 with no error; cvc5 1.3.4 returns UNSAT and emits Alethe; pinned Carcara 1.1.0 exits 0; retain exact hashes and Actions evidence artifact | ChatGPT agent | GitHub Actions run 31893307344; artifact 9249135467 |
+
+* Footnotes and Glossary
+
+- *Bounded sanity model* — Small explicit-state model used to find state-machine errors before or alongside the formal checker. It is not itself a P3 certificate.
+- *Bounded model-checked result* — Formal-tool result over an exact finite abstraction, bounds, assumptions, model, and checker version. It does not generalize beyond those inputs without additional proof.
+- *Fairness* — Temporal assumption that rules out selected infinite behaviors where an enabled action is postponed forever. It must be named in model evidence.
+- *Hard wait* — Dependency where one authority holds progress while synchronously waiting for another authority.
+- *Split-phase request* — Request semantics where sending stores a continuation and releases mailbox execution; reply/error/cancel/timeout later resumes the continuation.
+- *Terminal quiescence* — Explicit modeled state in which completed terminal work legitimately has no further useful progress; distinct from a nonterminal deadlock.
+- *Terminal poison* — Delivery deterministically unprocessable under one immutable verification context; automatic active-path retry is forbidden.
+- *Verification context* — Immutable tuple including message/subject identity, specification/plan digest, verifier identity/version, and relevant policy profile.
+- *QF_LIA* — Quantifier-free linear integer arithmetic in SMT-LIB.
+- *Alethe* — SMT proof format used here to carry cvc5 proof output to an independent checker.
+- *TCB* — Trusted computing base; code and semantics that must be trusted for a verification claim.

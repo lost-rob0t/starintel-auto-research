@@ -2,40 +2,63 @@
 :ID:       starintel-star-lang-research-020
 :END:
 #+title: STAR-LANG-RESEARCH-020 Hygienic Macro Expansion and Language Extensibility
-#+description: Audit the canonical StarLang source and define a safe, deterministic, source-preserving macro architecture for review.
+#+description: Define a StarLang macro architecture that combines Nim-style compile-time AST transformation with Racket-style syntax objects, scope-set hygiene, provenance, and deterministic compiler boundaries.
 #+status: REVIEW
-#+filetags: :starintel:research:star-lang:macros:hygiene:compiler:common-lisp:review:
+#+filetags: :starintel:research:star-lang:macros:hygiene:compiler:nim:racket:syntax-objects:review:
 #+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE DENIED
 #+created: [2026-07-29 Wed]
-#+last_modified: [2026-07-29 Wed]
+#+last_modified: [2026-08-15 Sat]
 
-| Version | Date       | Description of change                                      | Did nsaspy approve it |
-|---------+------------+------------------------------------------------------------+-----------------------|
-| 0.1.0   | 2026-07-29 | Audit canonical source and propose hygienic macro pipeline | Pending review        |
+| Version | Date       | Description of change                                                                                                             | Did nsaspy approve it |
+|---------+------------+-----------------------------------------------------------------------------------------------------------------------------------+-----------------------|
+| 0.3.0   | 2026-08-15 | Replace the original declarative-only model with Nim-style programmable AST macros over Racket-style hygienic syntax objects     | Pending review        |
+| 0.2.0   | 2026-08-15 | Keep Common Lisp canonical for the current generation while permitting explicitly authorized future self-hosting planning        | Policy change: Yes    |
+| 0.1.0   | 2026-07-29 | Audit canonical source and propose a declarative hygienic macro pipeline                                                          | Superseded by 0.3.0   |
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Verify Nim macro/template semantics, Racket syntax-object hygiene, and current compiler constraints | Research Findings |
+| Macro architecture | StarLang maintainer | PENDING | Approve the Nim-style macro / template split over Racket-style syntax objects | Recommended Language Model |
+| Runtime semantics | StarLang maintainer | PENDING | Confirm that macro expansion is compile-time while macro-generated code may execute normally at runtime | Runtime Boundary |
+| Current-generation host boundary | nsaspy | APPROVED | Keep Common Lisp canonical for the current-generation compiler | STAR-LANG-RESEARCH-018 and STAR-LANG-001 |
+| Future self-hosting policy | nsaspy | APPROVED | Permit self-hosting as a future direction but require explicit nsaspy authorization before planning it | nsaspy direction, 2026-08-15 |
+| Implementation | Repository maintainer | NOT STARTED | Implement only after macro architecture approval and prerequisite syntax-object work | Implementation Order |
 
 * Related Nodes
 
 - [[file:../../indexes/star-lang/STAR-LANG-INDEX-001-implementation.org][STAR-LANG-INDEX-001 Common Lisp Implementation]]
 - [[file:../../indexes/star-lang/STAR-LANG-INDEX-000-language-research.org][STAR-LANG-INDEX-000 Star-Lang Research Archive]]
 - [[file:STAR-LANG-RESEARCH-018-comparative-gate-and-language-selection.org][STAR-LANG-RESEARCH-018 Final Common Lisp Selection]]
+- [[file:STAR-LANG-RESEARCH-027-lisp-native-pragma-compiler-directives.org][STAR-LANG-RESEARCH-027 Lisp-Native Pragma and Compiler Directives]]
 - [[file:../../design/star-lang/STAR-LANG-001-common-lisp-host-portable-manifest.org][STAR-LANG-001 Final Common Lisp Architecture]]
 - Canonical source repository: [[https://github.com/lost-rob0t/star-lang][lost-rob0t/star-lang]]
 
-* Scope
+* Research Question
 
-This pass reviews the canonical StarLang[fn:starlang] implementation in =lost-rob0t/star-lang= and asks one narrow language-design question:
+How should StarLang gain serious Lisp-family metaprogramming without exposing arbitrary host Common Lisp, while retaining a closed parser, deterministic compilation, exact source diagnostics, reproducible manifests, and structural hygiene?
 
-How should StarLang gain macros[fn:macro] without losing its closed parser, deterministic compiler, source diagnostics, reproducible manifests, and Common Lisp-only implementation boundary?
+The revised answer is deliberately hybrid:
 
-This is implementation research, not a reopened host-language comparison. Common Lisp[fn:cl] remains the sole approved implementation language. Racket, Scheme, Rust, Lean, and Julia are examined only as evidence about macro-system design; none is proposed as a StarLang implementation host.
+- use *Nim-style author-facing macro semantics*: macros are compile-time functions that receive syntax trees, inspect or transform them, and return syntax that the compiler checks;
+- keep a separate *template* facility for simpler hygienic substitution and code generation;
+- use *Racket-style compiler infrastructure*: syntax objects carry source spans, binding scopes, and expansion provenance, and hygiene is structural rather than based on generated textual names;
+- do not import Racket's full arbitrary phase tower in the first generation;
+- do not copy Nim's broad compile-time ambient authority without StarLang-specific capability and reproducibility controls.
+
+This supersedes the original recommendation that V1 should be limited to =syntax-rules=-like declarative macros.
 
 * Executive Finding
 
-StarLang should add an explicit hygienic macro-expansion phase between parsing and semantic compilation.
+StarLang should support two related source-level expansion mechanisms:
 
-The first release should support declarative, pattern-directed macros only. A =.star= file must not contain arbitrary Common Lisp transformer code, must not enter the Common Lisp reader, and must not gain access to =EVAL=, the filesystem, the network, the clock, randomness, environment variables, packages, or runtime objects.
+1. =template= for concise, hygienic structural substitution;
+2. =macro= for programmable compile-time transformation over StarLang syntax objects.
 
-The required pipeline is:
+Both operate before ordinary runtime execution. A macro invocation itself is a compile-time transformation, but the code generated by a template or macro may perform ordinary runtime work.
+
+The compiler architecture should therefore be:
 
 #+begin_src text
 .star source
@@ -44,169 +67,275 @@ The required pipeline is:
 closed StarLang reader
     |
     v
-syntax objects with per-occurrence spans, scopes, and origin metadata
+Racket-inspired syntax objects
+(span + scope set + origin + datum)
     |
-    v
-locked declarative macro environment
-    |
-    v
-bounded hygienic expansion into a small core surface
-    |
-    v
-semantic validation
-    |
-    v
-normalized IR
-    |
-    v
-runtime binding and execution
+    +-------------------------------+
+    |                               |
+    v                               v
+hygienic templates          programmable macros
+(simple substitution)       (typed/untyped syntax)
+    |                               |
+    +---------------+---------------+
+                    |
+                    v
+         expanded StarLang syntax
+                    |
+                    v
+        semantic validation/checking
+                    |
+                    v
+             normalized IR
+                    |
+                    v
+               runtime
 #+end_src
 
-The current source is not ready for this phase yet. It first needs a syntax-object layer[fn:syntax-object] because parsed atoms are represented as ordinary strings, keywords, integers, and booleans, while source positions are attached only to list objects. That representation cannot distinguish every identifier occurrence and cannot carry a complete macro origin chain[fn:origin-chain].
+The expansion substrate is language-level compiler architecture. Current-generation implementation remains Common Lisp, but the semantics must not depend on observable Common Lisp reader, package, object-identity, or =EVAL= behavior.
 
 * Canonical Source Audit
 
-** The closed reader is the correct boundary
+** The closed reader remains the correct boundary
 
-The canonical parser in [[https://github.com/lost-rob0t/star-lang/blob/main/prototype/core-surface-prototype.lisp][=prototype/core-surface-prototype.lisp=]] reads =.star= text with a dedicated character parser. It rejects Common Lisp reader syntax beginning with =#=, ='=, backquote, and comma; rejects dotted lists; rejects package-qualified names; and maps source identifiers to lowercase strings.
+The canonical parser in [[https://github.com/lost-rob0t/star-lang/blob/main/prototype/core-surface-prototype.lisp][=prototype/core-surface-prototype.lisp=]] uses a dedicated StarLang parser rather than the Common Lisp reader. That boundary should remain.
 
-This is the right security direction. Macro support must preserve it. The implementation must not solve macros by calling Common Lisp =READ= on StarLang source or by translating user text into a host =DEFMACRO= form.
+Macro support must not mean:
 
-** Source positions are currently list-level, not occurrence-level
+- feeding untrusted =.star= source to Common Lisp =READ=;
+- translating user macro definitions into unrestricted host =DEFMACRO= bodies;
+- interning attacker-controlled source identifiers into arbitrary CL packages;
+- exposing host reader macros or host =EVAL= as the StarLang extension mechanism.
 
-The parser records a position when it finishes a parenthesized list and stores that position in an =EQ=-tested hash table keyed by the resulting list object. =with-star-source-position= later looks up the current list object in that table.
+The compiler may be implemented in Common Lisp while the source-language macro model remains a distinct StarLang facility.
 
-Atoms do not receive equivalent per-occurrence objects or spans[fn:source-span]. Repeated identifiers with the same spelling therefore do not carry independent lexical identity, source extent, scope set, or expansion provenance.
+** Current source identity is insufficient
 
-This is sufficient for the current declaration compiler, but insufficient for hygienic expansion. A macro expander must distinguish:
+The current parser attaches source-position information primarily to list objects. Hygienic metaprogramming requires occurrence-level syntax identity for identifiers and atoms as well as lists.
 
-- an identifier written at the macro use site;
-- an identifier written in the macro definition;
-- an identifier synthesized by the expander;
-- two identical spellings that belong to different scopes;
-- the source span of each occurrence;
-- the expansion steps that produced each generated form.
+A macro system must distinguish at least:
 
-** The current compiler has no expansion phase
+- syntax written at the macro use site;
+- syntax written in the macro definition;
+- syntax synthesized by the transformer;
+- two equal textual identifiers with different bindings;
+- definition-site and use-site binding context;
+- complete source spans;
+- the ordered expansion chain that generated a form.
 
-The normalized intermediate representation[fn:ir] compiler in [[https://github.com/lost-rob0t/star-lang/blob/main/prototype/compiler-ir-prototype.lisp][=prototype/compiler-ir-prototype.lisp=]] performs direct declaration dispatch. =compile-program= validates that one specification graph exists, gathers target names, and maps =compile-declaration= across the source declarations.
-
-The host macro =define-star-program= only quotes its body and invokes =compile-program=. It is a Common Lisp convenience wrapper around the prototype compiler. It is not a StarLang macro system and does not establish hygiene, phases, syntax objects, locked macro imports, expansion limits, or source-level macro definitions.
-
-** The current work order already points at the prerequisite
-
-[[file:../../indexes/star-lang/STAR-LANG-INDEX-001-implementation.org][STAR-LANG-INDEX-001]] lists first-class source spans and origin chains near the front of the implementation work order. Macro expansion makes that item urgent rather than optional. Building macro substitution on raw lists now would create a second incompatible source representation that would later need replacement.
+The prerequisite is therefore still a first-class syntax-object layer.
 
 * Research Findings
 
-** Syntax objects are the durable unit
+** Nim: macros are compile-time AST transformations
 
-Racket separates reading from expansion and represents program fragments as syntax objects containing source location and lexical binding information. Its expander uses that information to preserve lexical meaning through transformation. Racket also records an =origin= property describing the sequence of macro expansions that produced generated syntax.
+Nim distinguishes macros from ordinary runtime procedures. Its macro system exposes syntax trees as =NimNode= values, allows a transformer to inspect and construct AST nodes, and checks the produced result through the compiler.
+
+Nim also distinguishes =untyped= and =typed= macro arguments:
+
+- an =untyped= argument is passed to the macro before semantic checking and only needs to be syntactically parsable;
+- a =typed= argument is semantically processed before macro invocation, with identifiers resolved and type information available;
+- macro-generated syntax is subsequently checked by the compiler.
+
+Nim provides both low-level AST construction and quotation-based generation, along with helpers such as =genSym= and =bindSym= for symbol control.
 
 Sources:
+
+- [[https://nim-lang.org/docs/tut3.html][Nim Tutorial Part III: Macros]]
+- [[https://nim-lang.org/docs/macros.html][Nim std/macros]]
+
+This is the correct high-level semantic inspiration for StarLang macros.
+
+** Nim: templates and macros solve different problems
+
+Nim retains templates alongside macros. That separation is useful for StarLang too.
+
+A template should cover the common case where an author wants a small hygienic source abstraction without writing a general tree transformer. A macro should be used when the transformer needs to inspect tree shape, branch on syntax, query checked metadata, synthesize multiple declarations, or perform nontrivial compile-time reasoning.
+
+StarLang should not force simple source abstraction through the most powerful metaprogramming interface.
+
+** Racket: syntax objects provide the stronger hygiene substrate
+
+Racket represents program fragments as syntax objects associated with lexical scope information. Binding and reference resolution operate through scope sets, and macro expansion introduces scopes that prevent accidental capture between generated syntax and use-site syntax.
+
+Racket also tracks expansion history through syntax properties such as =origin=.
+
+Source:
 
 - [[https://docs.racket-lang.org/reference/syntax-model.html][Racket Reference: Syntax Model]]
-- [[https://docs.racket-lang.org/guide/stx-obj.html][Racket Guide: Syntax Objects]]
-- [[https://docs.racket-lang.org/reference/stxprops.html][Racket Reference: Syntax Object Properties]]
 
-StarLang does not need Racket's full module and phase system, but it does need the same core separation: parsed syntax must be richer than plain data, and expansion metadata must survive until diagnostics and manifest emission.
+StarLang should retain this infrastructure even though its author-facing macro semantics are closer to Nim than to =syntax-rules=.
 
-** Hygiene should be structural, not naming convention
+The key distinction is:
 
-The scope-set model described in Matthew Flatt's “Binding as Sets of Scopes” associates identifiers with sets of scopes created by binding forms and macro expansions. Binding resolution then depends on scope membership rather than textual renaming alone.
+#+begin_src text
+Nim inspiration      -> what macro authors can do
+Racket inspiration   -> how syntax identity, binding, hygiene, and provenance work
+#+end_src
 
-Source:
+These are complementary, not competing choices.
 
-- [[https://users.cs.utah.edu/plt/scope-sets/][Binding as Sets of Scopes]]
+** Racket's full phase system is not required initially
 
-Lean 4 independently applies automatic hygiene to its extensible syntax system and identifies the two main capture failures: macro arguments accidentally captured by introduced binders, and macro-introduced references accidentally resolving to use-site names.
+Racket supports bindings and evaluation across multiple phase levels. StarLang does not currently need that degree of module-phase generality.
 
-Source:
+The initial model should expose a much smaller distinction:
 
-- [[https://lean-lang.org/doc/reference/latest/Notations-and-Macros/Macros/][Lean Reference: Macros and Hygiene]]
+#+begin_src text
+compile/expand phase
+    -> templates and macro transformers operate here
 
-StarLang should use a compact scope-set model even though its current surface has fewer lexical binders than a general-purpose language. Dataflow bindings, generated actor names, generated message names, future local forms, and imported macro libraries will otherwise create the same capture problems later.
+runtime phase
+    -> expanded StarLang program executes here
+#+end_src
 
-** Declarative pattern macros are the correct first tier
+Additional compile-time phase levels should require a concrete future use case rather than arriving as inherited complexity.
 
-Scheme's standardized =syntax-rules= model demonstrates that useful hygienic macros can be built from declarative patterns and templates without giving source programs arbitrary compile-time execution. SRFI 72 further shows that source-object correlation and expansion traces can be retained as independent expansion records.
+** Common Lisp macros remain implementation evidence, not the source contract
 
-Sources:
-
-- [[https://r7rs.org/][Revised7 Report on Scheme]]
-- [[https://srfi.schemers.org/srfi-72/srfi-72.html][SRFI 72: Hygienic Macros]]
-
-For StarLang, this is a better V1 fit than unrestricted procedural macros. The language is intended to declare documents, actors, domain servers, capabilities, adapters, and dataflows. Repetition and abstraction over those forms can be expressed through pattern matching and templates while keeping compilation finite, inspectable, and reproducible.
-
-** Host macros are useful internally but are not the language boundary
-
-Common Lisp =DEFMACRO= defines expansion functions over host forms, and =MACROEXPAND= repeatedly applies host macro expansion. Those facilities are appropriate for implementing the StarLang compiler itself and for trusted internal code generation.
+Common Lisp =DEFMACRO= and =MACROEXPAND= remain useful implementation tools for trusted compiler code. They are not the direct StarLang macro API.
 
 Sources:
 
 - [[https://www.lispworks.com/documentation/HyperSpec/Body/m_defmac.htm][Common Lisp HyperSpec: DEFMACRO]]
 - [[https://www.lispworks.com/documentation/HyperSpec/Body/f_mexp_.htm][Common Lisp HyperSpec: MACROEXPAND]]
 
-They are not appropriate as the direct source-level extension API for untrusted =.star= files. A host macro body can execute arbitrary Common Lisp at compile time. Exposing that power would bypass the closed reader and make reproducible, capability-bounded compilation impossible.
+StarLang macros operate on StarLang syntax objects under StarLang compiler rules, even when the current compiler engine implementing those rules is Common Lisp.
 
-** Unhygienic procedural systems expose predictable failure modes
+* Recommended Language Model
 
-Rust procedural macros deliberately operate on token streams with spans, but the Rust Reference states that they are unhygienic and therefore require authors to defend against name collisions and path capture manually.
+** 1. Hygienic =template=
 
-Source:
+=template= is the simple expansion facility.
 
-- [[https://doc.rust-lang.org/stable/reference/procedural-macros.html][Rust Reference: Procedural Macros]]
-
-This is useful negative evidence for StarLang. “Generate unlikely names” is not an acceptable language invariant. StarLang should make capture impossible by default and require an explicit, reviewable operation for intentional capture if that operation is ever added.
-
-* Recommended Macro Model
-
-** Tier 1: locked declarative macros
-
-V1 macro definitions should be data, not executable host code. Each macro contains:
-
-- a stable name;
-- one or more patterns;
-- a template for each pattern;
-- literal identifiers that must match exactly;
-- pattern variables;
-- optional repetition markers;
-- a declared output context such as =declaration=, =dataflow-stage=, =field=, or =type-expression=;
-- a macro format version;
-- a source-library name, exact version, and digest.
-
-Illustrative surface syntax:
+Conceptually:
 
 #+begin_src lisp
-(macro bounded-worker
-  (:context declaration
-   :rules
-   (((bounded-worker ?name ?message ?handler ?capacity)
-     (actor ?name
-       (:accepts (list ?message)
-        :produces (list ?message)
-        :handler ?handler
-        :mailbox (bounded ?capacity)
-        :restart transient))))))
+(template unless
+  ((condition :syntax :untyped)
+   (body :syntax :untyped))
+  (quote
+    (when (not (unquote condition))
+      (unquote body))))
 #+end_src
 
-This example is a proposed StarLang form, not Common Lisp code. Identifiers beginning with =?= are pattern variables. The expansion result must consist entirely of recognized StarLang core forms after recursive expansion.
+The exact quotation syntax remains a surface-design decision; the semantic point is that templates perform hygienic source construction without requiring authors to manually manipulate syntax-node structures.
 
-** Tier 2: trusted packaged transformers, deferred
+Template properties:
 
-A future procedural tier may be useful for complex schema generation or adapter declarations. It must not be defined inside ordinary =.star= source.
+- expansion occurs at compile time;
+- parameters receive syntax, not runtime values;
+- generated identifiers are hygienic by default;
+- use-site syntax retains its existing scopes;
+- definition-site references retain their intended binding identity;
+- template output is checked like handwritten StarLang source;
+- templates may generate runtime code.
 
-A trusted transformer would instead be:
+Templates should cover most convenience syntax.
 
-- implemented in Common Lisp inside a reviewed ASDF[fn:asdf] system;
-- registered through an explicit compiler port;
-- identified by package, transformer name, version, and digest;
-- invoked with immutable syntax objects and an explicit expansion context;
-- denied direct I/O and runtime access unless a narrowly defined capability[fn:capability] is granted;
-- required to return syntax objects plus structured diagnostics;
-- included in the compilation lock and manifest.
+** 2. Programmable =macro=
 
-This tier should not begin until Tier 1, syntax objects, provenance, determinism tests, and expansion limits are complete.
+=macro= is a compile-time StarLang transformer function over syntax objects.
+
+Illustrative direction:
+
+#+begin_src lisp
+(macro derive-actor
+  ((decl :syntax :untyped))
+  (let ((name (syntax-field decl :name))
+        (messages (syntax-field decl :messages)))
+    (syntax-quote
+      (actor (syntax-unquote name)
+        ...))))
+#+end_src
+
+This is proposed StarLang syntax, not Common Lisp.
+
+A macro may:
+
+- inspect syntax-node kind and children;
+- inspect source spans and expansion provenance;
+- compare binding identities;
+- construct new syntax;
+- copy syntax while retaining use-site scopes;
+- introduce fresh hygienic bindings;
+- deliberately bind to an existing definition-site symbol through an explicit binding operation;
+- return one form or a bounded sequence of forms appropriate to the expansion context;
+- issue structured compile-time diagnostics.
+
+A macro may not return arbitrary host objects into ordinary runtime IR.
+
+** 3. Typed and untyped macro inputs
+
+StarLang should research the Nim distinction directly.
+
+Candidate parameter declarations:
+
+#+begin_src lisp
+(macro rewrite-query
+  ((query :syntax :untyped))
+  ...)
+
+(macro derive-codec
+  ((document-type :syntax :typed))
+  ...)
+#+end_src
+
+=:untyped= means:
+
+- parsing and syntax-object construction have occurred;
+- ordinary semantic validation of that argument has not yet been required;
+- the transformer can accept syntax that only becomes valid after expansion.
+
+=:typed= means:
+
+- the relevant semantic checker has run far enough to resolve names and attach checked semantic/type information;
+- the transformer receives syntax plus immutable checked metadata;
+- a typed macro cannot silently mutate that already-derived semantic information; generated output is checked again as appropriate.
+
+StarLang need not use the literal keywords =:typed= and =:untyped= if later syntax review chooses different names, but the semantic distinction should remain.
+
+** 4. Syntax construction and quotation
+
+Programmable macros need both:
+
+- a structured low-level syntax API for precise tree manipulation;
+- a quotation mechanism for writing generated StarLang in readable StarLang syntax.
+
+Candidate operations include:
+
+#+begin_src lisp
+(syntax-kind stx)
+(syntax-children stx)
+(syntax-child stx index)
+(syntax-span stx)
+(syntax-origin stx)
+(syntax-binding stx)
+(syntax-identifier "name")
+(syntax-literal value)
+(syntax-list ...)
+(syntax-fresh-identifier "tmp")
+(syntax-bind definition-identifier)
+(syntax-quote ...)
+(syntax-unquote ...)
+#+end_src
+
+These names are illustrative. The design requirement is the capability, not these exact spellings.
+
+** 5. Hygiene is structural by default
+
+StarLang should use Racket-inspired scope sets underneath both templates and macros.
+
+Default rules:
+
+1. syntax copied from a macro/template argument preserves its use-site scopes;
+2. newly introduced identifiers receive a fresh introduction scope;
+3. references intentionally copied from the definition context retain definition-site binding identity;
+4. equal textual names do not imply equal bindings;
+5. fresh names are compiler identities, not textual random suffix conventions;
+6. intentional capture requires an explicit operation and is visible in expansion evidence;
+7. converting plain text into an identifier does not implicitly grant a binding.
+
+This is stronger than relying only on gensym-style textual uniqueness.
 
 * Syntax Object Contract
 
@@ -219,290 +348,384 @@ Every parsed occurrence should become a StarLang syntax object with at least:
  :span <pathname-start-end>
  :scopes <immutable-scope-set>
  :origin <ordered-expansion-frames>
- :introduced-by <macro-id-or-nil>)
+ :binding <binding-identity-or-nil>
+ :semantic <immutable-checked-metadata-or-nil>
+ :introduced-by <macro-or-template-id-or-nil>)
 #+end_src
-
-The representation may be a Common Lisp structure, but it must remain internal compiler data. It must not expose Common Lisp package symbols as StarLang identifiers.
 
 Required properties:
 
-1. every identifier occurrence has independent identity;
-2. every node has a complete source span, not only a starting line and column;
-3. generated nodes retain the macro use-site span and macro definition span;
+1. every occurrence has independent syntax identity;
+2. every occurrence has a complete source span;
+3. generated syntax can point both to its invocation and definition origin;
 4. scope sets are immutable values or treated immutably;
-5. conversion to plain datum is explicit and lossy;
-6. normalized IR never depends on syntax-object identity;
-7. canonical serialization excludes process-local object addresses and random scope IDs.
+5. binding identity is independent of textual spelling;
+6. typed semantic metadata is explicit and immutable from the transformer viewpoint;
+7. conversion to plain datum is explicit and lossy;
+8. normalized runtime IR never depends on process-local syntax-object identity;
+9. canonical serialization excludes object addresses and nondeterministic identifiers.
 
-* Expansion Phases
+* Expansion and Checking Pipeline
 
-StarLang needs a small, explicit phase model[fn:phase-separation]:
+The initial compiler should use a small explicit phase model.
 
 ** Phase 0: read
 
-The closed parser converts characters into syntax objects. It performs only lexical validation and balanced-form validation. It does not resolve imports, run macros, or construct runtime values.
+The closed StarLang reader produces syntax objects and performs lexical / structural parsing only.
 
-** Phase 1: collect and lock macro bindings
+** Phase 1: resolve and lock expansion dependencies
 
-The compiler resolves macro libraries from the already locked specification graph. Macro libraries require exact versions and SHA-256 digests. Remote paths must be resolved before compilation, matching the existing specification-library rule.
+The compiler resolves template and macro libraries by exact identity, version, and digest.
 
-A macro definition cannot depend on a macro defined later in an unordered import cycle. Import cycles must be rejected or topologically resolved by an explicit module rule.
+The expansion environment must be fixed before transformer execution. No hidden global macro registry should influence compilation.
 
-** Phase 2: expand
+** Phase 2: expand untyped templates/macros
 
-Expansion is top-down and recursive:
+Transformers accepting untyped syntax may run before ordinary semantic checking of their arguments.
 
-1. inspect the head identifier in the current expansion context;
-2. resolve it against the macro environment using name plus scope set;
-3. if it is a macro, match one rule;
-4. instantiate the template with use-site syntax preserved;
-5. assign a fresh macro-introduction scope to generated identifiers;
-6. append an origin frame;
-7. recursively expand the result;
-8. stop when only core forms remain.
+Their output is recursively expanded and then checked.
 
-** Phase 3: validate core syntax
+** Phase 3: semantic analysis sufficient for typed transformers
 
-After expansion, every form must belong to the versioned StarLang core grammar. Unknown macro names, leftover pattern variables, malformed templates, context violations, and generated unknown declarations are errors.
+Names, declared types, capabilities, declaration classes, and other approved semantic metadata are resolved far enough to support typed macro inputs.
 
-** Phase 4: semantic compilation
+The exact semantic frontier must be explicit to avoid checker/expander cycles.
 
-Only fully expanded core syntax reaches the existing semantic validators and normalized IR builders. Macro definitions and syntax objects do not enter runtime IR.
+** Phase 4: run typed transformers
 
-* Hygiene Rules
+Typed macros receive syntax plus checked metadata and return new syntax.
 
-The default rules should be:
+Their output is re-entered through the required expansion and semantic-validation path rather than being trusted as valid merely because the macro received typed input.
 
-1. syntax copied from a macro argument keeps its use-site scopes;
-2. identifiers written in a macro template receive a fresh macro-introduction scope;
-3. literal core-form names resolve in the macro definition context;
-4. macro-generated binders bind only references generated in the matching intended scope;
-5. identical spellings do not imply identical bindings;
-6. intentional capture is unavailable in V1;
-7. macro expansion cannot intern source identifiers into arbitrary Common Lisp packages.
+** Phase 5: validate expanded core
 
-StarLang may later add an explicit =capture= or =datum-to-syntax= equivalent, but only after a concrete use case and separate review. It should be noisy in source, restricted by context, and visible in expansion traces.
+All remaining syntax must belong to the versioned StarLang core grammar or another explicitly recognized post-expansion declaration class.
+
+** Phase 6: normalize to IR
+
+Template and macro definitions, syntax scope sets, and transformer execution machinery do not become runtime dispatch mechanisms.
+
+Expansion provenance may remain referenced by source maps and compilation evidence.
+
+* Runtime Boundary
+
+The previous wording =DENIED: runtime macro expansion= was too easy to read as if macros were forbidden from generating runtime behavior.
+
+The corrected rule is:
+
+#+begin_quote
+A StarLang macro or template is invoked during compilation/expansion. The StarLang code it generates may execute normally at runtime.
+#+end_quote
+
+For example, a macro invocation such as:
+
+#+begin_src lisp
+(traced
+  (send worker message))
+#+end_src
+
+could expand into ordinary runtime StarLang such as:
+
+#+begin_src lisp
+(begin
+  (trace :enter)
+  (send worker message)
+  (trace :exit))
+#+end_src
+
+The =traced= macro is gone after expansion. The generated =trace= and =send= operations execute at runtime.
+
+What is *not part of ordinary macro semantics* is postponing the transformation itself until runtime, for example keeping an unresolved macro invocation inside normalized runtime IR and deciding later how to expand it.
+
+If StarLang later wants runtime syntax interpretation, dynamic compilation, staged code generation, or runtime AST evaluation, those should be researched and named as separate language/runtime features. This node does not prohibit such a future feature; it merely does not redefine it as ordinary macro expansion.
+
+* Compile-Time Transformer Authority
+
+StarLang should copy Nim's programmable-transformer power more than the original 020 did, but it should not automatically copy unrestricted ambient compile-time effects.
+
+A transformer can be powerful over compiler data while still having controlled external authority.
+
+Default compile-time transformer authority should include:
+
+- syntax inspection and construction;
+- binding queries;
+- immutable checked semantic metadata queries for typed macros;
+- deterministic collection operations;
+- structured diagnostics;
+- compiler-provided fresh syntax identities;
+- access to explicitly locked macro/template libraries.
+
+Ambient access should not silently include:
+
+- arbitrary filesystem traversal;
+- network access;
+- wall-clock time;
+- random state;
+- process/environment inspection;
+- actor runtime state;
+- mutable application globals;
+- arbitrary Common Lisp function invocation.
+
+If future compile-time tasks genuinely need external information, StarLang may define explicit compile-time capabilities or locked compiler inputs. Such inputs must participate in provenance and reproducibility evidence.
+
+This is a StarLang safety/reproducibility constraint, not a rejection of programmable macros.
 
 * Determinism and Resource Limits
 
-Macro expansion must be deterministic[fn:determinism] for a fixed source tree, compiler version, core grammar version, macro-library lock, and transformer lock.
+For fixed source, compiler version, core grammar, transformer libraries, locked compiler inputs, and policy, expansion should be deterministic.
 
-The expander must reject or bound:
+The compiler must bound or diagnose:
 
 - recursive expansion cycles;
 - expansion depth;
-- total transformer invocations;
-- total generated syntax nodes;
-- pattern backtracking work;
-- template repetition output;
+- transformer invocation count;
+- generated syntax-node count;
+- compile-time CPU/work budget;
+- compile-time allocation/output budget;
 - diagnostic origin-chain length;
-- imported macro-library count.
+- imported transformer-library count.
 
-Recommended initial limits are configuration values recorded in the compilation manifest, not hidden constants. A build that changes limits must produce a different manifest or compiler configuration digest.
-
-Declarative expansion must not observe:
-
-- wall-clock time;
-- random state;
-- process identifiers;
-- filesystem contents outside locked inputs;
-- network state;
-- environment variables;
-- mutable global registries;
-- actor runtime state;
-- hash-table iteration order.
+Pragma research in STAR-LANG-RESEARCH-027 may define the user-facing configuration mechanism for allowed compiler budgets, but pragmas cannot grant authority beyond mandatory deployment/compiler policy.
 
 * Provenance and Diagnostics
 
 Each expansion frame should record:
 
-- macro qualified name;
-- macro-library version and digest;
-- rule identifier;
-- macro definition span;
+- transformer kind: template or macro;
+- qualified transformer name;
+- library version and digest;
+- macro/template definition span;
 - invocation span;
+- input mode: typed or untyped;
 - parent expansion identifier;
 - deterministic expansion ordinal;
-- output-context kind.
+- output context;
+- any explicit compile-time capability/input evidence used.
 
-A compiler error in generated syntax should report:
+A diagnostic originating from generated syntax should be able to show:
 
-1. the final generated location;
-2. the user-written macro invocation;
-3. the macro definition and rule;
+1. the generated location;
+2. the user-written invocation;
+3. the transformer definition;
 4. the ordered expansion chain;
-5. the semantic validator that rejected the expanded form.
+5. whether the transformer received typed or untyped syntax;
+6. the semantic validator that rejected the result.
 
-The primary diagnostic should point to user-authored source whenever possible. Generated spans should not erase the call site.
+Recommended compiler tooling:
 
-For review tooling, the compiler should expose:
-
-- =expand-1= for one expansion step;
-- =expand= for full expansion;
-- =expansion-trace= for structured provenance;
-- =expanded-source= for a stable human-readable rendering;
-- =macro-dependencies= for lock and manifest inspection.
-
-These are StarLang compiler APIs, not Common Lisp =MACROEXPAND= aliases.
+#+begin_src text
+expand-1
+expand
+expansion-trace
+expanded-source
+macro-dependencies
+syntax-inspect
+macro-explain
+#+end_src
 
 * Library and Versioning Rules
 
-Macros should be shipped in versioned StarLang libraries. A macro library is part of the source contract and therefore participates in reproducibility.
+Template and macro libraries participate in the compilation lock.
 
 Required rules:
 
-- exact version and digest, never floating latest;
-- canonical macro-definition serialization;
-- macro format version independent from runtime IR version;
-- explicit exported macro names;
-- explicit import aliases or qualified names;
+- exact version and digest;
+- explicit exports;
+- explicit imports / aliases;
+- deterministic dependency order;
 - collision errors by default;
-- no implicit global macro registry;
-- expansion output tied to compiler and macro-library versions;
-- lock digest included in emitted manifests and compilation cache keys.
+- no hidden global registry;
+- macro ABI / syntax-object format versioning;
+- compilation cache keys include transformer-library identity;
+- generated schema declarations pass the same validators as handwritten declarations.
 
-A macro library may depend on core specification libraries, but macro expansion must not mutate those libraries or extend the StarIntel document schema implicitly. Generated schema declarations remain ordinary declarations subject to the same validators and approval process as handwritten declarations.
+* Interaction with Pragmas
 
-* Interaction with Normalized IR and Runtime
+STAR-LANG-RESEARCH-027 owns the generic pragma/compiler-directive mechanism.
 
-Macros are compile-time surface abstractions. They should disappear before normalized IR.
+Macros and templates may eventually be usable in annotation-like positions where the grammar deliberately permits a transformation hook, similar in spirit to Nim's ability to use macro/template machinery with declarations.
 
-The normalized IR should contain:
+However:
 
-- the expanded core declaration;
-- optional source-map references to expansion records;
-- the macro lock digest;
-- the compiler version and core grammar version.
+- =(pragma ...)= remains compiler-interpreted directive data unless a specific pragma definition says otherwise;
+- a pragma must not become an implicit arbitrary macro escape hatch;
+- backend selection remains governed by STAR-LANG-RESEARCH-026;
+- pragma expansion and macro expansion must have explicit ordering if they interact.
 
-The normalized IR should not contain:
-
-- executable transformer functions;
-- Common Lisp closures;
-- syntax-object scope sets used only for expansion;
-- host package symbols;
-- mutable macro environments;
-- runtime macro dispatch.
-
-Runtime behavior must be identical for a handwritten core program and a macro-generated program whose fully expanded core syntax is alpha-equivalent[fn:alpha-equivalence].
+This interaction needs a later focused design before implementation.
 
 * Rejected Designs
 
-** DENIED: expose Common Lisp =DEFMACRO= in =.star=
+** DENIED: expose Common Lisp =DEFMACRO= directly in =.star=
 
-Reason: arbitrary compile-time execution, host reader exposure, package leakage, nondeterministic dependencies, and violation of the closed-language boundary.
+Reason: the source contract would become host-language execution and package semantics rather than StarLang syntax transformation.
 
-** DENIED: textual substitution
+** DENIED: textual substitution as the binding model
 
-Reason: no structural validation, no reliable spans, accidental replacement inside unrelated syntax, and unavoidable capture bugs.
+Reason: it cannot preserve lexical identity, source provenance, or compositional hygiene.
 
 ** DENIED: raw list rewriting without syntax objects
 
-Reason: identical spellings cannot carry distinct scopes or per-occurrence provenance. Current list-level source-position tracking is not enough.
+Reason: equal spellings cannot reliably represent distinct scopes, bindings, or source occurrences.
 
-** DENIED: unhygienic macros with generated unique-name conventions
+** DENIED: declarative-only macros as the complete StarLang macro model
 
-Reason: naming conventions are not a binding model. They fail under composition, imports, recursive macros, and future local binding forms.
+Reason: the original 020 underfit the desired language. StarLang should retain simple templates but also support programmable compile-time AST transformation analogous to Nim macros.
 
-** DENIED: arbitrary procedural macros in V1
+** DENIED: generated-name conventions as hygiene
 
-Reason: expands the trusted computing base[fn:tcb] before StarLang has syntax objects, resource accounting, provenance, deterministic transformer ports, or a stable macro core.
+Reason: textual uniqueness is not a binding model. Fresh bindings must be represented structurally.
 
-** DENIED: runtime macro expansion
+** DENIED: trusting typed-macro output without revalidation
 
-Reason: runtime expansion breaks reproducible compilation, complicates recovery and replay, and mixes language construction with actor execution.
+Reason: typed input gives the transformer checked information; it does not make newly generated output automatically valid.
 
-** DENIED: expand after semantic compilation
+** DENIED: unresolved ordinary macro invocations in runtime IR
 
-Reason: semantic validators would need to understand both surface macros and core forms, duplicating logic and weakening the normalized core boundary.
+Reason: ordinary macro semantics are compile-time source transformation. Runtime dynamic compilation/evaluation is a separate feature if later desired.
+
+** DENIED: macro-generated runtime behavior
+
+This is *not denied*. Macro-generated code may execute normally at runtime. The old ambiguous wording is superseded.
 
 * Implementation Order
 
-1. Replace the parser's plain-data output with per-occurrence syntax objects while retaining the closed character reader.
-2. Record full spans for atoms and lists, including start and end offsets, line, and column.
-3. Replace the dynamic =EQ= position side table with first-class syntax metadata or a stable occurrence table keyed by syntax node identity.
-4. Add origin-frame structures and source-map serialization.
-5. Split the compiler entry point into =read-star-syntax=, =expand-star-syntax=, =validate-star-core=, and =compile-star-core=.
-6. Define the versioned core-form grammar and expansion contexts.
-7. Implement declarative pattern matching without backtracking ambiguity.
-8. Implement template instantiation with fresh macro-introduction scopes.
-9. Add exact-version macro-library imports to the existing specification lock model.
-10. Add cycle detection, expansion budgets, and deterministic ordering.
-11. Add =expand-1=, full expansion, trace, and stable expanded-source APIs.
-12. Integrate macro lock data and source maps into manifests and cache keys.
-13. Add conformance fixtures and adversarial tests.
-14. Consider trusted packaged procedural transformers only after the declarative system is approved and stable.
+1. Replace plain parsed atoms/lists with per-occurrence syntax objects while retaining the closed reader.
+2. Record full spans and origin metadata for every syntax occurrence.
+3. Introduce structural scope sets and binding identities.
+4. Add deterministic syntax-object serialization/debug rendering.
+5. Split compiler stages into read, expand, semantic-check, normalize, and compile/materialize boundaries.
+6. Implement hygienic =template= first as a thin user-facing layer over the syntax-object expander.
+7. Define the bounded StarLang compile-time macro execution language/API.
+8. Implement untyped macro parameters and result revalidation.
+9. Define the semantic frontier and immutable metadata contract for typed macro parameters.
+10. Implement typed macro invocation and result revalidation.
+11. Add syntax quotation/unquotation and low-level construction APIs.
+12. Add fresh-binding and explicit-binding operations over structural scopes.
+13. Lock transformer libraries by identity/version/digest.
+14. Add expansion budgets, recursion/cycle detection, and deterministic ordering.
+15. Add structured expansion provenance and diagnostic traces.
+16. Add conformance fixtures covering templates, typed macros, untyped macros, hygiene, and runtime-generated behavior.
+17. Design pragma/macro ordering separately before enabling annotation-style transformation hooks.
+18. Consider controlled external compile-time capabilities only after deterministic core macro execution is stable.
+
+This is a current-generation Common Lisp implementation order for the approved language semantics if/when this node is approved. It does not authorize a self-hosting migration.
 
 * Acceptance Tests
 
-The macro system is not complete until automated tests prove at least the following:
+The macro system is not complete until automated tests prove at least:
 
-1. a macro argument is not captured by a binder introduced by the macro;
-2. a generated identifier does not capture a use-site identifier with the same spelling;
-3. two invocations of one macro receive distinct introduction scopes;
-4. a copied use-site identifier keeps its original binding;
-5. an imported literal identifier resolves to the macro definition context;
-6. identical source, locks, compiler version, and limits produce byte-identical expanded core output;
-7. a recursive macro cycle fails with a bounded expansion trace;
-8. expansion-depth and output-size limits fail deterministically;
-9. malformed patterns and ambiguous rule matches produce source-located errors;
-10. generated unknown core forms are rejected before semantic compilation;
-11. generated schema declarations pass the same validators as handwritten declarations;
-12. remote or digest-mismatched macro libraries are rejected before expansion;
-13. expansion traces include invocation and definition spans;
-14. manifest and cache keys change when the macro lock changes;
-15. handwritten and macro-generated alpha-equivalent core programs compile to equivalent normalized IR;
-16. no =.star= source reaches Common Lisp =READ= or =EVAL=;
-17. no macro can observe clock, randomness, network, environment, or runtime actor state;
-18. parser errors still identify exact source spans after syntax-object migration;
-19. all existing non-macro fixtures compile unchanged;
-20. direct execution and optional CL-GServer[fn:cl-gserver] binding remain equivalent after expansion.
+1. use-site syntax is not accidentally captured by a generated binder;
+2. generated bindings do not capture equal-spelled use-site identifiers;
+3. two macro invocations receive distinct fresh introduction scopes;
+4. definition-site binding references remain stable when intentionally preserved;
+5. textual identifier equality is insufficient to establish binding equality;
+6. templates expand hygienically;
+7. untyped macros can receive syntax that becomes valid only after expansion;
+8. typed macros receive resolved immutable semantic/type information;
+9. newly generated output from typed macros is validated before normalization;
+10. quotation and low-level construction produce equivalent checked syntax where expected;
+11. macro-generated runtime operations execute normally after expansion;
+12. no ordinary macro invocation remains as runtime macro dispatch in normalized IR;
+13. recursive macro cycles fail with bounded expansion traces;
+14. expansion budgets fail deterministically;
+15. source diagnostics preserve invocation and definition origins;
+16. transformer-library digest changes alter manifest/cache identity;
+17. macro expansion cannot silently observe ambient clock, random, network, environment, or actor state;
+18. explicit future compile-time inputs, if added, appear in compilation evidence;
+19. handwritten and macro-generated alpha-equivalent core programs normalize equivalently;
+20. =.star= source never requires Common Lisp =READ= or unrestricted =EVAL=;
+21. direct runtime and optional CL-GServer binding remain semantically equivalent after expansion;
+22. existing non-macro fixtures continue to compile.
 
 * Review Decisions Required
 
-The research recommends approval of the architecture, but the following details remain explicit review choices:
+The rewritten research still requires explicit review on these details:
 
-1. approve declarative macros as V1 and defer procedural transformers;
-2. approve scope sets as the hygiene model rather than rename-only hygiene;
-3. choose the first legal expansion contexts: declarations only, or declarations plus dataflow stages and fields;
-4. choose whether macro definitions live inside ordinary specification libraries or a distinct =macro-library= top-level form;
-5. choose initial expansion budgets and whether projects may lower but not raise repository policy limits;
-6. choose whether expansion traces are embedded in manifests or stored as separate compiler artifacts referenced by digest;
-7. choose whether the first release includes explicit intentional capture; this research recommends no.
+1. approve the overall *Nim-style macro semantics + Racket-style syntax-object/hygiene* architecture;
+2. approve =template= and =macro= as distinct source concepts;
+3. approve the typed/untyped macro-input distinction;
+4. choose the exact StarLang quotation/unquotation surface syntax;
+5. define the first public syntax-construction API and which operations remain compiler-internal;
+6. choose whether explicit intentional capture/binding manipulation ships in the first macro release or follows later;
+7. define the exact semantic frontier exposed to typed macros;
+8. choose initial expansion/work budgets;
+9. choose whether expansion traces are embedded in manifests or stored as separately addressed artifacts;
+10. define pragma/macro ordering before annotation-style transformation hooks are enabled.
+
+The current-generation Common Lisp host decision and future self-hosting authorization rule are already governed elsewhere and are not reopened by approving this macro architecture.
+
+* Relationship to Future Self-Hosting
+
+Nothing in this macro model permanently requires Common Lisp semantics.
+
+A future explicitly authorized self-hosted StarLang compiler could reimplement:
+
+- syntax objects;
+- scope-set hygiene;
+- template expansion;
+- typed/untyped macro invocation;
+- quotation and syntax construction;
+- provenance;
+- deterministic transformer execution;
+- semantic revalidation.
+
+That compatibility is a design property only. No self-hosting research, roadmap, prototype, migration, or implementation work may begin without explicit nsaspy authorization under STAR-LANG-RESEARCH-018 and STAR-LANG-001.
 
 * Conclusion
 
-StarLang can gain Lisp-grade language extensibility without becoming arbitrary Common Lisp source.
+The original 020 was too conservative for the intended StarLang macro system. Treating declarative pattern rewriting as the main macro model would leave StarLang with useful templates but not the programmable compile-time AST machinery expected from a serious Lisp-family language.
 
-The safe path is not to expose host macros. It is to build a small StarLang expander over first-class syntax objects, use hygienic declarative patterns, lock every macro dependency, bound all expansion work, preserve complete origin chains, and erase macros before normalized IR.
+The revised direction is:
 
-The immediate source task is therefore syntax identity and provenance, not template substitution. Implementing raw list macros first would be fast but structurally wrong and would force a rewrite as soon as StarLang gains imported macro libraries, nested bindings, or serious diagnostics.
+#+begin_src text
+Racket-quality syntax identity + hygiene + provenance
+                        plus
+Nim-style programmable compile-time AST macros
+                        plus
+simple hygienic templates for the common case
+                        plus
+StarLang-specific deterministic/capability boundaries
+#+end_src
+
+Macro expansion itself is compile-time. Macro-generated StarLang may perform normal runtime behavior. Runtime dynamic compilation or AST evaluation, if ever desired, is a separate feature rather than something this node bans by accident.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-15 | Rewrite macro architecture around Nim-style programmable typed/untyped AST transformers over Racket-style hygienic syntax objects; retain templates and correct runtime wording | ChatGPT agent | nsaspy review direction; Nim macro docs; Racket syntax model |
+| 2026-08-15 | Clarify current-generation Common Lisp ownership and reserve future self-hosting under explicit nsaspy planning authority | ChatGPT agent | nsaspy direction; STAR-LANG-RESEARCH-018; STAR-LANG-001 |
+| 2026-07-29 | Audit canonical source and propose declarative hygienic macro architecture | Research loop | v0.1.0 research pass; superseded by v0.3.0 |
 
 * Footnotes and Glossary
 
-[fn:starlang] StarLang: the Common Lisp-implemented domain-specific language and runtime that defines StarIntel documents, actors, domain servers, capabilities, adapters, and dataflows.
+[fn:starlang] *StarLang* — the current-generation Common Lisp-implemented declarative language and runtime used to define StarIntel documents, actors, domain servers, capabilities, adapters, dataflows, and reasoning operations.
 
-[fn:cl] Common Lisp (CL): the standardized Lisp language used as the sole approved implementation language for the StarLang parser, compiler, runtime, and supporting systems.
+[fn:cl] *Common Lisp (CL)* — the implementation language of the current-generation StarLang compiler/runtime. It is not the source-language macro API.
 
-[fn:macro] Macro: a compile-time language feature that transforms one source form into other source forms before ordinary semantic compilation. For example, one compact worker-pool declaration could expand into several ordinary actor declarations.
+[fn:self-hosting] *Self-hosting* — a possible future architecture in which some or all of the StarLang compiler is implemented in StarLang. Planning requires explicit nsaspy authorization.
 
-[fn:syntax-object] Syntax object: a compiler value that combines a source form with metadata such as its exact location, lexical scopes, and expansion history. It is richer than a plain list or string.
+[fn:macro] *Macro* — a compile-time StarLang transformer that receives syntax objects, may inspect or construct syntax, and returns syntax that re-enters compiler checking.
 
-[fn:origin-chain] Origin chain: the ordered record of macro invocations and rules that produced generated syntax, allowing diagnostics to trace an error back to user-written source.
+[fn:template] *Template* — the simpler hygienic source-expansion facility intended for concise substitution/code-generation patterns without general tree-programming ceremony.
 
-[fn:source-span] Source span: the exact extent of one source occurrence, normally including pathname, starting and ending offsets, line numbers, and columns.
+[fn:syntax-object] *Syntax object* — compiler data combining source datum/tree structure with exact source span, lexical scopes, binding identity, provenance, and optional immutable checked semantic metadata.
 
-[fn:ir] Intermediate representation (IR): the normalized compiler data produced after parsing, expansion, and validation. Runtime adapters consume this representation rather than raw StarLang source.
+[fn:scope-set] *Scope set* — the structural lexical-context metadata used to determine binding identity and prevent accidental macro capture.
 
-[fn:asdf] ASDF: Another System Definition Facility, the standard Common Lisp build and system-loading tool used to package StarLang components.
+[fn:typed-syntax] *Typed syntax* — syntax passed to a macro after an explicitly defined semantic-checking frontier has attached resolved immutable metadata.
 
-[fn:capability] Capability: an explicit authorization object or declaration granting a narrowly defined operation. A capability-based transformer interface denies all undeclared powers by default.
+[fn:untyped-syntax] *Untyped syntax* — parsed syntax passed to a macro before ordinary semantic validation of that argument, allowing the macro to transform syntax that is not independently valid yet.
 
-[fn:phase-separation] Phase separation: the rule that reading, macro expansion, semantic compilation, and runtime execution are distinct stages with controlled data passed between them.
+[fn:origin-chain] *Origin chain* — the ordered record of expansion steps connecting generated syntax to transformer definitions and source invocations.
 
-[fn:determinism] Determinism: the property that the same locked inputs and compiler configuration always produce the same expansion and output, independent of clock time, process state, or hash-table ordering.
+[fn:source-span] *Source span* — exact source extent of one syntax occurrence, including pathname and start/end position information.
 
-[fn:alpha-equivalence] Alpha-equivalence: two programs being structurally identical except for consistent renaming of bound identifiers. A hygienic macro-generated form should behave like its handwritten equivalent even when generated internal names differ.
+[fn:ir] *Intermediate representation (IR)* — normalized compiler data after expansion and semantic validation; ordinary macro transformer execution is not retained as runtime dispatch.
 
-[fn:tcb] Trusted computing base (TCB): the code and components that must behave correctly to preserve system security. Adding arbitrary procedural macro execution would make the TCB much larger.
+[fn:capability] *Compile-time capability* — an explicit authority/input contract allowing a transformer to access a bounded external compiler resource while preserving provenance and reproducibility requirements.
 
-[fn:cl-gserver] CL-GServer (Sento): the optional Common Lisp actor runtime adapter used by StarLang after compilation; it must not define source-language macro semantics.
+[fn:alpha-equivalence] *Alpha-equivalence* — structural program equivalence modulo consistent renaming of bound identifiers.
+
+[fn:cl-gserver] *CL-GServer (Sento)* — optional Common Lisp actor runtime integration used after compilation; it does not define StarLang macro semantics.

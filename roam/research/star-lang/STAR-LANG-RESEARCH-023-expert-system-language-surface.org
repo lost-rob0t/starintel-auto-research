@@ -6,7 +6,7 @@
 #+status: REVIEW
 #+filetags: :starintel:star-lang:expert-systems:dsl:syntax:rules:prolog:lisa:proofs:uncertainty:
 #+created: [2026-08-13 Thu]
-#+last_modified: [2026-08-13 Thu]
+#+last_modified: [2026-08-15 Sat]
 
 * Approval Table
 
@@ -14,6 +14,7 @@
 |---------------+--------------------+-------+-------------------+--------------------|
 | Research basis | Research reviewer | PENDING | Verify expert-system constructs against StarLang parser/macro invariants and backend source semantics | Current StarLang source, LISA source, Prolog research |
 | Language surface | StarLang maintainer | PENDING | Approve proposed expert-system, fact, rule, goal, question, conclusion, proof, and uncertainty forms | Proposed surface below |
+| StarIntel object reuse | Research reviewer | PENDING | Demonstrate existing StarIntel objects can participate in expert reasoning without a second expert-only object model; verify identity/provenance behavior and backend projection requirements | Typed Facts; LISA object-instance path in =src/core/language.lisp=; StarIntel Object Reuse Approval Gate |
 | Portability | Logic runtime maintainer | PENDING | Approve semantic-profile split and backend lowering restrictions | Portability model below |
 | Security | Security reviewer | PENDING | Confirm no host evaluation, raw engine source, unrestricted effects, or prompt-driven executable goals enter the language | Closed lowering and effect model |
 | Implementation | Repository maintainer | NOT STARTED | Implement only after core syntax/IR ownership is in final compiler systems | STAR-LANG-006 and STAR-LANG-007 |
@@ -34,6 +35,7 @@ What StarLang syntax should make expert systems pleasant to author without expos
 The desired author experience should support:
 
 - typed facts;
+- reuse of existing StarIntel objects as fact-bearing values without an expert-only duplicate object model;
 - named rules and goals;
 - joins, existence, absence, comparisons, and deliberately named negation forms;
 - checked derived conclusions with structured reasons;
@@ -51,6 +53,8 @@ The live StarLang prototype uses a custom closed reader and first-class syntax/s
 New expert forms should extend the closed parser and compiler phase model. They must not be implemented by reading LISA =defrule= forms, evaluating host Lisp, or concatenating user-controlled strings into Prolog goals.
 
 The maintained LISA source remains valuable as semantic evidence because it demonstrates production-rule features such as salience, contexts, belief annotations, assertion/retraction/modification, agenda inspection, and forward-chaining execution. These concepts inform StarLang design; LISA syntax itself does not become the StarLang language contract.
+
+LISA also provides a concrete object-backed fact path. Its =assert= macro detects a Common Lisp =standard-object= and sends that instance through =parse-and-insert-instance=; the public language layer also exposes =assert-instance=, =retract-instance=, and =mark-instance-as-changed=. This is primary-source evidence that the LISA backend can reason from object instances. It does not by itself prove that current StarIntel objects satisfy the desired StarLang identity, provenance, schema-version, mutation, and replay contracts; those remain part of the approval gate below.
 
 * Design Principle: Describe Knowledge, Not Engine Instructions
 
@@ -140,7 +144,7 @@ Every form requires a closed grammar, static type rules, and a defined lowering.
 
 * Typed Facts
 
-Expert facts reuse StarLang schemas rather than creating a second expert-only type system.
+Expert facts reuse StarLang schemas and may reuse existing StarIntel objects as fact-bearing values rather than creating a second expert-only type or object system.
 
 #+begin_src lisp
 (facts
@@ -158,12 +162,52 @@ Expert facts reuse StarLang schemas rather than creating a second expert-only ty
 
 Each fact type declares a role:
 
-- =source= — projected from declared input data;
+- =source= — projected from declared input data or supplied by an existing typed StarIntel object;
 - =session= — mutable inside one expert session;
 - =derived= — produced by inference and backed by justification;
 - =questionAnswer= — generated from a typed question response.
 
 This role model prevents a rule from rewriting canonical source data.
+
+Schema reuse and object reuse are separate requirements. Reusing a StarLang schema avoids an expert-only type system. Reusing a StarIntel object additionally means the expert layer must not require the application to clone that object into an unrelated expert-only record merely to make it visible to inference.
+
+A backend may require an internal representation change. For example, a Prolog adapter may need a relational projection. Such lowering is acceptable only when the StarLang runtime retains the stable source-object identity and the provenance/schema metadata needed to map conclusions and proofs back to the authoritative StarIntel object. Backend representation is an implementation detail; application-visible object duplication is not the language contract.
+
+** LISA Object-Instance Evidence
+
+The LISA language implementation retrieved on 2026-08-15 provides the reference capability for this requirement:
+
+- =assert= branches when the supplied fact value is a Common Lisp =standard-object= and inserts the instance through =parse-and-insert-instance=;
+- =assert-instance= inserts an existing instance directly;
+- =retract-instance= retracts an instance;
+- =mark-instance-as-changed= reports a changed CLOS instance/slot to the inference engine.
+
+This demonstrates that object-backed facts are not hypothetical for the LISA backend. The StarLang research still has to establish exactly which StarIntel object families qualify, how schema compatibility is checked, how identity is represented in normalized IR, how changes are observed, and what replay/proof representation is portable.
+
+** StarIntel Object Reuse Approval Gate
+
+STAR-LANG-RESEARCH-023 remains =REVIEW= and MUST NOT be approved until the research demonstrates all of the following:
+
+1. native StarLang schemas remain valid fact/type contracts;
+2. at least one real existing StarIntel object family can enter an expert session without first being copied into a separate expert-only application object;
+3. the runtime retains a stable mapping from every backend fact/projection to the authoritative StarIntel object identity;
+4. relevant provenance, document/object ID, schema/version identity, relationship references, and verification/proof metadata remain available to inference or to normalized explanation/proof construction as required by the declared profile;
+5. LISA is exercised as the reference object-backed backend using its existing instance path rather than a synthetic expert-only replacement object;
+6. SWI-Prolog and N-Prolog research states explicitly whether they can satisfy the same semantic contract through identity-preserving relational projection, which metadata crosses the boundary, and which capabilities are backend-specific;
+7. backend selection changes how inference executes, not which application object model the StarLang author is forced to use;
+8. mutation and replay semantics are explicit: reasoning over an object must not create an untracked second mutable authority for canonical StarIntel state.
+
+The exact future StarLang spelling for importing, binding, or projecting a StarIntel object is deliberately not fixed by this gate. That belongs to the design that follows approved research.
+
+Conformance interpretation:
+
+#+begin_example
+FAIL: StarIntel Person -> copied expert-person object -> rules
+PASS: StarIntel Person -> LISA object fact -> rules
+PASS: StarIntel Person -> identity-preserving backend projection -> Prolog rules
+#+end_example
+
+The second =PASS= requires the projection to remain traceable to the same authoritative StarIntel object; merely copying fields into an anonymous tuple is insufficient when identity or provenance matters.
 
 * Rule Form
 
@@ -649,6 +693,7 @@ Manifest fields:
 - backend policy;
 - semantic profile;
 - fact schema IDs/versions;
+- source-object identity/projection policy when existing StarIntel objects are used;
 - rule IDs;
 - goal IDs;
 - question IDs;
@@ -710,7 +755,7 @@ Backend artifacts are trusted compiler outputs rather than source-language escap
   reason-code)
 #+end_src
 
-These structures describe ownership conceptually. Canonical JSON uses closed string/record values and never serializes live CLOS runtime instances.
+These structures describe ownership conceptually. Canonical JSON uses closed string/record values and never serializes live CLOS runtime instances. If a fact originates from a live StarIntel object, normalized IR and journal data carry a stable object-reference/projection identity rather than serializing the runtime object itself.
 
 * Compiler Phases
 
@@ -734,7 +779,8 @@ Expert sugar disappears before runtime interpretation just like approved compile
 
 A LISA package compiler may map:
 
-- fact types to safe adapter-owned fact/template representations;
+- fact types to safe adapter-owned fact/template representations or, where the StarIntel object-reuse gate is satisfied, to LISA's existing object-instance path;
+- existing StarIntel source objects without requiring a parallel expert-only application object;
 - fact patterns to LISA conditional elements;
 - shared compiler bindings to native rule bindings;
 - =absent= to negative conditional elements where semantics match;
@@ -744,7 +790,7 @@ A LISA package compiler may map:
 - =conclude= to adapter-owned derived-fact/justification operations;
 - uncertainty to LISA belief hooks only for a conformance-proven algebra.
 
-The adapter never splices arbitrary user forms into native =defrule= bodies.
+The adapter never splices arbitrary user forms into native =defrule= bodies. Object-backed conformance must additionally prove the mapping from a LISA instance/fact back to the authoritative StarIntel object identity and replay/provenance record.
 
 * SWI-Prolog Lowering
 
@@ -753,6 +799,7 @@ A SWI package compiler maps compatible relational experts into named predicates/
 Potential mappings:
 
 - fact types to typed module-scoped predicates or immutable snapshot predicates;
+- StarIntel object-backed source facts to compiler-owned relational projections carrying stable source-object identity/provenance references;
 - relational rules to generated clauses;
 - goals to declared named query IDs;
 - =notProvable= to negation as failure only under the declared profile;
@@ -760,7 +807,7 @@ Potential mappings:
 - questions to the external ExpertSessionActor question port;
 - explanations to proof-carrying generated predicates or instrumented wrappers.
 
-A package depending on production agenda order, salience, or retraction-driven activation must not be translated to plain Prolog clauses and called equivalent.
+A package depending on production agenda order, salience, or retraction-driven activation must not be translated to plain Prolog clauses and called equivalent. A package depending on StarIntel object identity/provenance must likewise not be lowered to anonymous tuples that cannot be traced to their source objects.
 
 * N-Prolog Lowering
 
@@ -774,7 +821,8 @@ Restrictions:
 - one query per worker initially;
 - named wrappers only;
 - bounded answer materialization;
-- deterministic JSON/string-mode bootstrap.
+- deterministic JSON/string-mode bootstrap;
+- StarIntel object reuse requires the same stable identity/provenance projection contract as other Prolog lowering; unsupported metadata/capabilities must fail compatibility rather than disappear silently.
 
 * Portable Expert Profiles
 
@@ -836,6 +884,8 @@ expertExplanationUnavailable
 expertBackendIncompatible
 expertRuleActionEffectDenied
 expertPortableSubsetViolation
+expertObjectIdentityUnavailable
+expertObjectProjectionLossy
 #+end_example
 
 All diagnostics carry source span and macro-origin chain.
@@ -856,7 +906,8 @@ Non-fatal lints should cover:
 - potential unbounded question loop;
 - proof-required rule without proof path;
 - uncertainty value outside algebra domain;
-- backend-specific feature defeating declared portability.
+- backend-specific feature defeating declared portability;
+- StarIntel object projection that drops provenance or stable source identity needed by the declared profile.
 
 Heuristic performance warnings must never be mislabeled as proven semantic errors.
 
@@ -904,13 +955,18 @@ This explanation becomes machine-readable selection evidence in the materialized
 - source facts cannot be mutated;
 - salience fails outside production profile;
 - uncertainty algebra is explicit;
-- question effects are typed/bounded.
+- question effects are typed/bounded;
+- a real StarIntel object can be consumed through the LISA instance path without application-level expert-object duplication;
+- identity/provenance required by the profile survives backend projection and maps conclusions/proofs back to the same authoritative object;
+- lossy or anonymous projections fail compatibility when the package requires identity/provenance.
 
 ** Lowering
 
 - fake backend receives stable normalized expert IR;
 - LISA lowering contains no raw source splice;
+- LISA object-backed fixture exercises =assert-instance= or the equivalent instance insertion path;
 - SWI/N-Prolog call only named wrappers;
+- SWI/N-Prolog object projections retain stable source-object identity/provenance references when the package requires them;
 - backend artifacts are digest-stable for identical input.
 
 ** Runtime
@@ -934,7 +990,8 @@ Create small experts for:
 4. MYCIN-inspired synthetic uncertainty fixture without copying external prose/data;
 5. recursive ownership — SWI tabled profile;
 6. streaming alerts — LISA production profile;
-7. portable relational arithmetic — SWI/N-Prolog conformance.
+7. portable relational arithmetic — SWI/N-Prolog conformance;
+8. StarIntel object reuse — an existing StarIntel object enters LISA reasoning directly, while Prolog adapters either preserve its stable identity/provenance through projection or report an explicit incompatibility.
 
 * Documentation Order
 
@@ -979,6 +1036,10 @@ Rejected. Inference emits conclusions/events; effects stay behind typed actor/to
 
 Rejected because a weight has no cross-engine meaning without a named algebra.
 
+** Mandatory expert-only object copies
+
+Rejected as the StarLang semantic model. A backend may own an internal identity-preserving projection, but StarIntel applications must not be required to maintain a second expert-only copy of the same authoritative object merely to reason about it.
+
 * Implementation Order
 
 1. land backend-neutral =star-logic= policy/types from STAR-LANG-RESEARCH-022;
@@ -988,44 +1049,50 @@ Rejected because a weight has no cross-engine meaning without a named algebra.
 5. define expert IR/canonical JSON;
 6. implement fake expert backend/runtime;
 7. generate digest-locked expert package manifests;
-8. lower production profile to LISA;
-9. lower relational profile to SWI-Prolog;
-10. lower portable relational subset to N-Prolog;
-11. add ExpertSessionActor/question port;
-12. add normalized explanations/proofs;
-13. add uncertainty algebras after boolean conformance is green;
-14. add backend-selection explanation tooling;
-15. publish tutorials only after executable fixtures exist.
+8. prove the StarIntel object-reuse gate with LISA's object-instance path and freeze the identity/provenance fixture;
+9. lower production profile to LISA;
+10. lower relational profile to SWI-Prolog with explicit object projection semantics where required;
+11. lower portable relational subset to N-Prolog with the same object identity/provenance gate where claimed;
+12. add ExpertSessionActor/question port;
+13. add normalized explanations/proofs;
+14. add uncertainty algebras after boolean conformance is green;
+15. add backend-selection explanation tooling;
+16. publish tutorials only after executable fixtures exist.
 
 * Acceptance Criteria
 
 1. Expert syntax is parsed only by the closed StarLang reader.
 2. =expert-system= lowers completely into checked IR before runtime execution.
 3. Normalized expert IR contains no raw Common Lisp/Prolog source, LISA objects, engine handles, or sockets.
-4. Facts reuse StarLang schema/type contracts.
-5. Rule variables are lexical, typed, and source-traceable.
-6. =absent=, =notProvable=, inequality, and contradiction remain distinct.
-7. Derived conclusions are separate from source facts.
-8. Questions are typed effect requests owned by ExpertSessionActor.
-9. Explanation requirements normalize to the shared derivation graph.
-10. Uncertainty names an explicit algebra; boolean reasoning works without uncertainty support.
-11. Salience/group semantics cannot run under a backend/profile that cannot honor them.
-12. Portability is declared by named semantic profile and proven by fixtures.
-13. Backend pinning is optional in source but immutable after plan materialization.
-14. Compiler diagnostics retain source spans/origin chains.
-15. A complete expert is testable with a fake backend and no inference engine installed.
+4. Facts reuse StarLang schema/type contracts rather than defining an expert-only type system.
+5. Research demonstrates at least one real existing StarIntel object family can participate in expert reasoning without a required expert-only application-object copy.
+6. LISA proves the reference object-backed path using its existing instance support, with stable mapping back to the authoritative StarIntel object.
+7. Backend projections preserve the stable source-object identity/provenance required by the declared profile, or compatibility fails explicitly.
+8. Rule variables are lexical, typed, and source-traceable.
+9. =absent=, =notProvable=, inequality, and contradiction remain distinct.
+10. Derived conclusions are separate from source facts.
+11. Questions are typed effect requests owned by ExpertSessionActor.
+12. Explanation requirements normalize to the shared derivation graph.
+13. Uncertainty names an explicit algebra; boolean reasoning works without uncertainty support.
+14. Salience/group semantics cannot run under a backend/profile that cannot honor them.
+15. Portability is declared by named semantic profile and proven by fixtures.
+16. Backend pinning is optional in source but immutable after plan materialization.
+17. Compiler diagnostics retain source spans/origin chains.
+18. A complete expert is testable with a fake backend and no inference engine installed.
 
 * Result
 
-StarLang should gain a compact expert-system layer rather than an embedded native rule language. The layer declares typed facts, rules, goals, questions, conclusions, proofs, and optional uncertainty. It lowers through the closed compiler into engine-neutral expert/logic IR. LISA, SWI-Prolog, and N-Prolog are then implementation backends selected only when their advertised semantic profiles satisfy the package.
+StarLang should gain a compact expert-system layer rather than an embedded native rule language. The layer declares typed facts, rules, goals, questions, conclusions, proofs, and optional uncertainty. It reuses StarLang schema contracts and must be able to reason over existing StarIntel objects without forcing a parallel expert-only application object model. It lowers through the closed compiler into engine-neutral expert/logic IR. LISA, SWI-Prolog, and N-Prolog are then implementation backends selected only when their advertised semantic profiles satisfy the package.
 
-The most valuable syntactic sugar is the sugar that makes correct semantics easy and ambiguous semantics hard: typed bindings, explicit negation forms, separated source/session/derived state, bounded question effects, structured explanations, and capability-checked backend selection.
+LISA's existing object-instance support makes direct object-backed reasoning a concrete reference capability. Prolog backends may require relational projection, but any claimed StarIntel-object support must retain the stable identity/provenance contract required by the package. Backend choice determines how inference executes; it must not silently redefine the application's object model.
+
+The most valuable syntactic sugar is the sugar that makes correct semantics easy and ambiguous semantics hard: typed bindings, explicit negation forms, separated source/session/derived state, bounded question effects, structured explanations, capability-checked backend selection, and traceable reuse of authoritative StarIntel objects.
 
 * Sources
 
-Sources retrieved and reviewed on 2026-08-13:
+Sources retrieved and reviewed on 2026-08-13 unless otherwise noted:
 
-- LISA rule language implementation: https://github.com/youngde811/Lisa/blob/master/src/core/language.lisp
+- LISA rule language implementation: https://github.com/youngde811/Lisa/blob/master/src/core/language.lisp — rechecked 2026-08-15 for =standard-object= insertion, =assert-instance=, =retract-instance=, and =mark-instance-as-changed= object support.
 - LISA MYCIN example: https://github.com/youngde811/Lisa/blob/master/examples/mycin.lisp
 - Sasagawa N-Prolog README: https://github.com/sasagawa888/nprolog
 - Sasagawa N-Prolog CLP(FD): https://github.com/sasagawa888/nprolog/blob/master/document/CLPFD.md
@@ -1043,6 +1110,7 @@ Sources retrieved and reviewed on 2026-08-13:
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-08-15 | Add a blocking StarIntel-object reuse research gate: retain StarLang schema contracts, require a real StarIntel object fixture, use LISA object-instance support as the reference capability, and require identity/provenance-preserving projections or explicit incompatibility for Prolog backends | ChatGPT agent | LISA =src/core/language.lisp= object-instance path; maintainer review direction on 2026-08-15 |
 | 2026-08-13 | Define expert-system source forms, fact/rule/goal/question semantics, session actor protocol, uncertainty/proof rules, backend lowering restrictions, diagnostics, and conformance strategy | ChatGPT agent | Current StarLang source plus primary LISA, SWI-Prolog, and N-Prolog sources |
 | 2026-08-13 | Normalize retrieved-source citations so full Org-roam export does not depend on unresolved footnote definitions | ChatGPT agent | Org-roam Pages run 31674290711 exposed source-footnote formatting defect in companion research node |
 
@@ -1057,3 +1125,5 @@ Sources retrieved and reviewed on 2026-08-13:
 - *Uncertainty algebra* — Versioned formal rule for combining positive/negative evidence, such as certainty-factor or Dempster-Shafer semantics.
 - *Partial match* — Information about a production rule whose conditions are only partly satisfied.
 - *Backend lowering* — Trusted compiler step converting backend-neutral expert IR into an engine-specific artifact without exposing native syntax in StarLang source.
+- *StarIntel object reuse* — Expert reasoning over an existing authoritative StarIntel object, either directly or through an identity-preserving backend projection, without requiring a second expert-only application object.
+- *Identity-preserving projection* — Backend representation that carries enough stable source-object identity and provenance metadata to map facts, conclusions, and proofs back to the authoritative StarIntel object.

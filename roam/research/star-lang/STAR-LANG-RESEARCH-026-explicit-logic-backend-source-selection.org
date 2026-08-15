@@ -15,8 +15,8 @@
 | Research basis | Research reviewer | PENDING | Verify consistency with STAR-LANG-RESEARCH-021/022 and current closed compiler boundary | Related Nodes and Findings |
 | Language surface | StarLang maintainer | PENDING | Approve canonical backend directive syntax and legal scopes | Canonical Source Surface |
 | Logic semantics | Logic runtime maintainer | PENDING | Confirm source selection does not bypass semantic profile/capability validation | Compatibility Rules |
-| Deployment authority | Runtime/security reviewer | PENDING | Confirm source cannot grant unavailable or forbidden backend authority | Deployment Boundary |
-| Implementation | Repository maintainer | NOT STARTED | Implement only after directive/pragma research and compiler ownership are approved | Implementation Consequences |
+| Deployment authority | Runtime/security reviewer | PENDING | Confirm source cannot grant unavailable or forbidden backend authority | Authority Boundary |
+| Implementation | Repository maintainer | NOT STARTED | Implement only after the separate pragma/directive research and compiler ownership are approved | Implementation Consequences |
 
 * Related Nodes
 
@@ -24,16 +24,15 @@
 - [[file:STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
 - [[file:STAR-LANG-RESEARCH-022-three-backend-logic-runtime-selection.org][STAR-LANG-RESEARCH-022 Three-Backend Logic Runtime Selection]]
 - [[file:STAR-LANG-RESEARCH-023-expert-system-language-surface.org][STAR-LANG-RESEARCH-023 Expert-System Language Surface]]
-- [[file:STAR-LANG-RESEARCH-027-lisp-native-pragma-compiler-directives.org][STAR-LANG-RESEARCH-027 Lisp-Native Pragma and Compiler Directives]]
 - [[file:../../design/star-lang/STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
 
 * Scope
 
 This node answers one narrow question: how does a StarLang author explicitly tell the compiler which inference backend policy to use?
 
-It does not redesign the expert-system language in STAR-LANG-RESEARCH-023, define a general compiler-option system, or replace the backend capability/runtime research in STAR-LANG-RESEARCH-021 and STAR-LANG-RESEARCH-022.
+It does not redesign the expert-system language in STAR-LANG-RESEARCH-023, define the general pragma/compiler-option system, or replace the backend capability/runtime research in STAR-LANG-RESEARCH-021 and STAR-LANG-RESEARCH-022.
 
-The general pragma grammar, option typing, inheritance pipeline, diagnostics framework, reproducibility classes, and deployment-policy interaction belong to STAR-LANG-RESEARCH-027. This node owns only the =:backend= option's source meaning and compatibility rules.
+The separate pragma research owns the general grammar, option typing, inheritance pipeline, diagnostics framework, reproducibility classes, and deployment-policy interaction. This node owns only the =:backend= option's source meaning and compatibility rules.
 
 * Decision
 
@@ -46,7 +45,7 @@ The canonical source-level selector should be a Lisp-native compiler directive:
 (pragma :backend :n-prolog)
 #+end_src
 
-The supported initial policy values are exactly:
+The supported initial values are exactly:
 
 #+begin_example
 :auto
@@ -55,11 +54,11 @@ The supported initial policy values are exactly:
 :n-prolog
 #+end_example
 
-=:auto= is a selection policy. The other three values are explicit backend pins.
+=:auto= is deterministic backend-selection policy. The other values are explicit backend pins.
 
-This is StarLang data consumed by the closed compiler. It is not Common Lisp =EVAL=, not a Common Lisp declaration, and not native LISA/Prolog syntax.
+This is StarLang data consumed by the closed compiler. It is not Common Lisp =EVAL=, a Common Lisp declaration, native LISA syntax, or native Prolog syntax.
 
-The Nim pragma system is useful inspiration for source-local compiler directives, but Nim punctuation is explicitly rejected. StarLang remains visibly Lisp-family syntax.
+Nim pragmas are useful inspiration for source-local compiler directives, but Nim punctuation is explicitly rejected. StarLang remains Lisp-family syntax.
 
 * Canonical Source Surface
 
@@ -68,50 +67,44 @@ The Nim pragma system is useful inspiration for source-local compiler directives
 #+begin_src lisp
 (module fraud-analysis
   (pragma :backend :swi-prolog)
-
   ...)
 #+end_src
 
-The module backend policy becomes the inherited default for compatible contained reasoning declarations unless a narrower legal scope overrides it.
+The module policy becomes the inherited backend default for compatible contained reasoning declarations unless a narrower legal source scope overrides it.
 
 ** Expert-system scope
 
 #+begin_src lisp
 (expert-system transaction-risk
   (pragma :backend :lisa)
-
   ...)
 #+end_src
 
-This selects LISA only if the expert-system's derived semantic profile and package requirements are compatible with the LISA adapter descriptor.
+This requests LISA only if the expert system's derived semantic profile and package requirements are compatible with the LISA adapter descriptor.
 
 ** Actor scope
 
 #+begin_src lisp
 (actor ownership-reasoner
   (pragma :backend :swi-prolog)
-
   ...)
 #+end_src
 
-Actor scope provides a default for logic operations lexically owned by that actor. It does not imply that the actor runtime itself becomes Prolog-backed.
+Actor scope provides a default for logic operations lexically owned by the actor. It does not make the actor runtime itself Prolog-backed.
 
 ** Operation scope
 
 #+begin_src lisp
 (reason ownership-path
   (pragma :backend :swi-prolog)
-
   ...)
 #+end_src
 
-Operation scope is the narrowest source backend policy and therefore overrides broader source defaults, subject to deployment restrictions and semantic compatibility.
+Operation scope is the narrowest source backend policy and overrides broader source defaults, subject to semantic compatibility and deployment restrictions.
 
 * Normalized Meaning
 
 The source directive should normalize to an engine-neutral compiler policy record before executable plan materialization.
-
-Conceptual normalized shape:
 
 #+begin_src lisp
 (logic-backend-source-policy
@@ -137,21 +130,19 @@ Native engine handles, Prolog modules, LISA networks, sockets, child-process IDs
 
 Backend selection has three distinct authorities:
 
-1. *Source preference/pin* — what the StarLang author requests with =:backend=.
-2. *Compiler semantic validation* — whether the selected backend can implement the program's required semantic profile, packages, proof contract, and enforceable limits.
+1. *Source request* — what the StarLang author asks for with =:backend=.
+2. *Compiler semantic validation* — whether that backend can implement the required semantic profile, packages, proof contract, and enforceable limits.
 3. *Deployment policy* — which backends/builds are installed, trusted, permitted, and usable in the target deployment.
 
-Source owns only the first category.
+Source controls only the first category.
 
-A source directive cannot install an engine, trust a package, weaken an isolation requirement, enable forbidden native code, or grant a capability that deployment policy denies.
+A source directive cannot install an engine, trust a package, weaken isolation, enable forbidden native code, or grant a capability that deployment policy denies.
 
 * Compatibility Rules
 
 An explicit pin never means "force the compiler to make it work."
 
-The compiler must reject a pin when the selected backend cannot satisfy the already-derived requirements.
-
-Examples:
+The compiler must reject a pin when the selected backend cannot satisfy independently derived requirements.
 
 #+begin_src lisp
 (reason recursive-ownership
@@ -170,31 +161,31 @@ Likewise:
   ... production-rule forms requiring agenda/salience semantics ...)
 #+end_src
 
-must fail unless a future SWI adapter explicitly advertises the exact required production semantic profile. Similar surface resemblance is not semantic compatibility.
+must fail unless a future SWI adapter explicitly advertises the exact required production semantic profile. Similar surface syntax is not semantic compatibility.
 
 N-Prolog must be checked against its declared portable/fixture-proven profile rather than treated as a transparent SWI replacement.
 
 * =:auto= Semantics
 
-=:auto= means deterministic capability-based selection during plan materialization using the versioned backend registry and policy already researched in STAR-LANG-RESEARCH-022.
+=:auto= means deterministic capability-based selection during plan materialization using the versioned backend registry and policy researched in STAR-LANG-RESEARCH-022.
 
 =:auto= does not mean:
 
-- try each engine until one succeeds;
+- try engines until one succeeds;
 - switch engine types after timeout or crash;
-- pick the currently least busy engine type;
-- use N-Prolog merely because SWI-Prolog is unavailable;
+- pick the least busy engine type;
+- use N-Prolog because SWI-Prolog is unavailable;
 - weaken proof, isolation, or budget requirements;
 - choose based on answer contents;
 - perform runtime semantic failover.
 
-Once materialized, the executable run plan pins one concrete backend identity and exact runtime/package/mapping evidence required for replay.
+Once materialized, the executable run plan pins one concrete backend identity and the runtime/package/mapping evidence required for replay.
 
-* Scope and Precedence
+* Source Precedence
 
-Backend policy participates in the general source-configuration pipeline defined by STAR-LANG-RESEARCH-027.
+The backend selector participates in the separate general pragma-resolution pipeline.
 
-For the backend option specifically, the expected source precedence is:
+Expected source precedence for this option is:
 
 #+begin_example
 project default
@@ -206,15 +197,15 @@ declaration pragma
 operation pragma
 #+end_example
 
-The nearest legal source scope wins, but this is not the final authority. Deployment restrictions are applied after source resolution and may reject or constrain the result.
+The nearest legal source scope wins, but deployment restrictions apply afterward and may reject or constrain the result.
 
 A declaration with no =:backend= pragma inherits the nearest enclosing value. Absence is not equivalent to =:auto= until the project/compiler default layer is resolved.
 
-Duplicate =:backend= pragmas in the same scope are a compiler error. Silent "last one wins" behavior would make refactors and generated source too easy to misread.
+Duplicate =:backend= pragmas in the same scope should be a compiler error. Silent "last one wins" behavior makes generated source and refactors too easy to misread.
 
 * Interaction With STAR-LANG-RESEARCH-023
 
-STAR-LANG-RESEARCH-023 currently contains illustrative metadata forms such as:
+STAR-LANG-RESEARCH-023 currently contains illustrative metadata such as:
 
 #+begin_src lisp
 (expert-system transactionRisk
@@ -224,9 +215,9 @@ STAR-LANG-RESEARCH-023 currently contains illustrative metadata forms such as:
   ...)
 #+end_src
 
-This research does not approve, rewrite, or substantially redesign that node.
+This node does not approve, rewrite, or substantially redesign 023.
 
-For backend-selection purposes only, the canonical direction is now the explicit directive form:
+For backend-selection purposes only, the canonical direction is now:
 
 #+begin_src lisp
 (expert-system transaction-risk
@@ -234,11 +225,11 @@ For backend-selection purposes only, the canonical direction is now the explicit
   ...)
 #+end_src
 
-The older =:backend= field examples in 023 should be treated as research-era expression of backend intent until the broader expert-system surface is reviewed. No approval state in 023 changes because of this node.
+The earlier =:backend= field examples in 023 remain research-era expressions of intent until the broader expert-system surface is reviewed. No approval state in 023 changes because of this node.
 
 * Diagnostics
 
-Required compiler diagnostics include:
+Required diagnostics include:
 
 ** Unknown backend
 
@@ -271,11 +262,11 @@ first:  fraud.star:4:3
 second: fraud.star:5:3
 #+end_example
 
-Diagnostics should preserve the originating source span and report the policy layer that supplied the final or rejected value.
+Diagnostics preserve the originating source span and identify the policy layer that supplied the final or rejected value.
 
 * Explainability
 
-The compiler should expose backend resolution through the option-explanation facility researched in STAR-LANG-RESEARCH-027.
+The separate compiler-option explanation facility should expose backend resolution.
 
 Conceptual output:
 
@@ -290,25 +281,25 @@ Conceptual output:
   selection:        pinned
 #+end_example
 
-For =:auto= the explanation should also identify the materialization rule and selected concrete backend once selection occurs.
+For =:auto=, explanation should also identify the versioned materialization rule and selected concrete backend once selection occurs.
 
 * Reproducibility
 
-The =:backend= pragma is semantic/runtime-plan configuration, not diagnostic decoration.
+The =:backend= directive is semantic/runtime-plan configuration, not diagnostic decoration.
 
 Therefore:
 
 - the resolved source backend policy participates in normalized compiler-option identity;
 - the selected concrete backend participates in executable run-plan identity;
 - engine build identity, adapter version, logic package digest, fact-mapping digest, semantic profile, and proof contract remain pinned as required by STAR-LANG-RESEARCH-022;
-- changing =:backend= invalidates any artifact/run-plan cache whose behavior can depend on the selected engine;
-- the original source span is retained for explanation/provenance but need not itself affect semantic identity if canonical source identity already covers it.
+- changing =:backend= invalidates artifacts/run plans whose behavior can depend on engine selection;
+- source span remains provenance/explanation metadata.
 
 * Safety Rules
 
-The backend selector must not become an escape hatch for executable compiler extensions.
+The selector must not become an executable compiler extension.
 
-Illegal examples include conceptual forms such as:
+Illegal conceptual examples:
 
 #+begin_src lisp
 (pragma :backend (load "my-engine.lisp"))
@@ -318,7 +309,7 @@ Illegal examples include conceptual forms such as:
 
 The value is a closed enum, not an expression.
 
-Backend-specific configuration belongs to statically registered namespaced options in STAR-LANG-RESEARCH-027. Ordinary StarLang source cannot load arbitrary native libraries, invoke shell commands at compile time, or execute Common Lisp to construct a backend.
+Backend-specific tuning belongs to statically registered namespaced compiler options in the separate pragma research. Ordinary StarLang source cannot load arbitrary native libraries, invoke shell commands at compile time, or execute Common Lisp to construct a backend.
 
 * Rejected Designs
 
@@ -330,11 +321,11 @@ Rejected:
 {. backend: swi-prolog .}
 #+end_example
 
-Reason: it introduces a non-Lisp punctuation sublanguage and duplicates information already expressible as normal StarLang list data.
+Reason: it introduces a non-Lisp punctuation sublanguage.
 
-** Backend field hidden inside an arbitrary metadata bag
+** Arbitrary metadata bag
 
-Rejected as the canonical direction:
+Rejected as the canonical backend-selection surface:
 
 #+begin_src lisp
 (reason ownership-path
@@ -343,7 +334,7 @@ Rejected as the canonical direction:
   ...)
 #+end_src
 
-Reason: backend selection needs typed option registration, consistent scoping, explanation, conflict diagnostics, and deployment-policy interaction. An arbitrary property bag makes those semantics implicit.
+Reason: backend selection needs typed option registration, consistent scoping, explanation, conflict diagnostics, and deployment-policy interaction.
 
 ** Native engine forms
 
@@ -355,7 +346,7 @@ Rejected:
   ...)
 #+end_src
 
-Reason: this leaks engine syntax into the core language and prevents backend-neutral IR validation.
+Reason: this leaks engine syntax into core StarLang and backend-neutral IR.
 
 ** Runtime fallback chain
 
@@ -365,15 +356,15 @@ Rejected:
 (pragma :backend '(:swi-prolog :n-prolog :lisa))
 #+end_src
 
-Reason: these engines are not generally semantically interchangeable. Operational failure cannot silently authorize a semantic change.
+Reason: the engines are not generally semantically interchangeable. Operational failure cannot silently authorize a semantic change.
 
 * Implementation Consequences
 
-If approved, compiler implementation should:
+If approved, implementation should:
 
 1. register =:backend= as a closed typed compiler option;
-2. parse it through the ordinary closed StarLang reader;
-3. allow it only in the scopes approved by STAR-LANG-RESEARCH-027;
+2. parse it through the closed StarLang reader;
+3. allow it only in scopes approved by the general pragma research;
 4. normalize it before logic/expert semantic lowering completes;
 5. derive required semantic profiles independently of the requested backend;
 6. validate explicit pins against the backend registry;
@@ -400,22 +391,20 @@ External syntax inspiration reviewed on 2026-08-15:
 * Open Questions
 
 - Which project-configuration file format becomes canonical for non-source backend defaults?
-- Should actor scope be legal for =:backend= only when every nested logic operation belongs to the actor lexically, or should actor scope be classified as ordinary declaration scope?
-- Should explicit backend pins be permitted in reusable libraries intended to remain backend-portable, or should project policy be able to reject library-level pins?
-- Which stable diagnostic codes and JSON explanation schema should become part of the compiler compatibility contract?
-
-These questions do not change the central recommendation: =:backend= is a closed, typed, Lisp-native compiler directive whose request is subordinate to semantic validation and deployment authority.
+- Should actor scope be legal for =:backend= only when every nested logic operation belongs to the actor lexically, or simply be ordinary declaration scope?
+- Should reusable libraries be allowed to pin a backend, or should project policy be able to reject library-level pins?
+- Which diagnostic codes and explanation JSON schema become compiler compatibility contracts?
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-15 | Create focused source-level backend-selection research with canonical Lisp pragma syntax, explicit scope/precedence rules, compatibility diagnostics, and deployment boundary | ChatGPT agent | STAR-LANG-RESEARCH-021/022/023, current StarLang compiler source, Nim pragma manual |
+| 2026-08-15 | Create focused source-level backend-selection research with canonical Lisp pragma syntax, explicit precedence, compatibility diagnostics, and deployment boundary | ChatGPT agent | STAR-LANG-RESEARCH-021/022/023, current StarLang compiler source, Nim pragma manual |
 
 * Footnotes and Glossary
 
 - *Backend pin* — Explicit request for one concrete inference backend ID rather than deterministic =:auto= selection.
-- *Semantic profile* — Versioned behavioral contract required from a logic backend, such as tabled query or production agenda semantics.
+- *Semantic profile* — Versioned behavioral contract required from a logic backend, such as tabled-query or production-agenda semantics.
 - *Materialization* — Compiler/deployment phase that resolves abstract policy into an immutable executable run plan.
 - *Deployment authority* — Operator-controlled configuration that can restrict installed, trusted, or permitted runtime capabilities; source cannot override it.
-- *Closed enum* — Finite compiler-recognized value set; values are data and are not evaluated as expressions.
+- *Closed enum* — Finite compiler-recognized value set whose members are data and are not evaluated as expressions.

@@ -1,0 +1,488 @@
+:PROPERTIES:
+:ID:       star-lang-design-012-n-prolog-expert-system-backend
+:END:
+#+title: STAR-LANG-012 N-Prolog Expert-System Backend
+#+description: Backend-specific StarLang design for a conservative portable relational expert backend on N-Prolog with identity-preserving StarIntel projection, explicit subset claims, structured process isolation, hard cancellation, and star.logic.api/1 conformance.
+#+status: REVIEW
+#+filetags: :starintel:design:star-lang:expert-systems:n-prolog:prolog:portable:relational:process:proofs:
+#+created: [2026-08-16 Sun]
+#+last_modified: [2026-08-16 Sun]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Architecture | StarLang maintainer | PENDING | Approve N-Prolog as the conservative portable relational specialization of STAR-LANG-007 | This design |
+| Portable API | Logic runtime maintainer | APPROVED BY DEPENDENCY | Conform exactly to =star.logic.api/1= | STAR-LANG-009 |
+| StarIntel projection | StarIntel maintainer | PENDING | Demonstrate identity-preserving projection for at least one real StarIntel object/document family | Projection contract |
+| Portable subset | Logic runtime maintainer | PENDING | Freeze exact fixture-proven N-Prolog subset and capability descriptor | Capability claims |
+| Runtime isolation | Runtime maintainer | PENDING | Approve framed child-process protocol and worker replacement rules | Process protocol |
+| Implementation | Repository maintainer | NOT STARTED | Land final-owned adapter slices and conformance fixtures | Implementation order |
+
+* Related Nodes
+
+- [[file:STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
+- [[file:STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
+- [[file:STAR-LANG-010-lisa-expert-system-backend.org][STAR-LANG-010 LISA Expert-System Backend]]
+- [[file:STAR-LANG-011-swi-prolog-expert-system-backend.org][STAR-LANG-011 SWI-Prolog Expert-System Backend]]
+
+* Status and Authority
+
+This file is the authoritative design for N-Prolog-specific expert-system behavior.
+
+STAR-LANG-007 remains the umbrella architecture and STAR-LANG-009 remains the portable API authority. This design owns N-Prolog process lifecycle, supported relational subset, package/bootstrap protocol, projection rules, cancellation, reset/replacement, proof-wrapper capability, and backend-specific failure behavior.
+
+N-Prolog MUST NOT be described as simply "SWI-Prolog with fewer features." Its supported semantics are independently declared and independently fixture-proven.
+
+* Decision
+
+StarLang SHALL implement N-Prolog through:
+
+#+begin_example
+star-logic-adapter-nprolog
+#+end_example
+
+N-Prolog is the conservative relational backend for workloads that fit a deliberately documented portable Prolog subset and benefit from a small external engine boundary.
+
+Capabilities SHALL be advertised only after conformance fixtures prove them against the exact pinned N-Prolog build.
+
+No feature is inherited merely because SWI-Prolog supports a similarly named construct.
+
+* Backend Boundary
+
+#+begin_example
+StarIntel objects/documents
+        |
+        v
+identity-preserving projection
+        |
+        v
+portable StarLang logic package
+        |
+        v
+star-logic-adapter-nprolog
+        |
+        v
+framed child-process wrapper
+        |
+        v
+pinned npl worker
+        |
+        v
+normalized answers + optional proofs + usage
+#+end_example
+
+Native N-Prolog terms, process handles, interpreter state, clause database handles, or arbitrary executable goals MUST NOT cross the portable boundary.
+
+* StarIntel Identity-Preserving Projection Contract
+
+N-Prolog uses relational projection, but that projection SHALL preserve authority.
+
+Conformance shape:
+
+#+begin_example
+FAIL: StarIntel Organization -> anonymous copied tuple -> N-Prolog
+PASS: StarIntel Organization -> identity-preserving projection -> named operation
+#+end_example
+
+Every projected source record SHALL preserve enough metadata to recover:
+
+- authoritative StarIntel object/document ID;
+- schema/type identity and version;
+- source/provenance references;
+- relation/document references needed by the package;
+- StarLang session fact identity;
+- source revision/generation where required;
+- proof/verification metadata required by a claimed proof profile.
+
+Projection state is disposable runtime state. It SHALL be reproducible from authoritative inputs and the session journal.
+
+* Portable Subset Principle
+
+The N-Prolog adapter SHALL begin with the smallest subset necessary to satisfy canonical StarLang relational fixtures.
+
+The initial subset MAY include, when proven:
+
+- facts and rules;
+- first-order unification;
+- conjunction;
+- finite disjunction where wrapper behavior is deterministic;
+- recursion that terminates under declared fixture/budget conditions;
+- arithmetic/comparison subset explicitly mapped by the compiler;
+- bounded answer enumeration;
+- named operation wrappers;
+- selected finite-domain constraint functionality only when separately proven.
+
+The initial subset SHALL NOT claim:
+
+- SWI tabling;
+- SWI incremental tabling;
+- SWI module semantics;
+- SWI-specific libraries;
+- SWI exception identities;
+- LISA production agenda or salience;
+- persistent RETE-style working memory;
+- proof semantics not implemented by an explicit wrapper.
+
+* Semantic Profiles
+
+Initial target profiles:
+
+#+begin_example
+star.logic.query/1
+star.logic.portable-prolog/1
+star.expert.relational/1
+#+end_example
+
+A stronger profile MAY be added only when exact observable behavior is specified and fixture-proven.
+
+If a package requires SWI-specific semantics, N-Prolog materialization MUST fail before execution rather than attempting transparent fallback or approximation.
+
+* Named Operations Only
+
+All execution occurs through compiler/package-declared named operations.
+
+Portable source may use:
+
+#+begin_example
+solve
+solutions
+exists?
+explain
+#+end_example
+
+but the adapter maps these to fixed wrapper requests, never raw user-supplied goals.
+
+Forbidden:
+
+- arbitrary predicate names supplied at runtime;
+- arbitrary source strings as executable goals;
+- arbitrary file consult/load from StarLang source;
+- prompt-generated executable Prolog;
+- transparent fallback from unsupported SWI packages;
+- mutation of canonical StarIntel documents.
+
+* Process Protocol
+
+Initial transport SHALL use one pinned =npl= child process behind a StarIntel-owned framed request/response wrapper.
+
+The framing SHALL distinguish at minimum:
+
+#+begin_example
+hello
+loadPackage
+openSession
+applyDelta
+invoke
+nextResult
+cancel
+closeSession
+health
+shutdown
+#+end_example
+
+Exact wire spelling may differ, but protocol versioning and message kinds SHALL be explicit.
+
+Each request SHALL carry correlation/session/operation identity sufficient to reject stale or cross-session responses.
+
+* Worker Model
+
+Initial rule:
+
+#+begin_example
+one active query per worker
+#+end_example
+
+Concurrency is achieved by multiple supervised workers rather than concurrent mutable query state inside one worker until stronger engine guarantees are proven.
+
+Workers SHALL be discarded after:
+
+- hard cancellation;
+- malformed protocol output;
+- engine crash;
+- package identity mismatch;
+- uncertain reset state;
+- unexpected stdout/stderr framing corruption;
+- health handshake failure.
+
+* Startup Handshake
+
+The adapter SHALL record and validate:
+
+- adapter version;
+- protocol version;
+- N-Prolog version;
+- executable hash/build identity;
+- enabled runtime modes;
+- supported package/profile versions;
+- fixture-proven capabilities.
+
+An unknown or mismatched build is not silently accepted when the deployment plan pins exact identity.
+
+* Package and Bootstrap Contract
+
+Each executable package SHALL be digest-locked and SHALL include or reference a StarIntel-owned bootstrap/wrapper compatible with the selected N-Prolog build.
+
+Package identity includes:
+
+#+begin_example
+packageId
+packageVersion
+packageDigest
+mappingDigest
+compilerVersion
+requiredSemanticProfiles
+requiredCapabilities
+engineCompatibility
+namedOperations
+#+end_example
+
+Untrusted StarLang source does not provide raw package bytes.
+
+* Session Facts
+
+Portable =assert!= and =retract!= remain StarLang operations over stable fact identity.
+
+The N-Prolog backend MAY represent session state as generated facts/clauses or wrapper-managed state, but the representation is private and SHALL satisfy:
+
+- source StarIntel facts remain immutable;
+- session mutations are journaled;
+- no cross-session mutable visibility;
+- idempotency follows STAR-LANG-009;
+- reset/replay reconstructs from normalized deltas;
+- portable =retract!= is not arbitrary native pattern retraction.
+
+If reliable mutable session semantics cannot be proven for a package/profile, that capability SHALL be omitted rather than simulated ambiguously.
+
+* Results and Enumeration
+
+Results SHALL normalize into STAR-LANG-009 answer records.
+
+=solutions= obeys explicit StarLang limits, duplicate policy, and ordering policy. Native answer order is non-portable unless a stronger profile defines it.
+
+The wrapper SHALL bound:
+
+- answer count;
+- output bytes;
+- per-result size;
+- total operation duration;
+- proof data when enabled.
+
+Malformed native terms or protocol output become typed backend failures, not partially trusted StarLang values.
+
+* Cancellation
+
+N-Prolog's simple process boundary is intentionally used as a reliable hard-stop mechanism.
+
+Escalation:
+
+#+begin_example
+cooperative wrapper cancellation if proven
+        |
+        v
+terminate current worker process
+        |
+        v
+spawn fresh pinned worker
+#+end_example
+
+No killed worker is reused.
+
+A runtime that cannot guarantee cooperative cancellation SHALL advertise hard process cancellation only.
+
+* Failure Model
+
+Normalize at least:
+
+- normal no-answer;
+- invalid named operation;
+- parameter/type mismatch;
+- unsupported profile/capability;
+- package/bootstrap mismatch;
+- executable/version/hash mismatch;
+- projection failure;
+- timeout;
+- answer/output budget exhaustion;
+- cancellation;
+- malformed framed response;
+- engine crash;
+- proof unavailable;
+- reset failure.
+
+Native diagnostic text MAY be retained as bounded diagnostic metadata.
+
+* Proof Normalization
+
+No generic native proof claim is assumed.
+
+A named operation may advertise proof support only when the StarIntel-owned package/wrapper explicitly emits derivation evidence sufficient to normalize into:
+
+#+begin_example
+star.logic.derivation/1
+#+end_example
+
+The adapter MUST NOT infer a proof graph from incidental trace/debug output.
+
+Potential normalized nodes include:
+
+#+begin_example
+sourceFact
+sessionFact
+questionAnswer
+clauseApplication
+goal
+parameterBinding
+conclusion
+assumption
+contradiction
+budgetTruncation
+#+end_example
+
+* Constraint Support
+
+Any CLP(FD)-like or finite-domain capability is backend-specific and MUST be independently tested against N-Prolog.
+
+Do not copy SWI capability claims.
+
+A constraint profile requires fixtures for:
+
+- accepted domains;
+- arithmetic semantics;
+- propagation/result behavior;
+- bounded enumeration;
+- failure;
+- timeout/cancellation;
+- normalization.
+
+Until those gates pass, the runtime descriptor SHALL omit the capability.
+
+* Capability Claims
+
+Initial target claims after fixture proof:
+
+| Capability | N-Prolog target |
+|------------+-----------------|
+| typed facts via mapping | yes |
+| StarIntel identity-preserving projection | required |
+| relational named query | yes portable subset |
+| recursion | yes only fixture-proven terminating subset |
+| tabling | no initial claim |
+| incremental tabling | no |
+| finite-domain constraints | gated/narrow subset only |
+| bounded answers | yes |
+| production agenda | no |
+| salience | no |
+| persistent RETE WM | no |
+| normalized proof | wrapper-dependent |
+| process isolation | yes |
+| hard cancellation | yes through worker termination |
+
+The runtime descriptor remains source of truth.
+
+* Security Invariants
+
+1. Only StarIntel-owned framed commands reach the N-Prolog worker.
+2. Raw user goals are never executed.
+3. Packages and bootstrap code are digest-locked.
+4. Projection preserves StarIntel identity/provenance authority.
+5. Source documents remain immutable.
+6. Session mutable state is isolated per logical session/worker policy.
+7. Output is framed, bounded, parsed, and schema-validated.
+8. Worker filesystem/environment exposure is minimized.
+9. Hard-cancelled or uncertain workers are replaced.
+10. Secrets are excluded from generated packages, proofs, and fixtures.
+
+* Observability
+
+Record at minimum:
+
+- N-Prolog version and binary hash;
+- adapter/protocol version;
+- package/mapping digest;
+- semantic profile;
+- worker starts/stops/replacements;
+- operations and durations;
+- answer counts;
+- protocol parse failures;
+- timeouts/cancellations;
+- proof nodes/bytes;
+- projection failures;
+- capability handshake mismatches;
+- replay mismatches.
+
+* Implementation Order
+
+** Slice 1 — pinned process wrapper
+
+- final adapter system;
+- =npl= version/hash handshake;
+- framed request/response protocol;
+- health/shutdown;
+- malformed-output tests.
+
+** Slice 2 — package/bootstrap loading
+
+- digest-locked bootstrap;
+- named operation manifest;
+- package mismatch failures;
+- clean worker replacement.
+
+** Slice 3 — StarIntel projection
+
+- one real object/document family;
+- identity/provenance mapping;
+- mapping digest;
+- rebuild/replay fixture.
+
+** Slice 4 — portable query operations
+
+- =solve=;
+- =solutions=;
+- =exists?=;
+- duplicate/order normalization;
+- bounded output.
+
+** Slice 5 — cancellation/isolation
+
+- hard cancellation;
+- worker replacement;
+- no-state-leak tests;
+- stale response rejection.
+
+** Slice 6 — proof wrapper
+
+Only after a package emits explicit proof evidence.
+
+** Slice 7 — optional constraints
+
+Only after independent N-Prolog fixture proof; no inherited SWI claims.
+
+* Acceptance Gate
+
+Complete when:
+
+1. =star-logic-adapter-nprolog= has final package ownership;
+2. exact N-Prolog binary/version/hash is recorded and validated;
+3. one real StarIntel object/document family is projected with preserved identity/provenance;
+4. only named operations are executable;
+5. solve/solutions/exists? obey STAR-LANG-009 semantics over the declared portable subset;
+6. unsupported SWI-specific package/profile fails before execution;
+7. framed protocol corruption is rejected safely;
+8. hard cancellation kills and replaces the worker;
+9. no mutable state leaks between logical sessions;
+10. proof is advertised only when an explicit wrapper emits sufficient derivation evidence;
+11. same-backend replay is deterministic for canonical fixtures;
+12. descriptor advertises only independently fixture-proven N-Prolog capabilities.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-16 | Split N-Prolog backend authority out of STAR-LANG-007 and define an independent conservative portable subset rather than inheriting SWI claims | ChatGPT agent | STAR-LANG-007, STAR-LANG-009, approved operator direction |
+
+* Glossary
+
+- *Portable subset* — Explicit fixture-proven N-Prolog semantics used by StarLang; never inferred from SWI compatibility.
+- *Framed wrapper* — StarIntel-owned process protocol separating structured commands/results from arbitrary interpreter text.
+- *Identity-preserving projection* — Relational representation that retains stable linkage to authoritative StarIntel object/document and provenance identity.
+- *Worker replacement* — Discarding an uncertain/killed N-Prolog process and starting a fresh pinned worker instead of attempting unsafe reuse.

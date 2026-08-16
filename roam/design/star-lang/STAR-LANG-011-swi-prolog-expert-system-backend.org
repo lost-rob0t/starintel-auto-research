@@ -1,0 +1,458 @@
+:PROPERTIES:
+:ID:       star-lang-design-011-swi-prolog-expert-system-backend
+:END:
+#+title: STAR-LANG-011 SWI-Prolog Expert-System Backend
+#+description: Backend-specific StarLang design for relational expert reasoning on SWI-Prolog with identity-preserving StarIntel projections, named operations, recursion, tabling, constraints, proof normalization, isolation, and the portable star.logic.api/1 contract.
+#+status: REVIEW
+#+filetags: :starintel:design:star-lang:expert-systems:swi-prolog:prolog:relational:tabling:constraints:proofs:
+#+created: [2026-08-16 Sun]
+#+last_modified: [2026-08-16 Sun]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Architecture | StarLang maintainer | PENDING | Approve SWI-Prolog as the relational expert backend specialization of STAR-LANG-007 | This design |
+| Portable API | Logic runtime maintainer | APPROVED BY DEPENDENCY | Conform exactly to =star.logic.api/1= | STAR-LANG-009 |
+| StarIntel projection | StarIntel maintainer | PENDING | Demonstrate identity-preserving projection for at least one real StarIntel document/object family | Projection contract |
+| Backend protocol | Runtime maintainer | PENDING | Approve MQI lifecycle, wrapper predicates, cancellation, reset, and worker isolation | Runtime protocol |
+| Proof semantics | Logic runtime maintainer | PENDING | Normalize proof-carrying wrapper output into =star.logic.derivation/1= | Proof normalization |
+| Implementation | Repository maintainer | NOT STARTED | Land final-owned adapter slices and conformance fixtures | Implementation order |
+
+* Related Nodes
+
+- [[file:STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
+- [[file:STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
+- [[file:STAR-LANG-010-lisa-expert-system-backend.org][STAR-LANG-010 LISA Expert-System Backend]]
+- [[file:STAR-LANG-012-n-prolog-expert-system-backend.org][STAR-LANG-012 N-Prolog Expert-System Backend]]
+
+* Status and Authority
+
+This file is the authoritative design for SWI-Prolog-specific expert-system behavior.
+
+STAR-LANG-007 remains the umbrella architecture. STAR-LANG-009 remains authoritative for the portable runtime API. Backend-specific transport, projection, tabling, constraints, package loading, isolation, cancellation, and proof-wrapper behavior belong here.
+
+This design MUST NOT redefine portable operation semantics or expose arbitrary Prolog goals through the public StarLang API.
+
+* Decision
+
+StarLang SHALL implement SWI-Prolog through:
+
+#+begin_example
+star-logic-adapter-swi
+#+end_example
+
+SWI-Prolog is the primary backend for relational expert reasoning requiring recursion, tabled evaluation, constraint solving where profile-approved, and bounded multi-answer named operations.
+
+SWI SHALL NOT be presented as a transparent production-rule replacement for LISA. Agenda, salience, persistent RETE working memory, and production activation semantics require their own profiles and are not implied by successful relational queries.
+
+* Backend Boundary
+
+#+begin_example
+StarIntel objects/documents
+        |
+        v
+identity-preserving projection
+        |
+        v
+closed StarLang logic package + named operations
+        |
+        v
+star-logic-adapter-swi
+        |
+        v
+SWI worker / MQI
+        |
+        v
+normalized answers + proofs + usage
+#+end_example
+
+No native module handle, variable, term reference, query handle, thread identifier, or arbitrary predicate indicator crosses the portable boundary.
+
+* StarIntel Identity-Preserving Projection Contract
+
+Relational projection is allowed only when it remains traceable to authoritative StarIntel state.
+
+Conformance shape:
+
+#+begin_example
+FAIL: StarIntel Person -> anonymous copied tuple -> Prolog facts
+PASS: StarIntel Person -> identity-preserving relational projection -> named predicates
+#+end_example
+
+Every projected source fact SHALL retain enough mapping data to recover:
+
+- authoritative object/document ID;
+- schema/type identity and version;
+- provenance/source references;
+- relationship/document references required by the declared package;
+- verification metadata required by proof policy;
+- StarLang session fact identity;
+- projection generation or source revision when freshness matters.
+
+The Prolog database is not canonical StarIntel storage. Projection state is session/package runtime state and MUST be reconstructible from authoritative inputs plus the session journal.
+
+* Projection Shape
+
+The exact native predicate layout is adapter/package-private.
+
+A conceptual projection may look like:
+
+#+begin_example
+star_object(ObjectId, SchemaId, SchemaVersion, Revision).
+star_field(ObjectId, FieldId, NormalizedValue).
+star_relation(RelationId, SourceId, RelationType, TargetId).
+star_provenance(ObjectId, EvidenceId, SourceKind).
+#+end_example
+
+These names are illustrative, not the public StarLang contract.
+
+Packages MAY compile more efficient specialized predicates when the mapping digest records the exact projection contract.
+
+* Named Operations Only
+
+StarLang source invokes compiler-declared operations through =solve=, =solutions=, =exists?=, or =explain=.
+
+The adapter SHALL expose only StarIntel-owned wrapper operations whose names, parameters, result schemas, semantic profiles, and package digests are known at materialization time.
+
+Forbidden:
+
+- arbitrary module names from source;
+- arbitrary predicate indicators from source;
+- raw Prolog terms as executable goals;
+- =call/1= over user-supplied callable terms;
+- consult/load of untrusted arbitrary files;
+- prompt/LLM-produced executable Prolog strings.
+
+* Semantic Profiles
+
+Initial SWI targets:
+
+#+begin_example
+star.logic.query/1
+star.logic.tabled/1
+star.logic.constraints/1
+star.expert.relational/1
+#+end_example
+
+Potential operations under those profiles include:
+
+- finite relational query;
+- recursive graph traversal;
+- tabled recursive query;
+- bounded solution enumeration;
+- existence check;
+- approved constraint query;
+- proof-carrying named operation when the package supplies proof data.
+
+SWI SHALL NOT claim =star.expert.production/1= merely by encoding forward-chaining behavior in ordinary Prolog.
+
+* Recursion and Tabling
+
+Recursive named operations are first-class SWI capabilities.
+
+For a package claiming tabled semantics:
+
+1. the package manifest records the tabled profile/version;
+2. the generated/owned wrapper defines the tabled predicates explicitly;
+3. replay records the exact package and engine build;
+4. table behavior that affects observable answers requires a semantic-profile version change if changed;
+5. N-Prolog compatibility MUST NOT be implied.
+
+Incremental tabling, subsumptive tabling, answer subsumption, or other stronger features require separate capability declarations and fixtures.
+
+* Constraints
+
+CLP(FD) or other SWI constraint libraries MAY be used only through named package operations with a declared semantic profile.
+
+The portable API does not expose arbitrary SWI constraint goals.
+
+Every claimed constraint capability requires fixtures covering:
+
+- accepted input domain;
+- normalized answer domain;
+- bounded enumeration;
+- failure semantics;
+- timeout/cancellation;
+- exact dependency/version identity.
+
+* Session Facts
+
+Portable =assert!= and =retract!= operate on StarLang session fact identity.
+
+The SWI adapter MAY represent session facts using dynamic predicates, thread-local/session modules, an indexed runtime store, or generated package state, but the representation is private.
+
+Requirements:
+
+- source StarIntel documents are immutable;
+- projected source facts are rebuildable;
+- session fact assertion/retraction is journaled;
+- one session cannot see another session's mutable fact state;
+- pattern-based native =retract/1= is not the meaning of portable =retract!=;
+- duplicate and idempotency behavior follows STAR-LANG-009, not native incidental behavior.
+
+* MQI Transport
+
+Initial production transport SHALL use SWI MQI over a local transport appropriate to the deployed SWI version, preferring local Unix-domain or loopback-local isolation when supported by the integration.
+
+The adapter SHALL:
+
+1. launch an exact pinned SWI worker or saved state;
+2. establish authenticated/isolated MQI communication;
+3. perform version/build/capability handshake;
+4. load only digest-locked StarIntel-owned packages;
+5. invoke only named wrappers;
+6. normalize streamed answers;
+7. enforce configured answer/output/time budgets;
+8. cancel cooperatively where possible;
+9. escalate to connection/process termination when required;
+10. discard uncertain or killed worker state.
+
+* Worker Isolation
+
+The initial safe model is process-isolated workers with explicit session ownership.
+
+A worker MAY serve multiple sequential sessions only when reset conformance proves no state leakage.
+
+A dirty, cancelled-hard, protocol-failed, package-mismatched, or otherwise uncertain worker SHALL be discarded rather than returned to a reusable pool.
+
+* Package Contract
+
+Every executable SWI package SHALL have exact identity:
+
+#+begin_example
+packageId
+packageVersion
+packageDigest
+mappingDigest
+compilerVersion
+requiredSemanticProfiles
+requiredCapabilities
+engineCompatibility
+namedOperations
+#+end_example
+
+The package may contain generated clauses and trusted wrapper code. Untrusted source cannot supply package bytes directly.
+
+* Results and Enumeration
+
+The adapter SHALL normalize answers into STAR-LANG-009 logic answer records.
+
+Native SWI answer order is not portable unless the selected profile explicitly defines it.
+
+=solutions= obeys StarLang's declared:
+
+#+begin_example
+limit
+duplicates
+order
+#+end_example
+
+Deduplication and canonical ordering are applied according to the portable contract, not inferred from incidental Prolog enumeration order.
+
+* Proof Normalization
+
+SWI does not automatically provide the exact proof graph StarLang requires for every arbitrary query.
+
+Therefore proof-required operations SHALL use StarIntel-owned proof-carrying wrappers/packages that explicitly return sufficient derivation evidence.
+
+The adapter SHALL normalize that evidence into:
+
+#+begin_example
+star.logic.derivation/1
+#+end_example
+
+Relevant node kinds include:
+
+#+begin_example
+sourceFact
+sessionFact
+questionAnswer
+clauseApplication
+goal
+parameterBinding
+conclusion
+assumption
+contradiction
+budgetTruncation
+#+end_example
+
+The adapter MUST NOT synthesize nonexistent native proof steps.
+
+* Cancellation and Budgets
+
+Target controls include:
+
+- wall-clock timeout;
+- answer limit;
+- output-byte limit;
+- inference limit where appropriate;
+- proof-node/byte limit;
+- memory/process limits when deployment can enforce them.
+
+Cancellation escalation:
+
+#+begin_example
+cooperative query cancellation
+        |
+        v
+MQI/connection termination
+        |
+        v
+worker process termination
+#+end_example
+
+A terminated or uncertain worker is not reused.
+
+* Failure Model
+
+Normalize at least:
+
+- normal logical no-answer;
+- invalid named operation;
+- parameter/type failure;
+- semantic-profile mismatch;
+- package digest/version mismatch;
+- engine capability mismatch;
+- query timeout;
+- inference/answer/output budget exhaustion;
+- cancellation;
+- transport failure;
+- worker crash;
+- proof unavailable;
+- projection/mapping failure.
+
+Native exception text may be retained as bounded diagnostics but is not the portable failure identity.
+
+* Capability Claims
+
+Initial target claims after fixture proof:
+
+| Capability | SWI target |
+|------------+------------|
+| typed facts via mapping | yes |
+| StarIntel identity-preserving projection | required |
+| relational named query | yes |
+| recursion | yes |
+| tabling | yes |
+| incremental tabling | gated |
+| CLP(FD) | yes under named profile |
+| bounded streaming answers | yes |
+| production agenda | no initial claim |
+| salience | no portable claim |
+| persistent RETE WM | no |
+| normalized proof | package/wrapper dependent |
+| process isolation | yes |
+
+Runtime descriptors remain source of truth.
+
+* Security Invariants
+
+1. No raw user Prolog goal crosses MQI.
+2. Only digest-locked StarIntel-owned packages and named operations execute.
+3. Source documents cannot be mutated by the backend.
+4. Projection preserves object identity/provenance authority.
+5. Session mutable facts are isolated.
+6. Query inputs are typed and normalized before invocation.
+7. Output/proof data is size-bounded and validated.
+8. Worker filesystem/environment exposure is minimized.
+9. Secrets are not serialized into generated packages or proofs.
+10. Hard-cancelled or uncertain workers are discarded.
+
+* Observability
+
+Record at minimum:
+
+- SWI version/build digest;
+- adapter version;
+- package/mapping digest;
+- semantic profile;
+- worker/connection count;
+- sessions opened/closed;
+- operation count/duration;
+- answer counts;
+- table statistics only when explicitly collected;
+- inference counts where used;
+- cancellations/escalations;
+- worker replacements;
+- proof nodes/bytes;
+- projection failures;
+- replay mismatches.
+
+* Implementation Order
+
+** Slice 1 — worker/MQI shell
+
+- final adapter system;
+- pinned SWI launch;
+- handshake;
+- named wrapper smoke operation;
+- clean close/reset.
+
+** Slice 2 — StarIntel projection
+
+- one real document/object family;
+- stable identity/provenance mapping;
+- mapping digest;
+- session rebuild fixture.
+
+** Slice 3 — portable query operations
+
+- =solve=;
+- =solutions=;
+- =exists?=;
+- bounded streaming;
+- normalized failures.
+
+** Slice 4 — recursive/tabled profile
+
+- recursive ownership/graph fixture;
+- tabled fixture;
+- capability mismatch negative tests.
+
+** Slice 5 — cancellation/isolation
+
+- cooperative cancellation;
+- hard kill;
+- worker replacement;
+- no-state-leak reset tests.
+
+** Slice 6 — proof wrapper
+
+- proof-carrying named operation;
+- normalized derivation;
+- proof budget tests.
+
+** Slice 7 — gated constraints
+
+Add CLP(FD) profile only after core relational conformance is green.
+
+* Acceptance Gate
+
+Complete when:
+
+1. =star-logic-adapter-swi= has final package ownership;
+2. one real StarIntel object/document family is projected without losing authoritative identity/provenance;
+3. only compiler-declared named operations are callable;
+4. solve/solutions/exists? obey STAR-LANG-009 semantics;
+5. recursive and tabled fixtures pass under exact package/profile identity;
+6. unsupported production semantics fail before execution;
+7. answer/order/duplicate behavior is normalized correctly;
+8. proof-required fixture emits =star.logic.derivation/1= through an explicit proof-carrying wrapper;
+9. cancellation escalation and worker replacement are tested;
+10. session state does not leak across workers/sessions;
+11. same-backend replay is deterministic for canonical fixtures;
+12. descriptor advertises only fixture-proven capabilities.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-16 | Split SWI-Prolog backend authority out of STAR-LANG-007 and make identity-preserving StarIntel projection mandatory | ChatGPT agent | STAR-LANG-007, STAR-LANG-009, approved operator direction |
+
+* Glossary
+
+- *Identity-preserving projection* — Backend-private relational representation that remains stably traceable to the authoritative StarIntel object/document and provenance record.
+- *Named operation* — Compiler/package-declared query entrypoint with a fixed typed contract; not an arbitrary Prolog goal.
+- *Proof-carrying wrapper* — StarIntel-owned predicate/package operation that explicitly returns derivation evidence for normalization.
+- *Dirty worker* — SWI process whose state cannot be proven clean after cancellation, protocol failure, package mismatch, or crash and therefore must be discarded.

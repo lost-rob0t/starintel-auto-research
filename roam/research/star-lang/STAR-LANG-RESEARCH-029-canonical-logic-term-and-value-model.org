@@ -1,0 +1,306 @@
+:PROPERTIES:
+:ID:       star-lang-research-029-canonical-logic-term-and-value-model
+:END:
+#+title: STAR-LANG-RESEARCH-029 Canonical Logic Term and Value Model
+#+description: Research the closed normalized value algebra required for deterministic StarLang logic bindings, cross-backend projection, answer identity, canonical ordering, hashing, replay, and proof references across LISA, SWI-Prolog, and N-Prolog.
+#+status: REVIEW
+#+filetags: :starintel:research:star-lang:logic:terms:values:canonicalization:prolog:lisa:replay:
+#+created: [2026-08-16 Sun]
+#+last_modified: [2026-08-16 Sun]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Source/runtime audit | Research reviewer | PENDING | Verify current StarLang canonical JSON, logic API, reader constraints, and backend term behavior | Source audit and primary sources |
+| Value algebra | Logic runtime maintainer | PENDING | Confirm the normalized term kinds and equality/ordering rules are sufficient and not backend-shaped | Findings |
+| Numeric policy | StarLang maintainer | PENDING | Approve exact integer/rational/decimal/float separation and wire restrictions | Numeric model |
+| Backend mappings | Backend maintainers | PENDING | Reproduce mapping fixtures for LISA, SWI-Prolog, and N-Prolog | Backend mapping findings |
+| Implementation | Repository maintainer | NOT STARTED | Implement only after STAR-LANG-013 approval | Design consequence |
+
+* Related Nodes
+
+- [[file:STAR-LANG-RESEARCH-028-logic-runtime-api-contract.org][STAR-LANG-RESEARCH-028 Logic and Expert Runtime API Contract]]
+- [[file:../../design/star-lang/STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
+- [[file:../../design/star-lang/STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
+- [[file:../../design/star-lang/STAR-LANG-013-canonical-logic-term-and-value-representation.org][STAR-LANG-013 Canonical Logic Term and Value Representation]]
+
+* Research Question
+
+What exact normalized term/value representation must StarLang own so that =solve=, =solutions=, =assert!=, =retract!=, proof graphs, duplicate elimination, canonical answer ordering, digesting, journaling, and replay do not inherit accidental semantics from Common Lisp symbols, SWI terms, N-Prolog syntax, JSON numbers, or LISA objects?
+
+* Current Source Audit
+
+The approved =star.logic.api/1= contract already requires stable binding identifiers, normalized values, canonical ordering when requested, duplicate preservation/removal, answer digests, replay records, and no native engine objects in portable records.
+
+The current =lost-rob0t/star-lang= repository has a real =star-canonical-json= package, but the extracted =starlang-compiler= and =star-capability= systems are still thin final-package shells. There is no final-owned =star-logic-term= implementation today.
+
+The existing closed reader also matters: untrusted =.star= syntax is not Common Lisp =READ=, arbitrary package symbols are rejected, and numeric syntax is intentionally conservative. A runtime term model therefore MUST NOT be defined by whatever Common Lisp reader object happened to represent the source token.
+
+* Primary Source Findings
+
+** Canonical JSON is necessary but insufficient
+
+RFC 8785 exists because hashes/signatures require invariant serialization. It requires deterministic JSON primitive serialization and property ordering, but its interoperable numeric domain is fundamentally JSON/IEEE-754 shaped and explicitly recommends strings for larger or higher-precision numbers.
+
+StarLang cannot therefore define logical numeric equality by JSON number behavior alone. Large integers, exact rationals, explicit decimals, and floating-point values need distinct normalized kinds before canonical JSON encoding.
+
+Primary source: [[https://www.rfc-editor.org/rfc/rfc8785.html][RFC 8785 JSON Canonicalization Scheme]].
+
+** SWI terms are richer than JSON values
+
+SWI-Prolog queries and answers may contain atoms, strings, integers, floats, lists, compounds, variables, and implementation/library-specific terms. MQI returns JSON representations, but that transport representation must not become the StarLang semantic model.
+
+Primary sources:
+- [[https://www.swi-prolog.org/pldoc/man?section=mqi-overview][SWI-Prolog MQI overview]]
+- [[https://www.swi-prolog.org/pldoc/man?section=mqi-message-format][SWI-Prolog MQI message format]]
+
+** N-Prolog is similar but not identical to SWI
+
+N-Prolog explicitly states it is not ISO-Prolog. It provides Prolog terms, Unicode, optional double-quoted string mode, and a JSON module with =term_json/2=. Similar spelling is not evidence of identical atom/string/number/module semantics.
+
+Primary sources:
+- [[https://github.com/sasagawa888/nprolog][N-Prolog repository]]
+- [[https://github.com/sasagawa888/nprolog/blob/master/document/JSON.md][N-Prolog JSON module]]
+
+** LISA values are Common Lisp/CLOS-native
+
+LISA is designed to reason over CLOS/Common Lisp application objects. That is valuable for object-backed expert sessions, but native Lisp objects, symbols, class instances, MOP objects, and RETE tokens cannot become portable logic values.
+
+Primary source: [[https://github.com/youngde811/Lisa][maintained LISA repository]].
+
+* Core Finding
+
+StarLang requires a closed semantic algebra above every backend transport.
+
+The normalized term is not:
+
+- a Common Lisp object;
+- a Prolog source string;
+- a SWI JSON answer object;
+- an N-Prolog interpreter term;
+- a LISA/CLOS fact instance;
+- arbitrary JSON.
+
+It is a versioned StarLang logical value with explicit kind, canonical identity, schema/type information where required, and private backend projection.
+
+* Required Initial Kinds
+
+The v1 research recommendation is:
+
+#+begin_example
+null
+boolean
+integer
+rational
+decimal
+float
+string
+atom
+list
+record
+reference
+variable
+compound
+#+end_example
+
+=compound= is capability/profile gated and intended for compiler-owned logical structures, not arbitrary executable callable terms.
+
+=record= is a typed field-value record with canonical field IDs/order.
+
+=reference= is a stable StarLang/StarIntel identity reference, not a native pointer or object handle.
+
+=variable= exists only in compiler/query/proof contexts where an unbound logical variable is valid. Runtime persisted fact values cannot contain accidental unresolved variables unless their schema explicitly permits symbolic variables.
+
+* Numeric Model
+
+** Integer
+
+Arbitrary-precision signed mathematical integer.
+
+Canonical identity is the mathematical integer value. No leading-zero or source-spelling identity survives normalization.
+
+** Rational
+
+Exact reduced fraction =numerator/denominator= with positive denominator and gcd reduction.
+
+Two equivalent fractions MUST normalize identically.
+
+** Decimal
+
+Exact base-10 decimal represented as integer coefficient plus scale. Decimal is not silently converted to binary float.
+
+Canonicalization removes redundant trailing fractional zero representation while preserving the exact decimal value.
+
+** Float
+
+IEEE-754 binary floating value under an explicit profile. NaN and infinities are rejected from the portable v1 value domain unless a future profile defines exact equality/order/wire behavior. Negative zero requires explicit normalization policy rather than accidental serializer behavior.
+
+* Atom, String, and Identifier Separation
+
+StarLang MUST distinguish:
+
+- user text/string;
+- logical atom/data symbol;
+- StarLang declaration/field/type identifier;
+- backend predicate/module names.
+
+A Prolog atom MUST NOT automatically become a StarLang identifier. A Common Lisp symbol MUST NOT automatically become a logical atom.
+
+Canonical logical atoms are UTF-8/Unicode strings tagged as =atom= and validated independently from StarLang source identifiers.
+
+* Record Model
+
+A normalized record contains:
+
+#+begin_example
+schemaId
+schemaVersion
+fields
+#+end_example
+
+Each field entry contains stable field ID plus normalized value. Field ordering for hashing/serialization is canonical and independent of source declaration order unless a specific schema contract makes order observable.
+
+* Reference Model
+
+A reference contains at minimum:
+
+#+begin_example
+namespace
+kind
+id
+optionalRevision
+#+end_example
+
+For StarIntel projections, provenance remains separate evidence, but the reference must preserve authoritative object/document identity. It MUST NOT encode a CLOS address, Prolog database reference, process-local token, or RETE node.
+
+* Compound Term Model
+
+A compound logical term may be represented conceptually as:
+
+#+begin_example
+functor
+arguments
+#+end_example
+
+Constraints:
+
+1. functor is data, not authority to call a predicate;
+2. arity is explicit and bounded;
+3. recursive depth/node count is budgeted;
+4. only profiles/packages that declare compound support may use it;
+5. portable =solve= still invokes a named operation ID rather than executing the compound as a goal.
+
+* Equality
+
+StarLang needs at least three distinct operations:
+
+#+begin_example
+valueEqual
+termIdentical
+unify
+#+end_example
+
+=valueEqual= compares normalized concrete values by StarLang value semantics.
+
+=termIdentical= compares normalized logical structure including kind.
+
+=unify= belongs to relational semantic profiles and returns bindings/failure. It is not the implementation of ordinary value equality.
+
+No backend-native equality predicate is automatically portable.
+
+* Canonical Ordering
+
+=solutions ... (order canonical)= requires one total order over normalized terms.
+
+Recommended kind precedence:
+
+#+begin_example
+null < boolean < integer < rational < decimal < float < string < atom < reference < list < record < compound < variable
+#+end_example
+
+Within each kind, the design must define a total deterministic comparison independent of locale, hash-table order, object address, backend enumeration order, and Common Lisp package ordering.
+
+Variables in persisted canonical answer output should normally be absent; if present in diagnostic/compiler values they compare by stable binding ID.
+
+* Hash and Digest Identity
+
+Digesting is two-stage:
+
+1. normalize semantic value into =star.logic.term/1=;
+2. canonical-serialize that record through StarLang canonical JSON and hash the bytes.
+
+Backends never provide the canonical digest.
+
+Native trace text, source spelling, object address, process IDs, query handles, and incidental answer order are excluded unless explicitly part of the normalized semantic record.
+
+* Duplicate Semantics
+
+=solutions= with duplicate removal compares canonical normalized answer identity, not backend textual formatting.
+
+A binding set identity includes the named operation's stable output/binding IDs and normalized values. Backend variable names are discarded after adapter mapping.
+
+* Backend Projection Findings
+
+** SWI-Prolog
+
+The adapter may privately map normalized values to safe generated Prolog terms. It must preserve string/atom distinction, exact integers, list shape, and declared compound data. Named wrappers receive only compiler-known structures.
+
+** N-Prolog
+
+The same portable model is used, but mappings are fixture-proven independently. =-d= changes double-quoted string handling; the JSON module does not make N-Prolog's entire term system equivalent to SWI.
+
+** LISA
+
+Object-backed facts may refer directly to authoritative CLOS instances inside the adapter/session, but portable bindings/proofs emit =reference= and normalized checked field values rather than the native instance.
+
+* Limits and Security
+
+Every decoded term requires bounded:
+
+- depth;
+- total nodes;
+- string/atom bytes;
+- list length;
+- record field count;
+- compound arity;
+- aggregate encoded bytes.
+
+Malformed, unknown-kind, over-budget, non-canonical, or schema-invalid values fail before entering durable state.
+
+Adapters must never deserialize portable records into executable host forms through =READ=, =EVAL=, =call/1=, or equivalent reflective execution.
+
+* Required Fixtures
+
+1. integer boundary and big-integer round trips;
+2. exact rational reduction;
+3. exact decimal normalization;
+4. float finite-value and negative-zero policy;
+5. string versus atom non-equivalence;
+6. Unicode canonical byte fixtures;
+7. list and improper-list rejection/explicit representation decision;
+8. typed record canonical ordering;
+9. authoritative reference round trip;
+10. compound data accepted but not executable;
+11. canonical total-order vectors;
+12. answer duplicate identity vectors;
+13. SWI round trip;
+14. N-Prolog round trip;
+15. LISA object-backed reference projection;
+16. malformed/depth/size rejection.
+
+* Design Consequence
+
+Create [[file:../../design/star-lang/STAR-LANG-013-canonical-logic-term-and-value-representation.org][STAR-LANG-013]] as the normative owner of =star.logic.term/1=, the initial value algebra, canonical equality/order/digest rules, and adapter projection contract.
+
+STAR-LANG-009 remains authoritative for public logic operations. STAR-LANG-013 defines the values those operations carry.
+
+* Research Conclusion
+
+The current logic designs are not safe to implement by passing backend-native terms through a thin adapter. A first-class canonical StarLang logic value algebra is required before real engine adapters. It should be implemented in final-owned portable packages before SWI, N-Prolog, or LISA result normalization is considered complete.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-16 | Add canonical logic term/value research to close the equality, ordering, hashing, replay, numeric, and backend-projection gap identified during backend design review | ChatGPT agent | STAR-LANG-009; RFC 8785; SWI MQI docs; N-Prolog docs; maintained LISA repository |

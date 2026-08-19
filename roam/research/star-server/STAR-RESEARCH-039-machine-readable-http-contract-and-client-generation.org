@@ -1,0 +1,891 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-039
+:END:
+#+title: STAR-RESEARCH-039 Machine-Readable HTTP Contract and Client Generation
+#+description: Deep research on making the StarIntel HTTP API machine-readable, preventing route/spec drift, selecting an OpenAPI and JSON Schema compatibility target, and generating most remote clients while retaining a small handwritten Common Lisp runtime.
+#+status: REVIEW
+#+created: [2026-08-19 Wed]
+#+last_modified: [2026-08-19 Wed]
+#+filetags: :starintel:star-server:http:openapi:json-schema:codegen:client:sdk:common-lisp:nim:typescript:python:research:org-roam:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Current source inspection and primary standards/tooling verification | |
+| Architecture direction | Project maintainer | PENDING | Review of contract registry, OpenAPI target, and generation boundary | |
+| Security | Security reviewer | PENDING | Review of published schema disclosure, secret annotations, and generated auth behavior | |
+| Operations | Operator | PENDING | Review of compatibility/versioning and generated-artifact workflow | |
+| Implementation | Repository maintainer | NOT STARTED | Approved design and passing implementation/CI | |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-19 | Initial deep research on machine-readable HTTP contracts and generated clients. | GPT-5.6 Sol research agent | Current StarIntel source plus primary OpenAPI, JSON Schema, Smithy, and OpenAPI Generator sources. |
+
+* Context
+
+[[file:STAR-RESEARCH-038-gserver-client-library-and-administration-boundary.org][STAR-RESEARCH-038 GServer Client Library and Administration Boundary]] established that the existing =starintel-gserver-client= should become the reusable remote protocol SDK, that =star-cli= should be a terminal adapter over it, and that server-local administration should remain a separate break-glass path.
+
+The operator explicitly approved that research direction on 2026-08-18 local time, immediately after PR #126 was merged, and asked for the next research slice to answer two questions:
+
+1. how the StarIntel HTTP API should become machine-readable;
+2. how most of the client can be generated from that machine-readable contract.
+
+The operator also selected the local-administration placement: administrative recovery commands should be subcommands of the =star-server= binary rather than a separate executable.
+
+This node researches the machine-readable contract and code-generation questions. The linked design slice may use the already-approved STAR-RESEARCH-038 boundary while this research remains under review.
+
+* Current Repository Findings
+
+The existing API is not represented by one authoritative machine-readable contract.
+
+The repository currently has:
+
+- Ningle route registrations distributed across =http-api.lisp=, =http-auth-routes.lisp=, authorization modules, job routes, boundary routes, view registries, and other frontend files;
+- hand-written prose documentation in =docs/http-api-docs.org=;
+- an existing Common Lisp client in =cli/api-client.lisp=;
+- authentication and user lifecycle operations added after much of the prose documentation was written;
+- multiple generations of response and error shapes;
+- versionless legacy routes alongside newer versioned service work.
+
+The prose HTTP document explicitly says that no OpenAPI document is generated. More importantly, it still contains statements from an older server generation, including a claim that the API has no authentication. Current source has password login, administrator user lifecycle routes, API-key lifecycle routes, request security contexts, authorization modules, and authenticated job/service boundaries.
+
+This proves that prose documentation cannot be the source of truth for client generation.
+
+The existing client also demonstrates route drift risk. It hard-codes route strings and manually serializes query values. Some command code reaches through the client to the raw =api-request= layer. A machine-readable contract is useful only if new client operations stop duplicating these wire details.
+
+* Research Question
+
+What representation should become the authoritative StarIntel HTTP contract so that:
+
+- route method/path metadata cannot drift from server registration;
+- request and response schemas are machine-readable;
+- authentication and required scopes are discoverable;
+- operation identifiers remain stable across clients;
+- documentation can be generated;
+- Common Lisp client wrappers can be generated;
+- TypeScript, Python, Nim, and other clients can consume standard tooling where practical;
+- the contract remains usable when the server implementation is Common Lisp and Ningle;
+- the project is not forced into a Java/Node build/runtime dependency merely to start the server?
+
+* Standards Finding: OpenAPI Is the Interchange Format
+
+The current published OpenAPI Specification is 3.2.0. OpenAPI is explicitly designed as a language-neutral description of HTTP APIs that can support discovery, documentation, client generation, server tooling, and testing.
+
+Primary source:
+
+- [[https://spec.openapis.org/oas/v3.2.0.html][OpenAPI Specification 3.2.0]]
+
+OpenAPI therefore has the strongest ecosystem fit as StarIntel's *external interchange contract*.
+
+It can represent the StarIntel concerns required for client generation:
+
+- HTTP methods and path templates;
+- operation identifiers;
+- path, query, header, and cookie parameters;
+- request bodies and media types;
+- response status codes and bodies;
+- reusable schemas;
+- bearer authentication and API-key schemes;
+- per-operation security requirements;
+- tags, descriptions, deprecation, examples, and external documentation;
+- extensions for StarIntel-specific metadata that has no standard OpenAPI field.
+
+OpenAPI should not itself become the internal server programming model. It is the portable representation emitted from the server's canonical contract data.
+
+* Version Finding: Emit OpenAPI 3.1.2 Initially
+
+Although OAS 3.2.0 is the newest standard, the generation ecosystem has not caught up.
+
+As of this research date:
+
+- OpenAPI Generator 7.24.x documents OpenAPI 3.1 as beta-supported;
+- the project does not list 3.2 support in its compatibility table;
+- an open OpenAPI Generator issue specifically requests OAS 3.2 support;
+- the stable generator list contains TypeScript, Python, Nim, C, Rust, and many other clients, but not Common Lisp.
+
+Primary sources:
+
+- [[https://github.com/OpenAPITools/openapi-generator][OpenAPI Generator repository and compatibility table]]
+- [[https://github.com/OpenAPITools/openapi-generator/issues/22728][OpenAPI Generator issue 22728: OpenAPI 3.2 support]]
+- [[https://openapi-generator.tech/docs/generators/][OpenAPI Generator generator list]]
+
+Selecting 3.2 as the first emitted artifact would optimize for specification recency rather than usable generation.
+
+Research recommendation:
+
+- make the internal StarIntel contract model version-neutral enough to emit later OAS revisions;
+- initially emit a deterministic **OpenAPI 3.1.2** document;
+- avoid 3.1 features known to be poorly supported by selected generators unless they are required;
+- add an explicit compatibility test before moving the emitted artifact to 3.2.
+
+This is a compatibility choice, not a claim that 3.1.2 is newer than 3.2.0.
+
+* JSON Schema Finding
+
+OpenAPI 3.1 aligns its Schema Object with JSON Schema Draft 2020-12 semantics. JSON Schema is specifically intended to describe and validate JSON structure and can be reused independently of OpenAPI.
+
+Primary sources:
+
+- [[https://json-schema.org/draft/2020-12][JSON Schema Draft 2020-12]]
+- [[https://json-schema.org/draft/2020-12/json-schema-core.html][JSON Schema Core 2020-12]]
+
+Use JSON Schema 2020-12 semantics for StarIntel HTTP request/response component schemas.
+
+The same logical schema should be reusable in:
+
+- OpenAPI =components/schemas=;
+- generated client model/decoder metadata;
+- contract fixtures;
+- request/response validation tests;
+- future runtime validation where a suitable implementation exists;
+- documentation and examples.
+
+Generic StarIntel intelligence documents should not be forced into rigid generated CLOS classes merely because control-plane responses are typed. The schema system needs to support both strict control-plane objects and intentionally open document payloads.
+
+* Why a Hand-Maintained openapi.yaml Is Rejected as Canonical
+
+A manually maintained OpenAPI file would make generation easy but would create a second route authority beside the Common Lisp server.
+
+The current stale prose documentation demonstrates the failure mode already:
+
+#+begin_example
+Ningle route changes
+       |
+       +----> server behavior changes
+       |
+       `----> human must remember to update OpenAPI
+                          |
+                          `----> eventual drift
+#+end_example
+
+CI can detect some drift with integration tests, but it is stronger to remove the duplicate method/path declaration entirely.
+
+A generated =openapi.json= is desirable. A hand-authored =openapi.yaml= as the primary route source is not.
+
+* Why Source-Code Scraping Is Rejected
+
+Another possible approach is to scan Common Lisp source for forms such as:
+
+#+begin_src lisp
+(setf (ningle:route *app* "/auth/login" :method :post)
+      #'handle-auth-login-route)
+#+end_src
+
+and infer an API description from source text or macro expansion.
+
+Reject this as the canonical mechanism.
+
+It cannot reliably infer:
+
+- request body fields parsed inside arbitrary handler code;
+- response schemas;
+- status variants hidden behind conditions;
+- security scopes enforced by helper calls;
+- idempotency semantics;
+- secret fields;
+- retry safety;
+- streaming behavior;
+- stable operation names;
+- future route registrations produced by macros or loops.
+
+Source scanning can be a migration/audit tool that reports unregistered legacy routes. It should not be the protocol model.
+
+* Why Smithy Is Not the First Canonical Model
+
+Smithy 2.0 is a serious alternative. It is designed as an interface definition language for generating clients, servers, and other artifacts, has explicit HTTP binding traits, model validation, and detailed client-codegen guidance.
+
+Primary sources:
+
+- [[https://smithy.io/2.0/spec/index.html][Smithy 2.0 specification]]
+- [[https://smithy.io/2.0/spec/http-bindings.html][Smithy HTTP bindings]]
+- [[https://smithy.io/2.0/guides/building-codegen/overview-and-concepts.html][Smithy code generation concepts]]
+
+Several Smithy ideas are worth borrowing:
+
+- generated clients should sit above replaceable transports;
+- client/server types need not be identical;
+- unknown future enum members should not crash old clients;
+- model projections are useful for producing consumer-specific artifacts;
+- HTTP transport is an interface beneath generated operation logic.
+
+Do not make Smithy the initial StarIntel source of truth.
+
+Reasons:
+
+- StarIntel already has a Common Lisp server and route structure;
+- adopting Smithy would add a second IDL/toolchain before solving the immediate route-drift problem;
+- OpenAPI would still be desirable for broad HTTP tooling and documentation;
+- Common Lisp would still require custom generation work;
+- the official Smithy codegen ecosystem is centered on Java/Gradle-based tooling and selected target languages.
+
+Smithy remains a useful comparison and a possible future import/export format if the benefits become concrete.
+
+* Selected Architecture: Data Contract Registry
+
+The strongest StarIntel-specific approach is a small dependency-light Common Lisp contract system that owns *data*, not handlers.
+
+Conceptually:
+
+#+begin_example
+Common Lisp HTTP contract registry
+      |
+      +--> server route mounting
+      |
+      +--> OpenAPI 3.1.2 JSON
+      |
+      +--> normalized StarIntel client manifest
+      |
+      +--> generated Common Lisp wrappers/models
+      |
+      +--> external OpenAPI generators
+      |       +--> TypeScript
+      |       +--> Python
+      |       `--> Nim (with limitations)
+      |
+      +--> generated reference docs / fixtures
+      `--> contract coverage + compatibility CI
+#+end_example
+
+The registry is the source of truth for protocol metadata. The Ningle frontend uses the registry to mount handlers by operation identifier so the method and path are not retyped in route files.
+
+* Contract System Boundary
+
+The contract model should live in a separately loadable ASDF system with a small dependency closure.
+
+Suggested conceptual package:
+
+#+begin_example
+star.http.contract
+#+end_example
+
+It must not require:
+
+- Ningle;
+- Clack;
+- RabbitMQ;
+- CouchDB;
+- actor startup;
+- the full StarIntel runtime.
+
+The contract system should be loadable by:
+
+- the server frontend;
+- a batch OpenAPI exporter;
+- client code generation;
+- documentation tooling;
+- tests.
+
+This preserves deterministic generation without starting infrastructure.
+
+* Operation Model
+
+Each operation needs a stable logical identifier and enough metadata to generate both HTTP tooling and StarIntel clients.
+
+Minimum operation fields:
+
+| Field | Purpose |
+|-------+---------|
+| stable operation id | cross-version codegen identity |
+| method | GET/POST/PUT/PATCH/DELETE/etc. |
+| path template | one source for server and clients |
+| summary/description | docs and generated docstrings |
+| tags | grouping into client modules/APIs |
+| path parameters | name, schema, requiredness |
+| query parameters | schema, style, explode/default rules |
+| headers | declared non-secret protocol headers |
+| request body | media type and schema reference |
+| responses | status, content type, schema reference |
+| security | public, bearer, bootstrap secret, or other scheme |
+| required scopes | StarIntel authorization metadata |
+| idempotency | safe/idempotent/key-required/unknown-outcome semantics |
+| timeout class | ordinary, long-running, streaming, caller-deadline-aware |
+| stability | experimental/stable/deprecated |
+| secret fields | generated logging/redaction metadata |
+
+OpenAPI-native fields should be emitted as native OpenAPI. StarIntel-only semantics should be emitted as bounded =x-starintel-*= extensions.
+
+Candidate extensions:
+
+#+begin_example
+x-starintel-scopes
+x-starintel-idempotency
+x-starintel-timeout-class
+x-starintel-secret-fields
+x-starintel-stability
+x-starintel-client-symbol
+#+end_example
+
+Extensions should remain few and documented. Do not encode ordinary OpenAPI features in private extensions.
+
+* Route Mounting
+
+The frontend should stop declaring method/path strings independently.
+
+Desired conceptual form:
+
+#+begin_src lisp
+(mount-http-operation *app* :auth-login #'handle-auth-login-route)
+#+end_src
+
+The mount helper looks up =:auth-login= in the contract registry and supplies the registered method/path to Ningle.
+
+A more declarative macro may combine contract definition and handler mounting, but keeping the dependency-light contract definitions in their own files has an advantage: the exporter can load them without loading HTTP handlers or runtime services.
+
+Research preference is therefore:
+
+#+begin_example
+contract definition -> stable data
+frontend mounting   -> operation-id + handler
+#+end_example
+
+rather than one macro that drags server implementation dependencies into code generation.
+
+* Schema Model
+
+Define reusable schema objects separately from operations.
+
+The first schema set should focus on control-plane data with stable structure:
+
+- login request;
+- login response;
+- user create/reset/change-password requests;
+- user metadata;
+- credential metadata;
+- credential secret response;
+- authentication context;
+- standard StarIntel error/problem representation;
+- health/server metadata;
+- operation receipts where stable.
+
+Document payloads can initially use permissive or referenced StarIntel document schemas until the document-spec project exposes a canonical JSON Schema representation.
+
+Schemas should support:
+
+- required properties;
+- nullable values using JSON Schema semantics;
+- enums without forcing closed client behavior where future additions are compatible;
+- arrays and maps;
+- formats such as UUID/date-time only when the wire contract truly guarantees them;
+- =readOnly= and =writeOnly= annotations;
+- examples that contain no real secrets;
+- descriptions;
+- additional-property policy.
+
+* Error Contract
+
+Client generation becomes substantially more useful if errors become machine-readable.
+
+The current server has older =status/msg/code= style envelopes and newer research/design that prefers RFC 9457 Problem Details.
+
+Do not block the contract project on an immediate server-wide error migration.
+
+The contract can describe:
+
+1. legacy StarIntel error shapes for legacy operations;
+2. =application/problem+json= for new/versioned operations;
+3. a generated client normalization layer that maps either representation into one StarIntel client condition model.
+
+This lets the server migrate gradually while client callers see one stable error abstraction.
+
+Primary reference:
+
+- [[https://www.rfc-editor.org/rfc/rfc9457.html][RFC 9457 Problem Details for HTTP APIs]]
+
+* Public Contract Endpoint
+
+A build artifact alone is sufficient for generation, but runtime discovery is useful for tooling and compatibility checks.
+
+Research recommendation:
+
+- generate and track a deterministic =api/openapi.json= artifact;
+- embed or package the exact artifact with the server build;
+- serve that exact artifact at a stable endpoint such as =/openapi.json=;
+- include a contract version and SHA-256 digest in server metadata;
+- do not regenerate a different document dynamically per request.
+
+Serving the machine-readable route inventory is not authorization. The document MUST NOT contain secrets, bootstrap secret values, bearer tokens, credential hashes, internal database credentials, stack traces, or private configuration values.
+
+Whether production deployments may disable the runtime endpoint is an operational design choice. The build artifact remains available regardless.
+
+* Determinism Requirement
+
+Generated artifacts must be reproducible.
+
+The exporter should:
+
+- sort paths and component maps deterministically;
+- avoid timestamps inside generated files;
+- normalize ordering of tags, parameters, responses, and schemas;
+- emit UTF-8 JSON with stable formatting;
+- include a semantic contract version separately from the OpenAPI spec version;
+- compute a digest over canonical bytes.
+
+CI should regenerate and fail if tracked output differs.
+
+This makes contract changes visible in ordinary review instead of hiding them in runtime reflection.
+
+* Client Generation Finding: Generate Operations, Keep Runtime Handwritten
+
+Generating an entire Common Lisp client stack is unnecessary and risky.
+
+The reusable parts that need careful handwritten semantics are small:
+
+- HTTP transport interface;
+- Dexador transport adapter;
+- connection configuration;
+- authentication provider/session handling;
+- timeouts/deadlines;
+- safe retry/idempotency policy;
+- response metadata;
+- condition hierarchy;
+- secret redaction;
+- raw request escape hatch;
+- observability hooks.
+
+Most endpoint-specific code is mechanical and should be generated:
+
+- public operation functions;
+- path parameter interpolation;
+- query/header serialization;
+- request-body encoding;
+- operation descriptors;
+- expected response dispatch;
+- stable control-plane response decoders/models;
+- docstrings;
+- contract fixtures and operation-level tests.
+
+Desired shape:
+
+#+begin_example
+handwritten client runtime
+       ^
+       |
+generated operation wrappers
+       ^
+       |
+normalized client manifest
+       ^
+       |
+HTTP contract registry
+#+end_example
+
+This avoids regenerating fragile transport/auth/error logic while removing nearly all repeated route knowledge.
+
+* Common Lisp Generation
+
+OpenAPI Generator does not currently list a Common Lisp client generator.
+
+Three options were considered.
+
+** Build an OpenAPI Generator plugin in Java
+
+OpenAPI Generator supports custom generators and its =meta= command can scaffold generator classes/templates.
+
+Primary sources:
+
+- [[https://openapi-generator.tech/docs/customization/][OpenAPI Generator customization]]
+- [[https://openapi-generator.tech/docs/new-generator/][Create a new OpenAPI Generator]]
+
+Advantages:
+
+- direct use of OpenAPI Generator's normalized model;
+- potential upstream contribution;
+- common behavior with other generators.
+
+Costs:
+
+- Java build/toolchain for StarIntel's primary Common Lisp SDK generation;
+- additional complexity for Lisp-specific symbol/package semantics;
+- generator behavior tied to OpenAPI Generator's internal normalized model and release cycle.
+
+This is viable later but is heavier than necessary for the first StarIntel client.
+
+** Use Mustache templates over another language generator
+
+OpenAPI Generator allows custom templates, but templates are downstream of language-specific normalization. Reusing a Clojure, OCaml, or other generator merely because its output is syntactically closer to Lisp would inherit wrong type mappings and naming behavior.
+
+Reject this approach for a first-class Common Lisp client.
+
+** Generate Common Lisp from a StarIntel normalized manifest
+
+Selected research direction.
+
+The StarIntel contract exporter can emit a small normalized =api/client-manifest.json= specifically for code generation. It contains only already-resolved StarIntel operation/schema metadata and therefore does not require the Common Lisp generator to implement the full OpenAPI specification.
+
+The manifest is derived from the same registry as =openapi.json=. It is not a competing source of truth.
+
+A small StarIntel codegen tool can then generate idiomatic Common Lisp directly.
+
+Benefits:
+
+- no Java runtime/toolchain required for ordinary CL regeneration;
+- easy integration with ASDF/Nix/CI;
+- exact StarIntel package and symbol conventions;
+- StarIntel-specific idempotency, timeout, and secret metadata is already normalized;
+- codegen can remain intentionally narrow instead of becoming a generic OpenAPI implementation.
+
+If the generator later becomes generally useful, it can be promoted into an OpenAPI Generator plugin or standalone project.
+
+* Generated Common Lisp Surface
+
+The generated layer should be boring.
+
+For an operation such as login it should conceptually emit a wrapper equivalent to:
+
+#+begin_src lisp
+(defun login (client username password &key request-options)
+  (call-operation client
+                  :auth-login
+                  :body (make-login-request
+                         :username username
+                         :password password)
+                  :request-options request-options))
+#+end_src
+
+The exact names are a design concern, but the principle is fixed:
+
+- generated wrappers call one handwritten =call-operation= runtime;
+- generated files do not call Dexador directly;
+- generated files do not implement authorization policy;
+- generated files do not silently retry operations;
+- generated files contain a prominent generated-file marker;
+- regeneration replaces generated files completely.
+
+* Generated Models
+
+Generate structured models only where the protocol is sufficiently stable.
+
+Recommended first-class generated models:
+
+- authentication/user/credential control-plane structures;
+- server metadata;
+- problem/error documents;
+- job/lease control-plane structures after their APIs stabilize.
+
+Keep generic intelligence documents as JSON/document values initially.
+
+For forward compatibility:
+
+- unknown object properties should be preserved when practical;
+- unknown enum values should remain representable rather than causing decoder failure unless the field is a closed protocol discriminator;
+- raw response metadata should remain accessible for diagnostics.
+
+This follows the same compatibility principle emphasized by Smithy client guidance: clients have less knowledge than the server and must tolerate compatible server evolution.
+
+* TypeScript Generation
+
+OpenAPI Generator's =typescript-fetch= client is currently marked stable and supports bearer tokens, path/query/header/body parameters, JSON wire data, and ordinary model generation.
+
+Primary source:
+
+- [[https://openapi-generator.tech/docs/generators/typescript-fetch/][OpenAPI Generator TypeScript Fetch generator]]
+
+Use it as the first external generated client candidate once the StarIntel 3.1.2 artifact is stable.
+
+Do not hand-edit generated TypeScript. Put any StarIntel-specific convenience API in a thin handwritten wrapper package above generated output.
+
+* Python Generation
+
+The OpenAPI Generator Python client is stable and supports multiple transport libraries plus bearer authentication.
+
+Primary source:
+
+- [[https://openapi-generator.tech/docs/generators/python/][OpenAPI Generator Python generator]]
+
+Python is useful as:
+
+- an external SDK;
+- a conformance oracle for the Common Lisp client;
+- integration testing against live StarIntel servers.
+
+* Nim Generation
+
+OpenAPI Generator includes a Nim client generator, currently marked beta.
+
+Primary source:
+
+- [[https://openapi-generator.tech/docs/generators/nim/][OpenAPI Generator Nim generator]]
+
+Its documented feature matrix is materially weaker for StarIntel: bearer/API-key security is not listed as supported.
+
+Therefore:
+
+- do not treat generated Nim as production-equivalent to CL/TypeScript/Python initially;
+- use it as a compile/conformance experiment;
+- either add a thin authenticated transport wrapper, customize generation, or build a StarIntel-specific Nim generator if the client becomes operationally important.
+
+The machine-readable contract is still valuable even when one target generator is incomplete.
+
+* Client Generation Coverage Target
+
+A reasonable initial target is to generate **most endpoint-specific code**, not most total lines in the package.
+
+Expected generated content:
+
+- 100% of stable operation method/path declarations;
+- 100% of operation parameters and media types;
+- 100% of operation grouping and docstrings from the contract;
+- 100% of generated control-plane model field declarations;
+- 100% of response status dispatch tables;
+- most request serialization wrappers;
+- most response decoding wrappers.
+
+Expected handwritten content:
+
+- transport;
+- auth/session configuration;
+- conditions;
+- retry/deadline policy;
+- secret handling;
+- observability;
+- compatibility negotiation;
+- convenience abstractions that combine multiple operations.
+
+The exact percentage is less important than the ownership rule: wire repetition is generated, policy/runtime semantics are handwritten.
+
+* Compatibility and Breaking-Change Detection
+
+The machine-readable contract enables CI to distinguish protocol changes from implementation changes.
+
+CI should eventually compare the generated contract against the base branch and classify at least:
+
+- removed operations;
+- changed method/path;
+- removed response status/schema;
+- newly required request properties;
+- narrowed enums;
+- changed security requirements;
+- changed scope requirements;
+- type narrowing;
+- newly required parameters.
+
+A breaking change should require either:
+
+- an explicit version boundary;
+- a compatibility shim;
+- or an approved breaking-change marker.
+
+Do not derive API semantic version solely from the OpenAPI specification version. =openapi: 3.1.2= describes the document format, not the StarIntel API version.
+
+* Operation IDs Are Public Compatibility Keys
+
+Every operation must have a unique stable =operationId=.
+
+Once generated clients are published, changing an operation ID is a source-level breaking change even if method/path remains identical.
+
+Therefore:
+
+- operation IDs must be reviewed like public function names;
+- do not derive them from handler function names;
+- do not include implementation package names;
+- do not change them when a handler is refactored;
+- use aliases/deprecation if a client-facing rename is necessary.
+
+The contract registry should use a canonical keyword/symbol identity and emit deterministic cross-language operation IDs.
+
+* Security Metadata
+
+OpenAPI can describe bearer authentication and other security schemes, but StarIntel also needs scopes/capabilities that are not necessarily OAuth scopes.
+
+Represent standard bearer/API-key mechanisms using OpenAPI =securitySchemes= and per-operation =security=.
+
+Represent StarIntel authorization requirements in an extension such as =x-starintel-scopes= until/unless the server adopts an OAuth scope model with equivalent semantics.
+
+Client generation may use this metadata for documentation and preflight ergonomics, but **the server remains authoritative**. Generated clients must never assume possession of an official client grants a scope.
+
+Secret-bearing schemas should mark fields such as passwords and returned API keys with appropriate write-only/read-only annotations plus StarIntel redaction metadata.
+
+Generated example fixtures MUST contain placeholders, never real credential material.
+
+* Runtime Capability Discovery
+
+OpenAPI describes the API surface but does not prove which optional features are enabled in a particular deployment.
+
+The server metadata response should eventually expose:
+
+- StarIntel server version;
+- API contract version;
+- OpenAPI artifact digest;
+- enabled optional capability identifiers;
+- selected compatibility profile if multiple route generations coexist.
+
+The Common Lisp client can use this for explicit compatibility checks rather than probing arbitrary endpoints and interpreting 404s.
+
+Do not require capability discovery before every request. Cache it per connection/session according to explicit invalidation rules.
+
+* Migration Strategy
+
+A flag-day conversion of every route is unnecessary.
+
+Recommended sequence:
+
+1. create the dependency-light contract package and deterministic exporters;
+2. model health/root/authentication/user/credential operations first;
+3. mount those handlers from contract operation IDs;
+4. expose deterministic =api/openapi.json= and =api/client-manifest.json=;
+5. build the handwritten Common Lisp client runtime;
+6. generate the auth/user client slice;
+7. compare generated client behavior with existing hand-written calls;
+8. add CI that rejects newly added raw Ningle routes without contract entries;
+9. migrate existing document/search/view routes incrementally;
+10. after coverage is high, reject all unregistered routes except explicitly internal/debug endpoints.
+
+This allows useful generated clients before the entire legacy API is normalized.
+
+* Contract Coverage Audit
+
+During migration, CI should produce a route coverage report:
+
+#+begin_example
+contracted routes:  24
+legacy raw routes:  31
+ignored internal:    2
+coverage:          43.6%
+#+end_example
+
+The exact numbers above are illustrative.
+
+The audit may use source scanning only to find raw Ningle route registrations. It must not infer schemas from handlers.
+
+New externally supported routes should fail CI if added outside the contract registry after the contract system lands.
+
+* Generated Artifact Policy
+
+Track deterministic generated artifacts needed by downstream consumers and package builds.
+
+Recommended tracked outputs:
+
+#+begin_example
+api/openapi.json
+api/client-manifest.json
+cli/generated/operations.lisp
+cli/generated/models.lisp
+#+end_example
+
+Potential external SDK outputs may live in separate repositories/packages later if they grow large.
+
+CI pattern:
+
+#+begin_example
+generate contracts + client
+        |
+        v
+git diff --exit-code
+#+end_example
+
+This catches stale generated files and makes contract/client changes visible in pull requests.
+
+Generated code MUST NOT be manually edited.
+
+* Testing Strategy
+
+** Registry tests
+
+Prove:
+
+- unique operation IDs;
+- unique method/path combinations;
+- valid path parameter bindings;
+- every schema reference resolves;
+- every response has a status and content contract;
+- secret fields are annotated;
+- protected operations declare security metadata;
+- no duplicate schema/component names.
+
+** OpenAPI artifact tests
+
+Prove:
+
+- deterministic bytes;
+- document validates as the selected OpenAPI version;
+- generated external SDK tools can parse it;
+- no secret/config values appear;
+- all expected auth schemes are represented.
+
+** Server binding tests
+
+Prove:
+
+- each contracted operation is mounted with exactly its declared method/path;
+- a contracted route cannot be mounted twice;
+- selected request/response fixtures match live handlers;
+- route coverage does not regress.
+
+** Common Lisp generation tests
+
+Prove:
+
+- regeneration is deterministic;
+- generated package loads;
+- generated wrappers never import Dexador directly;
+- parameter encoding matches fixtures;
+- response dispatch matches status/media-type fixtures;
+- secrets are absent from printed representations;
+- generated public symbols match operation IDs.
+
+** Cross-language conformance
+
+Run the same fixture corpus through CL, TypeScript, and Python clients where practical. Add Nim as a beta conformance target once authentication support is resolved.
+
+* Rejected Alternatives Summary
+
+| Alternative | Decision | Reason |
+|-------------+----------+--------|
+| hand-maintained OpenAPI as canonical source | reject | duplicates route authority and will drift |
+| infer complete contract by scraping Lisp handlers | reject | cannot recover schemas/security/error semantics reliably |
+| OpenAPI 3.2 emitted immediately | defer | current generator ecosystem does not yet support it reliably |
+| Smithy as primary IDL | defer | capable but adds another toolchain and does not eliminate need for OpenAPI/CL generation |
+| generate entire CL transport/runtime | reject | policy and failure semantics deserve a small handwritten core |
+| use a non-CL generator template to fake Common Lisp | reject | wrong normalization/type semantics |
+| direct generic OpenAPI implementation in CL | defer | unnecessary for StarIntel-specific generation; normalized manifest is smaller |
+| generated Nim as first-class production SDK immediately | defer | official generator remains beta and lacks documented bearer support |
+
+* Research Decision
+
+For the next design and implementation slices:
+
+1. create a dependency-light Common Lisp HTTP contract registry as the canonical protocol metadata source;
+2. make server route mounting consume operation IDs from that registry so method/path declarations cannot drift;
+3. emit deterministic OpenAPI **3.1.2** JSON using JSON Schema 2020-12 semantics;
+4. keep the internal model ready for a later OAS 3.2 exporter once generation tools catch up;
+5. emit a normalized StarIntel client manifest from the same registry;
+6. implement a small handwritten Common Lisp client runtime for transport, authentication, errors, deadlines, retries, redaction, and observability;
+7. generate operation wrappers, stable control-plane models, response dispatch, docstrings, and fixtures from the manifest;
+8. use OpenAPI Generator for TypeScript/Python immediately after the contract stabilizes;
+9. treat Nim generation as beta until auth/conformance gaps are solved;
+10. expose the exact built OpenAPI artifact through the server and advertise its contract version/digest;
+11. migrate legacy routes incrementally and add CI that prevents new externally supported raw Ningle routes.
+
+* Design Inputs
+
+The linked client design should assume:
+
+- STAR-RESEARCH-038's reusable-client boundary is approved;
+- =star-server admin= is the selected local break-glass command location;
+- generated endpoint code sits above a handwritten Common Lisp runtime;
+- the first generated slice should cover authentication, users, credentials, health, and server metadata;
+- exact OpenAPI/codegen implementation remains gated by approval of this research.
+
+* Related Nodes
+
+- [[file:STAR-RESEARCH-038-gserver-client-library-and-administration-boundary.org][STAR-RESEARCH-038 GServer Client Library and Administration Boundary]]
+- [[file:STAR-RESEARCH-032-authenticated-target-lease-http-execution.org][STAR-RESEARCH-032 Authenticated Target-Lease HTTP and Execution Enforcement]]
+- [[file:../../design/star-server/STAR-SERVER-032-authenticated-target-lease-http-execution.org][STAR-SERVER-032 Authenticated Target-Lease HTTP and Execution Enforcement]]
+- [[file:QUASAR-RESEARCH-002-client-library-stack.org][QUASAR-RESEARCH-002 Client Library Stack]]
+
+* Footnotes and Glossary
+
+[fn:openapi] OpenAPI: A language-neutral standard for describing HTTP APIs in a machine-readable document.
+
+[fn:json-schema] JSON Schema: A vocabulary for describing and validating the structure of JSON values.
+
+[fn:operation-id] Operation ID: A stable identifier for one HTTP operation used as a public code-generation compatibility key.
+
+[fn:contract-registry] Contract registry: The dependency-light Common Lisp data model containing canonical StarIntel operation and schema metadata.
+
+[fn:client-manifest] Client manifest: A deterministic derived representation optimized for StarIntel client generation. It is generated from the contract registry and is not an independent source of truth.
+
+[fn:codegen] Code generation: Deterministic creation of source code or other artifacts from a machine-readable model.

@@ -1,5 +1,3 @@
-# Starintel Codex Adapter
+# Agent entry point
 
-Read and obey `AGENTS.md`.
-
-Use `skills/`. Start implementation from the selected project's active Org file under `roam/implement/<project>/`. When multiple projects are active, pass `--project <project>` to `scripts/mark-design.py`. Mark outcomes with `scripts/mark-design.py`, then run `scripts/sync.py`.
+Read `AGENTS.md` before making changes. It is the repository-wide authority.

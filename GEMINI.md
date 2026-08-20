@@ -1,3 +1,3 @@
-# Starintel Gemini Adapter
+# Agent entry point
 
-Read and obey `AGENTS.md`. Use `skills/*/SKILL.md` on demand. Never bulk-load `roam/`.
+Read `AGENTS.md` before making changes. It is the repository-wide authority.

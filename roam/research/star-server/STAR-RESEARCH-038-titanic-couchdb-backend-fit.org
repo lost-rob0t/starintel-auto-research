@@ -1,0 +1,295 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-038
+:END:
+#+title: STAR-RESEARCH-038 Titanic CouchDB Backend Fit
+#+description: Evaluate CouchDB as the durable Titanic job-state backend against the selected RabbitMQ + LMDB v1 direction, separating useful CouchDB properties from requirements of the authoritative job journal.
+#+status: REVIEW
+#+last_modified: [2026-08-10 Mon]
+#+filetags: :starintel:star-server:titanic:couchdb:lmdb:rabbitmq:persistence:jobs:research:org-roam:
+
+* Research Question
+
+Is CouchDB a good fit for the durable Titanic backend, and should it replace LMDB as the first authoritative job journal behind RabbitMQ?
+
+* Short Answer
+
+CouchDB is a *good conditional fit* for Titanic state, but it is not the preferred first authoritative journal for the current v1 direction.
+
+Keep the v1 split:
+
+#+begin_example
+producer / actor
+      |
+      v
+  RabbitMQ
+      |
+      v
+ Titanic coordinator
+      |
+      v
+     LMDB
+ authoritative local journal
+#+end_example
+
+CouchDB should remain a supported backend candidate and is especially attractive as a queryable/replicated projection of Titanic state. It can also serve as the authoritative journal if the implementation deliberately uses a single-document aggregate per logical job and accepts CouchDB's distributed consistency model.
+
+The important conclusion is not "CouchDB cannot do Titanic." It can. The conclusion is that CouchDB's strengths are not the same as the strongest requirements of the smallest v1 journal.
+
+* What CouchDB Does Well
+
+** Durable per-document commits
+
+CouchDB uses append-only B-tree updates and documents that are committed normally are flushed with their associated index state. Its technical overview describes crash recovery in which incomplete writes are discarded and previously committed state remains coherent.
+
+That is a real durability property, not merely eventual persistence.
+
+** MVCC compare-and-transition
+
+CouchDB requires the current document revision when updating a document. A stale revision receives =409 Conflict=.
+
+That maps naturally onto Titanic's =compare-and-transition= primitive:
+
+#+begin_example
+GET job
+check current state + generation
+PUT new state with current _rev
+409 -> reload, re-evaluate, retry or reject
+#+end_example
+
+The same mechanism can protect attempt ownership, cancellation races, terminal-state writes, and optimistic scheduler transitions for one logical job.
+
+** Validation at the database boundary
+
+A =validate_doc_update= function can inspect the old and proposed document and reject an invalid write.
+
+That makes it possible to enforce invariants such as:
+
+- terminal states cannot transition back to =running=;
+- attempt number cannot decrease;
+- =job_id= and immutable submission identity cannot change;
+- result fields are required for =succeeded=;
+- stale fencing generations are rejected when the needed comparison is contained in the same document.
+
+The application should still own the state machine; database validation is a second guardrail.
+
+** Native JSON and existing StarIntel integration
+
+Titanic envelopes and StarIntel documents are already structured data. CouchDB avoids an impedance mismatch for operator inspection and application-level querying.
+
+Mango and views make status queries, retry dashboards, dead-letter inspection, retention sweeps, and administrative tooling much easier than raw LMDB key iteration.
+
+** Changes feed
+
+The =_changes= feed is useful for projections and observers:
+
+- update a dashboard when jobs change;
+- export completed results;
+- drive metrics materialization;
+- mirror selected job records to another service;
+- trigger retention/index maintenance.
+
+However, =_changes= is not a complete event journal: CouchDB documents that only the most recent change for a document is guaranteed to be present in a changes query, and consumers should be idempotent because changes may be observed again.
+
+Therefore =_changes= must not replace explicit Titanic transition history.
+
+** Replication and clustering
+
+CouchDB can replicate databases over HTTP and can run as a clustered, sharded database with configurable replicas and read/write quorum.
+
+This is valuable if Titanic eventually needs portable/offline state, administrative replicas, or distributed queryability without writing a new replication layer.
+
+* Where CouchDB Conflicts With Titanic Journal Semantics
+
+** No atomic multi-document transaction
+
+CouchDB bulk document operations are explicitly non-atomic. Some documents in a bulk operation may commit while others do not.
+
+That matters if the Titanic data model splits one logical transition across separate documents such as:
+
+#+begin_example
+job document
+attempt document
+idempotency receipt
+outbox record
+lease record
+result record
+replay lineage
+#+end_example
+
+A transition that must atomically alter several of those records cannot rely on =_bulk_docs= for ACID behavior.
+
+LMDB is materially different here: one LMDB write transaction may cover multiple keys/sub-databases in one local environment.
+
+** Replication conflicts are application-visible semantics
+
+CouchDB replication can create divergent document revisions. It selects a deterministic winning revision for normal reads while retaining conflicting leaves until the application resolves them.
+
+That behavior is useful for replicated documents but dangerous if an authoritative scheduler interprets the winning revision as the one true lifecycle transition.
+
+For a Titanic primary store, do not enable uncontrolled multi-master replication of actively mutating job records and then rely on automatic conflict winner selection for execution authority.
+
+** Cluster quorum is not a serializable transaction system
+
+CouchDB supports read and write quorum in clustered deployments, but the CouchDB documentation explicitly notes that even setting reads/writes to all replicas does not guarantee ACIDic consistency.
+
+Therefore a clustered CouchDB Titanic backend still needs application-level ownership, idempotency, and fencing rules. The database quorum is not a replacement for the Titanic state-machine contract.
+
+** Revision history is not an audit log
+
+CouchDB revisions primarily support MVCC and replication conflict handling. Compaction removes old revision bodies and leaves limited metadata/tombstones.
+
+Titanic must explicitly store transition/audit information that policy requires. Do not treat =_rev= history as durable job history.
+
+** Operational and hot-path overhead
+
+CouchDB adds a server process, HTTP serialization, index maintenance, compaction, and cluster/replication concerns. StarIntel already runs CouchDB, so this is not a new organizational dependency, but it is still a heavier hot-path journal than an embedded LMDB environment owned by Titanic.
+
+For the v1 coordinator, the extra distribution and query features are not automatically worth putting in the critical transition path.
+
+* A CouchDB Model That Can Work
+
+If CouchDB is implemented as a Titanic backend, use one authoritative aggregate document per logical job.
+
+Example shape:
+
+#+begin_src json
+{
+  "_id": "job:<stable-key>",
+  "type": "titanic-job",
+  "protocol": "star.titanic/1",
+  "job_id": "01K...",
+  "idempotency": {
+    "scope": "actor:operation:dataset",
+    "key_hash": "...",
+    "request_hash": "..."
+  },
+  "state": "running",
+  "attempt": {
+    "attempt_id": "01K...",
+    "number": 2,
+    "worker": "worker-17",
+    "started_at": "..."
+  },
+  "execution": {
+    "lease_id": "...",
+    "fencing_token": 42
+  },
+  "outbox": {
+    "publication_id": "...",
+    "status": "confirmed"
+  },
+  "result": null,
+  "retry": null,
+  "cancel": null,
+  "updated_at": "..."
+}
+#+end_src
+
+The aggregate must contain every field that needs atomic comparison/change for a lifecycle transition.
+
+Use =_rev= as the compare-and-swap token. A state transition is one document update.
+
+If idempotent admission must be atomic with job creation, prefer a deterministic document identity derived from the idempotency scope/key or another one-document admission scheme. Do not create an independent idempotency document and assume its write is atomic with a separate job document.
+
+* Explicit History With CouchDB
+
+Do not grow an unbounded transition array forever inside the aggregate document, and do not depend on CouchDB revision bodies.
+
+A safer pattern is:
+
+1. authoritative current state and a small bounded recent-history window live in the aggregate job document;
+2. the same update records an outbox entry describing the transition;
+3. an idempotent projector emits immutable audit/transition documents;
+4. the aggregate marks the outbox item emitted on a later CAS update;
+5. reconciliation can regenerate missing audit documents from deterministic transition IDs where sufficient source data is retained.
+
+This preserves one-document atomicity for authority while still making detailed history queryable in CouchDB.
+
+* CouchDB As Projection Beside LMDB
+
+The strongest CouchDB role for the selected v1 design is a derived operational projection:
+
+#+begin_example
+          RabbitMQ
+             |
+             v
+      Titanic coordinator
+             |
+             v
+            LMDB
+      authoritative journal
+             |
+             | deterministic projector/outbox
+             v
+          CouchDB
+ query / UI / replication / analytics
+#+end_example
+
+Benefits:
+
+- LMDB keeps state transitions local and transactionally compact;
+- CouchDB gives operators JSON documents, Mango/views, and replication;
+- the UI can query CouchDB without opening the LMDB environment;
+- a projection failure does not make execution authority ambiguous;
+- the projection can be rebuilt from the authoritative journal if the journal retains the required history.
+
+This also matches StarIntel's existing separation between hot execution state and durable/queryable documents.
+
+* Backend Ranking For Titanic V1
+
+| Backend | Authoritative journal fit | Operational/query fit | V1 decision |
+|---------+---------------------------+-----------------------+-------------|
+| LMDB | EXCELLENT for one-host coordinator; ACID local transactions across keys; very small hot-path footprint | LOW-MEDIUM without custom indexes/tools | PRIMARY V1 JOURNAL |
+| CouchDB | GOOD if one-job/one-aggregate CAS discipline is used; weaker for atomic multi-document invariants and multi-master authority | EXCELLENT JSON query, views, changes, replication, operator access | SECONDARY PROJECTION + SUPPORTED BACKEND SPIKE |
+| SQLite | GOOD transactional comparison baseline with richer ad-hoc local query | HIGH local inspectability | BENCHMARK/REFERENCE |
+
+* Contract Tests Required For A CouchDB Backend
+
+Before promoting CouchDB to an authoritative Titanic backend, run the same backend contract suite plus Couch-specific cases:
+
+1. two writers race =queued -> running=; exactly one =_rev= update wins;
+2. cancellation races terminal success;
+3. duplicate admission with one deterministic idempotency identity converges to one logical job;
+4. process dies after CouchDB commit but before RabbitMQ publish;
+5. process dies after RabbitMQ confirmation but before CouchDB confirmation update;
+6. stale =_rev= retry never permits an illegal state transition;
+7. validation function rejects backwards or malformed transitions;
+8. compaction does not destroy required explicit Titanic audit history;
+9. =_changes= duplicate delivery is harmless;
+10. missing/intermediate =_changes= observations do not lose authoritative job history;
+11. replication conflict injection cannot cause two workers to gain valid execution authority;
+12. cluster node loss and =202 Accepted= responses never get reported to callers as fully durable Titanic acceptance without policy explicitly permitting it.
+
+* Decision
+
+For the current Titanic v1 work:
+
+- keep RabbitMQ as the brokered job transport;
+- keep LMDB as the first authoritative Titanic journal implementation;
+- add CouchDB to the backend research matrix as a serious candidate rather than an afterthought;
+- prefer CouchDB initially for a queryable/replicated Titanic projection and operator surface;
+- permit a CouchDB authoritative backend only behind the same =job-store= contract and only with one-document aggregate/CAS semantics plus the CouchDB-specific failure tests above;
+- do not use CouchDB revision history or =_changes= as the canonical lifecycle audit log;
+- do not infer execution authority from automatic replication conflict winner selection.
+
+This preserves the simplest v1 while keeping a path to a more distributed and directly queryable backend if Titanic's deployment requirements later justify it.
+
+* Sources
+
+- [[https://docs.couchdb.org/en/stable/intro/overview.html][Apache CouchDB Technical Overview]]
+- [[https://docs.couchdb.org/en/stable/api/document/common.html][Apache CouchDB Document API / MVCC revision updates]]
+- [[https://docs.couchdb.org/en/stable/api/database/bulk-api.html][Apache CouchDB Bulk Documents API and transaction semantics]]
+- [[https://docs.couchdb.org/en/stable/replication/conflicts.html][Apache CouchDB Replication and Conflict Model]]
+- [[https://docs.couchdb.org/en/stable/cluster/sharding.html][Apache CouchDB Sharding and Quorum]]
+- [[https://docs.couchdb.org/en/stable/api/database/changes.html][Apache CouchDB Changes Feed]]
+- [[https://docs.couchdb.org/en/stable/ddocs/ddocs.html][Apache CouchDB Design Documents and validate_doc_update]]
+- [[https://docs.couchdb.org/en/stable/maintenance/compaction.html][Apache CouchDB Compaction]]
+- [[https://www.symas.com/lmdb.php][Symas LMDB overview]]
+
+* Footnotes and Glossary
+
+[fn:aggregate] Aggregate document: One document containing the authoritative state that must change atomically for a logical job.
+
+[fn:cas] CAS: Compare-and-swap style update. In CouchDB the current =_rev= acts as the optimistic concurrency token.
+
+[fn:projection] Projection: Derived representation built from authoritative state for querying, UI, analytics, replication, or integration.

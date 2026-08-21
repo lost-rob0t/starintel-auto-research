@@ -2,256 +2,251 @@
 :ID:       starintel-star-server-research-035
 :END:
 #+title: STAR-RESEARCH-035 Titanic Backend and Transport Comparison
-#+description: Compare ZeroMQ, RabbitMQ, NATS JetStream, Kafka, Temporal, and embedded persistence for the StarIntel Titanic durable actor-job protocol, with polyglot actor support as a first-class requirement.
+#+description: Compare RabbitMQ, LMDB, CouchDB, ZeroMQ, SQLite, NATS JetStream, Kafka, and Temporal for the StarIntel Titanic durable actor-job protocol without promoting comparative transport research into architecture by accident.
 #+status: REVIEW
-#+last_modified: [2026-08-08 Sat]
-#+filetags: :starintel:star-server:titanic:zeromq:rabbitmq:nats:kafka:temporal:polyglot:queues:research:org-roam:
+#+last_modified: [2026-08-10 Mon]
+#+filetags: :starintel:star-server:titanic:rabbitmq:lmdb:couchdb:zeromq:nats:kafka:temporal:polyglot:queues:research:org-roam:
 
 * Research Question
 
-Which transport should heterogeneous StarIntel actors speak, and which persistence or broker systems should back the modern Titanic durable job protocol?
-
-This is deliberately split into two questions. Transport and durability are not the same layer.
+Which transport and persistence combination best fits Titanic v1 while keeping =star.titanic/1= backend-neutral and transport-neutral?
 
 * Correction Notice
 
-The initial version of this node over-weighted RabbitMQ's existing deployment and broker semantics, and called NATS JetStream the strongest future adapter. That ranking was incomplete because it did not treat StarIntel's multi-language actor boundary and the already-approved ZeroMQ architecture as first-class constraints.
+Earlier versions of this research first over-promoted RabbitMQ/JetStream and then over-corrected by declaring ZeroMQ the canonical Titanic worker transport.
 
-[[id:starintel-star-server-research-037][STAR-RESEARCH-037 Titanic Polyglot ZeroMQ Transport Correction]] records the correction in detail.
+Both moves confused comparative research with implementation selection.
 
-The corrected conclusion is:
+[[id:starintel-star-server-research-037][STAR-RESEARCH-037 Titanic Polyglot ZeroMQ Research Boundary Correction]] records the transport correction.
 
-- ZeroMQ / ZMTP is the canonical cross-language Titanic worker transport;
-- Titanic owns durable job state and result retention above the transport;
-- RabbitMQ remains an existing broker, document/event path, and optional adapter/internal scheduling aid;
-- NATS JetStream is useful comparative research but is not a planned StarIntel transport;
-- LMDB remains a candidate embedded Titanic journal backend rather than a worker-facing protocol.
+[[id:starintel-star-server-research-038][STAR-RESEARCH-038 Titanic CouchDB Backend Fit]] evaluates CouchDB as a serious journal/projection candidate.
 
-* Evaluation Criteria
+The selected v1 direction is:
 
-The system must be judged against StarIntel's actual architecture:
-
-- Common Lisp, Nim, Python, and JavaScript/TypeScript actors;
-- future actors in additional languages without redesigning the wire contract;
-- process and host boundaries;
-- durable disconnected job submission and result retrieval;
-- at-least-once logical execution;
-- explicit acknowledgement after required side effects;
-- competing workers and horizontal scaling;
-- capability routing;
-- worker readiness and backpressure;
-- bounded retry and terminal failure;
-- cancellation and deadlines;
-- idempotency and fencing;
-- local-first deployment;
-- compatibility with existing Sento, Star Router, RabbitMQ, CouchDB, and Star-Lang work;
-- no requirement that every language have a high-quality client library for one specific broker.
+- RabbitMQ for brokered actor-job delivery;
+- LMDB for the first authoritative Titanic journal;
+- CouchDB for a queryable/replicated projection and as a supported alternate backend candidate;
+- ZeroMQ retained as transport research and an optional future specialized adapter;
+- =star.titanic/1= semantics independent of all of those implementation details.
 
 * Layer Separation
 
-The recovered 2023 architecture already pointed toward the correct separation:
+Titanic is not a broker and it is not a database.
 
 #+begin_example
-actors -> Broker <-> Titanic <-> LMDB
-                         |
-                    router socket
-                    /           \
-                 worker       worker
+producer / caller
+      |
+      | star.titanic/1
+      v
+ RabbitMQ adapter
+      |
+      v
+Titanic coordinator
+      |
+      | job-store contract
+      v
+     LMDB
+ authoritative journal
+      |
+      +--------------------+
+                           v
+                        CouchDB
+                 projection/query/UI
 #+end_example
 
-The modern model keeps the same conceptual split:
+The transport moves work. The journal records authoritative job truth. Titanic defines the durable semantics.
 
-#+begin_example
-existing document/event plane
-          |
-       RabbitMQ
-          |
-          v
- Titanic coordinator
- durable job journal
-          |
-          v
- ZeroMQ ROUTER/DEALER
-      /      |      \
-     v       v       v
-    CL      Nim    Python/JS
-  worker   worker    worker
-#+end_example
+* Evaluation Criteria
 
-The broker and journal may change independently of the worker protocol.
+The chosen v1 must support:
 
-* Corrected Comparison Matrix
+- stable logical =job_id=;
+- idempotent admission;
+- durable acceptance before reporting =accepted=;
+- at-least-once execution with duplicate-safe recovery;
+- explicit broker settlement;
+- bounded retry and dead-letter lineage;
+- cancellation and absolute deadlines;
+- attempt identity;
+- retained result lookup after disconnect;
+- correlation, causation, tracing, and provenance;
+- target lease/fencing metadata where required;
+- crash recovery at every journal/broker boundary;
+- local-first deployment;
+- Common Lisp ownership of the core coordinator;
+- language-neutral job envelopes for polyglot workers;
+- a backend contract that can be tested against fake, LMDB, CouchDB, and future stores.
 
-| System | Best role | Polyglot worker fit | Durability | Operational effect | Decision |
-|--------+-----------+---------------------+------------+--------------------+----------|
-| ZeroMQ / ZMTP | Cross-language actor transport | Excellent: stable C API plus broad bindings and common wire protocol | None by itself | Embedded library, no broker service | PRIMARY WORKER TRANSPORT |
-| Titanic journal | Durable actor-job lifecycle authority | Language-neutral because workers do not access it directly | Required | One service/store owned by Titanic | PRIMARY DURABILITY LAYER |
-| RabbitMQ | Existing document/event broker; optional adapter/internal queue | Broad, but not the chosen universal actor API | Strong | Already deployed | KEEP, DO NOT LEAK AMQP INTO ACTOR CONTRACT |
-| LMDB | Embedded Titanic journal candidate | Irrelevant to worker language because private to coordinator | Strong local transactions | No extra daemon | EVALUATE FOR JOURNAL |
-| SQLite | Embedded Titanic journal candidate/reference | Irrelevant to worker language | Strong local transactions | No extra daemon | BENCHMARK AGAINST LMDB |
-| NATS JetStream | Comparative durable-stream/work-queue reference | Strong in many languages, weaker for StarIntel CL/Nim first-class support | Strong | Adds another broker/control plane | COMPARISON ONLY |
-| Kafka | Event/log transport | Broad | Excellent replicated log | Large abstraction/ops cost | NON-V1 |
-| Temporal | Durable workflow engine | SDK-dependent | Deep durable workflow state | Adds workflow platform | NON-V1 |
+* Comparison Matrix
 
-* ZeroMQ / ZMTP
-
-** Why it fits the worker boundary
-
-ZeroMQ is a brokerless messaging library and ZMTP is its interoperable wire protocol. The ZeroMQ ecosystem has bindings or implementations in many languages, while the native =libzmq= API provides a C-callable fallback for languages where a high-level binding is missing or weak.
-
-That matters directly for StarIntel:
-
-- Common Lisp can use the already-researched PZMQ path or a narrow maintained CFFI binding;
-- Nim has direct C foreign-function interoperability, so a narrow =libzmq= binding is feasible without depending on a broker-specific Nim client;
-- Python has mature PyZMQ;
-- JavaScript/TypeScript has a maintained Node.js ZeroMQ binding;
-- future languages can target ZMTP or the C API without changing =star.titanic/1=.
-
-The approved StarIntel ADR already selected ZeroMQ at boundaries requiring language independence, process separation, routing identity, mobility, or failure containment.
-
-** Socket pattern
-
-Use ROUTER/DEALER for Titanic worker traffic.
-
-ROUTER owns worker routing identities and can dispatch to a selected ready worker. DEALER allows asynchronous receive/send behavior without REQ/REP lockstep.
-
-Do not use PUB/SUB for required job completion. Do not use PUSH/PULL when the protocol needs addressed cancellation, result correlation, or worker identity.
-
-** ZeroMQ is not durable
-
-ZeroMQ's queues are memory-backed transport state, not a durable job ledger.
-
-That is not a blocker. Titanic itself supplies the durability layer:
-
-1. persist admission;
-2. acknowledge =job_id=;
-3. dispatch an attempt over ZeroMQ;
-4. persist state transitions;
-5. receive result/error;
-6. persist terminal outcome;
-7. serve disconnected result lookup.
-
-The architecture therefore preserves ZeroMQ's simple polyglot transport without pretending its socket queues are durable storage.
+| System | Best role | Strengths | Main limitation for Titanic | V1 decision |
+|--------+-----------+-----------+-----------------------------+-------------|
+| RabbitMQ | brokered work delivery | already deployed; confirms; ACK/NACK; competing consumers; DLX; prefetch; routing | broker state is not the complete durable job lifecycle | PRIMARY TRANSPORT |
+| LMDB | embedded authoritative journal | local ACID; transactions across keys/sub-databases; tiny footprint; cheap reads | one concurrent writer; no built-in remote query/replication | PRIMARY JOURNAL |
+| CouchDB | JSON journal candidate / projection | durable per-doc MVCC; =_rev= CAS; Mango/views; changes; replication; existing StarIntel infra | no atomic multi-document transaction; replication conflicts; distributed quorum is not serializable | PROJECTION + SERIOUS ALTERNATE BACKEND |
+| SQLite | embedded journal comparison | ACID; SQL; constraints; easy inspection | relational impedance/locking model differs from desired KV journal | BENCHMARK / REFERENCE |
+| ZeroMQ / ZMTP | specialized polyglot transport | broad language boundary; ROUTER/DEALER; no broker daemon | no durability; would add a second mandatory transport if promoted without need | RESEARCH / OPTIONAL ADAPTER |
+| NATS JetStream | durable queue/stream comparison | durable consumers; redelivery; work-queue retention | adds another broker/control plane without a current requirement | COMPARISON ONLY |
+| Kafka | durable event log | replay; partitioned stream scale | offsets/partitions are unnecessary for the v1 job problem | NON-V1 |
+| Temporal | durable workflow runtime | deep long-running workflow semantics | separate execution/control model and platform | NON-V1 |
 
 * RabbitMQ
 
-RabbitMQ remains a major StarIntel component.
+RabbitMQ already solves the transport mechanics Titanic should not rebuild:
 
-The current server already has:
-
-- durable topic exchanges;
-- document ingest/new/update routes;
-- explicit ACK/NACK settlement;
-- dead-letter queue support;
-- worker-local connections;
-- prefetch/backpressure;
-- target routing;
-- document recursion.
-
-Those capabilities remain useful.
-
-The correction is architectural: RabbitMQ should not define the public Titanic worker protocol merely because it is already present.
-
-Use RabbitMQ for:
-
-- current document/event traffic;
-- a bridge feeding jobs into Titanic;
-- durable downstream StarIntel document output;
-- optional internal scheduler experiments where broker semantics help;
-- integration with legacy/existing actors already written for AMQP.
-
-Do not put AMQP delivery tags, exchange names, routing keys, channel state, or queue arguments in the stable Titanic actor envelope.
-
-* NATS JetStream
-
-JetStream is the persistence/stateful-consumer subsystem inside NATS.
-
-It adds:
-
-- persisted streams;
-- durable consumers;
-- explicit acknowledgement;
+- persistent publication;
+- publisher confirms;
+- durable queues/exchanges;
+- competing consumers;
+- explicit ACK/NACK;
 - redelivery;
-- work-queue retention;
-- delivery limits;
-- backoff;
-- pull-based consumption and flow control.
+- dead-letter exchanges;
+- prefetch/backpressure;
+- routing by capability.
 
-Mechanically, those features resemble a durable job queue and therefore make JetStream useful comparative research.
+RabbitMQ is therefore the first Titanic transport adapter.
 
-However, adopting it would add a new distributed broker beside RabbitMQ and would not improve StarIntel's weakest language boundary. The official NATS maintained client list includes Go, Java, .NET, Rust, JavaScript, Python, and C, among others, but Common Lisp and Nim are not first-class maintained entries.
+It is not the Titanic journal.
 
-Because StarIntel already approved ZeroMQ specifically for language/process boundaries, JetStream should not be carried forward as a planned future Titanic adapter by default.
+The stable protocol must not contain AMQP delivery tags, channel identity, connection objects, exchange implementation details, or queue arguments.
 
-Reopen that decision only if a concrete later requirement calls for NATS independently of Titanic.
+The dual-write boundary between the job journal and RabbitMQ must use outbox/reconciliation semantics from [[id:starintel-star-server-research-036][STAR-RESEARCH-036 Titanic Failure Semantics and Contract Tests]].
 
 * LMDB
 
-LMDB appeared directly behind Titanic in the recovered 2023 diagram.
+LMDB is the selected first authoritative journal implementation.
 
-That remains technically plausible because only the Titanic coordinator needs to access the journal. Worker languages do not need LMDB support.
+The job-store contract should expose operations such as:
 
-Candidate uses:
+#+begin_example
+put-job
+get-job
+compare-and-transition
+append-attempt
+put-result
+get-result
+claim-dispatch
+renew-dispatch
+release-dispatch
+record-idempotency-outcome
+record-outbox
+confirm-outbox
+record-dead-letter
+record-replay
+#+end_example
 
-- job state record;
-- attempt record;
-- idempotency receipt;
-- worker/capability snapshot cache;
-- retained result index;
-- dead-letter and replay metadata;
-- local single-node durable queue index.
+LMDB fits because Titanic itself owns the store. Worker languages never touch LMDB directly.
 
-Required evaluation:
+A single LMDB write transaction can update multiple logical records inside the same environment, which is useful for atomic job/outbox/idempotency transitions. LMDB's serialized-writer model also gives the coordinator one explicit mutation order rather than distributing execution authority across replicas.
 
-- crash recovery after committed and uncommitted transitions;
-- single-writer behavior under concurrent job admission;
-- read scaling;
-- transaction size and result retention;
-- compaction/growth behavior;
-- process restart and file corruption handling;
-- deterministic export/replay;
+Required validation includes:
+
+- write throughput under expected actor-job admission rates;
+- crash recovery at every state transition;
+- long-lived reader behavior;
+- map sizing and growth;
 - backup/restore;
-- migration/versioning.
+- corruption handling;
+- deterministic export/rebuild;
+- coordinator restart while RabbitMQ contains in-flight/redelivered work.
 
-LMDB must not become a second hidden distributed authority. It is appropriate as a local Titanic-owned journal backend.
+* CouchDB
+
+CouchDB is stronger than the old comparison gave it credit for.
+
+See [[id:starintel-star-server-research-038][STAR-RESEARCH-038 Titanic CouchDB Backend Fit]].
+
+Useful properties:
+
+- normal document commits are durable and crash-consistent;
+- =_rev= provides optimistic compare-and-transition behavior;
+- stale writes fail with =409 Conflict=;
+- =validate_doc_update= can enforce state-machine invariants;
+- JSON is directly inspectable and queryable;
+- Mango/views support operational queries;
+- =_changes= is useful for projection triggers;
+- replication and clustering are built in.
+
+Important constraints:
+
+- =_bulk_docs= is non-atomic across documents;
+- cluster quorum does not make CouchDB a serializable transaction system;
+- replication can create conflicting revisions;
+- normal reads choose one deterministic winning revision;
+- revision bodies are not a permanent audit log because compaction removes old bodies;
+- =_changes= is not guaranteed to expose every intermediate mutation of one document.
+
+Therefore a CouchDB authoritative backend should use one aggregate document per logical job so each authoritative state change is one CAS update. Idempotent admission, active attempt, cancellation, result, and any outbox state that must change atomically should live in that aggregate or be modeled with explicit reconciliation.
+
+For v1 the cleaner role is:
+
+#+begin_example
+LMDB authoritative state
+        |
+        v
+CouchDB projection
+        |
+        +--> UI / dashboards
+        +--> administrative query
+        +--> replication/export
+        +--> analytics
+#+end_example
 
 * SQLite
 
-SQLite should be the comparison baseline for an embedded journal even if LMDB wins.
+SQLite remains a useful benchmark because it offers strong local transactions plus SQL inspection.
 
-It provides transactions, a familiar inspection path, schema migration tooling, and straightforward state-machine constraints. LMDB provides a different performance/concurrency model.
+It should be compared against LMDB using actual Titanic state-machine workloads rather than generic database benchmarks:
 
-Benchmark both with the actual Titanic state transitions instead of deciding from generic database throughput numbers.
+- submit + idempotency + outbox;
+- dispatch claim;
+- heartbeat/progress;
+- retry transition;
+- terminal outcome;
+- dead-letter/replay;
+- retention sweep.
+
+No SQLite promotion is implied unless the benchmark shows a concrete operational or correctness advantage.
+
+* ZeroMQ / ZMTP
+
+ZeroMQ remains good research for cross-language boundaries.
+
+That does not make it the default Titanic transport.
+
+Potential future roles:
+
+- remote actor gateway;
+- low-latency specialized pool;
+- Sento cross-process transport;
+- non-durable internal process boundary;
+- research/conformance peer for Common Lisp, Nim, Python, and JavaScript.
+
+If a future =zmq= Titanic adapter is implemented, Titanic itself must still supply durable admission, state, retries, cancellation, and retained results. Transport choice cannot change the job contract.
+
+* NATS JetStream
+
+JetStream has useful durable queue semantics and remains worth studying.
+
+Adopting it now would create another broker beside RabbitMQ without solving a concrete v1 gap. Keep it comparative unless a later independent requirement specifically selects NATS.
 
 * Kafka
 
-Kafka is a durable partitioned event log. It is excellent for replay, high-throughput streams, ordering within partitions, and independent consumer groups.
+Kafka is a durable partitioned log and is excellent when the system problem is replayable streams with independent consumer groups.
 
-Titanic's core problem is narrower:
-
-- submit one logical job;
-- durably retain its state;
-- choose one capable actor worker;
-- retry or terminate;
-- retrieve one result later.
-
-Kafka can model that, but it adds partition/offset semantics that do not improve the polyglot worker boundary and are unnecessary for v1.
-
-Keep Kafka as a possible future event-stream/export backend, not Titanic v1.
+Titanic v1 is narrower: accept one logical job, schedule it, retry/fail it, and retain one durable result. Do not introduce Kafka merely to model that state machine.
 
 * Temporal
 
-Temporal is a durable workflow platform, not merely a message transport.
+Temporal is a durable workflow platform rather than a simple transport or journal.
 
-It is useful when the central problem becomes long-running multi-step orchestration with durable histories, timers, and activity retries.
+It becomes interesting if Titanic evolves into long-running, multi-step workflow orchestration where durable timers and workflow history become the dominant problem. It is unnecessary for v1 and would add another execution model beside Sento and StarIntel's own actor semantics.
 
-Adding it for Titanic would create another execution model beside Sento, Star-Lang, Star Router, ZeroMQ, and StarIntel's own job state.
+* Backend-Neutral Contract
 
-Do not add it for v1.
+The first implementation choices must remain replaceable.
 
-* Stable Titanic Boundary
-
-The public durable API should expose semantics such as:
+=star.titanic/1= should expose semantics such as:
 
 #+begin_example
 submit(job) -> accepted(job-id) | rejected | unknown-outcome
@@ -262,71 +257,55 @@ close(job-id) -> retention-released
 replay(dead-letter-id) -> new-attempt-lineage
 #+end_example
 
-The worker transport should expose versioned operations such as:
+The =job-store= implementation decides how those semantics are persisted.
 
-#+begin_example
-HELLO
-READY
-JOB
-ACCEPTED
-HEARTBEAT
-RESULT
-ERROR
-CANCEL
-CANCELLED
-#+end_example
+The transport adapter decides how attempts move to workers.
 
-Transport-specific identifiers stay outside the stable durable envelope.
-
-* Required Language Interoperability Tests
-
-Before promotion to implementation, prove at least:
-
-1. Common Lisp ROUTER <-> Python DEALER;
-2. Python ROUTER <-> Common Lisp DEALER;
-3. Common Lisp ROUTER <-> Nim DEALER;
-4. Nim ROUTER <-> Common Lisp DEALER;
-5. Common Lisp ROUTER <-> JavaScript DEALER;
-6. mixed Common Lisp/Nim/Python/JavaScript workers in one capability pool;
-7. binary multipart frame equality;
-8. canonical control/header decoding equality;
-9. identical unknown-version rejection;
-10. disconnect/reconnect without cross-language state disagreement;
-11. cancellation and stale-attempt handling across different worker languages;
-12. CURVE/ZAP interoperability when secure remote transport is enabled.
+Neither implementation owns the protocol meaning.
 
 * Recommendation
 
-**Titanic v1 should be a durable job coordinator and journal using ZeroMQ ROUTER/DEALER as the canonical polyglot worker transport.**
+Titanic v1 should use:
 
-Keep RabbitMQ integrated as the existing StarIntel broker and bridge for documents/events. Evaluate LMDB and SQLite as first embedded journal backends. Do not introduce JetStream, Kafka, or Temporal merely to obtain queue semantics StarIntel can already provide while preserving its approved language-independent ZeroMQ boundary.
+#+begin_example
+RabbitMQ
+   |
+   v
+Titanic coordinator
+   |
+   v
+LMDB authoritative journal
+   |
+   +--> CouchDB projection/operator store
+#+end_example
 
-This ranking is the corrected decision and supersedes the earlier RabbitMQ-primary/JetStream-secondary ranking.
+Do not require ZeroMQ for v1. Keep it as researched transport capability and add it only when a concrete boundary benefits from it.
+
+Keep CouchDB in active backend research and implement it behind the same =job-store= contract if distributed/queryable job authority becomes valuable enough to justify its consistency model.
 
 * Sources
 
-- [[file:../../design/star-server/STAR-ADR-001-domain-gserver-zmq-approval.org][STAR-ADR-001 Domain GServer and ZeroMQ Approval]]
-- [[file:../../design/cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]]
-- [[file:../cl-gserver/SENTO-000-zeromq-transport-analysis.org][SENTO-000 ZeroMQ Transport Analysis]]
-- [[file:../cl-gserver/SENTO-ZMQ-RESEARCH-001-pzmq-binding-audit.org][SENTO-ZMQ-RESEARCH-001 PZMQ Binding Audit]]
-- [[https://zguide.zeromq.org/][ZeroMQ Guide]]
+- [[id:starintel-star-server-research-034][STAR-RESEARCH-034 Titanic Durable Actor Job Protocol]]
+- [[id:starintel-star-server-research-036][STAR-RESEARCH-036 Titanic Failure Semantics and Contract Tests]]
+- [[id:starintel-star-server-research-037][STAR-RESEARCH-037 Titanic Polyglot ZeroMQ Research Boundary Correction]]
+- [[id:starintel-star-server-research-038][STAR-RESEARCH-038 Titanic CouchDB Backend Fit]]
+- [[https://www.rabbitmq.com/docs/4.1/publishers][RabbitMQ Publishers]]
+- [[https://www.rabbitmq.com/docs/4.1/consumers][RabbitMQ Consumers]]
+- [[https://www.rabbitmq.com/docs/4.1/dlx][RabbitMQ Dead Letter Exchanges]]
+- [[https://www.symas.com/lmdb.php][Symas LMDB]]
+- [[https://docs.couchdb.org/en/stable/intro/overview.html][Apache CouchDB Technical Overview]]
+- [[https://docs.couchdb.org/en/stable/api/database/bulk-api.html][Apache CouchDB Bulk API]]
+- [[https://docs.couchdb.org/en/stable/replication/conflicts.html][Apache CouchDB Conflict Model]]
+- [[https://docs.couchdb.org/en/stable/cluster/sharding.html][Apache CouchDB Cluster Quorum]]
+- [[https://docs.couchdb.org/en/stable/api/database/changes.html][Apache CouchDB Changes Feed]]
 - [[https://rfc.zeromq.org/spec/9/][ZeroMQ Titanic Service Protocol]]
-- [[https://github.com/zeromq/libzmq][libzmq]]
-- [[https://github.com/zeromq/pyzmq][PyZMQ]]
-- [[https://github.com/zeromq/zeromq.js][zeromq.js]]
-- [[https://www.rabbitmq.com/docs/4.1/consumers][RabbitMQ consumers]]
-- [[https://docs.nats.io/using-nats/developer][NATS official clients]]
-- [[https://kafka.apache.org/documentation/][Apache Kafka documentation]]
-- [[https://docs.temporal.io/][Temporal documentation]]
+- [[https://zguide.zeromq.org/][ZeroMQ Guide]]
+- [[https://docs.nats.io/using-nats/developer][NATS Official Clients]]
+- [[https://kafka.apache.org/documentation/][Apache Kafka Documentation]]
+- [[https://docs.temporal.io/][Temporal Documentation]]
 
 * Footnotes and Glossary
 
-[fn:zeromq] ZeroMQ: Brokerless asynchronous messaging library whose compatible implementations communicate using the ZeroMQ Message Transport Protocol.
+[fn:journal] Journal: The authoritative durable record of job admission, attempts, lifecycle state, retry/cancel history, result, dead-letter/replay lineage, and reconciliation state.
 
-[fn:zmtp] ZMTP: ZeroMQ Message Transport Protocol, the interoperable wire protocol used by ZeroMQ peers.
-
-[fn:jetstream] JetStream: NATS persistence and durable-consumer layer providing streams, acknowledgements, redelivery, and work-queue retention.
-
-[fn:lmdb] LMDB: Lightning Memory-Mapped Database, an embedded transactional key-value store.
-
-[fn:polyglot] Polyglot: Designed so components written in multiple programming languages can participate through the same protocol.
+[fn:projection] Projection: A derived representation optimized for query, UI, replication, or analytics and rebuildable from authoritative state.

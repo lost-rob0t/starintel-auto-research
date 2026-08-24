@@ -1,0 +1,151 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-042
+:END:
+#+title: STAR-RESEARCH-042 Strict JSON HTTP Boundary
+#+description: Research the verified StarIntel HTTP defect where malformed JSON with a trailing comma is accepted as a valid document, and define the questions a later operator-approved design must answer without prematurely selecting an implementation.
+#+status: REVIEW
+#+created: [2026-08-24 Mon]
+#+last_modified: [2026-08-24 Mon]
+#+filetags: :starintel:star-server:http:json:security:validation:parser:tdd:research:org-roam:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research direction | StarIntel operator | PENDING | Explicit operator approval to promote this verified defect into an ADADR design | |
+| Architecture design | StarIntel operator | NOT STARTED | Research approval, canonical RAGE/ADADR design, adversarial review, and explicit design approval | |
+| Implementation | Repository maintainer | NOT STARTED | Explicit operator design approval plus exact-scope implementation and green exact-head gates | |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-24 | Captured exact CI evidence that a malformed JSON object with a trailing comma is accepted by the HTTP document-ingest boundary; opened research gate before any server parser change. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-server/pull/105][server PR #105]], [[https://github.com/lost-rob0t/starintel-server/actions/runs/32693397947][ZAP run 32693397947]] |
+| 2026-08-24 | Renumbered to STAR-RESEARCH-042 after main concurrently allocated STAR-RESEARCH-041; corrected approval vocabulary and added required glossary without changing the research gate. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-auto-research/pull/142][PR #142 validation]] |
+
+* Decision Summary
+
+StarIntel currently has a verified strictness defect at at least one JSON HTTP boundary. The security-negative suite submitted a syntactically malformed object with a trailing comma and a valid canonical document version. The live disposable server returned HTTP 200 and normalized the request into a document rather than rejecting it as malformed input.
+
+This research exists to determine the correct boundary contract and the scope of affected JSON routes before a design is written. It does not authorize a parser replacement, route patch, middleware change, or other implementation.
+
+* Immutable Defect Evidence
+
+The reproducing transaction is =lost-rob0t/starintel-server#105=.
+
+- Server branch exact head under test: =6cba035145d7a4b5b8c35d77a64596e4f3494f3b=.
+- GitHub pull-request merge ref tested by the failing job: =83f7875de3be3314e9be79b4459a01593e1b7db4=.
+- Workflow run: [[https://github.com/lost-rob0t/starintel-server/actions/runs/32693397947][OWASP ZAP Security run 32693397947]].
+- Job: =zap-api= / =97331044353=.
+- Entry command: =bash ./scripts/zap-ci.sh passive=.
+- Test phase reached successfully: disposable stack health, delegated credential-negative checks, scoped CouchDB/Clouseau fixtures, search-query injection probes, and view-path probes.
+- Failing probe: =malformed JSON probe trailing-comma expected 400, got HTTP 200=.
+- Malformed request body used a valid canonical document version =0.8.0=.
+- Accepted response body: ={"_id":"security-json-comma","dataset":"security-a","dtype":"note","version":"0.8.0"}=.
+
+The earlier harness-only failure caused by stale =0.9.0= fixtures was repaired first. Therefore this result is not an unsupported-schema false positive: the malformed input passed syntax handling and document validation far enough to be accepted as a successful document request.
+
+* Standards Baseline
+
+RFC 8259 defines an object as an optional first member followed by zero or more repetitions of comma plus another member. That grammar does not permit a comma immediately before the closing brace. The same structure applies to arrays: commas separate elements rather than terminate the collection.
+
+RFC 8259 also permits parsers in general to accept extensions beyond the JSON grammar. That implementation freedom does not require an HTTP application boundary to accept those extensions. StarIntel can define a narrower interoperability and security contract for =application/json= requests.
+
+RFC 8259 notes that duplicate object names produce non-interoperable behavior across parsers. StarIntel therefore also needs an explicit duplicate-key policy rather than accidentally inheriting whichever behavior a library happens to expose.
+
+* Current Server Findings
+
+The =/new/document/:dtype= handler in =source/frontends/http-api.lisp= decodes request octets as UTF-8 and calls =jsown:parse= directly before document-schema validation. The verified trailing-comma acceptance is therefore consistent with permissive parser behavior being exposed directly as the public HTTP contract.
+
+The security suite already treats malformed JSON, ambiguous duplicate-key JSON, invalid UTF-8, oversized bodies, deep nesting, bounded bulk amplification, and parser concurrency as separate concerns. A strict-syntax correction must not weaken the existing resource-bound or authorization tests.
+
+The route audit must not stop at document ingest. Any HTTP endpoint that directly parses client-supplied JSON can inherit the same acceptance policy unless a stricter common boundary already wraps it.
+
+* Research Questions
+
+1. Which StarIntel HTTP routes parse caller-controlled JSON directly, and which parser/helper is used by each route?
+2. Does the current parser accept other non-RFC-8259 extensions besides trailing commas, such as comments, malformed escapes, non-standard numbers, or trailing tokens?
+3. What duplicate-object-key behavior does the current stack expose, and what deterministic policy should StarIntel require for security-sensitive fields such as identity, dataset, tenant, version, scopes, and idempotency keys?
+4. Where should strict JSON syntax validation live so every =application/json= route receives the same rule before schema or business logic?
+5. Can the existing Common Lisp JSON dependencies provide strict parsing with duplicate-key detection, or is a narrow validation layer required before decoding?
+6. What exact error envelope and HTTP status should malformed syntax produce, and how should correlation IDs be preserved on that path?
+7. How should UTF-8 validation, request-size limits, nesting limits, numeric bounds, and syntax strictness compose without parsing the same body repeatedly or creating unbounded allocation?
+8. Do bulk/document/auth/credential/target APIs need different top-level JSON shape constraints after syntax validation, or should syntax validation remain transport-only and leave shapes to each schema?
+9. What deterministic test matrix proves malformed input never reaches mutation, outbox publication, actor dispatch, credential creation, or document persistence?
+10. Are OpenAPI/client-contract changes needed, or is strict RFC-8259 syntax already implicit in the existing =application/json= media type and only enforcement is missing?
+
+* Scope for Route Audit
+
+The design-producing research pass should enumerate, from current =starintel-server= source rather than memory, all request paths that parse JSON bodies. At minimum inspect:
+
+- canonical document creation and bulk ingest;
+- target submission/control routes;
+- authentication, user, and credential mutation routes;
+- authorization and quota mutation routes;
+- any generated/contract-mounted operation that still reaches an independent parser seam.
+
+For every route, record whether malformed syntax is rejected before side effects and whether duplicate keys can alter an authority-sensitive value.
+
+* Security and Data-Integrity Invariants
+
+A later design must preserve these invariants:
+
+- malformed JSON syntax is rejected before schema validation or mutation;
+- one malformed request cannot be normalized into a different valid request silently;
+- authority-sensitive duplicate fields cannot be interpreted differently by different components;
+- rejected requests do not enqueue RabbitMQ work, write CouchDB documents/outbox entries, mutate credentials/users, or acquire target authority;
+- valid canonical JSON remains wire-compatible;
+- request body and nesting limits remain bounded before or during parsing;
+- invalid UTF-8 remains rejected deterministically;
+- error responses retain the canonical correlation/error contract and do not echo secrets;
+- the fix does not weaken target lease fencing, authorization/scoping, provenance, CouchDB revision safety, or durable-outbox semantics.
+
+* Candidate Research Experiments
+
+These are research experiments, not implementation decisions.
+
+1. Run a small parser conformance matrix against the exact JSON library versions in the Nix closure: valid canonical JSON, trailing commas in objects/arrays, comments, duplicate keys, trailing tokens, malformed escapes, invalid numbers, and maximum-depth inputs.
+2. Enumerate every direct =jsown:parse= and other JSON parser call reachable from HTTP request bodies and classify whether it occurs before or after side effects.
+3. Compare available strictness/error/duplicate-key behavior in dependencies already present in the repository before proposing a new parser dependency.
+4. Measure whether a strict validation seam can operate within the existing body-size bound without a second unbounded copy; performance is subordinate to correctness but should be quantified.
+5. Extend the security-negative corpus only to reveal behavior; do not convert unexpected acceptance into an allowed result merely to make CI green.
+
+* Design Gate Requirements
+
+If the operator approves this research direction, the subsequent RAGE/ADADR design must answer:
+
+1. the canonical strict JSON boundary and owning module;
+2. route coverage and migration plan;
+3. duplicate-key policy, especially for authority-sensitive keys;
+4. parser/dependency choice with adversarial comparison;
+5. malformed-input error algebra and correlation behavior;
+6. body-size, UTF-8, nesting, and numeric resource limits;
+7. proof that parsing completes before mutation/dispatch/outbox effects;
+8. focused regression tests plus the full hostile corpus;
+9. canonical unit, integration, Nix, stack, schema, and ZAP verification plan;
+10. rollback/compatibility consequences for callers that currently rely on non-standard JSON extensions.
+
+Architecture approval must remain pending until that design and adversarial review are explicitly accepted by the operator. Implementation remains blocked until then.
+
+* Sources
+
+- [[https://www.rfc-editor.org/rfc/rfc8259.html][RFC 8259: The JavaScript Object Notation (JSON) Data Interchange Format]]
+- [[https://github.com/lost-rob0t/starintel-server/pull/105][starintel-server PR #105 security audit and OWASP ZAP CI]]
+- [[https://github.com/lost-rob0t/starintel-server/actions/runs/32693397947][verified failing OWASP ZAP Security run 32693397947]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/6cba035145d7a4b5b8c35d77a64596e4f3494f3b/source/frontends/http-api.lisp][HTTP API implementation at the exact server head]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/6cba035145d7a4b5b8c35d77a64596e4f3494f3b/security/payloads.json][hostile JSON corpus at the exact server head]]
+
+* Footnotes and Glossary
+
+- *ADADR*: Analyze, Design, Adversarial review, Decision gate, Realize; StarIntel's human-gated architecture and implementation sequence.
+- *HTTP boundary*: The server layer that accepts and decodes a caller's HTTP request before application schema validation or business logic.
+- *JSON*: JavaScript Object Notation as defined by RFC 8259 for the =application/json= interchange format.
+- *Duplicate key*: Two object members with the same name. RFC 8259 recommends unique names because implementations disagree on duplicate handling.
+- *Strict syntax*: For this research, accepting the RFC 8259 JSON grammar rather than silently normalizing non-standard extensions such as trailing commas.
+- *TDD evidence*: A deterministic failing regression recorded before realization, including immutable code identity, command, and observed behavior.
+
+* Gate
+
+Research direction: *PENDING OPERATOR APPROVAL*.
+
+No design or server implementation is authorized by this file.

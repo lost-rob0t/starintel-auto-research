@@ -2,9 +2,9 @@
 :ID:       starintel-star-server-research-041
 :END:
 #+title: STAR-RESEARCH-041 Unified STAR URI Authority Routing and FediWatch RabbitMQ
-#+description: ADARD research on generalizing the approved actor-only star:// URI into an authority/resource namespace, defining a transport-neutral STAR application protocol, redesigning StarRouter around authority routing, connecting starintel-gserver under its own authority, and moving FediWatch durable target/document flows to RabbitMQ.
+#+description: ADARD research establishing RFC 3986 hierarchical URI semantics for the star scheme, authority-first StarRouter resolution, independent StarIntel gserver authority ownership, and RabbitMQ durability for FediWatch targets and findings.
 #+status: REVIEW
-#+filetags: :starintel:research:star-server:starrouter:star-lang:uri:protocol:routing:authority:rabbitmq:fediwatch:zeromq:
+#+filetags: :starintel:research:star-server:starrouter:star-lang:uri:rfc3986:routing:authority:rabbitmq:fediwatch:zeromq:
 #+created: [2026-08-24 Mon]
 #+last_modified: [2026-08-24 Mon]
 
@@ -12,390 +12,236 @@
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research scope | StarIntel operator | APPROVED | Explicit request to ADARD the protocol/router/FediWatch transport problem | GitHub issue 137 created from operator direction |
-| Research conclusions | StarIntel operator | PENDING | Review URI, protocol, routing, and transport conclusions | This document and issue 137 |
-| FediWatch RabbitMQ recommendation | StarIntel operator | PENDING | Review durable actor/dataflow recommendation | This document and issue 137 |
-| Implementation | Repository maintainers | NOT STARTED | Separate approved design, implementation work, and green gates | No implementation authorized by this research |
+| Research scope | StarIntel operator | APPROVED | Explicit request to ADARD the protocol/router/FediWatch problem | [[https://github.com/lost-rob0t/starintel-auto-research/issues/137][issue #137]] |
+| RFC 3986 URI direction | StarIntel operator | APPROVED | Explicit correction selecting the RFC-based hierarchical URI design and rejecting preservation of the old actor URI semantics | [[https://github.com/lost-rob0t/starintel-auto-research/issues/137#issuecomment-5390887569][operator clarification on #137]] |
+| FediWatch RabbitMQ recommendation | StarIntel operator | PENDING | Explicit review of the durable actor/dataflow recommendation | This document and [[https://github.com/lost-rob0t/starintel-auto-research/issues/137][issue #137]] |
+| Implementation | Repository maintainers | NOT STARTED | Approved design, implementation-slot promotion, TDD evidence, and green exact-head gates | No implementation authorized by this research |
 | Publication | Auto-Research maintainer | PENDING | Main-branch Pages workflow succeeds | Public site after merge/deployment |
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-24 | Initial ADARD research covering unified STAR URIs, protocol/authority routing, StarRouter redesign, starintel-gserver authority attachment, and FediWatch RabbitMQ transport. | GPT-5.6 Sol research agent under operator direction | GitHub issue 137; current StarLang, StarRouter, FediWatch, and starintel-server source; primary protocol sources |
-
-* Purpose
-
-This node answers one cross-repository architecture question before implementation:
-
-#+begin_quote
-What should =star://= mean if StarIntel needs one transport-neutral identity scheme for actors, services, documents, targets, and other resources; what protocol should carry operations addressed to those identities; what responsibility should StarRouter own; how should =starintel-gserver= attach under its own authority; and should FediWatch continue using StarRouter transport for durable targets/documents or use RabbitMQ?
-#+end_quote
-
-This is read-only research. It does not alter StarLang, StarRouter, FediWatch, or starintel-server runtime code.
-
-* Related Nodes
-
-- [[file:../../design/star-lang/STAR-LANG-004-star-service-uri-discovery.org][STAR-LANG-004 STAR Service URI Discovery and Dispatch]]
-- [[file:STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040 StarRouter ZeroMQ Transport and API Overhaul]]
-- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence GServer Domains]]
-- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000 StarIntel Fourth Generation]]
-- GitHub issue 137: https://github.com/lost-rob0t/starintel-auto-research/issues/137
-
-* Source Inventory
-
-Retrieved 2026-08-24 unless otherwise noted.
-
-** StarIntel sources
-
-- [[https://github.com/lost-rob0t/starintel-auto-research/blob/main/roam/design/star-lang/STAR-LANG-004-star-service-uri-discovery.org][STAR-LANG-004 approved URI design]]
-- [[https://github.com/lost-rob0t/star-lang/blob/0472ed8f4472252038b62bb19a17aa09d2ddf1b4/star-actor-protocol/src/service-uri.lisp][implemented StarLang service URI parser]]
-- [[https://github.com/lost-rob0t/starintel-auto-research/blob/main/roam/research/star-server/STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040 StarRouter transport/API research]]
-- [[https://github.com/lost-rob0t/starRouter/blob/master/src/starRouterpkg/proto.nim][current StarRouter protocol types]]
-- [[https://github.com/lost-rob0t/fediWatch/blob/master/src/fediWatch.nim][current FediWatch runtime]]
-- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/messaging.org][current starintel-server messaging contract]]
-
-** Primary standards and transport sources
-
-- [[https://www.rfc-editor.org/rfc/rfc3986][RFC 3986 Uniform Resource Identifier Generic Syntax]]
-- [[https://rfc.zeromq.org/spec/28/][ZeroMQ REQ/REP, DEALER, and ROUTER semantics]]
-- [[https://rfc.zeromq.org/spec/23/][ZeroMQ Message Transport Protocol socket semantics]]
-- [[https://www.rabbitmq.com/docs/confirms][RabbitMQ consumer acknowledgements and publisher confirms]]
-- [[https://www.rabbitmq.com/docs/reliability][RabbitMQ reliability guide]]
+| 2026-08-24 | Created ADARD research covering STAR URI authority routing and FediWatch transport. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-auto-research/issues/137][#137]]; current StarLang, StarRouter, FediWatch, and starintel-server source |
+| 2026-08-24 | Reworked the URI conclusion around RFC 3986 hierarchical authority/path semantics and removed the old =domain:address:actor-name= model from the new canonical design. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-auto-research/issues/137#issuecomment-5390887569][operator clarification]] |
 
 * ADARD Assess
 
-** Existing =star://= design is actor-only
-
-STAR-LANG-004 is approved and implemented. Its canonical identity is:
+The existing StarLang URI implementation is intentionally narrow. It parses only:
 
 #+begin_example
 star://domain:address:actor-name
 #+end_example
 
-The implementation stores exactly three fields: domain, address, and actor name. Its parser requires exactly two colon separators after =star://=. No path, query, fragment, service class, document identifier, or authority/resource distinction exists.
+and stores =domain=, =address=, and =actor-name= as first-class fields. That implementation proved the value of a transport-neutral =star:= identity, but its syntax is an actor-specific application tuple rather than a general hierarchical resource namespace.
 
-That design solved the original problem: stable transport-neutral actor identity independent of Sento, ZeroMQ, RabbitMQ, or HTTP.
+The current StarRouter work already has a broader transport-neutral contract in [[file:../../design/star-server/STAR-SERVER-040-starrouter-zeromq-transport-api-overhaul.org][STAR-SERVER-040]]. It defines canonical operations/results, leased registration, route selection, deadlines, cancellation, transport adapters, ZeroMQ-first request/reply, and RabbitMQ where durable broker semantics are required.
 
-It does not solve the newer requirement to address StarIntel resources such as documents, datasets, targets, services, or jobs.
+The current =fediWatch= implementation consumes targets through StarRouter PUB/SUB and emits newly collected documents through StarRouter messages. By contrast, =starintel-server= already defines RabbitMQ as the distributed durable document/target dataflow with manual acknowledgement, requeue, actor-specific target queues, and =documents.ingest.<dtype>= for durable output.
 
-** RFC 3986 already supplies the shape now needed
+* ADARD Design Findings
 
-RFC 3986 defines the generic hierarchical URI form as scheme + authority + path, with the path identifying a resource inside the scope of a naming authority.
+** RFC 3986 should be the syntax authority
 
-The desired StarIntel shape therefore fits standard URI structure naturally:
+The new =star= scheme should use RFC 3986 generic hierarchical syntax rather than preserve or cosmetically rearrange the old actor tuple.
 
-#+begin_example
-star://authority/resource-kind/resource-path
-#+end_example
-
-Example:
+Canonical shape:
 
 #+begin_example
-star://ingest.starintel.actor/document/01K...
+star://<authority>/<resource-kind>/<resource-path>
 #+end_example
 
-The authority need not be interpreted as an HTTP endpoint. The STAR scheme can define it as a logical namespace/resolution authority whose current runtime route is discovered separately.
+The authority is the namespace owner/resolution authority. The path is hierarchical. STAR defines the meaning of path segments; it does not invent a parallel URI grammar.
 
-** Current StarRouter protocol is not a long-lived authority protocol
-
-The current Nim protocol uses:
-
-- =SC01= and =SR01= headers;
-- a fixed integer =EventType= enum;
-- =Message[T]= with id, data, source, type, timestamp, and topic;
-- actor registration and heartbeat behavior;
-- ZeroMQ-specific client/server framing.
-
-STAR-RESEARCH-040 already concluded that StarRouter should become transport-neutral at the application-contract layer, with a versioned request/result envelope and ZeroMQ as the preferred low-latency transport rather than the protocol itself.
-
-The URI redesign strengthens that conclusion: StarRouter must route by STAR authority/resource identity and reviewed capabilities rather than only by a process-local actor table or topic string.
-
-** FediWatch currently uses StarRouter for both work intake and durable output
-
-Current =fediWatch.nim= imports StarRouter directly. It:
-
-- subscribes to target messages through StarRouter;
-- uses a topic filter for =fediwatch=;
-- emits collected user, social-post, and relation documents through =routerClient.emit(... newDocument ...)=;
-- keeps watcher state and =lastMessage= in process memory.
-
-This is an event-driven collector, but its important outputs are durable StarIntel documents.
-
-** starintel-server already has the appropriate durable external-actor contract
-
-Current starintel-server messaging documentation defines RabbitMQ as the distributed durable document/dataflow layer. External actor services are expected to:
-
-1. own a durable actor queue;
-2. bind actor target routing keys;
-3. process idempotently;
-4. publish durable outputs to =documents.ingest.<dtype>=;
-5. ACK only after required side effects complete.
-
-RabbitMQ manual consumer acknowledgements and publisher confirms exist specifically to transfer responsibility across failure boundaries. That semantic is a closer fit for FediWatch target delivery and document publication than ZeroMQ PUB/SUB.
-
-* ADARD Design Alternatives
-
-** Alternative A — keep actor-only =star://= and add a second resource scheme
-
-Example:
-
-#+begin_example
-star://bbp:localhost:nmap
-starintel://documents/01K...
-#+end_example
-
-Advantages:
-
-- no StarLang URI migration;
-- small immediate change.
-
-Disadvantages:
-
-- two canonical StarIntel identity systems;
-- MCP, A2A, StarLang, StarRouter, and StarIntel documents would need cross-scheme conversion;
-- actor identity remains syntactically special while every other resource uses a different grammar.
-
-Research conclusion: reject as the long-term architecture.
-
-** Alternative B — generalize =star://= into authority + resource path
-
-Example:
+Examples:
 
 #+begin_example
 star://ingest.starintel.actor/document/01K...
-star://ingest.starintel.actor/actor/quasar/user-hunt
-star://ingest.starintel.actor/service/starintel-mcp
+star://gserver.starintel.actor/service/starintel-mcp
+star://gserver.starintel.actor/actor/user-hunt
+star://gserver.starintel.actor/actor/quasar/user-hunt
 #+end_example
 
-Advantages:
+The last two examples show an important rule: additional actor path segments are resource-path structure, not revived =domain= or =address= fields. An authority may define useful subnamespaces, but the generic URI parser does not assign old actor-tuple semantics to them.
 
-- one canonical STAR identity language;
-- matches RFC 3986 hierarchy cleanly;
-- lets actors become an explicit resource class rather than the entire URI ontology;
-- StarRouter can resolve one authority first, then route a kind-specific path;
-- MCP resource URIs can directly reuse native STAR identities;
-- runtime transport remains outside the URI.
+** RFC-derived canonicalization
 
-Disadvantages:
+For protocol v1:
 
-- requires migration from STAR-LANG-004 v1 syntax;
-- requires protocol-level authority registration and conflict policy;
-- compatibility tooling must be explicit because old actor URIs contain an address component not present in the new logical form.
+- scheme is canonical lowercase =star=;
+- authority uses an RFC 3986 =reg-name= profile and is canonicalized case-insensitively to lowercase;
+- userinfo is forbidden;
+- a transport port is not part of canonical STAR identity;
+- path segments use RFC 3986 =pchar= and percent-encoding rules;
+- percent-encoded unreserved characters normalize to their unreserved representation;
+- percent-encoding hex digits normalize uppercase when encoding remains necessary;
+- path case remains resource-contract-defined and therefore case-sensitive by default;
+- dot segments are rejected for canonical STAR identity rather than silently resolving to a different resource;
+- query and fragment do not participate in canonical v1 STAR identity.
 
-Research conclusion: select for design.
+These rules deliberately distinguish URI identity from transport endpoints. ZeroMQ addresses, RabbitMQ queues, HTTP origins, host ports, and process IDs are route metadata, not embedded identity.
 
-** Alternative C — make =star://= authority directly imply a network endpoint
+** Resource-kind prefix, not old actor fields
 
-Example interpretation:
+The first path segment is a reviewed STAR resource class such as:
 
 #+begin_example
-star://ingest.starintel.actor/document/X
-=> connect to ingest.starintel.actor over a fixed transport
+/document
+/actor
+/service
+/target
+/dataset
+/relation
+/job
 #+end_example
 
-Research conclusion: reject.
+The remaining path is defined by that resource class and authority contract.
 
-This would repeat the coupling STAR-LANG-004 intentionally avoided. An authority may use a DNS-like name, but STAR resolution remains a logical registry operation. Transport coordinates can change without changing resource identity.
-
-* ADARD Attack
-
-** Attack: authority spoofing
-
-If a client can register any authority string, a malicious or misconfigured process could claim another service's namespace.
-
-Requirement: authority registration must be authenticated/authorized. A successful transport connection alone does not grant authority ownership.
-
-** Attack: URI becomes an authorization token
-
-Knowing a URI must never imply read or invoke permission.
-
-Requirement: URI parsing/resolution finds the responsible authority. The destination service still performs its own capability/resource authorization.
-
-** Attack: StarRouter becomes a god-service
-
-If StarRouter begins interpreting documents, StarIntel permissions, CouchDB state, target semantics, and provider-specific payloads, it becomes another application server.
-
-Requirement: StarRouter owns identity parsing, authority registration/resolution, route selection, bounded protocol metadata, transport adaptation, and routing outcomes. Domain semantics remain with the destination authority.
-
-** Attack: transport semantics get flattened
-
-ZeroMQ, RabbitMQ, and HTTP have materially different delivery semantics. A single protocol object must not imply they are interchangeable for every operation.
-
-Requirement: the STAR application protocol is transport-neutral, but every operation declares or selects a transport profile compatible with its required durability/replay/open-world semantics.
-
-** Attack: FediWatch switches to RabbitMQ but still loses progress
-
-RabbitMQ can durably deliver targets and outputs, but FediWatch currently keeps watcher membership and =lastMessage= in memory. Moving only the socket transport would not make collection state crash-safe.
-
-Requirement: the FediWatch implementation design must define restart-safe target/watch reconstruction and checkpoint persistence separately from Rabbit transport.
-
-** Attack: FediWatch ACKs too early
-
-If FediWatch ACKs an incoming target/work item before durable output publication or required state transition, a crash can lose work.
-
-Requirement: manual ACK timing must correspond to the operation's ownership transfer. Durable output publication must use publisher confirms or an equivalent proven handoff.
-
-** Attack: old actor URIs are silently reinterpreted
-
-The old syntax contains =domain:address:actor-name=. The new syntax contains authority + path. There is no universally correct authority derivable from an arbitrary old URI.
-
-Requirement: legacy migration requires an explicit mapping/configured authority. Do not silently invent one from =domain= or =address=.
-
-* ADARD Recommendation
-
-** One STAR identity namespace
-
-Generalize =star://= into a hierarchical authority/resource URI family:
+For actors, the generic form is:
 
 #+begin_example
-star://<authority>/<kind>/<resource-path>
+star://<authority>/actor/<actor-resource-path>
 #+end_example
 
-Initial closed resource kinds should include at least:
-
-- =actor=
-- =service=
-- =document=
-- =target=
-- =dataset=
-- =relation=
-- =job=
-
-The exact list is a protocol-versioned registry, not an arbitrary free-form path convention.
-
-** Actor identity becomes explicitly namespaced
-
-Preferred canonical form:
+not:
 
 #+begin_example
 star://<authority>/actor/<domain>/<actor-name>
 #+end_example
 
-Example:
+as a fixed protocol grammar.
+
+A deployment may choose =/actor/quasar/user-hunt= as a useful hierarchy, but =quasar= is simply one path segment interpreted by that authority. The STAR URI library should expose segments/path, not resurrect =domain= and =address= slots.
+
+** Legacy StarLang URI is compatibility input only
+
+The old form remains parseable only as a bounded legacy input:
 
 #+begin_example
-star://ingest.starintel.actor/actor/quasar/user-hunt
+star://domain:address:actor-name
 #+end_example
 
-The old runtime address component should leave canonical identity. Runtime location belongs in StarRouter's route registration/directory, not the actor URI.
+It is not a template for the new URI.
 
-** starintel-gserver owns an authority
+Migration requires an explicit authority and an application-owned mapping from the old tuple to a new resource path. There is intentionally no universal mapping such as =domain -> first actor path segment= because that would preserve the exact old design by another spelling.
 
-A running StarIntel gserver registers one configured logical authority with StarRouter. Example names are illustrative only:
+Conceptually:
+
+#+begin_src lisp
+(migrate-legacy-star-uri legacy
+                         :authority "gserver.starintel.actor"
+                         :resource-uri "star://gserver.starintel.actor/actor/user-hunt")
+#+end_src
+
+The caller or migration manifest supplies the target identity. The generic library validates and canonicalizes it.
+
+** StarRouter should route authority first
+
+For concrete STAR destinations, STAR-SERVER-040 route selection gains one deterministic prefix:
 
 #+begin_example
-gserver.starintel.actor
-ingest.starintel.actor
+parse RFC-based STAR URI
+  -> authority
+  -> authority registration
+  -> resource path / capability match
+  -> eligible authority instance
+  -> transport profile from STAR-SERVER-040
+  -> forward canonical operation
 #+end_example
 
-The authority can own paths such as:
+StarRouter owns parsing, authority registration/lease resolution, and routing. It does not own StarIntel document semantics or final application authorization.
+
+** starintel-gserver should own its own authority
+
+A StarIntel gserver deployment registers one configured stable STAR authority. Under that authority it can own resources such as:
 
 #+begin_example
-/document/<id>
-/target/<id>
-/dataset/<id>
-/relation/<id>
+/document/...
+/target/...
+/dataset/...
+/relation/...
 /service/starintel-mcp
-/actor/<domain>/<actor>
+/actor/...
 #+end_example
 
-The public research does not choose the deployment's production authority name.
+Authority identity is stable across process restart or transport relocation. Runtime instance IDs, generations, ZeroMQ endpoints, RabbitMQ routes, and HTTP listeners stay in registration metadata.
 
-** Define a STAR application protocol above transports
+The full StarIntel MCP can therefore return native STAR resource URIs without inventing a second =starintel:= URI family.
 
-The protocol should have a versioned typed envelope with at least:
+** FediWatch should use RabbitMQ for durable work
 
-- protocol version;
-- message identifier;
-- message class such as request, response, event, control, or cancellation;
-- source STAR URI when meaningful;
-- destination STAR URI;
-- stable operation identifier;
-- correlation and causation identifiers;
-- absolute deadline;
-- idempotency key when defined by the operation;
-- schema/content-type identifier;
-- bounded metadata;
-- authorization/security-context reference, never raw credentials;
-- typed payload;
-- typed result/error algebra.
+The transport audit supports moving FediWatch durable target intake and durable collected output to RabbitMQ.
 
-Transport bindings map that envelope into ZeroMQ frames, RabbitMQ messages, HTTP, or local calls without redefining the operation meaning.
+Reasons:
 
-** Redesign StarRouter around authority routing
+- targets need durable queue ownership and redelivery;
+- actor processing needs explicit ACK/NACK timing;
+- durable findings should publish to =documents.ingest.<dtype>=;
+- publisher confirms and idempotent output IDs provide a recoverable boundary;
+- StarRouter PUB/SUB liveness is not equivalent to broker persistence or settlement.
 
-StarRouter becomes the STAR identity/control-plane router:
+FediWatch may still have a STAR URI for identity, routed status/control, discovery, or provenance. Identity and durable work transport are separate concerns.
+
+RabbitMQ alone does not fix FediWatch restart state. Watch membership and feed cursors must become durable or reconstructable.
+
+* ADARD Attack
+
+** Attack: RFC-shaped syntax while preserving the old semantics
+
+A design like:
 
 #+begin_example
-parse STAR URI
-  -> validate protocol/version
-  -> resolve authority registration
-  -> enforce router-level route/registration policy
-  -> select one compatible registered route instance
-  -> select/pin compatible transport binding
-  -> forward bounded request
-  -> normalize routing outcome
+star://authority/actor/domain/actor-name
 #+end_example
 
-It is not the persistence layer and not the final StarIntel authorization authority.
+becomes defective if the protocol declares segment 2 to be a mandatory old =domain= field. That is merely the old tuple moved into slashes. The corrected design treats everything after =/actor/= as an actor resource path owned by the actor naming contract.
 
-** Keep RabbitMQ as the durable StarIntel actor/dataflow plane
+** Attack: authority as physical host
 
-FediWatch should migrate its durable work/data path to the existing starintel-server RabbitMQ external-actor contract:
+If authority is treated as a TCP host/port, moving a service changes object identity and transports leak into references. The authority must be a logical namespace owner whose current routes are resolved by StarRouter.
 
-#+begin_example
-persisted StarIntel target
-  -> actors.fediwatch.new.target
-  -> durable FediWatch queue
-  -> FediWatch collector
-  -> documents.ingest.<dtype>
-  -> StarIntel ingest consumer
-  -> CouchDB
-#+end_example
+** Attack: authority implies authorization
 
-FediWatch may retain/register a STAR actor/service identity for control, discovery, status, provenance, or future direct requests. That identity does not require its durable document pipeline to traverse ZeroMQ.
+Knowing or successfully routing =star://authority/document/x= does not authorize reading it. The destination authority must still apply application authorization.
 
-** Carry STAR identity across RabbitMQ without replacing the document contract
+** Attack: one transport for every semantic class
 
-RabbitMQ messages can include safe STAR identity/provenance fields or headers such as source and logical destination. The body remains the canonical StarIntel document/target contract where that is already authoritative.
+ZeroMQ request/reply and RabbitMQ durable queues have different guarantees. STAR-SERVER-040 correctly keeps transport bindings explicit. FediWatch durable dataflow should not be forced through ZeroMQ merely because STAR URIs are transport-neutral.
 
-Do not wrap every document in a second incompatible universal envelope merely to claim protocol uniformity.
+** Attack: automatic legacy mapping
 
-* Recommended Design Questions
+The old actor tuple does not contain a general new authority/resource identity. Automatic field-preserving rewrites would create false canonical identities. Migration must be explicit.
 
-The design pass should freeze:
+* ADARD Recommend
 
-1. URI ABNF and canonicalization rules;
-2. closed v1 resource-kind vocabulary and extension rules;
-3. legacy actor-URI compatibility/migration behavior;
-4. authority registration descriptor and conflict/lease semantics;
-5. STAR request/result envelope and result algebra;
-6. capability discovery versus concrete URI routing;
-7. ZeroMQ, RabbitMQ, HTTP, and local binding semantics;
-8. router authorization versus destination authorization;
-9. starintel-gserver authority registration and resource ownership;
-10. FediWatch queue/binding, manual ACK, publisher-confirm, idempotency, and checkpoint rules;
-11. cross-language Common Lisp/Nim conformance fixtures;
-12. interaction with the full StarIntel MCP and future A2A agent.
+1. Keep STAR-SERVER-040 as the canonical approved StarRouter transport/API design.
+2. Rework STAR-SERVER-041 around RFC 3986 authority + hierarchical path semantics.
+3. Define =star://<authority>/<resource-kind>/<resource-path>= as the canonical identity family.
+4. Treat the path after =/actor/= as a resource path, not fixed old =domain/address/name= fields.
+5. Make the reusable URI library expose RFC components and normalized segments rather than actor-specific tuple slots.
+6. Require explicit legacy migration targets instead of a universal old-to-new rewrite.
+7. Add authority-owned prefix registration to StarRouter while retaining STAR-SERVER-040 registration leases/generation/transport semantics.
+8. Give =starintel-gserver= its own stable logical authority.
+9. Keep FediWatch durable targets/findings on RabbitMQ, with durable/reconstructable checkpoint state.
+10. Reuse the same STAR URI library from StarLang, StarRouter, StarIntel MCP, Meta MCP, and future A2A tooling.
 
-* Research Verdict
+* Sources
 
-The current evidence supports the operator's direction.
-
-- The actor-only STAR URI should be redesigned, not worked around with a second resource URI scheme.
-- StarRouter should become authority-aware and protocol-driven.
-- starintel-gserver should attach as an authority rather than being hard-coded into the router.
-- ZeroMQ should remain the preferred low-latency routed-request binding, not the definition of STAR semantics.
-- FediWatch's durable target and document path should use RabbitMQ.
-- RabbitMQ migration alone is insufficient; restart-safe watch/checkpoint state remains a separate implementation requirement.
+- [[file:../star-lang/STAR-LANG-004-star-service-uri-discovery.org][STAR-LANG-004 STAR Service URI Discovery and Dispatch]]
+- [[file:../../design/star-server/STAR-SERVER-040-starrouter-zeromq-transport-api-overhaul.org][STAR-SERVER-040 StarRouter ZeroMQ Transport and API Overhaul]]
+- [[file:STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040 StarRouter ZeroMQ Transport and API Overhaul]]
+- Current =lost-rob0t/star-lang= =star-actor-protocol/src/service-uri.lisp= implementation.
+- Current =lost-rob0t/starRouter= protocol/client/server source.
+- Current =lost-rob0t/fediWatch= =src/fediWatch.nim= implementation.
+- Current =lost-rob0t/starintel-server= =docs/messaging.org= external actor and RabbitMQ contract.
+- [[https://www.rfc-editor.org/rfc/rfc3986][RFC 3986 — Uniform Resource Identifier (URI): Generic Syntax]].
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/137][ADARD issue #137]].
 
 * Footnotes and Glossary
 
-- *STAR URI* — A canonical =star://= identifier. This research proposes generalizing it from actor-only identity to authority-scoped resources and services.
-- *Authority* — The logical namespace owner/resolution boundary in a STAR URI. It is not automatically an HTTP host or transport endpoint.
-- *StarRouter* — The StarIntel routing component proposed to resolve STAR authorities and forward versioned STAR protocol operations through compatible transports.
-- *Transport binding* — A mapping from transport-neutral STAR protocol semantics to a concrete carrier such as ZeroMQ, RabbitMQ, HTTP, or an in-process call.
-- *Durable dataflow* — Messaging where the system must retain/retry work across process or broker failure, using explicit ownership-transfer semantics such as RabbitMQ acknowledgements and publisher confirms.
-- *Publisher confirm* — RabbitMQ broker acknowledgement that the broker/queue side has accepted responsibility for a published message according to the configured durability semantics.
-- *Consumer acknowledgement* — Explicit consumer indication that a delivered RabbitMQ message has been processed and the broker may release it.
+- *RFC 3986* — The Internet standard defining generic URI syntax, including scheme, authority, path, query, fragment, percent-encoding, and reference resolution rules.
+- *Authority* — The logical owner/resolver of the namespace following =star://=; it is not itself proof of authorization and is not required to be a transport endpoint.
+- *Resource kind* — The reviewed first path segment identifying the broad STAR resource class, for example =document= or =actor=.
+- *Resource path* — The ordered hierarchical path segments following the resource-kind segment. Their application meaning is owned by the resource contract rather than the generic URI parser.
+- *Legacy actor URI* — The old =star://domain:address:actor-name= syntax retained only for bounded compatibility input.
+- *Durable dataflow* — RabbitMQ-backed distributed target/document/event flow with acknowledgement, retry, settlement, and queue durability semantics.

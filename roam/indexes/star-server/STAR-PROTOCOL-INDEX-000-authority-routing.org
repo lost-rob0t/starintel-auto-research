@@ -2,9 +2,9 @@
 :ID:       starintel-star-protocol-index-000
 :END:
 #+title: STAR-PROTOCOL-INDEX-000 STAR Authority Routing Protocol
-#+description: Project index for the approved StarRouter transport/API design, approved RFC 3986 star:// authority/resource URI extension, starintel-gserver authority attachment, and FediWatch RabbitMQ migration.
+#+description: Project index for the approved StarRouter transport/API design, approved RFC 3986 star:// authority/resource URI extension, amended StarLang URI projection, starintel-gserver authority attachment, and FediWatch RabbitMQ migration.
 #+status: ACTIVE
-#+filetags: :starintel:index:star-protocol:starrouter:uri:rfc3986:authority:routing:rabbitmq:fediwatch:
+#+filetags: :starintel:index:star-protocol:starrouter:uri:rfc3986:authority:routing:rabbitmq:fediwatch:star-lang:
 #+created: [2026-08-24 Mon]
 #+last_modified: [2026-08-24 Mon]
 
@@ -12,7 +12,7 @@
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Index maintenance | StarIntel operator | PENDING | Review that this index reflects the canonical protocol graph after STAR-SERVER-041 approval | [[https://github.com/lost-rob0t/starintel-auto-research/issues/130][#130]], [[https://github.com/lost-rob0t/starintel-auto-research/issues/137][#137]], linked nodes |
+| Index maintenance | StarIntel operator | PENDING | Review that this index reflects the canonical protocol graph after STAR-SERVER-041 approval and STAR-LANG-004 amendment | [[https://github.com/lost-rob0t/starintel-auto-research/issues/130][#130]], [[https://github.com/lost-rob0t/starintel-auto-research/issues/137][#137]], linked nodes |
 | Publication | Auto-Research maintainer | PENDING | Main-branch Pages workflow succeeds | Public site after deployment |
 
 Index state does not itself grant implementation approval.
@@ -23,20 +23,22 @@ This index connects the canonical STAR routing stack:
 
 1. approved STAR-SERVER-040 transport/API architecture;
 2. completed RFC 3986 STAR URI research and approved STAR-SERVER-041 extension;
-3. the legacy StarLang actor URI predecessor;
+3. amended STAR-LANG-004 projection of the shared URI protocol into StarLang manifests/runtime, with the old actor tuple retained only as compatibility input;
 4. approved starintel-gserver authority ownership design;
-5. approved FediWatch RabbitMQ durable actor/dataflow design.
+5. approved FediWatch RabbitMQ durable actor/dataflow design;
+6. follow-on domain-server work that must use authority/resource routing rather than fixed URI =domain/address= fields.
 
 * Canonical Research
 
 - [[file:../../research/star-server/STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040 StarRouter ZeroMQ Transport and API Overhaul]] — research basis for the approved router design.
 - [[file:../../research/star-server/STAR-RESEARCH-041-unified-star-uri-authority-routing-and-fediwatch-rabbitmq.org][STAR-RESEARCH-041 Unified STAR URI Authority Routing and FediWatch RabbitMQ]] — DONE; RFC 3986 and FediWatch recommendations approved by the operator.
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-014-bbp-tool-domain-remoting.org][STAR-LANG-RESEARCH-014 BBP Tool Domain Remoting]] — historical domain-server/remoting prototype; registration and routing sections require revision against STAR-SERVER-041 before promotion as current domain-server architecture.
 
 * Canonical Design
 
 - [[file:../../design/star-server/STAR-SERVER-040-starrouter-zeromq-transport-api-overhaul.org][STAR-SERVER-040 StarRouter ZeroMQ Transport and API Overhaul]] — *APPROVED by operator on 2026-08-24*; evidence [[https://github.com/lost-rob0t/starintel-auto-research/issues/130#issuecomment-5390887105][issue #130 approval]].
 - [[file:../../design/star-server/STAR-SERVER-041-star-uri-authority-routing-protocol.org][STAR-SERVER-041 RFC 3986 STAR URI Authority Routing Extension]] — *APPROVED by operator on 2026-08-24*; evidence [[https://github.com/lost-rob0t/starintel-auto-research/issues/137#issuecomment-5391071152][issue #137 approval]].
-- [[file:../../design/star-lang/STAR-LANG-004-star-service-uri-discovery.org][STAR-LANG-004 STAR Service URI Discovery and Dispatch]] — implemented legacy actor-only URI predecessor; compatibility source, not the semantic template for new URIs.
+- [[file:../../design/star-lang/STAR-LANG-004-star-service-uri-discovery.org][STAR-LANG-004 STAR Service URI Discovery and Dispatch]] — amended StarLang projection of STAR-SERVER-041. It owns manifest/runtime/deterministic-dispatch integration; the old =star://domain:address:actor-name= parser is compatibility-only and no longer defines canonical URI syntax.
 
 * Current Architecture
 
@@ -57,6 +59,10 @@ star://authority/resource-kind/resource-path
 
 Authority registrations map stable STAR authorities/resource prefixes
 onto current runtime instances and transport profiles.
+
+StarLang consumes the same URI value/fixtures for actor and service manifests.
+Local runtime directories may resolve exact canonical actor URIs; cross-process
+resolution delegates to StarRouter instead of creating a second distributed registry.
 
 starintel-gserver owns its own configured STAR authority.
 
@@ -93,6 +99,8 @@ star://domain:address:actor-name
 
 is accepted only through bounded compatibility/migration code. Migration requires an explicit new target URI or mapping.
 
+For domain servers, =domain-server= is a StarLang runtime/supervision concept, not a URI grammar component. A domain server may claim its own authority or operate under an explicitly delegated prefix of another authority.
+
 * Dependency and Implementation Order
 
 #+begin_example
@@ -102,7 +110,11 @@ STAR-SERVER-040 APPROVED
                 |
                 +--> reusable STAR URI RFC 3986 conformance fixtures/library
                 |       |
-                |       +--> StarLang legacy compatibility + new emitters
+                |       +--> amended STAR-LANG-004 migration
+                |       |       +--> new actor/service manifest emitters
+                |       |       +--> local runtime-directory integration
+                |       |       +--> legacy tuple compatibility only
+                |       |       +--> domain-server authority fixtures
                 |       +--> StarRouter authority/prefix registration
                 |       +--> StarIntel MCP resource URIs
                 |       +--> future Meta MCP / A2A consumers
@@ -119,6 +131,8 @@ Implementation slices remain gated by the separate security review, implementati
 - authority claim trust root and credential/delegation mechanism;
 - final global resource-kind registry extension process;
 - exact starintel-gserver production authority name;
+- exact independent-versus-delegated authority policy for each domain server deployment;
+- revised domain-server v2 registration, heartbeat, capability advertisement, and control protocol aligned with STAR-SERVER-040/041;
 - concrete FediWatch checkpoint persistence implementation choice;
 - security review of canonicalization, authority delegation, and confused-deputy boundaries;
 - downstream implementation ownership and exact-head conformance evidence.
@@ -130,6 +144,7 @@ Implementation slices remain gated by the separate security review, implementati
 | 2026-08-24 | Created project index for STAR URI/protocol authority routing and FediWatch RabbitMQ work. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-auto-research/issues/137][#137]] |
 | 2026-08-24 | Recorded operator approval of STAR-SERVER-040 and replaced the old-semantics URI direction with the RFC 3986 hierarchical authority/resource model. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-auto-research/issues/130#issuecomment-5390887105][#130 approval]], [[https://github.com/lost-rob0t/starintel-auto-research/issues/137#issuecomment-5390887569][#137 clarification]] |
 | 2026-08-24 | Recorded operator approval of STAR-SERVER-041, including canonicalization/registration, starintel-gserver authority integration, and FediWatch RabbitMQ/checkpoint architecture. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-auto-research/issues/137#issuecomment-5391071152][#137 approval]] |
+| 2026-08-24 | Indexed the STAR-LANG-004 amendment: StarLang now consumes the shared RFC URI protocol, keeps the old actor tuple only for compatibility, delegates cross-process authority routing to StarRouter, and treats domain servers as authority/delegation consumers rather than URI =domain= fields. | GPT-5.6 Sol | [[file:../../design/star-lang/STAR-LANG-004-star-service-uri-discovery.org][STAR-LANG-004 amendment]]; [[file:../../design/star-server/STAR-SERVER-041-star-uri-authority-routing-protocol.org][STAR-SERVER-041]] |
 
 * Footnotes and Glossary
 
@@ -137,4 +152,5 @@ Implementation slices remain gated by the separate security review, implementati
 - *Authority* — Stable logical owner/resolver of a STAR namespace, independent from its current network endpoint.
 - *Resource path* — Hierarchical segments following the resource-kind segment, interpreted by the owning resource contract.
 - *Compatibility input* — A legacy syntax accepted for migration but not emitted as the new canonical identity.
+- *Domain server* — Independently supervised StarLang runtime/domain boundary that may claim a STAR authority or operate beneath an explicit delegated prefix.
 - *Durable dataflow* — RabbitMQ-backed distributed work/document/event flow with settlement and retry semantics.

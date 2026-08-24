@@ -2,17 +2,18 @@
 :ID:       starintel-auto-research-meta-mcp-execution-plane-006
 :END:
 #+title: STAR-RESEARCH-006 StarIntel Meta MCP Execution Plane Analysis
-#+description: Research a library-first Common Lisp execution plane that composes SearXNG, YaCy, external search MCPs, and the authoritative StarIntel MCP while reserving autonomous research for a future A2A agent.
-#+status: REVIEW
-#+filetags: :starintel:research:auto-research:mcp:search:common-lisp:a2a:searxng:yacy:
+#+description: Completed research for a library-first Common Lisp Meta MCP that composes SearXNG, external search/fetch MCPs, the local YaCy-backed search index through SearXNG, and the authoritative StarIntel MCP while reserving autonomous research for a future A2A agent.
+#+status: DONE
+#+filetags: :starintel:research:auto-research:mcp:search:common-lisp:a2a:searxng:yacy:done:
 #+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research findings | StarIntel operator | PENDING | Review primary-source findings, boundaries, and negative evidence | This document and cited sources |
-| Library-first direction | StarIntel operator | PENDING | Confirm reusable Common Lisp libraries precede the final Meta MCP package | Recommendation section |
+| Research findings | StarIntel operator | APPROVED | Review primary-source findings, boundaries, and negative evidence | GitHub issue 133 comment 5390218938 |
+| Library-first direction | StarIntel operator | APPROVED | Confirm reusable Common Lisp libraries precede the final Meta MCP package | GitHub issue 133 comment 5390218938 |
+| Search/fetch-only Meta boundary | StarIntel operator | APPROVED | Confirm crawl is removed entirely from Meta MCP | GitHub issue 133 comment 5390218938 |
 | Publication | StarIntel auto-research maintainer | PENDING | Main-branch Pages workflow succeeds and the page resolves | Public site after deployment |
 
 No approval row authorizes infrastructure deployment or StarIntel topology changes.
@@ -23,80 +24,68 @@ No approval row authorizes infrastructure deployment or StarIntel topology chang
 - [[file:STAR-RESEARCH-002-deep-research-execution-adapter-analysis.org][STAR-RESEARCH-002 Deep Research Execution Adapter Analysis]]
 - [[file:../star-lang/STAR-LANG-RESEARCH-019-common-lisp-library-gap-analysis.org][STAR-LANG-RESEARCH-019 Common Lisp Library Gap Analysis]]
 - [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-005-starintel-meta-mcp-execution-plane.org][STAR-RESEARCH-PIPELINE-005 StarIntel Meta MCP Execution Plane]]
-- GitHub issue 133: https://github.com/lost-rob0t/starintel-auto-research/issues/133
+- Operator decision: https://github.com/lost-rob0t/starintel-auto-research/issues/133#issuecomment-5390218938
 
 * Research Question
 
-How should StarIntel expose one small Model Context Protocol[fn:mcp] information-retrieval surface over self-hosted search, archival crawl/indexing, external search MCPs, and the full StarIntel service without creating a tool explosion, duplicating provider results, or placing autonomous research reasoning inside an MCP tool?
+How should StarIntel expose one small Model Context Protocol[fn:mcp] information-retrieval surface over self-hosted search, external search/fetch MCPs, retained local web search, and the full StarIntel service without creating a tool explosion, duplicating provider results, or placing autonomous research reasoning inside an MCP tool?
 
-The implementation constraint is library-first Common Lisp[fn:common-lisp]: protocol, client, server, execution-plan, provider, result, provenance, and fusion behavior must live in reusable ASDF systems. The final StarIntel Meta MCP is a consumer package in the same monorepo, not the first place those semantics are implemented.
+The implementation constraint is library-first Common Lisp[fn:common-lisp]: protocol, client, server, execution-plan, provider, result, provenance, and fusion behavior must live in reusable ASDF systems. The final StarIntel Meta MCP is a consumer package in the same monorepo.
 
 * Assess
 
 ** MCP protocol direction
 
-The released MCP 2026-07-28 revision makes the protocol core stateless, removes the old protocol-level session model, uses per-request metadata, and makes tool discovery cacheable. Streamable HTTP remains a single POST endpoint; the transport requires Origin validation and recommends proper authentication. Long-running operations can use the Tasks extension, where a tool call may return a task handle and clients later get, update, or cancel the task.[fn:mcp-release][fn:mcp-http][fn:mcp-tasks]
+The current MCP direction supports a reusable client/server library boundary, Streamable HTTP transport, capability discovery, cancellation, and bounded tool execution.[fn:mcp-release][fn:mcp-http]
 
-This supports a Meta MCP that performs bounded search immediately while materializing deterministic long-running crawl work as MCP tasks.
+The Meta design does not need autonomous behavior inside an MCP tool. Search and fetch are bounded primitives that can be planned and executed deterministically.
 
 ** SearXNG and YaCy
 
-SearXNG exposes an HTTP search API with JSON output when enabled. It has a native YaCy engine and supports YaCy =search_mode= values =global= and =local=; local mode restricts results to the configured local YaCy instance. SearXNG also has a generic JSON engine suitable for integrating additional HTTP search APIs.[fn:searx-api][fn:searx-yacy][fn:searx-json]
+SearXNG exposes an HTTP search API with JSON output when enabled. It has a native YaCy engine and supports local YaCy search, so the local YaCy index can participate in federated retrieval without making YaCy a second model-visible tool surface.[fn:searx-api][fn:searx-yacy]
 
-The implication is a clean split:
-
-- SearXNG owns broad metasearch and can include the local YaCy index for search.
-- Direct YaCy integration remains useful for crawl/index control because SearXNG is not the crawl control plane.
-- Meta must track physical provider identity so a source queried through SearXNG and again through an upstream MCP is not counted as independent corroboration.
+The corrected design does not add direct crawl/index control to Meta MCP. YaCy is relevant here only as a retained local search source reachable through the approved search path.
 
 ** External search MCPs
 
-The official Brave Search MCP exposes web, local/place, image, video, news, LLM-context, and summarization capabilities over STDIO or HTTP.[fn:brave-mcp]
+The official Brave Search MCP exposes multiple search/fetch-oriented capability classes. Exa exposes a compact search/fetch-oriented surface, and Tavily demonstrates that upstream MCPs may expose broader capabilities than Meta should adopt.[fn:brave-mcp][fn:exa-mcp][fn:tavily-mcp]
 
-The Exa MCP currently defaults to =web_search_exa= and =web_fetch_exa=, offers a more advanced search tool optionally, and deprecates several older provider-specific tools in favor of the smaller search/fetch surface.[fn:exa-mcp]
-
-The Tavily MCP exposes search, extract, map, and crawl operations and supports a remote MCP endpoint with OAuth or API-key authentication.[fn:tavily-mcp]
-
-These are evidence that Meta should compile semantic requests onto provider capabilities instead of mirroring every upstream tool name into the client-visible surface.
+The architectural conclusion is to compile semantic Meta requests onto reviewed provider capabilities instead of mirroring every upstream tool name into the client-visible surface.
 
 ** Common Lisp MCP ecosystem
 
-Current Common Lisp MCP implementations are useful references but do not justify coupling StarIntel to one upstream implementation without a conformance gate.
+Current Common Lisp MCP implementations are useful references but do not justify coupling StarIntel to one implementation without conformance testing.
 
-- =40ants/mcp= provides server-side MCP infrastructure, STDIO and Streamable HTTP, JSON-schema-backed tools, and OpenRPC foundations, while its documented client side remains incomplete and its public roadmap still references older protocol work.[fn:40ants-mcp]
-- =cl-ai-project/cl-mcp= is a mature Common Lisp MCP server for REPL/development tooling with STDIO, TCP, and Streamable HTTP, worker isolation, tests, and Nix packaging; its product purpose is a trusted development server rather than a reusable Meta search execution plane.[fn:cl-mcp]
-- Other Common Lisp MCP projects demonstrate protocol extraction and server patterns, but the official MCP SDK list for 2026-07-28 does not include Common Lisp.[fn:mcp-sdks]
+- =40ants/mcp= provides server-side MCP infrastructure, transports, schema-backed tools, and OpenRPC foundations.[fn:40ants-mcp]
+- =cl-ai-project/cl-mcp= demonstrates Common Lisp MCP server, transport, worker-isolation, test, and Nix patterns.[fn:cl-mcp]
+- Common Lisp is not currently an official MCP SDK language, so StarIntel should treat protocol conformance as an explicit library responsibility rather than assuming an official SDK supplies it.[fn:mcp-sdks]
 
-The appropriate response is not a bespoke one-file server. StarIntel should build reusable Common Lisp protocol/client/server libraries behind conformance fixtures, borrowing upstream code or dependencies where evidence supports it.
+The proper implementation shape is reusable Common Lisp protocol/client/server and execution libraries first, with =starintel-meta-mcp= layered above them.
 
 ** Existing StarIntel boundary
 
-The current StarIntel server already advertises documents, search, targets, views, and a capabilities endpoint. The Meta plane must not learn CouchDB, Clouseau, or other persistence internals directly. A full StarIntel MCP should be the authoritative MCP boundary for StarIntel operations, including authorization and resource scope. Meta consumes that MCP like another capability provider.
+The current StarIntel server already owns documents, search, persistence, authorization, and platform behavior. Meta must not learn CouchDB, Clouseau, or persistence internals directly. A full StarIntel MCP is the authoritative MCP boundary for StarIntel operations, authorization, and resource scope.
 
-* Design Hypothesis
+Meta consumes the StarIntel MCP like another capability provider.
 
-The stable client-visible Meta surface should begin with:
+* Design Finding
+
+The approved client-visible Meta surface is:
 
 #+begin_example
 search(...)
 fetch(...)
 #+end_example
 
-and add:
+There is no =crawl(...)= tool in PIPELINE-005.
 
-#+begin_example
-crawl(...)
-#+end_example
+There is also no =research(...)= Meta tool. Research requires iterative reasoning, branch selection, gap analysis, evidence review, and stopping criteria. That belongs to a future StarIntel Agent exposed through Agent2Agent[fn:a2a].
 
-after bounded task semantics and crawl policy are implemented.
-
-=research(...)= is deliberately excluded. Research requires iterative reasoning, branch selection, gap analysis, evidence review, and stopping criteria; that belongs to a future StarIntel Agent exposed through Agent2Agent[fn:a2a]. A2A 1.0 models remote agents through Agent Cards, stateful Tasks, Messages, and output Artifacts, and explicitly separates task outputs from conversational messages.[fn:a2a-spec]
-
-The future StarIntel Agent can use both Meta MCP and the full StarIntel MCP:
+The future agent can use both Meta MCP and the full StarIntel MCP:
 
 #+begin_example
 StarIntel A2A Agent
-  -> Meta MCP: search / fetch / crawl
+  -> Meta MCP: search / fetch
   -> StarIntel MCP: full authorized platform abilities
 #+end_example
 
@@ -104,70 +93,69 @@ StarIntel A2A Agent
 
 ** Tool explosion
 
-Directly re-exporting every upstream MCP produces provider-coupled tool names and increases model context. It also makes adding or removing a backend a client-visible breaking change.
+Directly re-exporting every upstream MCP produces provider-coupled tool names, larger model context, and client-visible churn when providers change.
 
-Countermeasure: expose semantic Meta tools and keep provider capabilities internal.
+Countermeasure: expose semantic =search= and =fetch= tools and keep provider capabilities internal.
 
 ** False corroboration
 
-Calling Brave through SearXNG and Brave MCP separately can return the same underlying source family twice. The same problem applies to YaCy if it is searched both through SearXNG and directly.
+Calling Brave through SearXNG and Brave MCP separately can return the same underlying source family twice. The same problem applies to any provider reachable through multiple adapters.
 
-Countermeasure: normalized results must distinguish adapter, physical provider/origin, source URL or document identity, retrieval time, and content hash. Fusion must deduplicate by source identity before confidence or ranking logic.
+Countermeasure: normalized results distinguish adapter identity, physical provider/origin, source locator or document identity, retrieval time, and content hash. Fusion deduplicates provider origin before ranking or confidence interpretation.
 
 ** Confused deputy
 
-If Meta receives broad StarIntel credentials and then accepts a narrower caller request, it can accidentally act with more authority than the caller intended.
+If Meta receives broad StarIntel credentials and accepts a narrower caller request, it could accidentally act with more authority than the caller intended.
 
-Countermeasure: the full StarIntel MCP remains authoritative for capability and dataset/resource scope. Meta must propagate or exchange caller authority rather than translating =scope=intel= into unrestricted service authority.
+Countermeasure: the full StarIntel MCP remains authoritative for capability and dataset/resource scope. Meta propagates or exchanges caller authority rather than interpreting =scope=intel= as unrestricted service authority.
 
 ** God-service drift
 
-Once Meta can call StarIntel MCP, there is pressure to expose create, mutate, dispatch, delete, and ingest operations through Meta.
+Once Meta can call StarIntel MCP, there is pressure to expose mutations and platform actions through Meta.
 
 Countermeasure: Meta remains an information execution plane. Full StarIntel actions stay on StarIntel MCP. The future A2A agent may compose both services when an autonomous task legitimately needs them.
 
-** Crawl ambiguity
+** Scope creep into crawling
 
-Crawl can mean temporary traversal, archival indexing, or canonical intelligence ingestion.
+Adding crawl to Meta would turn a small retrieval facade into a larger acquisition/index-control service and introduce additional retention, task, network-policy, and ingest-boundary questions before the core search/fetch plane is proven.
 
-Countermeasure: define crawl as bounded traversal/indexing only. Canonical StarIntel ingest remains a separate StarIntel operation. A crawl may produce references or artifacts suitable for later ingest but must not silently promote data into StarIntel.
+Countermeasure: crawl is removed from PIPELINE-005 entirely. Any future crawling capability would require a new research/design track rather than silently expanding this approved Meta contract.
 
 ** Library fragmentation
 
 Implementing protocol parsing, provider adapters, result normalization, and ranking directly inside =starintel-meta-mcp= would make the final package unusable as general Common Lisp LLM tooling.
 
-Countermeasure: every stable semantic boundary becomes a reusable ASDF system first; the application package wires them together.
+Countermeasure: stable semantic boundaries become reusable ASDF systems first; the application package wires them together.
 
-* Recommend
+* Recommendation
 
-Proceed to design review with the following boundaries:
+The approved recommendation is:
 
 1. Build reusable Common Lisp libraries for MCP protocol/types, MCP client, MCP server, capability/provider registration, execution-plan representation and execution, normalized search results/provenance, fusion/deduplication, HTTP provider adapters, and MCP-provider adapters.
 2. Keep provider selection deterministic and capability-based initially. Do not introduce Prolog-RLM or an LLM planner into the execution plane without later evidence that ordinary code is insufficient.
-3. Treat SearXNG as the broad metasearch front end and search the local YaCy index through SearXNG when appropriate; use a direct YaCy adapter for crawl/index operations.
-4. Treat Brave, Exa, Tavily, and future MCPs as capability providers. Track physical provider identity independently from adapter identity.
+3. Treat SearXNG as the broad metasearch front end and include the local YaCy index through SearXNG where appropriate.
+4. Treat Brave, Exa, Tavily, and future MCPs as capability providers, but adopt only reviewed search/fetch capabilities. Track physical provider identity independently from adapter identity.
 5. Build the full StarIntel MCP as the authoritative platform interface; Meta calls it rather than bypassing it.
-6. Start Meta with =search= and =fetch=. Add =crawl= as a bounded MCP Task-capable primitive after the execution/task contract is proven.
-7. Reserve =research= for the future StarIntel A2A agent, which can compose Meta MCP and StarIntel MCP and return research outputs as A2A Artifacts.
-8. Keep infrastructure placement, network topology, credentials, and deployment-specific routing out of this public design. Those details belong in downstream infrastructure RAGE work after design approval.
+6. Meta exposes =search= and =fetch= only.
+7. Do not implement crawl as part of this Meta MCP design or roadmap.
+8. Reserve =research= for the future StarIntel A2A agent, which composes Meta MCP and StarIntel MCP and returns research outputs as A2A Artifacts.
+9. Keep infrastructure placement, network topology, credentials, and deployment-specific routing out of public design material. Those details belong in downstream infrastructure RAGE work.
 
-* Decide
+* Decision
 
-Research decision: advance =STAR-RESEARCH-PIPELINE-005 StarIntel Meta MCP Execution Plane= to operator review. This is a research recommendation, not implementation approval.
+Research decision: DONE and approved. =STAR-RESEARCH-PIPELINE-005 StarIntel Meta MCP Execution Plane= is approved with the operator correction that Meta is search/fetch-only and contains no crawl tool or crawl implementation phase.
 
-The design must preserve the library-first rule: the final Meta MCP package contains composition and configuration only; reusable MCP and LLM-tooling semantics live in separate Common Lisp ASDF systems in the same monorepo.
+The library-first rule remains mandatory: the final Meta MCP package contains composition and configuration only; reusable MCP and LLM-tooling semantics live in separate Common Lisp ASDF systems in the same monorepo.
 
 * Sources
 
 Primary and project sources were retrieved on 2026-08-24 UTC.
 
-- MCP 2026-07-28 release: https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/
+- MCP release material: https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/
 - MCP Streamable HTTP: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports
-- MCP Tasks extension: https://tasks.extensions.modelcontextprotocol.io/specification/draft/tasks
 - MCP SDK list: https://modelcontextprotocol.io/docs/sdk
 - SearXNG Search API: https://docs.searxng.org/dev/search_api.html
 - SearXNG YaCy engine: https://docs.searxng.org/dev/engines/online/yacy.html
-- SearXNG JSON engine: https://docs.searxng.org/dev/engines/json_engine.html
 - Brave Search MCP: https://github.com/brave/brave-search-mcp-server
 - Exa MCP: https://github.com/exa-labs/exa-mcp-server
 - Tavily MCP: https://github.com/tavily-ai/tavily-mcp
@@ -175,12 +163,14 @@ Primary and project sources were retrieved on 2026-08-24 UTC.
 - cl-ai-project cl-mcp: https://github.com/cl-ai-project/cl-mcp
 - A2A specification: https://a2a-protocol.org/latest/specification/
 - StarIntel server capabilities: https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-capabilities.lisp
+- Operator approval and correction: https://github.com/lost-rob0t/starintel-auto-research/issues/133#issuecomment-5390218938
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-24 | Added ADARD analysis for a library-first Common Lisp Meta MCP execution plane, crawl boundary, provider deduplication, full StarIntel MCP boundary, and future A2A research agent. | OpenAI research agent under operator direction | Primary sources listed in this document; GitHub issue 133 |
+| 2026-08-24 | Added ADARD analysis for a library-first Common Lisp Meta MCP execution plane, provider deduplication, full StarIntel MCP boundary, and future A2A research agent. | OpenAI research agent under operator direction | Primary sources listed in this document; GitHub issue 133 |
+| 2026-08-24 | Removed crawl from the recommendation and marked the research decision complete and approved for a search/fetch-only Meta MCP. | OpenAI research agent under operator direction | GitHub issue 133 comment 5390218938 |
 
 * Footnotes and Glossary
 
@@ -190,28 +180,22 @@ Primary and project sources were retrieved on 2026-08-24 UTC.
 
 [fn:a2a] Agent2Agent, or A2A: An open protocol for interoperable remote agents that discover skills and exchange tasks, messages, status, and artifacts.
 
-[fn:mcp-release] MCP 2026-07-28 release material describing the stateless protocol core, cacheable discovery, authorization changes, and Tasks extension.
+[fn:mcp-release] MCP release material: Current release documentation used to validate protocol direction and capability boundaries.
 
-[fn:mcp-http] Streamable HTTP: The MCP remote transport using a single HTTP endpoint with one POST per request and request-scoped JSON or SSE responses.
+[fn:mcp-http] Streamable HTTP: The MCP remote transport using an HTTP endpoint with request-scoped responses.
 
-[fn:mcp-tasks] MCP Tasks extension: An extension allowing a tool call to materialize as a durable task that can be polled, updated, or cancelled.
+[fn:searx-api] SearXNG Search API: The HTTP search interface that can return machine-readable results when enabled by server configuration.
 
-[fn:searx-api] SearXNG Search API: The HTTP search interface that can return JSON, CSV, or RSS when enabled by server configuration.
-
-[fn:searx-yacy] SearXNG YaCy engine: The SearXNG backend adapter supporting local or global YaCy search modes.
-
-[fn:searx-json] SearXNG JSON engine: A configurable adapter for external JSON search APIs.
+[fn:searx-yacy] SearXNG YaCy engine: The SearXNG backend adapter supporting local YaCy search.
 
 [fn:brave-mcp] Brave Search MCP: Brave's official MCP server exposing several Brave Search API capability classes.
 
-[fn:exa-mcp] Exa MCP: Exa's MCP server exposing web search, fetch, and optional advanced search capabilities.
+[fn:exa-mcp] Exa MCP: Exa's MCP server exposing web search and fetch capabilities.
 
-[fn:tavily-mcp] Tavily MCP: Tavily's MCP server exposing search, extraction, site mapping, and crawling.
+[fn:tavily-mcp] Tavily MCP: Tavily's MCP server whose broader tool surface demonstrates why Meta should import reviewed capabilities rather than mirror every upstream tool.
 
 [fn:40ants-mcp] 40ANTS MCP: A Common Lisp MCP framework using OpenRPC with server transports and tool registration.
 
-[fn:cl-mcp] cl-ai-project/cl-mcp: A Common Lisp MCP development server with multiple transports and isolated SBCL workers.
+[fn:cl-mcp] cl-ai-project/cl-mcp: A Common Lisp MCP development server demonstrating multiple transports and isolated SBCL workers.
 
-[fn:mcp-sdks] MCP SDK list: The official MCP SDK tier list for the current protocol release; Common Lisp is not currently an official SDK language.
-
-[fn:a2a-spec] A2A 1.0 specification: The released Agent2Agent protocol model defining Agent Cards, stateful Tasks, Messages, Parts, Artifacts, streaming, and discovery.
+[fn:mcp-sdks] MCP SDK list: The official MCP SDK list used to check whether Common Lisp has an official SDK.

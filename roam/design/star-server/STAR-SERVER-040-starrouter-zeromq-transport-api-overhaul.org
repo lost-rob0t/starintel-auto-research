@@ -1,0 +1,473 @@
+:PROPERTIES:
+:ID:       starintel-star-server-040-starrouter-zmq-overhaul
+:END:
+#+title: STAR-SERVER-040 StarRouter ZeroMQ Transport and API Overhaul
+#+description: Human-gated ADADR design for a transport-neutral StarRouter contract with ZeroMQ-first routing, native Common Lisp gserver integration, optional HTTP/RabbitMQ projections, deterministic conformance, and benchmark promotion gates.
+#+status: REVIEW
+#+created: [2026-08-24 Mon]
+#+last_modified: [2026-08-24 Mon]
+#+filetags: :starintel:star-server:starrouter:zeromq:design:adadr:transport:api:gserver:sento:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research direction | StarIntel operator | APPROVED | Explicit approval of broadened StarRouter/ZeroMQ research | [[https://github.com/lost-rob0t/starintel-auto-research/issues/128][operator decision #128]], [[file:../../research/star-server/STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040]] |
+| Architecture design | StarIntel operator | PENDING | Explicit approval of this exact design after adversarial review | [[https://github.com/lost-rob0t/starintel-auto-research/issues/130][design task #130]] |
+| Implementation | Repository maintainer | NOT STARTED | Approved architecture design, implementation-slot promotion, TDD evidence, and green exact-head gates | |
+
+Research approval authorizes this design only. No StarRouter or =starintel-server= implementation may begin from this node while Architecture design is =PENDING=.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-24 | Created the canonical ADADR design and adversarial review for issue #130 from approved STAR-RESEARCH-040. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-auto-research/issues/128][#128]], [[https://github.com/lost-rob0t/starintel-auto-research/issues/130][#130]], [[file:../../research/star-server/STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040]] |
+
+* ADADR Analyze
+
+** Problem
+
+Current StarRouter is an experimental Nim ZeroMQ broker/client whose application protocol, request lifecycle, actor registration, and transport assumptions are coupled. The existing client performs effectively stop-and-wait request/reply, the routing table is ephemeral, protocol evolution is tied to ad-hoc headers/event enums, and Common Lisp gservers do not have a native typed StarRouter API. Meanwhile =starintel-server= has HTTP and RabbitMQ paths with stronger application semantics such as authenticated authority, deadlines, durable outbox publication, target lease fencing, and provenance.
+
+The approved direction is not to replace those semantics with ZeroMQ. It is to make StarRouter the transport-neutral operation boundary and make ZeroMQ the preferred low-latency projection where the requested semantic class permits it.
+
+** Existing authority and constraints
+
+This design consumes rather than supersedes:
+
+- [[file:../../research/star-server/STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040 StarRouter ZeroMQ Transport and API Overhaul]];
+- [[file:STAR-ADR-001-domain-gserver-zmq-approval.org][STAR-ADR-001 Domain GServer and ZeroMQ Approval]];
+- [[file:../cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]];
+- [[file:../cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]].
+
+The following invariants are non-negotiable unless a later separately approved design changes them:
+
+1. one ZeroMQ context per operating-system process;
+2. one exclusive owner for each ZeroMQ socket;
+3. direct Sento mailboxes remain the normal path inside one tightly coupled actor subtree;
+4. transport peers never become application-authorized merely because transport authentication succeeded;
+5. durability, idempotency, target lease fencing, provenance, cancellation, deadlines, and outcome-unknown behavior cannot be weakened by selecting a faster transport;
+6. RabbitMQ durable publication/outbox semantics remain authoritative where durable broker settlement is required;
+7. Titanic owns durable asynchronous job admission, journaled attempts, recovery, and retained results;
+8. no transport-specific foreign object crosses the canonical StarRouter protocol boundary.
+
+** Scope
+
+This design defines the canonical operation model, result/error model, capability model, transport adapter contract, ZeroMQ topology, Common Lisp API, security boundary, lifecycle, migration order, cross-language conformance, and performance gates.
+
+It does not approve implementation, pick a final Common Lisp ZeroMQ binding beyond the already-defined audit gate, replace RabbitMQ durability, replace Titanic's durable job state, or authorize public unauthenticated ZeroMQ exposure.
+
+* ADADR Design
+
+** Layer ownership
+
+#+begin_example
+caller / gserver / CLI / service
+            |
+            v
+   star-router.protocol
+ typed operation/result/capability
+            |
+            v
+    star-router.client
+ bounded async call lifecycle
+            |
+            v
+ star-router.transport protocol
+     /       |        |        \
+ local     ZeroMQ    HTTP    RabbitMQ
+            |
+      ROUTER/DEALER
+
+Titanic is a service above this API when durable jobs are requested.
+Persistence/outbox/lease authority remain application services, not transport features.
+#+end_example
+
+=star-router.protocol= owns only transport-neutral values and validation. =star-router.client= owns request correlation, cancellation state, absolute deadlines, bounded in-flight accounting, route selection, and outcome classification. Transport implementations own framing, connection/session lifecycle, peer authentication, transport-level backpressure, and translation between transport events and the common result algebra.
+
+Application services own authorization policy, persistence, idempotency records, target lease/fencing authority, provenance, and business state.
+
+** Canonical operation envelope
+
+Every operation is represented by a validated immutable record with these required fields:
+
+- =protocol_version=: semantic protocol major/minor;
+- =operation=: stable namespaced operation identifier such as =star.documents.get= or =star.targets.submit=;
+- =request_id=: globally unique request-attempt identifier;
+- =correlation_id=: conversation/parent request identifier when present;
+- =causation_id=: immediate triggering event/request when present;
+- =caller_identity=: application principal/service identity reference, never a bearer secret;
+- =destination=: capability selector or explicitly pinned endpoint identity;
+- =deadline_at=: absolute UTC deadline represented in a canonical integer time unit;
+- =cancellation_id=: stable cancellation handle when cancellation is supported;
+- =idempotency_key=: present for retryable mutation contracts that support replay;
+- =authorization_context_id=: server-owned authority context/receipt reference where required;
+- =trace_id= and provenance/evidence references;
+- =content_schema=: stable schema identifier plus revision/digest policy;
+- bounded typed metadata;
+- typed payload bytes/value.
+
+An adapter may encode fields differently on the wire but may not omit required semantic fields. Transport-generated connection IDs or ZeroMQ routing identities are not caller identity and may never substitute for =caller_identity=.
+
+** Result and error algebra
+
+All transports project onto exactly one terminal result class:
+
+- =ok(payload)=;
+- =invalid(details)=;
+- =unauthorized(details)=;
+- =forbidden(details)=;
+- =not-found(details)=;
+- =no-route(details)=;
+- =conflict(details)=;
+- =stale-authority(details)=;
+- =overloaded(retry-after, boundary)=;
+- =deadline-exceeded(stage)=;
+- =cancelled(stage)=;
+- =dependency-unavailable(details)=;
+- =outcome-unknown(stage, retry-safety)=;
+- =protocol-error(details)=;
+- =internal-error(reference)=.
+
+HTTP status codes, RabbitMQ acknowledgements, and ZeroMQ replies are mappings from this algebra, not independent contracts. A transport disconnect after a mutation was accepted but before the result is observed must become =outcome-unknown= unless application idempotency proves the stored terminal result.
+
+** Cancellation and deadlines
+
+Deadlines are absolute and validated at ingress. Every stage must refuse new side effects once the deadline is expired unless it is completing a previously accepted atomic transition whose semantics require completion.
+
+Cancellation is best-effort before an authoritative side-effect commit and deterministic after a service-specific cancellation point. A cancellation acknowledgement means the cancellation request was observed, not that an already-committed mutation was rolled back.
+
+Adapters must never convert connection closure into proof of cancellation.
+
+** Capability registration and route selection
+
+A capability advertisement contains:
+
+- logical component ID and generation/incarnation;
+- stable capability names and supported operation versions;
+- payload/schema revisions;
+- endpoint/transport profiles;
+- lifecycle/readiness state;
+- bounded load/pressure hints;
+- authorization policy reference, never credentials;
+- lease/ordering/idempotency requirements;
+- registration expiry and monotonically changing generation.
+
+Registrations are leases, not immortal map entries. A route is eligible only while its registration is current and the requested operation/version/schema intersects. Re-registration after restart receives a new generation. Replies or heartbeats carrying an older generation cannot refresh or resurrect a newer registration.
+
+Route selection is deterministic given the same eligible-set snapshot and selector. Stateful/keyed operations use a declared stable routing key; stateless equivalent routes may use round-robin or measured-load selection. Random routing is forbidden for stateful keyed work.
+
+** ZeroMQ-first transport profile
+
+The default addressed request path is DEALER clients to a ROUTER-owned StarRouter service boundary. One client connection supports multiple concurrent requests differentiated by =request_id=. The client must maintain a bounded in-flight table and may not issue beyond configured capacity.
+
+Required ZeroMQ invariants:
+
+- one socket owner; application workers communicate with the socket owner through bounded runtime channels/mailboxes;
+- explicit send/receive high-water marks;
+- bounded multipart/frame count and total bytes;
+- persistent session/socket reuse;
+- correlation by application =request_id= rather than receive order;
+- ROUTER identity is routing metadata only;
+- heartbeat/monitor events update transport liveness but do not extend capability-generation leases without a valid registration refresh;
+- reconnect creates a new transport session and does not silently replay non-idempotent mutations;
+- queue saturation returns/propagates =overloaded= instead of unbounded buffering;
+- peer loss with unobserved mutation result yields =outcome-unknown= unless application reconciliation resolves it.
+
+Profiles:
+
+1. =local=: same-process typed direct call where process ownership and actor boundary permit it; no serialization requirement, but observable result semantics remain identical.
+2. =ipc=: same-host ZeroMQ IPC with peer/process identity policy and filesystem/socket permissions where applicable.
+3. =tcp-private=: authenticated private-network ZeroMQ TCP.
+4. =tcp-remote=: CURVE/ZAP-authenticated and encrypted remote ZeroMQ with explicit application authorization.
+
+=inproc://= is an implementation option only when both endpoints share the same ZeroMQ context and ownership model. It is never used as a fake cross-process transport.
+
+** Native Common Lisp API
+
+The Common Lisp public interface is typed and async-capable. Concrete names may change during implementation, but the capability contract must cover:
+
+- create/start/stop a StarRouter client bound to a runtime/component owner;
+- =call= returning a future/promise/result handle without blocking a dispatcher thread;
+- synchronous =call*= convenience only with mandatory deadline;
+- =cancel= by cancellation ID/request ID;
+- register/renew/unregister capabilities through a component handle;
+- inspect transport/session/route health without exposing raw PZMQ/libzmq pointers;
+- attach trace, principal, authorization-context, deadline, idempotency, lease/fence, and schema information through typed fields.
+
+A Sento actor/gserver sends StarRouter work through a managed component handle. Blocking socket receive loops never run on ordinary actor dispatchers. Socket ownership, polling, and shutdown integrate with Sento managed-component lifecycle and the process thread budget.
+
+** HTTP adapter
+
+HTTP remains an optional gateway. It translates method/path/headers/body into canonical operations after HTTP authentication and input validation, then translates canonical results back to HTTP.
+
+HTTP route names are not canonical operation identity. The same =operation= must be invokable through local/ZeroMQ/HTTP when that operation declares semantic equivalence.
+
+The gateway keeps request body limits, TLS policy, bearer/service authentication, correlation IDs, deadlines, and structured RFC-compatible error projection. It must not become a hidden internal dependency of Common Lisp callers.
+
+** RabbitMQ adapter
+
+RabbitMQ is used only for operations/events that explicitly require broker semantics: durable publication, fan-out, queue ownership, settlement, dead-lettering, or outbox delivery.
+
+The adapter maps canonical envelopes to broker messages while preserving message/idempotency IDs, trace/provenance, authorization receipts where safe, deadlines, target lease/fencing locators, and schema identifiers. Settlement remains owned by the Rabbit connection owner thread.
+
+No claim of transport equivalence may map a durable broker mutation to a volatile ZeroMQ send unless the application service has already durably accepted the operation and can reconcile replay/outcome.
+
+** Titanic integration
+
+Titanic is addressed as canonical StarRouter operations such as submit/status/cancel/result, but the Titanic coordinator remains the authority for durable job state. A ZeroMQ reply confirms Titanic admission/result according to Titanic's own contract; it does not make the ZeroMQ transport a durable queue.
+
+Worker dispatch beneath Titanic may use StarRouter/ZeroMQ only when the journaled attempt state makes replay and worker loss safe.
+
+** Authorization, identity, fencing, and provenance
+
+Transport identity and application identity are separate dimensions.
+
+- ZeroMQ CURVE/ZAP, HTTP TLS/auth, and Rabbit credentials authenticate a transport peer/session.
+- The canonical envelope carries a reference to server-established application identity/authorization context.
+- Application services re-authorize the operation and scope at the authoritative boundary.
+- Raw credentials are never embedded in canonical payloads or persisted provenance.
+- Target lease IDs/fencing tokens remain locators/assertions; current server-owned lease authority must be resolved before side effects.
+- Fenced writes must perform authority check and side-effect commit atomically or through the already-approved fenced-intent/outbox design; a ZeroMQ preflight followed by an unconditional write is forbidden.
+- Provenance/trace IDs survive every adapter projection.
+
+** Version and compatibility contract
+
+Protocol major version changes only for incompatible envelope/result semantics. Minor versions are additive. Operations are independently versioned where behavior evolves.
+
+A session begins with capability/version negotiation. Unknown required envelope fields, unsupported major versions, unknown operations, or incompatible schema revisions fail explicitly. Optional additive fields are ignored only when the negotiated compatibility policy says they are safe.
+
+The old =SC01=/=SR01= and fixed Nim event enum become a legacy adapter, not the new protocol authority. During migration, legacy clients may run through an adapter that converts supported operations to the canonical model. Legacy-only semantics that cannot be represented safely are rejected rather than silently approximated.
+
+** Cross-language conformance
+
+The protocol repository must carry language-neutral fixtures for Common Lisp, Nim, Python, and JavaScript clients maintained by StarIntel. Fixtures include:
+
+- canonical operation/result objects;
+- byte-level encoded frames for the selected wire codec;
+- malformed/oversize/unknown-version cases;
+- deadline/cancellation races;
+- multiplexed out-of-order replies;
+- reconnect with idempotent retry versus mutation outcome-unknown;
+- capability generation expiry/stale registration;
+- overload/high-water-mark behavior;
+- authorization identity separation;
+- target stale-fence rejection;
+- HTTP/RabbitMQ/ZeroMQ projections where equivalence is claimed.
+
+Each implementation must decode canonical fixtures and re-encode the canonical byte form or an explicitly normalized equivalent. Cross-language tests compare semantic JSON/object diffs plus exact bytes where the codec declares canonical encoding.
+
+** Performance and promotion gates
+
+No speed claim is accepted from microbenchmarks that bypass schema validation, authorization-context handling, correlation, serialization, or result decoding used in production.
+
+The benchmark harness records machine profile, OS/kernel, libzmq/binding/runtime versions, payload fixture, warmup, sample count, concurrency, socket HWM, transport profile, and commit SHA.
+
+Required measurements:
+
+- p50/p95/p99/p99.9 end-to-end latency;
+- throughput at concurrency 1, 8, 32, 128 and saturation;
+- CPU time/request;
+- allocation/GC indicators per runtime where available;
+- bytes/frames/copies where observable;
+- reconnect recovery and outcome classification time;
+- overload onset/recovery;
+- IPC versus TCP loopback;
+- Common Lisp versus Nim/Python reference peer results;
+- representative control, small document, and large document payloads.
+
+Promotion to ZeroMQ-first defaults requires all semantic conformance tests green and a measured improvement over the current HTTP path for request/reply workloads. Initial quantitative gate: on the same machine/fixture, p99 latency must improve by at least 2x or throughput by at least 2x at matched concurrency without increasing terminal error rate, memory growth, or queue bound violations. If neither threshold is met, ZeroMQ may remain supported but does not become the default solely on architectural preference.
+
+Binary codecs, batching, reduced-copy paths, and frame compaction are later optimizations. They require semantic equivalence first and separate benchmark evidence.
+
+** Lifecycle and shutdown
+
+StarRouter transport components are managed resources. Startup validates thread/socket budgets, config, security profile, supported protocol versions, and endpoint conflicts before advertising readiness.
+
+Shutdown order:
+
+1. stop new route admission/registration;
+2. mark component draining and reject new calls with bounded retry metadata;
+3. finish/cancel in-flight requests within deadline;
+4. stop registration renewal;
+5. stop socket pollers/owners;
+6. close sockets with explicit bounded linger policy;
+7. terminate the process-owned ZeroMQ context only after all owned sockets are closed;
+8. remove component handles and join only owned threads.
+
+Repeated start/stop must not leak sockets, contexts, threads, registrations, or pending promises.
+
+** Migration plan
+
+Phase 0: freeze language-neutral fixtures for currently relied-on StarRouter behavior and record current HTTP/Rabbit request benchmark baselines.
+
+Phase 1: implement =star-router.protocol= and fake/in-memory transport in isolation; run semantic conformance before libzmq work.
+
+Phase 2: implement the Common Lisp managed transport boundary using the approved PZMQ audit outcome and SENTO-ZMQ lifecycle rules; prove socket ownership, cancellation, reconnect, and bounded in-flight behavior.
+
+Phase 3: update Nim StarRouter as a protocol peer/adapter rather than protocol authority; add Python/JavaScript fixture peers.
+
+Phase 4: project selected =starintel-server= read-only/idempotent operations over StarRouter ZeroMQ first. Keep HTTP compatibility aliases.
+
+Phase 5: migrate mutations only when idempotency/outcome-unknown/fencing/provenance tests prove semantic parity with current authoritative paths.
+
+Phase 6: integrate Titanic operations and optional RabbitMQ bridges without moving durable state into StarRouter.
+
+Phase 7: benchmark exact production paths. Promote ZeroMQ-first defaults only when the quantitative gate passes.
+
+At every phase the old adapter remains removable and bounded. No phase requires a flag day.
+
+* ADADR Adversarial Review
+
+** Attack: hidden HTTP dependency
+
+Counterexample: Common Lisp =call= constructs an internal HTTP URL because existing server request wrappers already exist.
+
+Decision: reject. The core client targets the transport protocol and typed operation registry directly. HTTP is an adapter selected only when configured.
+
+** Attack: hidden RabbitMQ durability dependency
+
+Counterexample: a ZeroMQ mutation returns accepted, but the implementation relies on RabbitMQ to make the request durable although RabbitMQ is disabled in the deployment.
+
+Decision: acceptance semantics must name their durability boundary. If an operation requires durable broker/outbox state, the service either persists before returning accepted or declares RabbitMQ/Titanic as a required capability. ZeroMQ transport alone cannot satisfy durable acceptance.
+
+** Attack: reconnect duplicate mutation
+
+Counterexample: DEALER sends a mutation, server commits it, TCP breaks before reply, client reconnects and blindly retransmits.
+
+Decision: client returns =outcome-unknown=. Automatic replay is permitted only when the operation declares an idempotency contract and the same key can reconcile the stored result.
+
+** Attack: request correlation race
+
+Counterexample: request A times out; its delayed reply arrives after request ID reuse and is delivered to request B.
+
+Decision: request IDs are never reused within the retention horizon. Completed/expired IDs remain tombstoned for a bounded interval. Replies for unknown/tombstoned IDs are discarded and measured, never reassigned by receive order.
+
+** Attack: unbounded multiplexing
+
+Counterexample: DEALER allows asynchronous sends, so a fast producer accumulates millions of pending promises while libzmq queues below the HWM.
+
+Decision: application in-flight capacity is checked before send and is stricter than transport HWM. The boundary returns =overloaded= before allocating an unbounded promise/queue entry.
+
+** Attack: stale capability registration
+
+Counterexample: actor process restarts, old heartbeat races with new registration and keeps old route alive.
+
+Decision: registration generation is monotonic; renewals must match current generation. Old-generation heartbeats cannot mutate the new lease.
+
+** Attack: cancellation ambiguity
+
+Counterexample: caller cancels after server commits persistence but before reply and assumes the document was not stored.
+
+Decision: cancellation has explicit service commit points; post-commit cancellation returns the committed terminal result or =outcome-unknown= with reconciliation instructions, never false =cancelled=.
+
+** Attack: transport identity authorization bypass
+
+Counterexample: CURVE-authenticated peer claims an administrator =caller_identity= in its payload.
+
+Decision: transport identity only selects/validates a server-side principal/authorization context. Caller-supplied principal fields are never trusted as authority. Application authorization resolves the trusted context before side effects.
+
+** Attack: stale fencing token accepted through faster path
+
+Counterexample: ZeroMQ handler validates a lease token, then a newer owner acquires before CouchDB write.
+
+Decision: forbidden TOCTOU. The authoritative side-effect boundary must atomically enforce the current fence or consume a server-owned fenced intent/receipt that is validated as part of the write transition.
+
+** Attack: schema drift across languages
+
+Counterexample: Nim accepts unknown enum value as integer while Common Lisp rejects it; both tests pass locally.
+
+Decision: one language-neutral fixture corpus and normalized semantic diff is mandatory. Unknown required values produce the same typed protocol error everywhere.
+
+** Attack: local transport semantic shortcut
+
+Counterexample: same-process path returns raw Lisp conditions while ZeroMQ returns typed errors.
+
+Decision: local transport is an optimization under the same protocol/result boundary. Raw runtime conditions are normalized before crossing the StarRouter API.
+
+** Attack: benchmark cheats
+
+Counterexample: ZeroMQ benchmark times only send/recv of preencoded bytes while HTTP benchmark includes JSON parsing/auth/schema validation.
+
+Decision: production-path benchmark gate includes identical application validation/auth/result work on both paths and separately reports transport-only microbenchmarks as diagnostics, not promotion evidence.
+
+** Attack: socket shutdown hangs
+
+Counterexample: default ZeroMQ linger waits indefinitely during shutdown with unreachable peers.
+
+Decision: bounded explicit linger and shutdown deadline are mandatory; unresolved requests receive deterministic shutdown/outcome classification.
+
+** Adversarial conclusion
+
+The design survives the required failure cases only if transport remains subordinate to application authority and durability, bounded in-flight admission sits above ZeroMQ HWM, registration generations are leased, and reconnect/cancellation produce explicit =outcome-unknown= where truth cannot be reconstructed. Any implementation that removes one of those constraints is a design contradiction and must return to ADADR rather than be patched around.
+
+* Decision Gate
+
+Architecture design is =PENDING=. Issue [[https://github.com/lost-rob0t/starintel-auto-research/issues/130][#130]] is the operator review surface.
+
+If approved, realization must still begin with the repository's implementation-slot workflow and TDD/benchmark evidence. Approval of this design authorizes only the scope above; it does not automatically authorize unrelated StarRouter, StarIntel Server, RabbitMQ, Titanic, or Sento refactors.
+
+* Realize Plan After Approval
+
+No realization is authorized yet. If the operator explicitly approves this exact design, implementation should be decomposed into dependency-ordered issues/PRs rather than one rewrite:
+
+1. protocol/result/capability model plus fake transport and fixtures;
+2. managed Common Lisp transport client and bounded multiplexing;
+3. ZeroMQ adapter and cross-language peer fixtures;
+4. capability registration/discovery generations;
+5. HTTP projection alignment;
+6. RabbitMQ/Titanic projection alignment where semantics require them;
+7. selected =starintel-server= read-only operations;
+8. mutation/idempotency/fencing migration;
+9. benchmark-driven default promotion.
+
+Each implementation defect begins with a deterministic regression test. Each phase must preserve old compatibility paths until its declared migration gate passes.
+
+* Acceptance and Verification Gates
+
+Before any implementation slice is considered complete:
+
+- all language-neutral protocol fixtures pass in every maintained client;
+- focused TDD regressions are green without skipped/xfail/zero-test bypasses;
+- stale capability generation, deadline, cancellation, reconnect, out-of-order reply, and overload tests pass deterministically;
+- authorization tests prove transport identity cannot forge application authority;
+- stale target fencing is rejected at the authoritative side-effect boundary;
+- bounded in-flight and HWM saturation tests show no unbounded memory/queue growth;
+- lifecycle tests prove clean repeated startup/shutdown and no unrelated-thread joins;
+- HTTP/RabbitMQ equivalence tests pass only for operations that declare equivalence;
+- exact production-path benchmark evidence is attached with machine profile and commit SHA;
+- full repository/Nix/container/integration gates required by the implementation repository pass at exact PR head;
+- GitHub Actions for the exact final head are green before merge.
+
+* Rejected Alternatives
+
+1. *Keep HTTP as the internal canonical API and add ZeroMQ only underneath selected endpoints.* Rejected because it preserves HTTP as a hidden dependency and forces non-HTTP callers through URL/status semantics.
+2. *Replace RabbitMQ broadly with ZeroMQ.* Rejected because broker durability, settlement, replay, and dead-letter semantics are not supplied by ZeroMQ.
+3. *Make the Nim broker implementation the protocol authority.* Rejected because implementation enums/object layout would leak into a multi-language contract and Common Lisp would remain second class.
+4. *One socket per request.* Rejected because it destroys session reuse and multiplexing and increases allocation/handshake overhead.
+5. *Unlimited asynchronous DEALER requests with HWM as the only bound.* Rejected because application promises/metadata can grow before transport pressure is visible.
+6. *Trust CURVE/ZAP identity as application authorization.* Rejected because authenticated transport peers can have narrower application privileges and scope.
+7. *Automatic retry of every disconnected mutation.* Rejected because the first attempt may have committed and duplicate side effects are otherwise possible.
+8. *Adopt a binary codec before semantic fixtures exist.* Rejected because serialization optimization without a stable contract amplifies cross-language drift.
+
+* Sources and Related Nodes
+
+- [[file:../../research/star-server/STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040 StarRouter ZeroMQ Transport and API Overhaul]]
+- [[file:STAR-ADR-001-domain-gserver-zmq-approval.org][STAR-ADR-001 Domain GServer and ZeroMQ Approval]]
+- [[file:../cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]]
+- [[file:../cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/128][Operator research decision #128]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/130][RAGE design task #130]]
+
+* Footnotes and Glossary
+
+[fn:starrouter] StarRouter: the canonical StarIntel routed-operation seam defined here independently of any one language or transport implementation.
+
+[fn:zeromq] ZeroMQ: a message-oriented networking library/protocol family providing ROUTER, DEALER, PUB, SUB, IPC, TCP, in-process, high-water-mark, monitoring, and security mechanisms.
+
+[fn:hwm] High-water mark: ZeroMQ's configured queue threshold. This design requires a stricter application in-flight bound above it.
+
+[fn:outcome-unknown] Outcome unknown: a terminal client classification meaning the caller cannot safely infer whether a mutation committed, usually after transport loss; reconciliation or idempotent replay is required.
+
+[fn:fencing] Fencing token: a monotonically increasing authority generation used to reject stale owners at side-effect boundaries.

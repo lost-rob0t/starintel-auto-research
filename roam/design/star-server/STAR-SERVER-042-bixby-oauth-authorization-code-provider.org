@@ -1,0 +1,260 @@
+:PROPERTIES:
+:ID:       starintel-star-server-design-042
+:END:
+#+title: STAR-SERVER-042 Bixby OAuth Authorization-Code Provider
+#+description: Approved design for StarIntel-owned OAuth authorization-code provider endpoints reusing the existing human-user identity and merged OAuth core for Bixby user account linking.
+#+status: APPROVED
+#+filetags: :starintel:design:star-server:oauth:bixby:authorization:pkce:security:identity:
+#+created: [2026-08-24 Mon]
+#+last_modified: [2026-08-24 Mon]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | StarIntel operator | APPROVED | Approved research and threat model | [[id:starintel-star-server-research-042][STAR-RESEARCH-042]]; [[https://github.com/lost-rob0t/starintel-auto-research/issues/144][#144]] |
+| Architecture design | StarIntel operator | APPROVED | Explicit operator approval to research/design this Bixby auth issue | [[https://github.com/lost-rob0t/starintel-auto-research/issues/144][#144 durable approval record]] |
+| Security boundary | StarIntel operator | APPROVED | Threat model covering redirect, PKCE, code replay, principal confusion, scope escalation, leakage, and guest/user separation | [[id:starintel-star-server-research-042][STAR-RESEARCH-042]] |
+| Implementation | Repository maintainers | NOT STARTED | Implementation-slot promotion, TDD RED/GREEN evidence, exact-head complete suite | starintel-server PR #117 is tests-first RED only |
+| Publication | Auto-Research maintainer | PENDING | Main-branch Pages workflow succeeds | Public site after merge/deployment |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-24 | Created approved OAuth provider design from STAR-RESEARCH-042 and current starintel-server OAuth core/provider tests. | GPT-5.6 Sol | [[id:starintel-star-server-research-042][STAR-RESEARCH-042]]; [[https://github.com/lost-rob0t/starintel-server/pull/117][server PR #117]]; [[https://github.com/lost-rob0t/starintel-auto-research/issues/144][#144]] |
+
+* Context
+
+This design realizes only the missing OAuth provider protocol boundary for =lost-rob0t/starintel-server#111=. OAuth client/token storage, one-time authorization-code primitives, bearer access-token authentication, expiry/revocation, and shared bearer dispatch already exist from merged server PR #115.
+
+The provider supports one StarIntel human identity architecture across both Bixby capsules:
+
+- guest Intelligence: no OAuth token, synthetic public-read authority only;
+- signed-in Intelligence: same capsule features may use a real StarIntel human principal with read/search scopes;
+- Operations: same human principal, additional scopes only for confirmed target/Auto-Dig operations.
+
+No Samsung/Bixby identifier becomes the StarIntel principal.
+
+* Invariants
+
+1. =/oauth/authorize= and =/oauth/token= are publicly routable protocol bootstrapping endpoints, not application-data authorization bypasses.
+2. Every authorization request is validated against an existing OAuth client before user authentication.
+3. =redirect_uri= must equal one registered redirect URI exactly; wildcard, suffix, prefix, and normalization-based matching are forbidden.
+4. Bixby authorization-code clients use PKCE =S256=; =plain= and missing challenge/method fail closed for this provider profile.
+5. Existing StarIntel =human_user= authentication is authoritative. Provider login must not mint or depend on a legacy API key.
+6. Authorization code binds client, exact redirect, StarIntel principal, approved scopes, PKCE challenge/method, issue/expiry state, and one-time consumption state.
+7. The token endpoint authenticates the confidential client where configured and validates grant type, exact redirect, unconsumed/unexpired code, and PKCE verifier before token issuance.
+8. Access-token scope cannot exceed client registration, authorization-code scope, or authenticated principal authorization policy.
+9. Passwords, client secrets, authorization codes after exchange, and bearer tokens are never logged or emitted in diagnostics. The token endpoint is the only route allowed to return a new bearer access token.
+10. Token responses use =Cache-Control: no-store= and =Pragma: no-cache= or equivalent stronger no-cache behavior.
+11. Authenticated/private application responses must be user-partitioned/non-publicly-cacheable. Invalid authenticated requests are never silently retried as guest when private semantics were requested.
+12. Guest public-read and authenticated user-read contexts remain separate application authorization states after OAuth completes.
+
+* HTTP / Protocol Design
+
+** Authorization endpoint
+
+Canonical route:
+
+#+begin_example
+/oauth/authorize
+#+end_example
+
+Accepted protocol inputs for the Bixby client profile:
+
+- =response_type= exactly =code=;
+- =client_id= registered OAuth client ID;
+- =redirect_uri= exact registered URI;
+- =scope= space-delimited requested scopes;
+- =state= opaque client state preserved exactly;
+- =code_challenge= valid PKCE challenge;
+- =code_challenge_method= exactly =S256=.
+
+Request validation happens before credential handling. Invalid client, redirect, response type, scope, or PKCE input must not display/login against StarIntel and must not redirect to an untrusted URI.
+
+After protocol validation, the endpoint authenticates an existing StarIntel human user using the current password-verification primitive. Authentication failure returns a generic client-safe authorization failure without distinguishing user existence or exposing password material.
+
+On success, call the existing OAuth-core authorization-code issuance primitive. Construct the redirect by percent-encoding query values and appending only:
+
+#+begin_example
+code=<one-time-code>&state=<opaque-state>
+#+end_example
+
+No access token, password, client secret, tenant, dataset, or internal service identity appears in the browser redirect.
+
+** Token endpoint
+
+Canonical route:
+
+#+begin_example
+/oauth/token
+#+end_example
+
+Required inputs:
+
+- =grant_type= exactly =authorization_code=;
+- =code= raw one-time authorization code;
+- =client_id=;
+- =client_secret= for the confidential Bixby client profile;
+- =redirect_uri= exact value bound into the authorization code;
+- =code_verifier=.
+
+Exchange order:
+
+#+begin_example
+parse bounded request
+ -> resolve/authenticate client
+ -> validate grant type
+ -> resolve code record by secure verifier/hash
+ -> verify unexpired + unconsumed
+ -> verify client binding
+ -> verify exact redirect binding
+ -> recompute PKCE S256 and compare
+ -> atomically consume code
+ -> issue existing-core OAuth access token
+ -> emit no-store JSON
+#+end_example
+
+The consumption + token issuance boundary must prevent two concurrent exchanges from successfully redeeming the same code. If the existing store primitive already provides this guarantee, reuse it; otherwise fix the owning OAuth-core primitive rather than papering over the race in HTTP code.
+
+Successful JSON shape is standards-shaped and minimal:
+
+#+begin_example
+{
+  "access_token": "<opaque bearer>",
+  "token_type": "Bearer",
+  "expires_in": <seconds>,
+  "scope": "<space-delimited scopes>"
+}
+#+end_example
+
+Add refresh-token fields only if the existing core and lifecycle contract actually support them coherently; do not fabricate refresh behavior in this slice.
+
+* Error Contract
+
+Provider protocol errors remain OAuth-shaped and client-safe. At minimum:
+
+- =invalid_request= — malformed/missing/unsupported protocol input;
+- =invalid_client= — client authentication failure;
+- =invalid_grant= — invalid, expired, consumed, redirect-mismatched, or PKCE-mismatched authorization code;
+- =invalid_scope= — requested scope exceeds client/authorization policy;
+- =unsupported_grant_type= — token grant other than authorization code;
+- =unsupported_response_type= — authorize response type other than code;
+- =access_denied= — user authentication/authorization denied.
+
+Do not include raw exception text, password, client secret, code verifier, bearer token, store key, or internal database error.
+
+* Ownership and Components
+
+=starintel-server= owns:
+
+- HTTP route registration and request parsing;
+- existing human-user authentication invocation;
+- OAuth client lookup and protocol validation;
+- authorization-code issuance/exchange invocation;
+- access-token issuance/authentication via existing OAuth core;
+- error mapping, cache headers, log redaction, and tests.
+
+=starintel-bixby= owns:
+
+- =authorization.bxb= client declaration only after real endpoints/client registration exist;
+- Developer Center secret-key reference, never the secret value;
+- optional-user auth behavior for Intelligence and required auth behavior for Operations;
+- capsule UX/dialog/training and request minimization.
+
+=starintel-infra= owns:
+
+- public TLS ingress to provider routes;
+- deployment secrets/systemd credentials/operator registration values;
+- rate limiting/edge protections/health/deploy validation.
+
+The OAuth provider does not own Bixby capsule models, gateway business translation, Quasar/Auto-Dig state, or a second user database.
+
+* Adversarial Design Review
+
+** Counterexample: validate redirect after login
+
+Rejected. This creates a credential-phishing/open-redirect surface. Client/redirect/response/scope/PKCE validation happens before password handling.
+
+** Counterexample: accept any =*.oauth.aibixby.com= callback
+
+Rejected. A platform-looking host is not client registration. Require exact registered redirect values.
+
+** Counterexample: reuse API-key login as OAuth bootstrap
+
+Rejected. API keys are another credential class and would create unnecessary secret issuance/lifecycle. Authenticate the human user directly through the existing user verifier.
+
+** Counterexample: let failed user auth fall back to guest Intelligence
+
+Rejected at the provider/application boundary. Guest mode is an explicit public path; an attempted signed-in/private request fails closed so auth failure cannot change the meaning of the request.
+
+** Counterexample: token endpoint first checks code then marks it consumed later
+
+Rejected if the store permits concurrent redemption. Code consumption must be atomic with respect to successful exchange.
+
+** Counterexample: use Samsung/Bixby user ID as token subject
+
+Rejected. The OAuth subject is the authenticated StarIntel principal.
+
+** Counterexample: one all-powerful Bixby scope
+
+Rejected. Read/search and target/Auto-Dig controls remain separable; the OAuth core/client registration must prevent scope escalation.
+
+* Decision Gate
+
+** ACCEPTED for realization after canonical Auto-Research merge and implementation-slot promotion. **
+
+The design survives the threat model without requiring a new subsystem. The minimum correct implementation is the provider HTTP surface around already-merged StarIntel identity/OAuth primitives.
+
+Implementation must return to Analyze if any of these assumptions are falsified:
+
+- existing code exchange is not concurrency-safe/one-time;
+- existing human-user verifier cannot authenticate without minting an API key;
+- scope attenuation cannot be enforced at client/code/token boundaries;
+- current server HTTP framework cannot guarantee secret-safe parsing/logging;
+- Samsung's live registration contract requires a provider behavior incompatible with this design.
+
+* TDD / Verification Map
+
+| Acceptance behavior | Required RED before implementation | GREEN evidence |
+|---------------------+------------------------------------+----------------|
+| Public protocol routes | route/public-path assertions fail | OAuth routes mounted without app-data bypass |
+| Exact redirect validation | evil redirect test fails | =invalid_redirect_uri=/safe local equivalent before login |
+| S256-only PKCE | =plain= downgrade test fails | downgrade rejected before login |
+| Existing-user authentication | provider authorize function missing/fails | valid user gets code redirect; wrong password denied |
+| State preservation | redirect assertion fails | exact state is percent-encoded and round-trips |
+| No password leakage | secret-in-location/error assertion | no password/client secret in redirect/error/log fixtures |
+| One-time exchange | replay test fails | first exchange succeeds, second =invalid_grant= |
+| Bearer token response | token handler missing | access token/token type/expiry/scope returned |
+| No-store token response | cache-header assertion fails | no-store + no-cache headers |
+| Wrong client/redirect/verifier | negative cases fail | all fail closed without token issuance |
+| Scope escalation | excess-scope test fails | requested/token scopes remain attenuated |
+| Cross-user isolation | principal fixture fails | subject and downstream authorization remain canonical StarIntel user |
+| Full regression | repository complete suite | exact-head unit/integration/container/security gates green |
+
+Current server PR #117 already supplies the first provider RED contract and must remain tests-first until this design is canonically merged/promoted.
+
+* Realize Order
+
+1. Merge this Auto-Research research/design/index change after canonical documentation gates are green.
+2. Promote this design through =scripts/implement.py= so the implementation slot records the authorized design.
+3. Reconcile =starintel-server= master and PR #117 against any changes since its immutable start.
+4. Preserve current RED provider tests; add missing negative tests before production code where needed.
+5. Implement the smallest provider functions/routes around existing OAuth core.
+6. Run focused OAuth tests, full Lisp suite, security/smoke/container gates, and exact-head GitHub Actions.
+7. Merge server PR only with expected-head protection and satisfied reviews/discussions.
+8. Keep server issue #111 open until real Bixby client registration/endpoint contract needed by #11/#7 is sufficient, then continue capsule auth work.
+
+* Related Nodes
+
+- [[id:starintel-star-server-research-042][STAR-RESEARCH-042 Bixby OAuth Authorization-Code Provider]]
+- [[id:starintel-star-oauth-index-042][STAR-OAUTH-INDEX-042 Bixby User Authorization]]
+
+* Footnotes and Glossary
+
+- *Provider endpoint* — Public HTTP protocol boundary implementing OAuth authorization and token exchange; public reachability does not bypass protocol validation.
+- *Exact redirect binding* — Requirement that the redirect URI equal one registered value and the same value be bound into authorization code and token exchange.
+- *Authorization context* — Server-owned representation of authenticated principal plus scopes/tenant/dataset constraints used by downstream policy.
+- *Scope attenuation* — Rule that delegated credentials can only retain or reduce authority, never gain scopes absent from client/principal authorization.
+- *Implementation slot* — Auto-Research workflow state that promotes one approved design at a time into active realization for a project.

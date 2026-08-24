@@ -1,0 +1,183 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-042
+:END:
+#+title: STAR-RESEARCH-042 Bixby OAuth Authorization-Code Provider
+#+description: ADADR research for a StarIntel-owned OAuth 2 authorization-code provider supporting Bixby guest and signed-in user modes without creating a parallel identity system.
+#+status: DONE
+#+filetags: :starintel:research:star-server:oauth:bixby:authorization:pkce:security:identity:
+#+created: [2026-08-24 Mon]
+#+last_modified: [2026-08-24 Mon]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research scope | StarIntel operator | APPROVED | Explicit operator authorization to research/design the Bixby auth issue | [[https://github.com/lost-rob0t/starintel-auto-research/issues/144][issue #144 durable approval record]] |
+| Dual-mode user architecture | StarIntel operator | APPROVED | Guest Intelligence plus signed-in StarIntel users; Operations reuses the same user identity | [[https://github.com/lost-rob0t/starintel-auto-research/issues/144][issue #144]] |
+| Threat-model scope | StarIntel operator | APPROVED | Explicit requirement to threat-model the auth design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/144][issue #144]] |
+| Implementation | Repository maintainers | NOT STARTED | Approved design, implementation-slot promotion, TDD evidence, and exact-head green gates | Draft server PR #117 remains tests-first RED |
+| Publication | Auto-Research maintainer | PENDING | Main-branch Pages workflow succeeds | Public site after merge/deployment |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-24 | Created current-source OAuth/Bixby research and threat model for starintel-server #111 / PR #117. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-auto-research/issues/144][#144]]; current Samsung Bixby docs; current starintel-server PR #117 |
+
+* ADADR Analyze
+
+** Product requirement
+
+StarIntel Bixby needs two authority modes, not an anonymous-only capsule and not a capsule-wide service identity:
+
+1. Guest Intelligence executes only against the server-owned synthetic public-read authority.
+2. Signed-in Intelligence represents a real StarIntel human principal and receives only that principal's read/search authority.
+3. Operations reuses the same StarIntel human identity and requests stronger target/Auto-Dig scopes only where required.
+
+Samsung identity is not StarIntel identity. A Bixby account link is a client relationship to StarIntel's authorization server, not a replacement user database.
+
+** Current Samsung/Bixby facts, retrieved 2026-08-24
+
+The current Bixby authorization reference still defines root-level =authorization.bxb= as optional and supports =user { oauth2-authorization-code (...) { ... } }= with concrete authorize endpoint, token endpoint, client ID, optional scope, and a =client-secret-key= reference. The client-secret key names a secret stored in Bixby Developer Center rather than a secret committed to capsule source.
+
+The current Capsule Configuration reference confirms OAuth client secrets belong in Developer Center Configuration & Secrets. Dynamic configuration values can be consumed by local JavaScript, while =endpoints.bxb= cannot consume those dynamic values directly.
+
+Current Bixby dialog documentation includes explicit Authorization and NoAuth dialog states, so account linking/auth failure is a first-class conversational state rather than an application-specific error hack.
+
+Current Bixby HTTP guidance confirms external servers must be publicly reachable. The existing StarIntel capsule's local JavaScript boundary remains useful because it can construct the minimum outbound request and avoid forwarding unrelated ambient Bixby context.
+
+The exact redirect URI accepted for a real capsule is a client-registration value and must be copied from the actual Developer Center/OAuth registration workflow during the manual Samsung gate. The provider design therefore validates an exact pre-registered redirect URI and does not derive or wildcard callback hosts.
+
+** Current StarIntel facts
+
+OAuth credential/token core is already merged in =lost-rob0t/starintel-server= PR #115. The merged implementation provides OAuth client records, authorization-code issuance/exchange primitives, OAuth access-token records, bearer-token authentication, expiry/revocation semantics, scope constraints, and shared bearer dispatch alongside legacy API keys.
+
+Draft PR #117 is intentionally tests-first RED and adds only provider-contract tests. Its current contract requires public protocol paths =/oauth/authorize= and =/oauth/token= while preserving fail-closed client/redirect/scope/PKCE validation; existing human-user password authentication; state-preserving redirect; one-time code exchange; bearer JSON; and =Cache-Control: no-store=.
+
+The missing work is therefore the HTTP/provider protocol boundary, not another token store or identity system.
+
+* Security Assets and Trust Boundaries
+
+Protected assets:
+
+- StarIntel human identity and user authorization context;
+- OAuth client registration and redirect allowlist;
+- client secret;
+- authorization code and PKCE verifier/challenge;
+- access token and refresh/revocation state where supported;
+- user-private tenant/dataset visibility;
+- public-reader boundary;
+- security/audit logs and HTTP caches.
+
+Trust boundaries:
+
+#+begin_example
+Bixby user / browser
+  -> public StarIntel OAuth authorize endpoint
+  -> StarIntel human-user authentication
+  -> one-time authorization code
+  -> registered Bixby redirect
+  -> Bixby token exchange client
+  -> public StarIntel OAuth token endpoint
+  -> StarIntel OAuth core
+  -> bearer access token
+  -> StarIntel authorization-aware API/gateway
+#+end_example
+
+The browser-facing authorize endpoint and protocol token endpoint are public network routes, but public routing does not mean authorization bypass. Every OAuth request remains constrained by registered client, redirect, scope, grant, PKCE, code lifetime, and user identity rules.
+
+* ADADR Adversarial Review
+
+** Open redirect / redirect substitution
+
+Failure mode: attacker supplies an arbitrary =redirect_uri= and receives an authorization code.
+
+Required defense: resolve the client first, require byte-for-byte equality with one registered redirect URI before user authentication or redirect construction, and never permit wildcard/subdomain matching.
+
+** Authorization-code interception and replay
+
+Failure mode: stolen code is exchanged by another client or exchanged twice.
+
+Required defense: authorization code binds client ID, redirect URI, principal, scopes, PKCE challenge/method, expiry, and one-time consumed state. Exchange is atomic/fail-closed. Repeated exchange returns =invalid_grant= without revealing whether another actor consumed it.
+
+** PKCE downgrade
+
+Failure mode: attacker changes =S256= to =plain= or omits the verifier requirement.
+
+Required defense: Bixby authorization-code clients use S256-only policy; unsupported/plain challenge methods fail before login. Token exchange recomputes S256 over the verifier and compares to the stored challenge.
+
+** CSRF / login swap
+
+Failure mode: opaque client =state= is lost, normalized incorrectly, or attacker-controlled data is reflected unsafely.
+
+Required defense: preserve the exact opaque state value across the authorize response and percent-encode it as a query value. StarIntel does not interpret state as identity or authorization data.
+
+** Client impersonation
+
+Failure mode: wrong client exchanges a code or a leaked client ID is treated as sufficient authentication.
+
+Required defense: confidential-client token exchange validates the registered client secret through the existing secret-hash boundary; the client secret never appears in redirects, logs, errors, or returned structures.
+
+** Scope escalation
+
+Failure mode: authorize request or token exchange asks for scopes not granted to the registered client or user.
+
+Required defense: requested scopes must be a subset of registered client scopes and the resulting token must not exceed both the authorization code and authenticated principal policy. Intelligence read/search and Operations mutation scopes stay distinguishable.
+
+** Principal confusion / cross-user access
+
+Failure mode: Bixby/Samsung user identifiers or request fields become StarIntel identity; token from user A accesses user B resources.
+
+Required defense: only the StarIntel OAuth subject/principal resolved by the provider becomes the application identity. Normal StarIntel authorization applies tenant/dataset/resource constraints after bearer authentication.
+
+** Silent authenticated-to-guest downgrade
+
+Failure mode: expired/revoked token request intended for private data silently retries anonymously and returns public results, masking authorization failure or changing semantics.
+
+Required defense: explicit private/user-required actions fail closed on invalid authentication. Guest fallback is permitted only when the caller selected/issued a guest-compatible public request before an authenticated-private requirement existed.
+
+** Secret/token leakage
+
+Failure mode: password, client secret, code, or bearer token appears in access logs, exception bodies, fixtures, URLs, or shared caches.
+
+Required defense: passwords/client secrets are POST body inputs at the trusted provider boundary and are never interpolated into errors; token responses use no-store and no-cache semantics; redirects contain only one-time authorization code plus opaque state; authorization values are redacted from request logs.
+
+** Public route confusion
+
+Failure mode: adding =/oauth/authorize= and =/oauth/token= to auth-public-paths bypasses protocol validation or grants application data authority.
+
+Required defense: auth-public-paths only bypasses pre-existing API bearer middleware so OAuth can bootstrap. The OAuth handlers themselves are mandatory security boundaries and produce no StarIntel application data.
+
+* ADADR Conclusion
+
+The inherited direction survives adversarial review with one key constraint: StarIntel must own the OAuth provider and reuse the merged OAuth core plus existing =human_user= authentication. Bixby is a registered client. No Bixby-only auth database, API-key-to-OAuth shim, global capsule credential, or Samsung-ID-as-principal mapping is acceptable.
+
+The minimal provider surface is:
+
+- =GET/POST /oauth/authorize= semantics: validate protocol request first, authenticate existing StarIntel human user, issue a short-lived one-time code, redirect only to the exact registered URI with percent-encoded =code= and =state=;
+- =POST /oauth/token=: authorization-code grant only for this slice, validate confidential client, exact redirect, one-time code, expiry, PKCE S256 verifier, then issue an OAuth bearer token from the existing core;
+- protocol errors are client-safe and never expose secrets;
+- token-bearing/private responses are never publicly cached.
+
+* Sources
+
+- [[https://corp.bixbydevelopers.com/dev/docs/reference/type/authorization][Bixby Developer Center — authorization]] (retrieved 2026-08-24).
+- [[https://corp.bixbydevelopers.com/dev/docs/reference/capsule-config][Bixby Developer Center — Capsule Configuration]] (retrieved 2026-08-24).
+- [[https://corp.bixbydevelopers.com/dev/docs/reference/dialog-modes/dialog-events][Bixby Developer Center — Dialog Events]] (retrieved 2026-08-24).
+- [[https://corp.bixbydevelopers.com/dev/docs/sample-capsules/samples/http][Bixby Developer Center — HTTP API Calls]] (retrieved 2026-08-24).
+- [[https://www.rfc-editor.org/rfc/rfc6749][RFC 6749 — OAuth 2.0 Authorization Framework]].
+- [[https://www.rfc-editor.org/rfc/rfc7636][RFC 7636 — Proof Key for Code Exchange by OAuth Public Clients]].
+- [[https://www.rfc-editor.org/rfc/rfc9700][RFC 9700 — Best Current Practice for OAuth 2.0 Security]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/111][starintel-server #111]].
+- [[https://github.com/lost-rob0t/starintel-server/pull/117][starintel-server PR #117]].
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/144][Auto-Research #144]].
+
+* Footnotes and Glossary
+
+- *Authorization code* — Short-lived one-time credential delivered through the browser redirect and exchanged by the registered OAuth client for an access token.
+- *PKCE* — Proof Key for Code Exchange, binding an authorization request to a later token exchange through a challenge/verifier pair.
+- *S256* — PKCE method using SHA-256 over the verifier before base64url encoding.
+- *OAuth client* — Registered external application allowed to request StarIntel user authorization within configured redirects and scopes.
+- *Human principal* — Canonical StarIntel user identity authenticated by StarIntel, distinct from Samsung/Bixby identity.
+- *Synthetic public reader* — Server-owned principal/context used only for the deliberate public Intelligence surface.
+- *Fail closed* — Refuse the operation when identity, redirect, scope, token, PKCE, or protocol state cannot be proven valid.

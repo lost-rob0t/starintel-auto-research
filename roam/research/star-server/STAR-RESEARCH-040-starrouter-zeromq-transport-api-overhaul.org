@@ -1,0 +1,294 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-040
+:END:
+#+title: STAR-RESEARCH-040 StarRouter ZeroMQ Transport and API Overhaul
+#+description: Approved research direction for rebuilding StarRouter as StarIntel's transport-neutral, ZeroMQ-first routing seam with a native Common Lisp gserver API, optional HTTP and RabbitMQ adapters, and measurable latency/throughput goals.
+#+status: REVIEW
+#+created: [2026-08-23 Sun]
+#+last_modified: [2026-08-24 Mon]
+#+filetags: :starintel:star-server:starrouter:zeromq:zmq:api:gserver:sento:routing:performance:transport:research:org-roam:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research direction | StarIntel operator | APPROVED | Explicit approval of broadened ZeroMQ/StarRouter research scope | [[https://github.com/lost-rob0t/starintel-auto-research/issues/128][issue #128]] |
+| Architecture design | StarIntel operator | NOT STARTED | RAGE/ADADR design derived from this research and explicit operator design approval | [[https://github.com/lost-rob0t/starintel-auto-research/issues/128][issue #128]] |
+| Implementation | Repository maintainer | NOT STARTED | Approved design, TDD evidence, implementation-slot promotion, and green exact-head gates | |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-24 | Reframed the earlier Titanic-only ZeroMQ direction into a StarRouter transport, Common Lisp API, and performance overhaul; recorded operator research approval and separate design gate. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-auto-research/issues/128][operator decision #128]], current =starRouter= source, existing SENTO-ZMQ research/design |
+
+* Decision Summary
+
+The earlier Titanic research was directionally correct but too narrow. ZeroMQ[fn:zeromq] is not merely a worker transport beneath one durable-job subsystem. The approved research direction is to make StarRouter[fn:starrouter] the canonical transport-neutral routing and request contract for StarIntel, with ZeroMQ as the preferred low-latency transport wherever the required semantics can be expressed safely.
+
+The target architecture should make these deployment shapes normal:
+
+#+begin_example
+Common Lisp gserver
+      |
+      v
+ StarRouter API
+      |
+      +--> in-process/local direct seam when safe
+      +--> ZeroMQ IPC/TCP ROUTER/DEALER
+      +--> HTTP gateway adapter when wanted
+      +--> RabbitMQ adapter/event bridge when wanted
+      +--> Titanic durable-job coordinator when durable jobs are wanted
+#+end_example
+
+HTTP and RabbitMQ remain useful integrations. They stop being mandatory dependencies for operations that only need StarRouter's canonical request/routing semantics.
+
+This research approval authorizes a RAGE/ADADR design pass. It does not authorize implementation. The resulting design requires separate operator approval before code changes begin.
+
+* Research Questions
+
+1. What should the canonical StarRouter operation and result model be if HTTP, RabbitMQ, and ZeroMQ are projections rather than separate application programming interfaces?
+2. Which operations can use ZeroMQ directly without weakening durability, authorization, fencing, idempotency, provenance, or recovery semantics?
+3. How should Common Lisp gservers call StarRouter without shelling out to a Nim process or depending on HTTP?
+4. Which existing StarRouter implementation choices dominate latency, allocation, copying, and throughput?
+5. What explicit transport profiles are required for local process, same-host inter-process communication[fn:ipc], trusted local-area network, and remote authenticated deployment?
+6. Which semantics belong to StarRouter itself versus Sento/cl-gserver, Titanic, RabbitMQ, HTTP, or persistence services?
+
+* Current StarRouter Findings
+
+The existing =lost-rob0t/starRouter= repository already identifies itself as a ZeroMQ messaging broker, but explicitly warns that it is not alpha quality and should not be exposed directly to the web. The current implementation is a Nim service rather than a stable cross-language protocol authority.
+
+** Existing topology
+
+The current client opens two ZeroMQ sockets:
+
+- a =DEALER= socket for API requests;
+- a =SUB= socket for subscriptions.
+
+The server binds:
+
+- a =ROUTER= socket for addressed client traffic;
+- a =PUB= socket for multicast traffic.
+
+This is a useful starting topology, not a sufficient API contract.
+
+** Wire shape
+
+Current requests are multipart messages with separate frames for header, source, identifier, timestamp, event type, topic, and a JSON payload. The payload can use Nim =json= or optional =jsony=. The protocol exposes a fixed =EventType= enum and two string headers, =SC01= and =SR01=.
+
+The implementation itself contains a =TODO protobuffs man= comment, which correctly points at the larger issue: serialization, framing, compatibility, and versioning need to be designed as one protocol rather than optimized one parser at a time.
+
+** Request path is effectively stop-and-wait
+
+=emit= sends one multipart request and immediately waits for one response on the =DEALER= socket. That removes much of the concurrency advantage available from DEALER/ROUTER because callers cannot naturally keep multiple request identifiers in flight through one connection.
+
+The overhaul should therefore research correlation-based multiplexing with bounded outstanding requests, explicit deadlines, cancellation, and backpressure rather than preserving one-send/one-wait sequencing as the universal client contract.
+
+** Router logic is not yet a durable protocol authority
+
+The current server keeps an in-memory actor table and performs simple round-robin actor selection. Heartbeats mutate liveness counters. Broker-to-broker behavior is a TODO. The routing contract does not yet define durable capability registration, authorization identity, request deadlines, cancellation, idempotency, structured error algebra, retries, reconnect semantics, or compatibility negotiation.
+
+There is also duplicated message-dispatch logic in =handleMessage= after the =try/finally= block, which is exactly the kind of implementation accident a protocol rewrite should make observable through deterministic conformance tests instead of encoding into clients.
+
+* Existing Approved ZeroMQ Foundation
+
+This work should not invent a second ZeroMQ architecture. The existing approved StarIntel research/design stack already selects ZeroMQ for process and language boundaries:
+
+- [[file:../../design/star-server/STAR-ADR-001-domain-gserver-zmq-approval.org][STAR-ADR-001 Domain GServer and ZeroMQ Approval]];
+- [[file:../../design/cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]];
+- [[file:../cl-gserver/SENTO-000-zeromq-transport-analysis.org][SENTO-000 ZeroMQ Transport Analysis]];
+- [[file:../cl-gserver/SENTO-ZMQ-RESEARCH-001-pzmq-binding-audit.org][SENTO-ZMQ-RESEARCH-001 PZMQ Binding Audit]].
+
+The StarRouter refresh should consume that foundation and make it usable as the higher-level application routing protocol.
+
+* Protocol Direction
+
+** One canonical operation envelope
+
+The design should define one transport-independent request object containing at minimum:
+
+- protocol/schema version;
+- operation or capability identifier;
+- request identifier;
+- correlation and causation identifiers;
+- caller/service identity reference;
+- destination capability or concrete endpoint when pinned;
+- absolute deadline;
+- cancellation identity;
+- idempotency key where the operation is replayable;
+- authorization/security context reference, never raw credentials;
+- trace/provenance identifiers;
+- content type/schema identifier;
+- bounded metadata;
+- typed payload.
+
+The result model should define:
+
+- success with typed payload;
+- rejected/unauthorized;
+- invalid request;
+- not found/no capable route;
+- conflict/stale authority;
+- overloaded/backpressured;
+- deadline exceeded;
+- cancelled;
+- dependency unavailable;
+- outcome unknown;
+- internal protocol/runtime error.
+
+HTTP status codes, RabbitMQ settlement, and ZeroMQ reply frames should map onto this common result algebra rather than defining three different meanings.
+
+** ZeroMQ first, not ZeroMQ only
+
+ZeroMQ should be available for request/reply, service calls, actor/gserver commands, capability routing, status queries, local administration where authorization permits, and other routing operations whose semantics do not require another transport's durability model.
+
+RabbitMQ remains appropriate for durable brokered events, fan-out, queues, existing outbox publication, and workflows that need broker settlement semantics.
+
+HTTP remains appropriate as a browser/tool/public integration gateway.
+
+Titanic remains appropriate for durable asynchronous jobs with retained result lookup and crash-recoverable attempt state.
+
+The design must never pretend that replacing RabbitMQ with ZeroMQ also supplies broker durability, or that replacing HTTP with ZeroMQ removes authentication/authorization requirements.
+
+* Native Common Lisp and GServer Boundary
+
+Common Lisp must not be a second-class client.
+
+The design should expose a stable Common Lisp StarRouter library usable directly by =starintel-server= and cl-gserver/Sento components. The public Common Lisp interface should operate on typed StarRouter request/result objects and capabilities, not raw multipart socket frames.
+
+Expected layers:
+
+#+begin_example
+star-router.protocol     ; typed operation/result/capability objects
+star-router.client       ; async calls, cancellation, deadlines, multiplexing
+star-router.transport    ; generic transport protocol
+star-router.zmq          ; SENTO-ZMQ/PZMQ or narrow libzmq binding
+star-router.local        ; optional same-process/local optimized path
+star-router.http         ; gateway projection
+star-router.rabbitmq     ; broker/event projection where semantics match
+#+end_example
+
+A gserver should be able to send a routed request through this interface without knowing whether the selected transport is local, ZeroMQ IPC, ZeroMQ TCP, HTTP, or RabbitMQ. Transport selection must be explicit/pinned where replay or semantics depend on it.
+
+* Speed Overhaul Research
+
+Performance work must start from measured end-to-end costs rather than folklore.
+
+The design should require a benchmark harness for:
+
+1. request/reply latency at p50, p95, p99, and p99.9;
+2. throughput at bounded concurrency levels;
+3. payload sizes from small control messages through representative StarIntel documents;
+4. allocation/copy counts where observable;
+5. CPU time per accepted request;
+6. reconnect and peer-loss behavior;
+7. high-water-mark saturation and recovery;
+8. IPC versus TCP loopback;
+9. Common Lisp client versus Nim/Python reference clients;
+10. optional JSON versus a compact binary representation only after semantic equivalence is proven.
+
+Candidate optimization areas:
+
+- persistent sockets and connection/session reuse;
+- correlation-based concurrent requests over DEALER/ROUTER;
+- fewer multipart frames for hot metadata when a compact envelope proves faster;
+- bounded zero-copy or reduced-copy message handling where language bindings expose it safely;
+- =ipc://= for same-host process separation and =inproc://= only for same-context components where the runtime architecture actually permits it;
+- explicit high-water marks and backpressure rather than unbounded buffering;
+- batching only for operations whose ordering/idempotency semantics permit it;
+- avoiding repeated JSON parse/serialize at every adapter boundary;
+- transport-neutral typed objects so HTTP/RabbitMQ adapters do not become the internal representation.
+
+ZeroMQ's own guidance treats high-water marks as a required resource bound rather than something to disable for convenience. ROUTER/DEALER also supports asynchronous service-oriented request/reply, so the current stop-and-wait client behavior should not be treated as a transport limitation.
+
+* Compatibility and Versioning
+
+The existing =SC01=/=SR01= headers and integer event enum are not enough for a long-lived multi-language API.
+
+The design should define:
+
+- a versioned envelope and compatibility policy;
+- capability negotiation for optional features;
+- stable operation identifiers independent of transport;
+- schema identifiers/digests for payload contracts;
+- explicit unknown-operation and unsupported-version errors;
+- additive evolution rules;
+- byte-level conformance fixtures across Common Lisp, Nim, Python, and JavaScript where those clients are maintained.
+
+ZMTP already provides a stable framed message transport below the application protocol. StarRouter should use that property rather than making Nim object layout or parser behavior part of the contract.
+
+* Security Boundary
+
+The current StarRouter README explicitly warns against web exposure. The refreshed architecture must make the boundary explicit instead of relying on operator caution.
+
+Profiles should distinguish:
+
+- same-process/local trusted calls;
+- same-host IPC;
+- trusted private-network ZeroMQ;
+- authenticated/encrypted remote ZeroMQ using the approved CURVE/ZAP strategy;
+- HTTP gateway authentication;
+- RabbitMQ credential/virtual-host policy.
+
+Application authorization remains above transport authentication. A valid ZeroMQ peer identity is not automatically authorized to invoke every StarIntel operation.
+
+* Relationship to Titanic
+
+[[file:STAR-RESEARCH-037-titanic-polyglot-zmq-transport-correction.org][STAR-RESEARCH-037 Titanic Polyglot ZeroMQ Transport Correction]] remains valid for durable actor jobs, but it is now a consumer of the broader StarRouter transport/API architecture.
+
+Titanic owns durable admission, attempts, retries, cancellation, retained results, and crash recovery. StarRouter supplies the canonical routed operation envelope and ZeroMQ transport path used to dispatch or query that service.
+
+The architecture should therefore become:
+
+#+begin_example
+caller / gserver / CLI / service
+              |
+        StarRouter API
+              |
+      transport projection
+       /       |       \
+     ZMQ      HTTP    RabbitMQ
+       |
+  Titanic coordinator when durable jobs are requested
+       |
+ durable journal + worker dispatch
+#+end_example
+
+* Design Gate Requirements
+
+The RAGE/ADADR design derived from this research must answer, with tests or benchmark plans:
+
+1. canonical request/result/cancellation/deadline schemas;
+2. transport adapter interface and semantic-equivalence rules;
+3. Common Lisp gserver client/runtime API;
+4. capability registration/discovery and route selection;
+5. ZeroMQ socket topology, identities, reconnect behavior, high-water marks, and security;
+6. request multiplexing and bounded in-flight work;
+7. HTTP and RabbitMQ adapter boundaries;
+8. Titanic integration boundary;
+9. migration path from current StarRouter and current server APIs;
+10. benchmark baselines and promotion thresholds;
+11. cross-language conformance fixtures;
+12. deployment profiles and operational observability.
+
+The design must be presented for explicit operator approval before implementation begins.
+
+* Sources
+
+- [[https://github.com/lost-rob0t/starRouter][current StarRouter repository]]
+- [[https://github.com/lost-rob0t/starRouter/blob/master/src/starRouterpkg/client.nim][current StarRouter client]]
+- [[https://github.com/lost-rob0t/starRouter/blob/master/src/starRouterpkg/server.nim][current StarRouter server]]
+- [[https://github.com/lost-rob0t/starRouter/blob/master/src/starRouterpkg/proto.nim][current StarRouter protocol types]]
+- [[https://rfc.zeromq.org/spec/23/][ZeroMQ Message Transport Protocol 3.0]]
+- [[https://rfc.zeromq.org/spec/28/][ZeroMQ REQ/REP, DEALER/ROUTER semantics]]
+- [[https://zeromq.org/socket-api/][ZeroMQ socket API]]
+- [[https://zguide.zeromq.org/docs/chapter7/][ZeroMQ Guide: advanced architecture and bounded buffering]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/128][operator approval and scope correction]]
+
+* Footnotes and Glossary
+
+[fn:zeromq] ZeroMQ: A message-oriented networking library and protocol family that supplies framed asynchronous socket patterns including ROUTER, DEALER, PUB, and SUB.
+
+[fn:starrouter] StarRouter: StarIntel's routing component. This research proposes promoting it from the current experimental Nim broker into the canonical transport-neutral routing contract and runtime seam.
+
+[fn:ipc] Inter-process communication: Communication between separate processes on the same host. ZeroMQ supports local IPC transports on platforms where the binding/runtime exposes them.

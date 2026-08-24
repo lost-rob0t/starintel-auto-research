@@ -2,41 +2,52 @@
 :ID:       starintel-mcp-research-001-authoritative-platform-interface
 :END:
 #+title: STAR-MCP-RESEARCH-001 Full StarIntel MCP Authoritative Platform Interface
-#+description: ADARD analysis of how the full StarIntel service should be projected through MCP using reusable Common Lisp libraries, authorization-aware discovery, resources for addressable reads, and tools for search, computation, mutation, and administrative operations.
+#+description: ADARD analysis of a full StarIntel MCP built from reusable Common Lisp MCP libraries and the existing StarIntel gserver client/contract boundary, with authorization-aware discovery, resources for addressable reads, and capability-shaped tools for bounded query and mutation operations.
 #+status: REVIEW
-#+filetags: :starintel:research:auto-research:mcp:common-lisp:authorization:resources:tools:
+#+filetags: :starintel:research:auto-research:mcp:common-lisp:authorization:resources:tools:client-sdk:
 #+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research findings | StarIntel operator | PENDING | Review source-grounded capability, authorization, resource/tool, and library conclusions | This document and cited sources |
-| StarIntel MCP phase dependency | StarIntel operator | PENDING | Confirm full StarIntel MCP is an explicit phase before Meta MCP integration | PIPELINE-005 and PIPELINE-006 |
+| Research findings | StarIntel operator | PENDING | Review source-grounded capability, authorization, resource/tool, and client-library conclusions | This document and cited sources |
+| Existing-client reconciliation | StarIntel operator | PENDING | Confirm MCP reuses =starintel-gserver-client= rather than creating a second StarIntel remote SDK | STAR-RESEARCH-038, STAR-RESEARCH-039, this document |
+| Meta dependency | StarIntel operator | PENDING | Confirm full StarIntel MCP is a required phase before Meta MCP StarIntel integration | PIPELINE-005 and PIPELINE-006 |
 | Publication | StarIntel auto-research maintainer | PENDING | Main-branch Pages workflow succeeds and page resolves | Public site after deployment |
 
-No row authorizes deployment topology, credentials, or StarIntel runtime changes.
+No row authorizes implementation, deployment topology, credentials, or StarIntel runtime changes.
 
 * Related Nodes
 
 - [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-006-starintel-mcp-authoritative-platform-interface.org][STAR-RESEARCH-PIPELINE-006 Full StarIntel MCP Authoritative Platform Interface]]
 - [[file:../../design/auto-research/STAR-RESEARCH-PIPELINE-005-starintel-meta-mcp-execution-plane.org][STAR-RESEARCH-PIPELINE-005 StarIntel Meta MCP Execution Plane]]
 - [[file:STAR-RESEARCH-006-starintel-meta-mcp-execution-plane-analysis.org][STAR-RESEARCH-006 StarIntel Meta MCP Execution Plane Analysis]]
+- [[file:../star-server/STAR-RESEARCH-038-gserver-client-library-and-administration-boundary.org][STAR-RESEARCH-038 GServer Client Library and Administration Boundary]]
+- [[file:../star-server/STAR-RESEARCH-039-machine-readable-http-contract-and-client-generation.org][STAR-RESEARCH-039 Machine-Readable HTTP Contract and Client Generation]]
+- [[file:../../design/star-server/STAR-SERVER-038-gserver-client-runtime-and-local-administration.org][STAR-SERVER-038 GServer Client Runtime and Server-Local Administration]]
 - [[file:../star-lang/STAR-LANG-RESEARCH-019-common-lisp-library-gap-analysis.org][STAR-LANG-RESEARCH-019 Common Lisp Library Gap Analysis]]
 - [[file:../../indexes/auto-research/STAR-RESEARCH-PIPELINE-INDEX-000-adaptive-research.org][STAR-RESEARCH-PIPELINE-INDEX-000 Adaptive Research]]
 - GitHub issue 136: https://github.com/lost-rob0t/starintel-auto-research/issues/136
 
 * Research Question
 
-What should the full StarIntel MCP expose, and how should it map StarIntel's authoritative capability, resource-scope, search, document, target, view, bulk-job, identity, credential, audit, and future service behavior into MCP without mechanically re-exporting legacy HTTP routes or bypassing StarIntel authorization?
+How should StarIntel expose a full MCP interface over the authoritative platform without:
 
-The implementation constraint is library-first Common Lisp. Generic MCP protocol, transport, client, server, schema, task, discovery, and tool/resource machinery belongs in reusable ASDF systems. The StarIntel-specific product is a separate =starintel-mcp= package in the same monorepo consuming those libraries.
+- mirroring legacy HTTP route names into a huge model tool surface;
+- creating a second authorization system;
+- advertising policy capabilities whose runtime backend is absent;
+- creating a second StarIntel remote client library beside =starintel-gserver-client=;
+- sending bearer keys, passwords, or other secret-returning authentication operations through model context;
+- making Meta MCP bypass the full StarIntel MCP?
+
+The implementation constraint is library-first Common Lisp. Generic MCP protocol/client/server/resource/tool/schema behavior must be reusable ASDF systems. The StarIntel-specific MCP is a package consuming those systems and the established StarIntel remote SDK boundary.
 
 * Assess
 
 ** StarIntel already has an authoritative authorization model
 
-The current runtime uses a closed action vocabulary and closed resource-scope prefixes. Current runtime capabilities include:
+The current runtime policy has a closed action vocabulary:
 
 #+begin_example
 identity:read
@@ -67,130 +78,92 @@ principals:manage
 audit:read
 #+end_example
 
-Resource restrictions include tenant, dataset, actor, target, target namespace, and program dimensions. Unknown capabilities and unknown scope prefixes deny. The HTTP authorization boundary is default-deny and re-authorizes Rabbit publication through a safe service-call context.[fn:star-auth-policy][fn:star-auth-runtime]
+The resource-scope vocabulary is also closed and currently covers tenant, dataset, actor, target, target namespace, and program dimensions. Unknown capabilities and unknown scope prefixes deny.[fn:star-auth-policy]
 
-This capability/resource model is a better MCP source of truth than route names.
+The authorization runtime is default-deny, resolves canonical resource dimensions before protected operations, filters search/view/target results, and reauthorizes Rabbit publication using server-owned service context rather than caller-supplied decision fields.[fn:star-auth-runtime]
 
-** Current HTTP surface is transitional, not the MCP schema
+Conclusion: the MCP must project this existing authority model. It must not invent MCP-only permission strings.
 
-The server currently exposes documents, bulk ingest, search, targets, views, credential lifecycle endpoints, identity context, and some planned operations. Several facts make mechanical HTTP-to-MCP generation inappropriate:
+** Policy capability is not the same thing as runtime availability
 
-1. The capabilities endpoint still labels much of the older route surface as legacy.
-2. The API documentation contains historical behavior that has since been tightened by the authorization runtime.
-3. Target lease and event replay routes currently authorize and then return =501= because their backends are not implemented.
-4. Bulk ingest may execute inline or create an asynchronous process-local job.
-5. Legacy view routes have weaker scope signatures than the newer scoped view endpoint and require broader grants.
-6. The service capability vocabulary can contain an operation before its runtime implementation is usable.
+Current StarIntel authorization knows about operations such as target lease and event replay, but current routes authorize them and then return =501= because their backing services are not implemented.[fn:star-auth-routes]
 
-Therefore MCP discovery must be generated from the intersection of:
+The current capability endpoint also exposes a mixed legacy/current feature inventory rather than a complete typed platform contract.[fn:star-capabilities]
+
+Therefore caller-visible MCP discovery must be the intersection:
 
 #+begin_example
-caller authorization
-AND StarIntel runtime capability availability
-AND MCP surface policy
+caller StarIntel grants
+INTERSECT caller resource visibility
+INTERSECT runtime implemented/healthy capability
+INTERSECT reviewed MCP exposure policy
+= caller-visible tools/resources
 #+end_example
 
-not from HTTP route registration alone.[fn:star-capabilities][fn:star-http-api][fn:star-auth-routes][fn:star-bulk]
+A scope string alone can never make an unimplemented operation appear.
 
-** MCP supports authorization-specific discovery
+** The HTTP route layout is not the MCP domain model
 
-MCP 2026-07-28 allows =tools/list= and =resources/list= to vary according to the authorization presented on each request. Lists are deterministic and cacheable, with private cache scope available for caller-specific results.[fn:mcp-tools][fn:mcp-resources]
+StarIntel has accumulated versionless routes, compatibility aliases, registered views, newer authorization wrappers, and historical prose that still describes older pre-auth behavior.[fn:star-http-api][fn:star-views]
 
-This fits StarIntel well: a read-only dataset-scoped principal does not need credential, deletion, target-dispatch, or administrative tools in model context at all. Hiding them from discovery reduces tool context while the StarIntel policy engine still remains authoritative if a direct call is attempted.
+Generating one MCP tool per HTTP route would freeze accidental wire history into the model interface.
 
-** Resources fit addressable StarIntel objects
+Examples of route-shaped behavior that should not become separate MCP tools:
 
-MCP resources are URI-addressed, application-driven data objects and support resource templates. The protocol explicitly allows custom URI schemes.[fn:mcp-resources]
+- message-by-user versus message-by-platform routes;
+- historical =socialmpost= alias;
+- raw =/views/:design/:view= identifiers;
+- old =/new/document/:dtype= naming;
+- stubbed event and lease routes.
 
-StarIntel has multiple addressable read models that fit resources better than model-visible tools:
+Conclusion: MCP names must be semantic and stable; HTTP compatibility remains beneath the client library.
+
+** Existing StarIntel client research already owns the remote SDK boundary
+
+STAR-RESEARCH-038 is crucial prior art. It establishes that =starintel-gserver-client= already exists and should become the authoritative reusable Common Lisp representation of the remote StarIntel protocol. =star-cli= and other clients should consume named SDK operations rather than Dexador or raw route strings.[fn:client-research]
+
+STAR-SERVER-038 develops that direction into an effectively immutable client configuration, replaceable transport, typed protocol conditions, deadline/correlation handling, secret-safe printing, and generated-operation seam.[fn:client-design]
+
+This invalidates the first provisional idea of creating a new =starintel-service-port= plus a new =starintel-http-client= specifically for MCP. That would be duplicate architecture.
+
+Correct dependency:
 
 #+begin_example
-starintel://identity/context
-starintel://documents/{id}
-starintel://bulk-jobs/{id}
-starintel://targets/{actor}
+StarIntel server contract
+       |
+       v
+starintel-gserver-client
+       |
+       +--> star-cli / Emacs / Quasar / tests
+       |
+       +--> starintel-mcp
 #+end_example
 
-Future stable dataset, actor, audit-record, report, or other resource APIs can add templates when their authoritative service contracts exist.
+The MCP project may add a *thin adapter protocol* around the SDK if testing/composition benefits from it, but that adapter must not become a second remote API implementation.
 
-The server must not enumerate millions of documents through =resources/list=. Large collections use resource templates and search/query tools. A search tool can return =resource_link= content pointing to document resources instead of embedding every full document in the tool result.[fn:mcp-tool-results]
+** Machine-readable contract work is also already in flight
 
-** Tools fit computation and side effects
+STAR-RESEARCH-039 proposes a dependency-light Common Lisp HTTP contract registry as the source of method/path/schema/security metadata, able to emit OpenAPI and generated Common Lisp operation wrappers.[fn:contract-research]
 
-MCP tools are model-controlled operations with JSON Schema input/output contracts and structured results. Tool discovery can be authorization-dependent. Tool annotations provide risk hints such as read-only, destructive, idempotent, and open-world, but they are hints and never substitute for server authorization.[fn:mcp-tools][fn:mcp-annotations]
+That work is under review, so PIPELINE-006 must not require it to be completed before the first MCP slice. But the MCP must align with its stable operation IDs/schema metadata where available and must not create a third schema source.
 
-StarIntel operations naturally split into:
-
-- computation/query tools: search and scoped view query
-- additive/mutating tools: document create/update, bounded bulk submission, target dispatch
-- destructive tools: document delete, credential revoke/disable, future force release
-- elevated administrative tools: credential lifecycle and principal management
-- future tools that remain undiscoverable until their backing service is implemented: target leases, force release, event replay, and similar capabilities
-
-** Search must remain a tool
-
-StarIntel search is not merely reading a known URI. It performs a bounded query over authorized tenant/dataset scope, may return bookmarks and ranked results, and must enforce scope before backend execution.[fn:star-auth-runtime]
-
-Therefore =search= remains a tool. Its structured result should contain normalized hits plus resource links to =starintel://documents/{id}= when the caller may read those documents.
-
-** Views should be one semantic query tool, not route-shaped tools
-
-The current server has a registry of message, social-post, dataset, target, and other views, including historical compatibility aliases. The newer authorization boundary also has a scoped =/views/:design/:view= contract.[fn:star-views][fn:star-auth-routes]
-
-The MCP should not expose one tool per HTTP view route. It should expose one reviewed =view_query= capability that accepts a registered semantic view identifier and bounded parameters. The service-side StarIntel client/port resolves that semantic view through the authoritative view registry.
-
-** Bulk job semantics need an explicit handle boundary
-
-Current bulk ingest may create a bounded asynchronous job identified by a job ID. The job table is process-local runtime state and is readable only by the submitter or an administrator.[fn:star-bulk][fn:star-bulk-status]
-
-The initial MCP should therefore return an explicit StarIntel job handle/resource link, for example =starintel://bulk-jobs/{id}=, matching the actual StarIntel service semantics. It should not automatically claim MCP Tasks durability or lifecycle guarantees that the underlying service does not yet provide.
-
-MCP Tasks can be adopted later if the StarIntel job implementation satisfies the required lifecycle/conformance contract.
-
-** Authentication transport and StarIntel authorization are separate layers
-
-MCP HTTP authorization defines the MCP server as a protected OAuth resource server when the standard authorization flow is used. STDIO integrations should obtain credentials from the environment rather than implementing the HTTP authorization flow.[fn:mcp-auth]
-
-StarIntel currently has its own authenticated principal and credential model. The design must preserve the StarIntel principal/resource decision regardless of the MCP transport credential mechanism.
-
-The MCP layer MUST NOT infer StarIntel authority from MCP =clientInfo=, tool arguments, URI text, connection locality, or self-reported metadata. A request must resolve to an authenticated StarIntel principal or a deliberately delegated service context before any protected StarIntel operation.
-
-The exact token exchange or deployment arrangement is an implementation/topology question and is not selected in this public research node.
-
-** Common Lisp library boundary
-
-The generic MCP protocol/server systems from PIPELINE-005 remain reusable. The StarIntel-specific layer additionally needs a typed StarIntel service port/client library so =starintel-mcp= does not embed legacy URL strings throughout tool handlers.
-
-Conceptual dependency direction:
+Preferred evolution:
 
 #+begin_example
-cl-mcp-core / transports / server / client / schema
-                    |
-                    v
-            starintel-service-port
-                    |
-       +------------+-------------+
-       |                          |
-starintel-http-client       future in-process adapter
-       |                          |
-       +------------+-------------+
-                    |
-               starintel-mcp
+StarIntel contract registry
+      |
+      +--> server route mounting
+      +--> OpenAPI / generated SDK operations
+      `--> starintel-gserver-client
+                       |
+                       `--> starintel-mcp adapter
 #+end_example
 
-The service port owns semantic operations such as document read/write, search, view query, target dispatch, credential lifecycle, and capability discovery. HTTP is one adapter, not the domain contract.
+** MCP resources fit addressable StarIntel reads
 
-* Design Hypothesis
+MCP resources are URI-addressed application-driven data and support custom URI schemes and resource templates. Discovery can vary by authorization and private cache scope.[fn:mcp-resources]
 
-The full StarIntel MCP should expose three protocol surfaces:
-
-1. authorization-aware =server/discover=, =tools/list=, and resource discovery
-2. custom =starintel://= resources/templates for addressable read objects
-3. a capability-shaped tool set for computation and mutation
-
-The initial candidate interface is intentionally semantic rather than route-shaped.
-
-** Candidate read resources
+Good candidate resources:
 
 #+begin_example
 starintel://identity/context
@@ -199,200 +172,220 @@ starintel://bulk-jobs/{id}
 starintel://targets/{actor}
 #+end_example
 
-** Candidate query tools
+The server must not enumerate the entire StarIntel corpus through =resources/list=. Large collections use templates plus bounded query tools.
+
+** MCP tools fit computation and side effects
+
+MCP tools are model-controlled operations with input/output schemas and structured results. Caller-specific =tools/list= is allowed, but direct calls must still be authorized.[fn:mcp-tools]
+
+StarIntel naturally divides into:
+
+- query/computation: =search=, semantic =view_query=;
+- document mutations: create, update when authoritative, delete, bounded bulk;
+- target mutation: dispatch;
+- elevated operations only when implemented and separately exposed;
+- safe administrative operations only when they do not move secrets through model context.
+
+Tool annotations such as read-only, destructive, idempotent, and open-world are useful client hints but never authorization.[fn:mcp-annotations]
+
+** Search should return resource links rather than full document floods
+
+StarIntel search is a parameterized computation over authorized scope and therefore remains a tool. MCP tool results can carry structured content and resource links.[fn:mcp-tool-results]
+
+Preferred result pattern:
 
 #+begin_example
-search
-view_query
+search(query, dataset, ...)
+  -> bounded hit summaries
+  -> score / pagination
+  -> starintel://documents/{id} links
 #+end_example
 
-** Candidate document tools
+The client reads only selected full documents through =resources/read=, which reauthorizes independently.
 
-#+begin_example
-document_create
-document_update      ; only after authoritative write/update path is proven
-document_delete
-documents_bulk
-#+end_example
+This directly reduces LLM context bloat.
 
-** Candidate target/event tools
+** Views should collapse to one semantic query tool
 
-#+begin_example
-target_dispatch
+The current server has a view registry covering messages, social posts, datasets, targets, and other document families, plus compatibility aliases.[fn:star-views]
 
-target_lease          ; not discoverable until backend exists
-target_force_release  ; not discoverable until backend exists
-event_write            ; only when backing contract is usable
-event_replay           ; not discoverable until backend exists
-#+end_example
+The MCP should expose one =view_query= tool accepting a *registered semantic view identifier*, not arbitrary CouchDB design/view names and not one MCP tool per HTTP route.
 
-** Candidate administration tools
+** Current bulk jobs are StarIntel jobs, not automatically MCP Tasks
 
-#+begin_example
-credential_create
-credential_rotate
-credential_revoke
-credential_disable
-principal_manage       ; only to the extent an authoritative service exists
-#+end_example
+Bulk ingest may run inline or enqueue a bounded process-local StarIntel job. Status is restricted to the submitter or an administrator.[fn:star-bulk][fn:star-bulk-status]
 
-Read-only administrative collections such as credential metadata or audit records should prefer resources/query tools rather than mutation-shaped tools where practical.
+The first MCP should return a =starintel://bulk-jobs/{id}= resource link when async. It should not claim MCP Task durability/cancellation semantics that the underlying job system does not yet provide.
 
-The final list remains subject to design review and current runtime capability inventory.
+MCP Tasks can be considered after StarIntel job lifecycle semantics satisfy a dedicated conformance gate.
+
+** Secret-returning authentication operations should not be model tools
+
+Current login, credential creation, and credential rotation can return raw API keys. Password operations necessarily accept password material.[fn:star-auth-routes][fn:client-research]
+
+A "full StarIntel MCP" should mean full *safe model-facing platform capability*, not literally every administrative HTTP endpoint.
+
+Exclude from model-controlled MCP v1:
+
+- bootstrap secret flow;
+- username/password login;
+- password change/reset;
+- credential create/rotate when the operation returns a raw bearer key;
+- verifier/salt/pepper/password-hash access.
+
+Safe administrative metadata, revoke/disable operations, and audit querying can be added after explicit review because they need not expose a new bearer secret.
+
+** Internal actors are not automatically MCP capabilities
+
+StarIntel is actor-oriented internally, but architecture documentation distinguishes loaded, experimental, and inactive actor systems. RabbitMQ, Sento mailboxes, CouchDB, Clouseau indexes, and internal actor names are implementation details unless a stable authorized StarIntel service contract deliberately exposes a capability.[fn:star-architecture]
+
+A full MCP therefore grows with the *authoritative StarIntel service contract*, not with every internal function or actor present in the repository.
 
 * Attack
 
-** Route mirroring
+** Tool explosion
 
-Failure mode: generate =get_document=, =documents_messages_by_user=, =documents_messages_by_platform=, =new_target_actor=, and similar tools directly from HTTP routes.
+Failure: expose one tool per route/view/internal actor.
 
-Impact: tool explosion, legacy aliases become permanent protocol, authorization semantics leak into URL parsing, and refactoring HTTP breaks MCP clients.
+Countermeasure: semantic resources + compact query/mutation tools.
 
-Countermeasure: semantic service port plus small domain-shaped MCP interface.
+** False capability discovery
 
-** Capability vocabulary outruns runtime implementation
+Failure: advertise =target_lease= because the caller owns =targets:lease= even though runtime returns =501=.
 
-Failure mode: a principal has =targets:lease= and the MCP advertises =target_lease= even though StarIntel returns =501=.
+Countermeasure: authorization × runtime availability × MCP policy intersection.
 
-Impact: model-visible dead tools and misleading capability claims.
+** Discovery mistaken for security
 
-Countermeasure: discovery intersects authorization with live runtime availability and MCP policy.
+Failure: omit an unauthorized tool from =tools/list= but forget direct =tools/call= enforcement.
 
-** Authorization-aware discovery mistaken for authorization
+Countermeasure: independently reauthorize every tool call/resource read inside StarIntel.
 
-Failure mode: hide unauthorized tools from =tools/list= and assume that is enough.
+** Second StarIntel SDK
 
-Impact: a client can still directly construct =tools/call=.
+Failure: create =starintel-service-port= and a new HTTP implementation inside the MCP monorepo while =starintel-gserver-client= already owns the remote protocol.
 
-Countermeasure: every resource read and tool call independently enters the StarIntel policy boundary. Discovery is context reduction, not enforcement.
+Countermeasure: extend/reuse =starintel-gserver-client=; MCP contains only an adapter and model-facing projection.
+
+** Third schema authority
+
+Failure: define MCP schemas manually, HTTP schemas separately, and generated client schemas a third way.
+
+Countermeasure: align MCP input/output schemas with stable StarIntel contract/SDK models; adopt generated metadata when STAR-RESEARCH-039 lands.
 
 ** Massive resource enumeration
 
-Failure mode: expose every StarIntel document through =resources/list=.
+Failure: list millions of documents through =resources/list=.
 
-Impact: unusable discovery payloads, data leakage risk, expensive list invalidation.
+Countermeasure: templates + search/view query tools.
 
-Countermeasure: resource templates plus bounded query tools. Resource lists contain only small stable collections or entry points.
+** Full-document search dumps
 
-** Full document dumping from search
+Failure: put full source documents in every search result.
 
-Failure mode: every search hit returns the entire document body.
+Countermeasure: bounded summaries + resource links + explicit selected reads.
 
-Impact: context bloat and accidental exposure of more content than needed.
+** Secret leakage through "full admin" tooling
 
-Countermeasure: structured hit summaries plus resource links; fetch a selected document through =resources/read=.
+Failure: let an LLM call credential rotation and receive the new bearer token in its tool result.
 
-** Tool annotations treated as security policy
+Countermeasure: secret-returning operations stay outside model-controlled MCP unless a later out-of-band secret-delivery design exists.
 
-Failure mode: rely on =readOnlyHint= or =destructiveHint= to control behavior.
+** Async semantics overclaim
 
-Impact: clients may ignore hints and annotations are not authorization.
+Failure: call a process-local StarIntel bulk job an MCP Task.
 
-Countermeasure: annotations inform client UX; StarIntel closed capabilities and resource scopes remain authoritative.
+Countermeasure: expose the real StarIntel job handle first; tasks require separate proof.
 
-** MCP becomes a second StarIntel authorization model
+** Internal implementation leakage
 
-Failure mode: create MCP-only scope strings or permission rules that drift from StarIntel.
+Failure: expose arbitrary CouchDB design docs, Clouseau index IDs, Rabbit routing keys, or internal actor refs.
 
-Impact: confused-deputy bugs and policy inconsistency.
-
-Countermeasure: MCP tool/resource mapping references the existing StarIntel action and canonical resource dimensions. No duplicate policy language.
-
-** Admin tools dominate normal model context
-
-Failure mode: every caller receives credential and principal lifecycle tools.
-
-Impact: larger prompts and elevated accidental-risk surface.
-
-Countermeasure: caller-specific discovery exposes only currently authorized and available tools; admin discovery remains private-cache scoped.
-
-** Async semantics overclaimed
-
-Failure mode: map current process-local bulk jobs directly to MCP Tasks and imply stronger lifecycle guarantees.
-
-Impact: clients expect task durability/cancellation semantics that StarIntel does not provide.
-
-Countermeasure: return StarIntel job resource handles initially. Adopt MCP Tasks only after a separate conformance gate.
-
-** Stale HTTP documentation becomes MCP truth
-
-Failure mode: generate schema from historical API docs that state pre-authorization behavior.
-
-Impact: MCP contract disagrees with active runtime.
-
-Countermeasure: source order is runtime authorization/capability/service code first, current tests second, documentation third. Contradictions are recorded as gaps.
+Countermeasure: MCP depends on public StarIntel SDK operations only.
 
 * Recommend
 
-1. Insert a dedicated full StarIntel MCP implementation phase between reusable MCP libraries and Meta MCP integration.
-2. Implement a typed =starintel-service-port= and at least one tested adapter; do not make MCP handlers depend directly on legacy HTTP route strings.
-3. Use MCP resources/templates for addressable read objects and resources returned from tool calls.
-4. Keep =search= and =view_query= as tools because they perform bounded computation over caller-scoped data.
-5. Keep mutations as explicit capability-shaped tools with JSON Schema input/output and correct MCP risk annotations.
-6. Make =tools/list= and resource discovery authorization-aware and deterministic, but re-authorize every invocation/read independently.
-7. Expose only the intersection of caller grants, StarIntel runtime availability, and reviewed MCP policy.
-8. Do not expose =501= or stubbed capabilities until backing services are implemented and tested.
-9. Return resource links from search and mutation tools so clients can retrieve selected objects without duplicating payloads.
-10. Represent current asynchronous bulk work with explicit StarIntel job resources first; defer MCP Tasks until job lifecycle semantics pass a dedicated gate.
-11. Preserve StarIntel's canonical tenant/dataset/actor/target/namespace/program authorization dimensions; do not invent a second MCP permission language.
-12. Keep generic MCP/LLM infrastructure reusable Common Lisp ASDF systems and implement =starintel-mcp= as a StarIntel-specific package in the same monorepo.
-13. Meta MCP consumes the full StarIntel MCP; it never bypasses this interface to reach CouchDB, Clouseau, queues, or internal service routes.
-14. Future A2A research agents use both Meta MCP and full StarIntel MCP according to their authorized tasks.
+1. Make the full StarIntel MCP an explicit implementation phase before Meta integrates StarIntel.
+2. Build reusable generic MCP Common Lisp libraries first: protocol/types, transports, server/client, schemas, resources/tools, discovery/cache behavior, and conformance tests.
+3. Reuse and mature =starintel-gserver-client= as the authoritative remote StarIntel SDK. Do not create a parallel StarIntel HTTP client for MCP.
+4. Add a thin =starintel-mcp-adapter= library in the MCP/LLM-tooling monorepo that converts SDK operations/results/conditions into MCP domain semantics.
+5. Align adapter schemas with the StarIntel machine-readable contract/generated-operation work as it becomes available; do not create an independent contract source.
+6. Implement =starintel-mcp= as the final StarIntel-specific package consuming generic MCP libraries + =starintel-mcp-adapter= + =starintel-gserver-client=.
+7. Use custom =starintel://= resources/templates for addressable reads; do not enumerate the whole corpus.
+8. Keep =search= and =view_query= as bounded tools and return resource links for selected full objects.
+9. Expose document and target mutations as explicit capability-shaped tools only where authoritative StarIntel services exist and pass conformance.
+10. Discovery is caller-aware but every invocation/read independently enters the StarIntel policy boundary.
+11. Hide stubbed/unimplemented operations even when their policy capability exists.
+12. Exclude password/bootstrap/raw-credential-returning operations from model-controlled MCP v1.
+13. Represent current bulk async work with StarIntel job resources; defer MCP Tasks until lifecycle semantics are proven.
+14. Meta MCP consumes StarIntel exclusively through the full StarIntel MCP read/search surface.
+15. The future A2A StarIntel agent may consume both Meta MCP and the full StarIntel MCP for autonomous research/platform work.
+16. Infrastructure placement, secret delivery, DNS/TLS, and service topology remain downstream private infrastructure RAGE concerns after design approval.
 
 * Decide
 
 Research decision: advance =STAR-RESEARCH-PIPELINE-006 Full StarIntel MCP Authoritative Platform Interface= to operator review.
 
-The full StarIntel MCP is a required implementation phase before PIPELINE-005 can integrate StarIntel into the Meta MCP. This research does not approve implementation or infrastructure topology.
+The design must reuse the existing =starintel-gserver-client= remote SDK boundary and must not introduce a duplicate StarIntel remote client implementation. This research does not approve PIPELINE-006 implementation.
 
 * Sources
 
 Primary and project sources reviewed 2026-08-24 UTC:
 
-- MCP 2026-07-28 tools: https://modelcontextprotocol.io/specification/2026-07-28/server/tools
-- MCP 2026-07-28 resources: https://modelcontextprotocol.io/specification/2026-07-28/server/resources
-- MCP 2026-07-28 authorization: https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization
+- MCP tools: https://modelcontextprotocol.io/specification/2026-07-28/server/tools
+- MCP resources: https://modelcontextprotocol.io/specification/2026-07-28/server/resources
+- MCP authorization: https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization
 - MCP 2026-07-28 release: https://blog.modelcontextprotocol.io/posts/2026-07-28/
 - StarIntel authorization policy: https://github.com/lost-rob0t/starintel-server/blob/master/source/authorization/policy.lisp
 - StarIntel authorization runtime: https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-authorization-runtime.org
-- StarIntel HTTP capabilities: https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-capabilities.lisp
 - StarIntel authorized routes: https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-authorization-routes.lisp
+- StarIntel capability endpoint: https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-capabilities.lisp
 - StarIntel view registry: https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-view-registry.lisp
 - StarIntel bulk jobs: https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-bulk-jobs.lisp
 - StarIntel bulk job status: https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-auth-job-routes.lisp
-- StarIntel historical HTTP API docs: https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-api-docs.org
-- STAR-LANG-RESEARCH-019 Common Lisp Library Gap Analysis: https://auto-research.starintel.actor/notes/research/star-lang/STAR-LANG-RESEARCH-019-common-lisp-library-gap-analysis.html
+- StarIntel auth routes: https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-auth-routes.lisp
+- StarIntel architecture: https://github.com/lost-rob0t/starintel-server/blob/master/docs/architecture.org
+- [[file:../star-server/STAR-RESEARCH-038-gserver-client-library-and-administration-boundary.org][STAR-RESEARCH-038 GServer Client Library and Administration Boundary]]
+- [[file:../star-server/STAR-RESEARCH-039-machine-readable-http-contract-and-client-generation.org][STAR-RESEARCH-039 Machine-Readable HTTP Contract and Client Generation]]
+- [[file:../../design/star-server/STAR-SERVER-038-gserver-client-runtime-and-local-administration.org][STAR-SERVER-038 GServer Client Runtime and Server-Local Administration]]
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-24 | Added ADARD research for the full StarIntel MCP authority boundary, resources/tools split, authorization-aware discovery, service-port architecture, async-job boundary, and required phase before Meta integration. | OpenAI research agent under operator direction | Primary sources above and GitHub issue 136 |
+| 2026-08-24 | Added ADARD research for the full StarIntel MCP authority boundary, resources/tools split, authorization-aware discovery, async-job boundary, and required phase before Meta integration. | OpenAI research agent under operator direction | Primary sources above and GitHub issue 136 |
+| 2026-08-24 | Attack pass reconciled the design with approved STAR-RESEARCH-038 and in-review STAR-RESEARCH-039; rejected a duplicate MCP-specific StarIntel HTTP client in favor of =starintel-gserver-client= plus a thin MCP adapter. | OpenAI research agent under operator direction | STAR-RESEARCH-038, STAR-RESEARCH-039, STAR-SERVER-038 |
 
 * Footnotes and Glossary
 
-[fn:mcp-tools] MCP Tools: model-controlled operations with authorization-dependent discovery and JSON Schema contracts. Source: MCP 2026-07-28 tools specification.
+[fn:mcp-tools] MCP Tools: model-controlled operations with authorization-dependent discovery and JSON Schema contracts.
 
-[fn:mcp-resources] MCP Resources: URI-addressed application-driven context with resource templates, authorization-dependent listing, cache hints, and custom URI schemes. Source: MCP 2026-07-28 resources specification.
+[fn:mcp-resources] MCP Resources: URI-addressed application-driven context with resource templates, authorization-dependent listing, and cache hints.
 
-[fn:mcp-tool-results] MCP tool results may contain structured content, embedded resources, and resource links. Source: MCP 2026-07-28 tools specification.
+[fn:mcp-tool-results] MCP tool results may contain structured content, embedded resources, and resource links.
 
-[fn:mcp-annotations] MCP tool annotations are client hints for read-only, destructive, idempotent, and open-world behavior; they do not replace authorization.
+[fn:mcp-annotations] MCP tool annotations provide client risk/UX hints; they do not replace server authorization.
 
-[fn:mcp-auth] MCP HTTP authorization defines protected resource behavior for remote MCP servers; STDIO should obtain credentials through its execution environment. Source: MCP 2026-07-28 authorization specification.
+[fn:star-auth-policy] Current StarIntel closed action/resource policy: =source/authorization/policy.lisp=.
 
-[fn:star-auth-policy] StarIntel closed capability and resource-scope runtime: =source/authorization/policy.lisp=.
+[fn:star-auth-runtime] Current implemented StarIntel authorization behavior: =docs/http-authorization-runtime.org=.
 
-[fn:star-auth-runtime] StarIntel implemented authorization behavior and route/action matrix: =docs/http-authorization-runtime.org=.
+[fn:star-auth-routes] Current authorized HTTP boundary and stub availability behavior: =source/frontends/http-authorization-routes.lisp=.
 
-[fn:star-capabilities] StarIntel HTTP capability discovery: =source/frontends/http-capabilities.lisp=.
+[fn:star-capabilities] Current capability endpoint: =source/frontends/http-capabilities.lisp=.
 
-[fn:star-http-api] StarIntel historical HTTP route documentation: =docs/http-api-docs.org=.
+[fn:star-http-api] Historical HTTP documentation used as negative evidence for route drift: =docs/http-api-docs.org=.
 
-[fn:star-auth-routes] StarIntel authorized route implementation: =source/frontends/http-authorization-routes.lisp=.
+[fn:star-views] Current registered HTTP view adapters: =source/frontends/http-view-registry.lisp=.
 
-[fn:star-views] StarIntel registered HTTP view adapters: =source/frontends/http-view-registry.lisp=.
+[fn:star-bulk] Current bounded inline/asynchronous bulk runtime: =source/frontends/http-bulk-jobs.lisp=.
 
-[fn:star-bulk] StarIntel bounded inline/asynchronous bulk implementation: =source/frontends/http-bulk-jobs.lisp=.
+[fn:star-bulk-status] Current submitter/admin bulk status resource behavior: =source/frontends/http-auth-job-routes.lisp=.
 
-[fn:star-bulk-status] StarIntel submitter/admin bulk job status route: =source/frontends/http-auth-job-routes.lisp=.
+[fn:client-research] Approved research establishing =starintel-gserver-client= as reusable remote protocol boundary: STAR-RESEARCH-038.
+
+[fn:client-design] In-review client runtime design that preserves =starintel-gserver-client= and adds replaceable transport, typed conditions, and generated-operation seam: STAR-SERVER-038.
+
+[fn:contract-research] In-review machine-readable contract/code-generation research: STAR-RESEARCH-039.
+
+[fn:star-architecture] StarIntel server architecture and loaded/experimental actor boundaries: =docs/architecture.org=.

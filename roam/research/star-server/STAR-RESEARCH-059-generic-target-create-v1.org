@@ -1,0 +1,146 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-059
+:END:
+#+title: STAR-RESEARCH-059 Generic Target Creation API and Idempotency Boundary
+#+description: Research packet for a generic authenticated target-creation API that can serve Bixby and other privileged clients without introducing client-specific server architecture.
+#+status: REVIEW
+#+filetags: :starintel:research:star-server:targets:http:idempotency:authorization:bixby:
+#+created: [2026-08-26 Wed]
+#+last_modified: [2026-08-26 Wed]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research scope | StarIntel operator | PENDING | Explicit approval of this research scope and conclusions | This document |
+| Prior target-lease research/design | StarIntel operator | EXISTING PRIOR ART | Merged canonical research/design lineage for issues 29-32 | [[https://github.com/lost-rob0t/starintel-auto-research/pull/76][auto-research PR #76]] |
+| Implementation | Repository maintainers | NOT AUTHORIZED | Approved design plus TDD and exact-head verification | No implementation authorization from this research alone |
+| Publication | Auto-Research maintainer | PENDING | Main-branch publication workflow succeeds | Public site after deployment |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-26 | Created research packet for generic target creation required by privileged clients including the optional Bixby projection. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-server/pull/127][starintel-server PR #127]] |
+
+* Problem
+
+Privileged clients need a stable way to submit ordinary StarIntel target documents. The server already owns target validation and dispatch semantics, while client-specific projections such as Samsung Bixby must remain optional adapters.
+
+The immediate implementation candidate in starintel-server PR #127 introduces =POST /api/v1/targets=, authorization through =targets:dispatch=, principal-bound deterministic idempotency, conflict detection for changed content under one idempotency identity, and a narrow receipt.
+
+The governance question is whether those semantics belong in generic StarIntel core and, if so, what exact contract should be approved before implementation merges.
+
+* Existing Authority and Prior Art
+
+STAR-SERVER-029 and STAR-SERVER-032 already establish useful invariants for privileged target operations:
+
+- authenticated callers use explicit security context;
+- HTTP is an adapter over application semantics rather than the authority itself;
+- idempotent mutations bind request identity to caller identity and canonical request content;
+- changed content under one idempotency identity must be rejected;
+- callers receive narrow policy-safe responses rather than backend objects;
+- target dispatch remains a core capability;
+- client-specific interfaces must not acquire backend or storage authority.
+
+However STAR-SERVER-032 is specifically a target-lease HTTP design and remains a distinct protocol. It does not define a general target-document creation route. Reusing its invariants is appropriate; treating its lease routes as implicit authorization for a new creation route is not.
+
+* Ownership Analysis
+
+The generic target-create operation belongs to starintel-server core because it describes a StarIntel target independent of any client.
+
+Samsung-specific behavior does not belong in core. The optional Bixby add-on may translate a confirmed Bixby operation into the generic target-create request, but core must not depend on Bixby capsule concepts, Samsung request shapes, dialog state, or confirmation UX.
+
+No standalone Bixby gateway is needed. A second privileged backend would duplicate authorization, idempotency, validation, and target ownership semantics and create drift.
+
+* Required Semantics
+
+A minimal v1 operation should provide:
+
+1. one authenticated =POST /api/v1/targets= operation;
+2. authorization through the existing canonical =targets:dispatch= capability/scope;
+3. required target identity fields: actor, target, dataset;
+4. bounded optional scheduling fields already understood by the target runtime;
+5. a caller-supplied bounded idempotency key;
+6. server-side idempotency identity bound at least to authenticated principal and idempotency key;
+7. a canonical request fingerprint covering dispatch-significant content, including actor, target, dataset, delay, recurring semantics, and options;
+8. deterministic replay of an equivalent accepted request;
+9. conflict/rejection when the same principal/key identity is reused with changed dispatch-significant content;
+10. a narrow receipt containing stable target/request/correlation identity and disposition, not a raw durable document or credential information.
+
+* Security and Threat Model
+
+** Cross-principal replay
+
+Threat: two principals reuse the same visible idempotency key and collide.
+
+Requirement: the durable request identity must be principal-bound. Raw principal identifiers and raw idempotency keys should not need to be exposed in durable target extensions or receipts; stable cryptographic digests are sufficient where correlation is needed.
+
+** Semantic substitution
+
+Threat: the caller reuses one idempotency key while changing target value, actor, dataset, recurrence, delay, options, or other dispatch-significant fields.
+
+Requirement: the request fingerprint covers every field that can change target dispatch semantics. Equivalent retries replay; changed semantics reject.
+
+** Client-specific authority smuggling
+
+Threat: Bixby or another projection supplies fields that grant itself authority or alter server authorization.
+
+Requirement: request fields never grant scope. Core obtains authorization solely from authenticated security context and server policy.
+
+** Receipt leakage
+
+Threat: a successful response exposes backend document internals, principal identifiers, credentials, or queue/storage details.
+
+Requirement: receipts are narrow and policy-safe.
+
+** Duplicate backend architecture
+
+Threat: a Bixby-specific gateway duplicates the target-create application service.
+
+Requirement: Bixby remains a projection over the generic operation; no separate privileged backend is introduced for this use case.
+
+* Compatibility with Target Leases
+
+Target creation and target execution leasing are related but not identical operations.
+
+Creating a target record does not by itself prove execution authority. If the target's manifest requires a lease, the existing lease/execution design remains responsible for acquisition, fencing, immutable execution envelopes, lease loss, and protected side effects.
+
+The target-create API therefore MUST NOT silently mint a lease, fabricate a fencing token, or weaken manifest-controlled locking.
+
+* Error Model
+
+The exact shared HTTP boundary may use the server's existing error representation, but the semantic distinctions must remain stable:
+
+- unauthenticated;
+- unauthorized;
+- malformed JSON/request shape;
+- semantic validation failure;
+- idempotency key required/too large;
+- idempotency identity reused with changed content;
+- target dispatch rejection;
+- server/backend failure.
+
+No error should expose credentials, backend keys, stack traces, or another principal's private metadata.
+
+* Adversarial Findings
+
+1. Fingerprinting only schedule identity is insufficient; it permits changed target content to masquerade as a retry. Fingerprinting must include actual dispatch semantics.
+2. Hashing only the idempotency key is insufficient; identity must include the authenticated principal.
+3. A Bixby-specific scope such as =starintel.targets.write= is rejected because the canonical server capability is =targets:dispatch=.
+4. Returning the full target document is unnecessary and expands leakage/stability surface; a narrow receipt is preferable.
+5. Coupling target creation to lease acquisition conflates durable intent with temporary execution authority and is rejected.
+6. Creating a standalone Bixby gateway duplicates generic core responsibility and is rejected.
+
+* Recommendation
+
+Approve a generic target-create v1 contract in starintel-server core with principal-bound deterministic idempotency, dispatch-semantic fingerprinting, =targets:dispatch= authorization, narrow receipts, and no client-specific fields.
+
+Keep Bixby as an optional projection that performs its own conversational prepare/confirm flow and commits only by calling the generic owner operation after confirmation.
+
+* Footnotes and Glossary
+
+- *target*: a durable StarIntel request for an actor to operate on a subject under dataset/runtime policy.
+- *idempotency identity*: stable server identity derived from authenticated caller identity and a caller-provided retry key.
+- *request fingerprint*: digest of dispatch-significant request semantics used to distinguish equivalent retry from changed-content reuse.
+- *projection*: client-specific adapter that maps an external interface onto canonical StarIntel operations without owning their semantics.

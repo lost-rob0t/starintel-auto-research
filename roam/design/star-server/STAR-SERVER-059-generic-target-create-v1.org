@@ -1,0 +1,350 @@
+:PROPERTIES:
+:ID:       starintel-star-server-design-059
+:END:
+#+title: STAR-SERVER-059 Generic Target Creation v1
+#+description: Review-stage normative design for authenticated generic target creation with principal-bound deterministic idempotency, dispatch-semantic conflict detection, narrow receipts, and client-specific projection isolation.
+#+status: REVIEW
+#+filetags: :starintel:design:star-server:targets:http:idempotency:authorization:bixby:
+#+created: [2026-08-26 Wed]
+#+last_modified: [2026-08-26 Wed]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | StarIntel operator | PENDING | Explicit approval of STAR-RESEARCH-059 | [[file:../../research/star-server/STAR-RESEARCH-059-generic-target-create-v1.org][STAR-RESEARCH-059]] |
+| Generic target-create architecture | StarIntel operator | PENDING | Explicit approval of this complete design | This document |
+| Security/adversarial review | Security reviewer | REVIEWED IN DOCUMENT | Threat model and rejected alternatives reconciled before implementation approval | Adversarial Review section |
+| Implementation | Repository maintainers | NOT AUTHORIZED | Research and design approval, implementation reconciliation, TDD, exact-head CI | [[https://github.com/lost-rob0t/starintel-server/pull/127][starintel-server PR #127]] is provisional realization evidence only |
+| Publication | Auto-Research maintainer | PENDING | Main-branch publication workflow succeeds | Public site after deployment |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-26 | Created review-stage generic target-create v1 design from STAR-RESEARCH-059 and existing target-lease authority. | GPT-5.6 Sol | [[file:../../research/star-server/STAR-RESEARCH-059-generic-target-create-v1.org][STAR-RESEARCH-059]] |
+
+* Related Nodes
+
+- [[file:../../research/star-server/STAR-RESEARCH-059-generic-target-create-v1.org][STAR-RESEARCH-059 Generic Target Creation API and Idempotency Boundary]].
+- [[file:STAR-SERVER-029-distributed-target-lease-and-fencing.org][STAR-SERVER-029 Distributed Target Lease and Fencing Semantics]].
+- [[file:STAR-SERVER-032-authenticated-target-lease-http-execution.org][STAR-SERVER-032 Authenticated Target-Lease HTTP and Execution Enforcement]].
+- [[https://github.com/lost-rob0t/starintel-server/pull/127][starintel-server PR #127]].
+
+* Decision
+
+StarIntel core owns one generic authenticated target-create operation. Client-specific systems, including the optional Bixby add-on, project onto this operation and do not own target authorization, idempotency, validation, durable identity, or dispatch semantics.
+
+The v1 HTTP projection is:
+
+#+begin_example
+POST /api/v1/targets
+#+end_example
+
+The canonical contracted operation identifier is:
+
+#+begin_example
+targets.create
+#+end_example
+
+The authorization requirement is the existing core capability/scope:
+
+#+begin_example
+targets:dispatch
+#+end_example
+
+No Bixby-specific scope, request field, route, or backend service is part of this contract.
+
+* Architecture Boundary
+
+#+begin_example
+Bixby capsule / privileged client
+          |
+          | client-specific prepare + confirmation
+          v
+optional projection / generic HTTP client
+          |
+          v
+POST /api/v1/targets
+          |
+          v
+core authentication + authorization
+          |
+          v
+generic target-create application semantics
+          |
+          v
+canonical target validation + dispatch
+#+end_example
+
+Core MUST remain usable without the Bixby add-on installed or enabled.
+
+The Bixby add-on MUST remain removable without changing target creation, authorization, validation, idempotency, or dispatch behavior for other clients.
+
+* Request Contract
+
+The minimal JSON request is:
+
+#+begin_src json
+{
+  "actor": "collector",
+  "target": "example subject",
+  "dataset": "example-dataset",
+  "idempotency_key": "opaque-client-retry-key"
+}
+#+end_src
+
+Optional dispatch-significant fields supported by the canonical target runtime MAY include:
+
+#+begin_src json
+{
+  "delay": 1,
+  "recurring": false,
+  "options": []
+}
+#+end_src
+
+Requirements:
+
+1. =actor=, =target=, =dataset=, and =idempotency_key= are required non-empty bounded strings.
+2. =idempotency_key= MUST be bounded by encoded byte length, not merely character count.
+3. actor syntax MUST pass the existing canonical target actor validation.
+4. =delay=, when present, MUST be a positive integer within the existing target scheduling bound.
+5. =recurring= MUST be a JSON boolean.
+6. =options= MUST be a bounded JSON array in the form accepted by the canonical target runtime.
+7. unknown top-level properties SHOULD be rejected for v1 unless the shared contract framework has an explicitly approved extension mechanism.
+
+* Authentication and Authorization
+
+The route requires an authenticated principal.
+
+Authorization MUST be decided by the server's existing centralized authorization boundary using =targets:dispatch=.
+
+Request content MUST NOT grant authority. In particular, actor, dataset, options, client type, Bixby capsule identity, or idempotency key cannot create or widen permissions.
+
+The authenticated principal used for authorization MUST be the same principal used to bind idempotency identity.
+
+* Idempotency Identity
+
+The stable request identity is derived from:
+
+#+begin_example
+principal identity + idempotency key
+#+end_example
+
+A cryptographic digest SHOULD be used when persisting or exposing a derived identifier so raw principal identity and raw caller retry keys do not need to enter target extensions or receipts.
+
+Equivalent calls from two distinct principals using the same idempotency key MUST NOT collide.
+
+* Request Fingerprint
+
+The idempotency ledger MUST store or derive a cryptographic fingerprint over all dispatch-significant semantics.
+
+For the v1 request defined here, the fingerprint MUST cover at least:
+
+- authenticated principal identity;
+- actor;
+- target value;
+- dataset;
+- effective delay, including defaults;
+- effective recurring value, including defaults;
+- canonical options representation.
+
+If later fields can change dispatch meaning, they MUST be added to the fingerprint before those fields become part of the public contract.
+
+Object/list canonicalization used inside =options= MUST be deterministic enough that semantically equivalent retries are not rejected merely because of incidental serializer ordering. If the current runtime cannot guarantee that property, v1 MUST either constrain the options shape to a deterministic form or document exact representation identity and add conformance fixtures before approval.
+
+* Durable Identity
+
+A deterministic target identifier and request-ledger identifier MAY be derived from the principal-bound idempotency identity.
+
+The exact storage encoding is an implementation detail and MUST NOT become a client contract beyond the stable opaque identifiers returned in receipts.
+
+Raw credentials MUST never be persisted in the target or request ledger.
+
+* Replay and Conflict Semantics
+
+For one authenticated principal and one idempotency key:
+
+1. first valid accepted request creates/accepts the canonical target and records the request fingerprint;
+2. an exact semantic retry replays the accepted outcome and returns the same stable target/request identities;
+3. reuse of the same identity with changed dispatch-significant content MUST reject as an idempotency conflict;
+4. a failed validation that never committed an idempotency record MUST NOT reserve the key indefinitely;
+5. ambiguous commit outcomes MUST be safely replayable with the same key rather than encouraging the caller to invent a new key.
+
+The implementation MUST NOT classify changed target content as a duplicate merely because a schedule identifier matches.
+
+* Receipt Contract
+
+Success returns a narrow policy-safe receipt:
+
+#+begin_src json
+{
+  "status": "accepted",
+  "target_id": "opaque-stable-target-id",
+  "request_id": "opaque-stable-request-id",
+  "correlation_id": "opaque-correlation-id"
+}
+#+end_src
+
+An equivalent replay MAY use ="duplicate"= or another explicitly contracted replay disposition, but the target and request identities MUST remain stable.
+
+The receipt MUST NOT expose:
+
+- credentials or bearer material;
+- raw principal identity unless a separate approved policy requires it;
+- raw idempotency key;
+- CouchDB revisions or backend keys;
+- RabbitMQ routing details;
+- stack traces;
+- complete internal target documents when the narrow receipt is sufficient.
+
+* Status Semantics
+
+Recommended stable HTTP behavior:
+
+| Outcome | Status |
+|---------+--------|
+| first accepted target | =201 Created= |
+| equivalent replay | =200 OK= |
+| unauthenticated | =401= |
+| unauthorized | =403= |
+| malformed request / invalid JSON shape | =400= |
+| semantic validation failure | =422= |
+| idempotency identity reused with changed content | =409= or the server-wide approved idempotency-conflict mapping |
+| target dispatch rejected by canonical runtime | =409= when conflict-like, otherwise shared stable error mapping |
+| server/backend unavailable | shared =5xx= mapping |
+
+The exact problem-body format SHOULD reuse the canonical server HTTP boundary rather than invent a target-only error dialect.
+
+* Relationship to Target Leases
+
+Creating a target is durable intent; a lease is temporary execution authority.
+
+This API MUST NOT implicitly:
+
+- acquire a target lease;
+- mint a fencing token;
+- claim that dispatch is safe without required execution authority;
+- bypass manifest-controlled locking;
+- weaken stale-writer rejection.
+
+If an actor manifest requires target locking, the canonical target execution path remains responsible for STAR-SERVER-029/032 lease acquisition and fencing before protected work proceeds.
+
+* Bixby Projection Contract
+
+The optional Bixby integration owns conversational state only.
+
+A privileged Bixby target action SHOULD follow:
+
+#+begin_example
+prepare intent
+  -> normalize/display proposed target
+  -> explicit user confirmation
+  -> commit exactly once through targets.create
+  -> render narrow receipt
+#+end_example
+
+Before confirmation, the Bixby action MUST NOT call =targets.create=.
+
+After confirmation, retry behavior MUST reuse the same idempotency key for the same prepared operation so network/action retries cannot create duplicate targets.
+
+The capsule/add-on MUST NOT invent a second target-write capability. It requests the canonical =targets:dispatch= scope.
+
+* Adversarial Review
+
+** A. Changed-content duplicate confusion
+
+Attack: reuse one idempotency key with the same actor/schedule but a different target or options payload.
+
+Failure mode: an implementation fingerprints only schedule identity and returns duplicate instead of rejecting changed content.
+
+Decision: fingerprint every dispatch-significant field. Add a mandatory regression fixture changing target value, options, recurrence, and delay one at a time under the same principal/key.
+
+** B. Cross-principal collision
+
+Attack: principal B guesses principal A's idempotency key.
+
+Decision: principal identity is part of idempotency identity and fingerprint. B receives an independent identity and learns nothing about A's request.
+
+** C. Authorization by request field
+
+Attack: caller selects a privileged actor/dataset and expects that field to grant authority.
+
+Decision: centralized =targets:dispatch= authorization is evaluated from authenticated security context and canonical resource context. Request fields never grant scope.
+
+** D. Confirmation bypass in Bixby
+
+Attack/failure: a conversational retry or action resolver directly commits a target before user confirmation.
+
+Decision: split Bixby behavior into prepare and commit phases. Only the commit action after affirmative confirmation may invoke =targets.create=.
+
+** E. Duplicate backend drift
+
+Failure: standalone Bixby gateway develops its own auth/idempotency/target semantics.
+
+Decision: rejected. Bixby is a thin optional projection over generic server ownership.
+
+** F. Lease conflation
+
+Failure: target creation is treated as proof that the caller owns execution.
+
+Decision: rejected. Creation and leasing remain separate contracts.
+
+** G. Non-canonical options fingerprint
+
+Failure: equivalent JSON objects serialized with different key order generate different fingerprints.
+
+Decision: require deterministic canonicalization or constrain/document v1 representation before approval; add equivalent-order conformance tests when object-valued options are supported.
+
+* Required TDD / Conformance Gates
+
+Before implementation merges, tests MUST prove at least:
+
+1. unauthenticated create denies;
+2. caller without =targets:dispatch= denies;
+3. valid create returns =201= and narrow receipt;
+4. same principal + same key + same semantics returns stable replay;
+5. same principal + same key + changed target rejects;
+6. changed actor rejects;
+7. changed dataset rejects;
+8. changed delay rejects;
+9. changed recurring value rejects;
+10. changed options reject;
+11. two principals may reuse the same visible key without collision;
+12. raw principal and raw idempotency key are absent from policy-safe receipts;
+13. invalid actor/delay/recurring/options are rejected before dispatch;
+14. canonical HTTP contract registry contains =targets.create= and =targets:dispatch=;
+15. optional Bixby add-on defaults to =targets:dispatch= and core has no dependency on Bixby packages;
+16. Bixby prepare path performs no target-create side effect before explicit confirmation.
+
+* Implementation Reconciliation Gate
+
+starintel-server PR #127 predates approval of this document. It MUST remain provisional until approval exists.
+
+After approval, maintainers MUST compare PR #127 against this exact design, correct any mismatch, rebase/reconcile against current =master= without weakening tests, and run exact-head unit, integration, smoke, container-stack, schema-lock, and relevant add-on gates before merge.
+
+Green CI before approval is useful realization evidence but is not architecture approval.
+
+* Rejected Alternatives
+
+- Bixby-specific =starintel.targets.write= scope — rejected; duplicates canonical =targets:dispatch=.
+- standalone Bixby gateway — rejected; duplicates generic owner semantics.
+- target creation inside capsule metadata or client state only — rejected; durable target ownership is server responsibility.
+- idempotency keyed only by caller string — rejected; cross-principal collision risk.
+- schedule-only fingerprint — rejected; semantic substitution risk.
+- automatic lease acquisition inside create — rejected; conflates durable intent and temporary execution authority.
+
+* Decision Gate
+
+This design remains =REVIEW= until the StarIntel operator explicitly approves both STAR-RESEARCH-059 and STAR-SERVER-059, or explicitly approves the complete combined chain with an unambiguous reference to these documents.
+
+No merge of provisional runtime implementation should infer approval from this document's existence.
+
+* Footnotes and Glossary
+
+- *generic target-create*: client-independent operation that submits a canonical StarIntel target.
+- *projection*: optional client-specific translation layer over canonical server operations.
+- *dispatch-significant*: any request property capable of changing what target is dispatched, where, when, or with which runtime options.
+- *replay*: returning the stable outcome of an already accepted semantically equivalent request.
+- *idempotency conflict*: reuse of one principal-bound request identity with changed dispatch-significant content.

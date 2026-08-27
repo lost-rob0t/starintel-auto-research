@@ -2,6 +2,17 @@
 
 This file is the repository-wide authority for every human or automated agent that reads or changes this repository.
 
+## Main-only Repository Workflow
+
+This repository uses `main` as its only active work and publication branch.
+
+- Commit authorized changes directly to `main`.
+- Do not create feature, review, migration, agent, or publication branches and do not open new pull requests unless the operator explicitly overrides this rule for a specific task.
+- Existing historical branches and pull requests are legacy work items, not workflow precedent. Reconcile or merge them into `main` when needed, but do not model new work after them.
+- GitHub Pages production publication is driven by `main`. Any change intended to affect the public site must land on `main` and must either touch a Pages-triggered path or explicitly dispatch the Pages workflow.
+- Do not create a branch solely to trigger, stage, or review publication.
+- When reporting completion, report `main` and the exact `main` head. Direct-main work does not require a review branch or pull request.
+
 ## Instruction Scope
 
 1. Read this root `AGENTS.md` before making any change.

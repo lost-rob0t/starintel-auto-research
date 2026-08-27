@@ -12,7 +12,7 @@ REPOSITORY = "lost-rob0t/starintel-auto-research"
 BRANCH = "main"
 SITE_BASE = "https://auto-research.starintel.actor"
 CANONICAL_PENDING = "PENDING"
-CANONICAL_SCHEMA = "prolog-rlm.research-approval.v1"
+CANONICAL_SCHEMA = "adard.research-approval.v1"
 CANONICAL_APPROVAL_FIELDS = frozenset(
     {
         "APPROVAL_SCHEMA",

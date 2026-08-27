@@ -77,7 +77,7 @@ class ResearchPendingTests(unittest.TestCase):
             org_text(
                 title="Pending",
                 status="REVIEW",
-                approval_schema="prolog-rlm.research-approval.v1",
+                approval_schema="adard.research-approval.v1",
                 approval_state="PENDING",
             ),
         )
@@ -87,7 +87,7 @@ class ResearchPendingTests(unittest.TestCase):
             org_text(
                 title="Approved",
                 status="REVIEW",
-                approval_schema="prolog-rlm.research-approval.v1",
+                approval_schema="adard.research-approval.v1",
                 approval_state="APPROVED",
             ),
         )
@@ -97,7 +97,7 @@ class ResearchPendingTests(unittest.TestCase):
             org_text(
                 title="Rejected",
                 status="REVIEW",
-                approval_schema="prolog-rlm.research-approval.v1",
+                approval_schema="adard.research-approval.v1",
                 approval_state="REJECTED",
             ),
         )
@@ -146,7 +146,7 @@ class ResearchPendingTests(unittest.TestCase):
             org_text(
                 title="Partial canonical",
                 status="REVIEW",
-                approval_schema="prolog-rlm.research-approval.v1",
+                approval_schema="adard.research-approval.v1",
             ),
         )
 
@@ -160,7 +160,7 @@ class ResearchPendingTests(unittest.TestCase):
             org_text(
                 title="Canonical pending",
                 status="REVIEW",
-                approval_schema="prolog-rlm.research-approval.v1",
+                approval_schema="adard.research-approval.v1",
                 approval_state="PENDING",
             ),
         )
@@ -187,7 +187,7 @@ class ResearchPendingTests(unittest.TestCase):
             org_text(
                 title="Pending",
                 status="REVIEW",
-                approval_schema="prolog-rlm.research-approval.v1",
+                approval_schema="adard.research-approval.v1",
                 approval_state="PENDING",
             ),
         )

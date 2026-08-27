@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-CANONICAL_SCHEMA = "prolog-rlm.research-approval.v1"
+CANONICAL_SCHEMA = "adard.research-approval.v1"
 CANONICAL_FIELDS = (
     "approval_schema",
     "approval_state",

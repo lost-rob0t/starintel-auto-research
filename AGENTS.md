@@ -307,3 +307,16 @@ Report:
 - publication workflow result and only `auto-research.starintel.actor` page links.
 
 Do not enable auto-merge. This repository is main-only: perform authorized work directly on `main`. If consuming an existing historical pull request, merge it only after every required check for its current head is complete and green, it is current and mergeable, review requirements are satisfied, discussions are resolved, and the expected current head SHA is supplied to the merge operation. After any direct-main change or merged historical pull request, verify the exact `main` head and verify the `main` publication workflow when publication is in scope.
+
+## Org TODO and Review Queue Presentation
+
+When generating or updating Org TODO/review queues for the operator:
+
+- Every project or queue heading that contains checkbox items must include an Org progress cookie in the form `[N/M]`, where `N` is the number of completed checkbox items and `M` is the total number of checkbox items in that queue.
+- Example: `*** star-lang [25/25]`.
+- Keep review/TODO entries as a flat list of sibling checkbox items under their queue heading whenever there is no real semantic hierarchy.
+- Do not turn each queue item into its own Org heading merely for presentation. Extra headings create foldable subtrees and hide work from the operator.
+- Do not nest ordinary queue items under other queue items for visual grouping. Nest only when the child is a true dependency or subtask and that hierarchy is operationally meaningful.
+- Prefer visible checkbox lists such as `- [x] [[https://auto-research.starintel.actor/...][TITLE]]` and `- [ ] [[https://auto-research.starintel.actor/...][TITLE]]`.
+- Recalculate the progress cookie whenever checkbox state or queue membership changes; never leave a stale `[N/M]` count.
+- Formatting must optimize for scanning in Emacs Org mode: the operator should be able to expand one queue heading and see the complete list without opening a chain of nested subtrees.

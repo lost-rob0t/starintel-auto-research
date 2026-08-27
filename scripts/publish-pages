@@ -10,6 +10,7 @@ if [[ -d "$root/pages/root" ]]; then
   cp -a "$root/pages/root/." "$root/_site/"
 fi
 
+python3 "$root/scripts/build-research-pending.py" "$root/_site"
 python3 "$root/scripts/enhance-pages.py" "$root/_site"
 
 python3 - "$root/_site" <<'PY'
@@ -22,9 +23,12 @@ site = Path(sys.argv[1])
 feed = site / "feed.xml"
 search = site / "search-index.json"
 index = site / "index.html"
+review = site / "research-pending" / "index.html"
 
 if not feed.is_file() or feed.stat().st_size == 0:
     raise SystemExit("RSS feed was not generated")
+if not review.is_file() or review.stat().st_size == 0:
+    raise SystemExit("research-pending dashboard was not generated")
 records = json.loads(search.read_text(encoding="utf-8"))
 if len(records) > 1 and len({record["modified"] for record in records}) < 2:
     raise SystemExit("all document modified dates collapsed to one build timestamp")
@@ -39,7 +43,7 @@ if "application/rss+xml" not in index.read_text(encoding="utf-8"):
 print(
     f"pages_metadata=PASS records={len(records)} "
     f"modified_dates={len({record['modified'] for record in records})} "
-    f"rss_items={len(items)}"
+    f"rss_items={len(items)} research_pending=present"
 )
 PY
 

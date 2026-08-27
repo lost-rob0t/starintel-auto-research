@@ -2,124 +2,161 @@
 :ID:       star-lang-design-004-star-service-uri-discovery
 :END:
 #+title: STAR-LANG-004 STAR Service URI Discovery and Dispatch
-#+description: Define transport-neutral star:// service identity, manifest declaration, runtime discovery, and dispatch semantics for StarLang actors.
+#+description: Define the StarLang projection of canonical STAR resource identities into actor manifests, runtime discovery, deterministic dispatch, and runtime dispatch. RFC 3986 URI syntax and authority routing are owned by STAR-SERVER-041.
 #+status: APPROVED
-#+filetags: :starintel:design:star-lang:actors:service-discovery:registry:manifest:dispatch:uri:common-lisp:
+#+filetags: :starintel:design:star-lang:actors:service-discovery:registry:manifest:dispatch:uri:rfc3986:authority:common-lisp:
 #+created: [2026-08-12 Wed]
-#+last_modified: [2026-08-13 Thu]
+#+last_modified: [2026-08-24 Mon]
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research basis | Research reviewer | APPROVED | Existing StarLang dispatch, transport, runtime-directory, remoting, endpoint, and durable-runtime research supports the design | STAR-LANG-RESEARCH-011 through 015 and STAR-LANG-002 |
-| Architecture | Project maintainer | APPROVED | Explicit approval of the star:// service-discovery direction and consistency with existing StarLang boundaries | User-approved Auto Research direction on 2026-08-12; this design |
-| Security | Security reviewer | NOT APPLICABLE | This slice defines logical identity and injected lookup only; authentication, trust, and transport security are explicitly deferred | Deferred-work boundary in this design |
-| Operations | Operator | NOT APPLICABLE | This slice introduces no deployment topology, external registry, or production operational policy | Runtime-directory injection and deferred-work boundary |
-| Implementation | Repository maintainer | APPROVED | Merged implementation with passing Common Lisp and Nix validation | lost-rob0t/star-lang PR #14, merged 2026-08-13 |
+| Research basis | Research reviewer | APPROVED | Existing StarLang dispatch, transport, runtime-directory, remoting, endpoint, durable-runtime, and unified URI research supports this design | STAR-LANG-RESEARCH-011 through 015; STAR-LANG-002; STAR-RESEARCH-041 |
+| Original actor-tuple URI architecture | Project maintainer | SUPERSEDED | Explicit operator approval of the RFC 3986 authority/resource model replacing fixed =domain:address:actor-name= semantics | [[file:../star-server/STAR-SERVER-041-star-uri-authority-routing-protocol.org][STAR-SERVER-041]]; [[https://github.com/lost-rob0t/starintel-auto-research/issues/137#issuecomment-5391071152][operator approval]] |
+| Current StarLang URI projection | Project maintainer | APPROVED | StarLang must consume the approved shared STAR URI model without creating a second URI grammar | [[file:../star-server/STAR-SERVER-041-star-uri-authority-routing-protocol.org][STAR-SERVER-041]]; [[https://github.com/lost-rob0t/starintel-auto-research/issues/137#issuecomment-5391071152][operator approval]] |
+| Security | Security reviewer | PENDING | Review authority claims, delegated identity, confused-deputy behavior, and canonicalization boundaries inherited from STAR-SERVER-041 | [[file:../star-server/STAR-SERVER-041-star-uri-authority-routing-protocol.org][STAR-SERVER-041 security gate]] |
+| Legacy implementation | Repository maintainer | SUPERSEDED | PR #14 implemented the old actor-tuple URI and remains historical compatibility evidence only | lost-rob0t/star-lang PR #14; STAR-SERVER-041 |
+| RFC-based StarLang migration implementation | Repository maintainer | NOT STARTED | Reusable URI conformance library, StarLang manifest/runtime migration, tests, and exact-head verification | STAR-SERVER-041 Phase A and Phase C |
+
+* Amendment Scope
+
+This document no longer defines a private StarLang URI grammar.
+
+The original implementation proved that transport-neutral =star:= identities are useful for actor manifests and dispatch. The URI syntax itself has since been generalized by [[file:../star-server/STAR-SERVER-041-star-uri-authority-routing-protocol.org][STAR-SERVER-041]] into the RFC 3986 hierarchical authority/resource model.
+
+This amended document owns only the StarLang projection of that shared protocol:
+
+- actor and service identity in StarLang source and portable manifests;
+- deterministic manifest-only resolution;
+- runtime-directory representation of live StarLang services;
+- mapping from canonical STAR identity to runtime-specific actor references;
+- compatibility treatment of legacy StarLang actor-tuple URIs;
+- the boundary between StarLang domain servers and authority routing.
+
+STAR-SERVER-040 and STAR-SERVER-041 own cross-process authority registration, leased routing, transport-profile selection, deadlines, cancellation, and canonical STAR operation/result semantics.
 
 * Decision
 
-StarLang SHALL support canonical actor/service identities of the form:
+New StarLang source and manifests SHALL use canonical RFC 3986 STAR resource identities.
+
+Generic form:
+
+#+begin_example
+star://<authority>/<resource-kind>/<resource-path>
+#+end_example
+
+Actor form:
+
+#+begin_example
+star://<authority>/actor/<actor-resource-path>
+#+end_example
+
+Service form:
+
+#+begin_example
+star://<authority>/service/<service-resource-path>
+#+end_example
+
+Illustrative examples:
+
+#+begin_example
+star://gserver.starintel.actor/actor/user-hunt
+star://gserver.starintel.actor/actor/quasar/user-hunt
+star://bbpd.starintel.actor/actor/nmap
+star://bbpd.starintel.actor/service/recon
+#+end_example
+
+The example authority names are illustrative and do not define production deployment names.
+
+The canonical URI names a logical resource. It does not select HTTP, RabbitMQ, Sento remoting, ZeroMQ, a process, a host port, or an actor-system object.
+
+The StarLang/runtime split is:
+
+#+begin_example
+StarLang source / portable manifest
+        |
+        v
+canonical STAR resource URI
+        |
+        +--> deterministic manifest-only resolution
+        |
+        +--> local runtime-directory resolution
+        |
+        +--> StarRouter authority resolution for cross-process routing
+                         |
+                         v
+                runtime descriptor
+                         |
+                         v
+                selected runtime adapter
+#+end_example
+
+* Normative URI Authority
+
+STAR-SERVER-041 is normative for:
+
+- RFC 3986 parsing and canonicalization;
+- authority representation;
+- path-segment representation;
+- global resource-kind semantics;
+- rejection of userinfo, transport ports, dot segments, query, and fragment in canonical v1 identities;
+- percent-encoding normalization;
+- legacy URI compatibility boundaries;
+- authority registration and resource-prefix routing.
+
+StarLang MUST reuse the shared URI value model and conformance fixtures. It MUST NOT maintain a second actor-specific canonicalizer.
+
+The reusable value model exposes at least:
+
+#+begin_example
+authority
+path-segments
+resource-kind
+resource-path
+#+end_example
+
+It does not expose new canonical URIs as fixed =domain=, =address=, or =actor-name= URI fields.
+
+* Legacy StarLang URI Compatibility
+
+The original syntax:
 
 #+begin_example
 star://domain:address:actor-name
 #+end_example
 
-Examples:
+is compatibility input only.
+
+Examples such as:
 
 #+begin_example
 star://quasar:localhost:user-hunt
 star://bbp:localhost:nmap
 #+end_example
 
-The URI names a logical STAR actor/service. It does not select HTTP, RabbitMQ,
-Sento remoting, ZeroMQ, or any other transport.
+MUST NOT be emitted by new StarLang manifests.
 
-The language/runtime split is:
+There is no universal automatic rewrite from the old tuple into a new hierarchical identity. Migration requires an explicit canonical target URI or an application-owned migration map.
 
-#+begin_example
-StarLang source / portable manifest
-        |
-        v
-canonical STAR service URI
-        |
-        v
-runtime directory / registry resolution
-        |
-        v
-actor descriptor or actor reference
-        |
-        v
-transport/runtime-specific dispatch
-#+end_example
+Conceptually:
 
-* Research audit
+#+begin_src lisp
+(migrate-legacy-star-uri
+ old-uri
+ :to "star://gserver.starintel.actor/actor/user-hunt")
+#+end_src
 
-This design reuses existing StarLang research rather than reopening settled
-runtime questions.
+The compatibility layer validates the explicit target against the shared STAR URI rules. It does not infer a new authority from the old =domain= or =address= fields.
 
-- [[file:../../research/star-lang/STAR-LANG-RESEARCH-011-deterministic-dispatcher.org][STAR-LANG-RESEARCH-011 Deterministic Dispatcher]] already defines standalone dispatch.
-- [[file:../../research/star-lang/STAR-LANG-RESEARCH-012-transport-port-and-settlement.org][STAR-LANG-RESEARCH-012 Transport Port and Settlement]] already separates dispatch semantics from transport settlement.
-- [[file:../../research/star-lang/STAR-LANG-RESEARCH-013-cl-gserver-runtime-facade.org][STAR-LANG-RESEARCH-013 Optional cl-gserver Runtime Adapter]] already defines optional runtime topology discovery and liveness snapshots.
-- [[file:../../research/star-lang/STAR-LANG-RESEARCH-014-bbp-tool-domain-remoting.org][STAR-LANG-RESEARCH-014 BBP Tool Domain Remoting]] already proves cross-domain actor routing.
-- [[file:../../research/star-lang/STAR-LANG-RESEARCH-015-runtime-endpoint-materialization.org][STAR-LANG-RESEARCH-015 Runtime Endpoint Materialization]] already establishes that deployment coordinates are runtime material, not language identity.
-- [[file:STAR-LANG-002-durable-actor-runtime.org][STAR-LANG-002 Durable Actor Runtime]] already defines runtime actor references, capability ownership, and runtime portability boundaries.
+* Manifest Model
 
-Therefore the missing design surface is naming, manifest representation,
-resolution, and dispatch integration.
-
-* URI grammar
-
-Initial grammar is intentionally strict:
-
-#+begin_example
-star-uri    = "star://" domain ":" address ":" actor-name
-domain      = token
-address     = token
-actor-name  = token
-token       = 1*( lower-alpha / digit / "-" / "_" / "." )
-#+end_example
-
-Initial implementation rules:
-
-- scheme is exactly =star://=;
-- domain, address, and actor-name are non-empty;
-- canonical tokens are lowercase ASCII;
-- colon is reserved as the component separator;
-- no query string, fragment, credentials, or implicit default component exists in v1;
-- IPv6 literals are not represented directly in v1 because colon is reserved;
-- future URI revisions may add escaping or structured authorities without changing the v1 parser.
-
-Canonicalization is identity preserving: valid input already has one canonical
-string representation.
-
-* Component semantics
-
-** domain
-
-A logical STAR application or actor namespace, for example =quasar= or =bbp=.
-It is not necessarily a DNS domain and does not imply process ownership.
-
-** address
-
-A logical runtime location selector. =localhost= means the local host/runtime
-scope. Other values may later identify configured runtime nodes. Address does
-not itself encode a transport.
-
-** actor-name
-
-The stable logical actor/service name declared by the StarLang actor contract.
-Examples include =user-hunt= and =nmap=.
-
-* Manifest model
-
-Actor manifests may declare an optional canonical service URI.
+Actor manifests may declare one optional canonical actor resource URI.
 
 #+begin_src lisp
 (actor user-hunt
   (:runtime native
-   :service-uri "star://quasar:localhost:user-hunt"
+   :service-uri "star://gserver.starintel.actor/actor/quasar/user-hunt"
    :accepts (username-search)
    :produces (username-search-result)
    :handler user-hunt-handler
@@ -127,22 +164,26 @@ Actor manifests may declare an optional canonical service URI.
    :mailbox (bounded 256)))
 #+end_src
 
-The compiled actor IR and portable manifest record =:service-uri= as data.
-The manifest does not contain a live Sento actor cell, socket, queue, or host
-object.
+The compiled actor IR and portable manifest retain =:service-uri= as canonical data. The manifest does not contain a live Sento actor cell, socket, RabbitMQ queue, ZeroMQ endpoint, host object, or process identifier.
 
-A service URI declared on an actor MUST have an actor-name component equal to
-the actor contract name. This prevents one manifest entry from claiming another
-actor's logical identity.
+For a StarLang actor declaration:
 
-* Static manifest versus runtime registration
+1. the URI must be canonical under the shared STAR URI profile;
+2. the resource kind must be =actor=;
+3. one canonical URI may identify at most one actor contract in a manifest;
+4. duplicate URI claims are invalid;
+5. authority-specific actor path semantics may add stricter naming rules, but the generic StarLang compiler does not resurrect a fixed =domain/address/actor-name= grammar.
 
-These are distinct concepts.
+Service declarations use =/service/= and follow the service resource contract instead of pretending every callable boundary is an actor.
+
+* Static Manifest Versus Runtime Registration
+
+Manifest declaration and runtime registration remain distinct.
 
 Manifest declaration:
 
 #+begin_example
-star://quasar:localhost:user-hunt
+star://gserver.starintel.actor/actor/quasar/user-hunt
   actor = user-hunt
   capabilities = username-search
 #+end_example
@@ -150,208 +191,256 @@ star://quasar:localhost:user-hunt
 Runtime observation:
 
 #+begin_example
-star://quasar:localhost:user-hunt
-  runtime = cl-gserver
-  alive = true
-  ref = runtime-specific reference
+service-uri = star://gserver.starintel.actor/actor/quasar/user-hunt
+runtime = cl-gserver
+alive = true
+ref = runtime-specific reference
+endpoint = runtime metadata, if applicable
 #+end_example
 
-The manifest answers what service exists. The runtime directory answers which
-service instance is currently reachable.
+The manifest answers what logical service an application declares. A runtime directory answers which local/runtime instance is reachable. StarRouter answers which authority instance/prefix/transport should receive a cross-process operation.
 
-* Runtime directory extension
+No transport endpoint becomes canonical identity merely because it is currently reachable.
 
-The existing optional runtime-directory port remains the discovery boundary.
+* Runtime Directory Extension
+
+The existing optional StarLang runtime-directory port remains the local/runtime discovery boundary.
+
 Directory entries MAY include:
 
 #+begin_src lisp
 (:name "user-hunt"
- :service-uri "star://quasar:localhost:user-hunt"
- :domain "quasar"
- :address "localhost"
+ :service-uri "star://gserver.starintel.actor/actor/quasar/user-hunt"
+ :authority "gserver.starintel.actor"
+ :resource-kind "actor"
+ :resource-path ("quasar" "user-hunt")
  :runtime :cl-gserver
  :alive t
  :capabilities ("username-search")
  :ref <opaque-runtime-reference>)
 #+end_src
 
-The generic StarLang layer validates portable metadata but treats =:ref= as an
-opaque runtime value. Final extracted packages may split portable descriptor
-fields from implementation-private references.
+The generic StarLang layer validates portable URI/resource metadata but treats =:ref= and transport endpoint data as opaque runtime material.
 
-No second competing registry is required for the first implementation. A
-concrete Sento/cl-gserver adapter may source the directory snapshot from
-=all-actors=, =find-actors=, and running state. Other registry backends can later
-implement the same runtime-directory port.
+A concrete Sento/cl-gserver adapter may source local liveness and actor references from the real actor system. Other runtime backends may implement the same directory contract without changing logical URI identity.
 
 * Resolution
 
-Resolution of a canonical STAR URI is exact.
+** Deterministic resolution
+
+Deterministic execution does not perform network or authority discovery.
+
+For a canonical actor URI:
 
 #+begin_example
-parse URI
-  -> validate canonical components
-  -> obtain runtime-directory snapshot
-  -> find exact :service-uri match
-  -> require alive != nil
-  -> return normalized runtime entry
+command :actor = star://gserver.starintel.actor/actor/quasar/user-hunt
+  -> parse/canonicalize with shared STAR URI library
+  -> require resource kind = actor
+  -> find the manifest actor with the exact canonical URI
+  -> dispatch through the registered deterministic handler
 #+end_example
 
-If a legacy directory entry lacks =:service-uri=, no implicit cross-domain
-mapping is performed. Compatibility mapping may be added only as an explicit
-adapter policy.
+Actor-name dispatch may remain as a bounded source/runtime compatibility feature where the language contract still allows it.
 
-Typed failures distinguish:
+** Local runtime resolution
 
-- malformed service URI;
-- service not registered;
-- service registered but stopped;
-- duplicate service registrations;
-- manifest/service actor-name mismatch.
+A local runtime may resolve the exact canonical URI through its injected runtime-directory snapshot and obtain a live opaque actor reference.
 
-* Deterministic standalone dispatch
+Typed failures distinguish at least:
 
-Standalone deterministic execution remains valid without a runtime directory.
-A command may target either the actor name or the actor's declared STAR service
-URI.
+- malformed or noncanonical STAR URI;
+- unsupported resource kind for the requested operation;
+- resource not registered;
+- resource registered but unavailable/stopped;
+- duplicate local registration;
+- incompatible capability/runtime binding.
 
-For a STAR URI target, deterministic dispatch performs manifest-only resolution:
+** Cross-process resolution
+
+StarLang MUST NOT invent a second distributed registry.
+
+For cross-process destinations, resolution delegates to the STAR-SERVER-040/041 StarRouter authority model:
 
 #+begin_example
-command :actor = star://quasar:localhost:user-hunt
-  -> parse URI
-  -> find manifest actor whose :service-uri exactly matches
-  -> dispatch through the already registered deterministic handler
+canonical STAR URI
+  -> authority registration
+  -> longest matching resource prefix
+  -> eligible leased/generation-fenced authority instance
+  -> compatible transport profile
+  -> canonical STAR operation forwarding
 #+end_example
 
-It does not pretend to perform network discovery. This gives deterministic tests
-the same logical addressing model without requiring cl-gserver.
+StarLang remains responsible for its actor/message semantics. StarRouter remains responsible for authority routing and transport selection.
 
-* Runtime dispatch
+* Domain Servers
 
-Runtime-backed execution may use the directory before selecting a concrete
-runtime transport.
+A StarLang =domain-server= is not represented by a URI =domain= field.
+
+A domain server is a runtime/supervision boundary that may:
+
+- own keyed StarLang actor state;
+- expose actors and services;
+- claim its own STAR authority; or
+- operate beneath an explicitly delegated prefix of another authority;
+- advertise capabilities and runtime transport profiles through the authority-routing layer.
+
+Examples of two valid ownership models:
 
 #+begin_example
-star://bbp:localhost:nmap
-  -> runtime-directory resolve
+independent authority:
+  star://bbpd.starintel.actor/actor/nmap
+
+explicitly delegated beneath a gserver authority:
+  star://gserver.starintel.actor/actor/bbpd/nmap
+#+end_example
+
+These are different authority/ownership decisions. The generic URI parser must not treat =bbpd= as a magic language-level domain component.
+
+STAR-LANG-RESEARCH-014 remains the historical domain-remoting prototype and must be revised against this authority model before its registration/routing design is promoted as current domain-server architecture.
+
+* Runtime Dispatch
+
+Runtime-backed StarLang execution receives or resolves a runtime descriptor, then dispatches through the selected adapter.
+
+#+begin_example
+star://bbpd.starintel.actor/actor/nmap
+  -> local directory or StarRouter authority resolution
   -> runtime descriptor
-  -> selected runtime adapter
-  -> tell / dispatch / remote transport
+  -> selected adapter
+  -> tell / ask / transport operation
 #+end_example
 
-The STAR URI remains unchanged if the implementation moves from same-process
-Sento to another local process or future remote transport.
+The logical STAR URI remains stable when the implementation moves between same-process Sento, remote Sento, ZeroMQ, HTTP, or another approved transport profile.
 
-* Wire semantics
+Durable RabbitMQ work remains a separate settlement/dataflow concern where the application contract requires broker durability.
 
-Existing message envelopes keep =:actor= as a string. A canonical =star://=
-service URI is therefore a valid actor destination without introducing a second
-recipient field in protocol v1.
+* Wire Semantics
 
-The sender/recipient logical identity should remain the STAR URI at system
-boundaries. Runtime adapters may internally map the URI to an actor name or
-opaque reference.
+Existing StarLang message envelopes may continue carrying a canonical STAR URI as the actor/destination string where the current protocol field permits it.
+
+At system boundaries, sender and destination identity should remain canonical STAR URIs. Runtime adapters may map those URIs to local names, opaque references, or transport routes internally.
+
+Transport routing metadata must not rewrite logical request identity.
 
 * Capabilities
 
-Capabilities remain manifest metadata, not URI syntax. Do not add capability
-selectors to the URI.
+Capabilities remain manifest and runtime registration metadata, not URI syntax.
 
-Future discovery may support:
+Discovery may return canonical STAR URIs by authority, resource prefix, or capability, but a capability selector is not embedded into canonical resource identity.
 
-#+begin_src lisp
-(find-services directory :domain "quasar" :capability "username-search")
-#+end_src
+* Relationship to Runtime Endpoint Materialization
 
-and then return one or more canonical STAR URIs.
-
-* Relationship to runtime endpoint materialization
-
-=STAR-LANG-RESEARCH-015= uses runtime-neutral Sento endpoint templates such as
-=sento://dynamic/user/bbp-domain=. STAR service identity is a higher layer.
+STAR-LANG-RESEARCH-015 remains valid in its core separation: runtime endpoints are deployment material, not language identity.
 
 Example:
 
 #+begin_example
 logical identity:
-  star://bbp:localhost:nmap
+  star://bbpd.starintel.actor/actor/nmap
 
 resolved runtime descriptor:
   runtime = sento
   endpoint = sento://worker.internal:4912/user/nmap
 #+end_example
 
-The compiled STAR URI stays stable while runtime coordinates change.
+or:
 
-* API design
+#+begin_example
+logical identity:
+  star://bbpd.starintel.actor/actor/nmap
 
-Prototype Common Lisp API:
+resolved runtime descriptor:
+  runtime = zeromq
+  endpoint = tcp://worker.internal:5555
+#+end_example
+
+The canonical STAR URI does not change when the transport endpoint changes.
+
+* API Design
+
+The StarLang URI API should consume the shared reusable STAR URI implementation rather than retain actor-tuple accessors.
+
+Conceptual public operations include:
 
 #+begin_src lisp
-(parse-star-service-uri "star://quasar:localhost:user-hunt")
-(star-service-uri-string uri)
+(parse-star-uri "star://gserver.starintel.actor/actor/user-hunt")
+(star-uri-string uri)
+(star-uri-authority uri)
+(star-uri-path-segments uri)
+(star-uri-resource-kind uri)
+(star-uri-resource-path uri)
 (resolve-star-service-uri directory context uri)
 #+end_src
 
-The URI object exposes domain, address, and actor-name accessors.
+Legacy parsing and migration live in an explicit compatibility module/API.
 
-The first implementation deliberately does not add global mutable registry
-state. Discovery is injected through the existing runtime-directory port.
+Exact exported Common Lisp names remain implementation-owned and must follow the final shared URI package API rather than this design inventing a parallel parser package.
 
-* Initial implementation slice
+* TDD-First Migration Slice
 
-Implement in =lost-rob0t/star-lang= prototype ownership:
+Implementation follows STAR-SERVER-041 Phase A and Phase C:
 
-1. strict STAR service URI parser and canonical formatter;
-2. optional =:service-uri= actor contract field;
-3. portable manifest emission of service identity;
-4. runtime-directory validation for service metadata;
-5. exact URI resolution over runtime-directory snapshots;
-6. deterministic dispatcher routing to manifest-declared service URIs;
-7. tests covering Quasar UserHunt and BBP nmap examples;
-8. no transport-specific code in the URI module.
+1. write shared RFC 3986 STAR URI conformance fixtures first;
+2. extract/generalize the existing StarLang URI parser into the reusable shared URI boundary;
+3. implement canonical authority/path parsing and serialization once;
+4. retain the old tuple parser only in a compatibility module;
+5. require explicit legacy migration targets;
+6. update StarLang actor/service manifests to emit RFC-based canonical URIs;
+7. update runtime-directory entries and deterministic dispatch to use shared URI values;
+8. add tests proving one- and multi-segment actor resource paths do not recreate fixed =domain= semantics;
+9. add local Sento/runtime integration evidence using canonical URIs;
+10. add domain-server fixtures for independent-authority and delegated-prefix ownership without committing to one deployment topology;
+11. keep StarRouter authority routing outside StarLang runtime ownership;
+12. run the full StarLang and cross-language STAR URI conformance gates before migration completion.
 
-* Deferred work
+* Deferred Work
 
-Not part of the first implementation:
+This document does not define:
 
-- query parameters or URI version selectors;
-- IPv6 authority encoding;
-- distributed registry consensus;
-- DNS-SD, Consul, Kubernetes, or mDNS discovery;
-- global mutable process registry;
-- automatic cross-domain trust;
-- remote authentication or mTLS policy;
-- Quasar registry UI;
-- starintel-server gateway implementation.
+- the authority trust root or credential format;
+- operator policy for delegated authority/prefix claims;
+- the production authority name for starintel-gserver or BBPD;
+- the complete domain-server v2 registration/control protocol;
+- distributed consensus beyond STAR-SERVER-040 leased registration semantics;
+- application authorization implied by URI ownership;
+- transport-specific security profiles;
+- Quasar registry UI.
 
-Those belong to later service-discovery and server-dispatch work.
+The starintel-gserver authority integration formerly deferred by this document is now designed in STAR-SERVER-041 and is no longer an unowned gap.
 
 * Acceptance
 
-The slice is conformant when:
+The amended design is conformant when:
 
-1. both example URIs parse and round-trip canonically;
-2. malformed/noncanonical URIs fail with stable typed conditions;
-3. an actor manifest may declare exactly one service URI;
-4. actor-name mismatch is rejected;
-5. the portable manifest retains the URI without runtime objects;
-6. runtime-directory resolution returns the exact live entry;
-7. stopped and missing entries are distinguishable;
-8. deterministic dispatch can address a handler through the declared URI;
-9. actor-name dispatch remains backward compatible;
-10. all existing prototype tests remain green.
+1. new StarLang actor/service manifests emit only RFC-based canonical STAR URIs;
+2. URI parse/serialize behavior is shared with STAR-SERVER-041 conformance fixtures;
+3. new code has no canonical URI dependency on =domain= or =address= tuple fields;
+4. legacy tuple URIs are accepted only through explicit compatibility APIs;
+5. legacy migration requires an explicit new target URI or mapping;
+6. deterministic dispatch resolves exact canonical manifest actor URIs;
+7. runtime-directory resolution returns the exact live entry without embedding transport into identity;
+8. stopped, missing, duplicate, malformed, and incompatible entries remain distinguishable;
+9. one- and multi-segment =/actor/= paths are valid without assigning fixed domain semantics;
+10. cross-process routing delegates to StarRouter rather than adding a second distributed registry;
+11. domain-server fixtures support both independent-authority and delegated-prefix models;
+12. existing actor-name compatibility behavior remains explicit and bounded where retained;
+13. full StarLang and shared URI conformance tests are green at the exact implementation head.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
 | 2026-08-13 | Normalize the approved STAR service URI design after implementation and record current validation evidence | ChatGPT agent | lost-rob0t/star-lang PR #14 merged with Common Lisp and Nix checks green |
+| 2026-08-24 | Amend STAR-LANG-004 to consume the approved RFC 3986 authority/resource URI protocol, demote =star://domain:address:actor-name= to compatibility input, delegate cross-process authority routing to STAR-SERVER-040/041, and redefine domain servers without URI-level =domain/address= fields | GPT-5.6 Sol | [[file:../star-server/STAR-SERVER-041-star-uri-authority-routing-protocol.org][STAR-SERVER-041]]; [[https://github.com/lost-rob0t/starintel-auto-research/issues/137#issuecomment-5391071152][operator approval]] |
 
 * Footnotes and Glossary
 
-- *STAR service URI* — Canonical transport-neutral logical identity in the form =star://domain:address:actor-name=.
-- *Runtime directory* — Injected StarLang boundary that returns observed runtime actor descriptors and liveness without defining portable manifest identity.
-- *Manifest identity* — Stable portable service metadata compiled from StarLang source; it does not contain live actor references, sockets, queues, or transport coordinates.
-- *Runtime descriptor* — Runtime-specific observation that may include liveness and an opaque actor reference while preserving the canonical STAR service URI.
+- *STAR URI* — Canonical transport-neutral resource identity using RFC 3986 hierarchical =star://authority/path= syntax as specialized by STAR-SERVER-041.
+- *Authority* — Stable logical owner/resolver of a STAR namespace, independent from the current network endpoint or process instance.
+- *Resource kind* — Reviewed first path segment such as =actor= or =service=.
+- *Resource path* — Ordered path segments following the resource kind; their semantics belong to the resource contract, not the generic URI parser.
+- *Runtime directory* — Injected StarLang boundary returning observed local/runtime descriptors and liveness without defining distributed authority ownership.
+- *Manifest identity* — Stable portable service metadata compiled from StarLang source; it contains canonical URI data but no live runtime object or transport endpoint.
+- *Runtime descriptor* — Runtime-specific observation that may include liveness, opaque actor references, and endpoint metadata while preserving canonical STAR identity.
+- *Legacy actor URI* — The superseded =star://domain:address:actor-name= syntax retained only as bounded compatibility input.
+- *Domain server* — Independently supervised StarLang runtime/domain boundary that may own keyed actors and either claim an authority or operate under an explicitly delegated authority prefix.

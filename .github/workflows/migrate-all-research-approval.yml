@@ -1,0 +1,45 @@
+name: Migrate all research approval metadata
+
+on:
+  push:
+    branches:
+      - chore/migrate-research-approval-20260827
+    paths:
+      - .github/workflows/migrate-all-research-approval.yml
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: chore/migrate-research-approval-20260827
+
+      - name: Report existing state
+        run: python3 scripts/research_approval_migration.py --report
+
+      - name: Migrate every research document
+        run: python3 scripts/research_approval_migration.py
+
+      - name: Verify migration invariants
+        run: python3 scripts/research_approval_migration.py --check --verify
+
+      - name: Commit migration and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/migrate-all-research-approval.yml
+          git status --short
+          git config user.name "starintel-research-migration"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add roam/research .github/workflows/migrate-all-research-approval.yml
+          if git diff --cached --quiet; then
+            echo "No migration changes required."
+            exit 0
+          fi
+          git commit -m "chore: migrate all research approval metadata"
+          git push origin HEAD:chore/migrate-research-approval-20260827

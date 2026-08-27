@@ -57,8 +57,9 @@
 
   const SEARCH_QUERIES = [
     "user:lost-rob0t is:pr is:open research",
+    "org:starintel-labs is:pr is:open research",
     "user:lost-rob0t is:pr is:open ADARD",
-    "user:lost-rob0t is:pr is:open approval",
+    "org:starintel-labs is:pr is:open ADARD",
   ];
 
   function repositoryFromUrl(value) {
@@ -137,6 +138,13 @@
     container.append(article);
   }
 
+  function appendFallbackLink(container, href, label) {
+    const link = document.createElement("a");
+    link.href = href;
+    link.textContent = label;
+    container.append(link);
+  }
+
   function startPullRequests() {
     const container = byId("pr-list");
     const status = byId("pr-status");
@@ -184,11 +192,18 @@
         render();
       } catch (error) {
         container.replaceChildren();
+        container.classList.add("pr-fallback-links");
         status.textContent = `Could not load live PRs: ${error.message}`;
-        const fallback = document.createElement("a");
-        fallback.href = "https://github.com/pulls?q=is%3Aopen+is%3Apr+user%3Alost-rob0t+research";
-        fallback.textContent = "Open GitHub research PR search ↗";
-        container.append(fallback);
+        appendFallbackLink(
+          container,
+          "https://github.com/pulls?q=is%3Aopen+is%3Apr+user%3Alost-rob0t+research",
+          "Search lost-rob0t research PRs ↗"
+        );
+        appendFallbackLink(
+          container,
+          "https://github.com/pulls?q=is%3Aopen+is%3Apr+org%3Astarintel-labs+research",
+          "Search starintel-labs research PRs ↗"
+        );
       } finally {
         refresh && (refresh.disabled = false);
       }

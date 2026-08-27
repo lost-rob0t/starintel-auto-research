@@ -4,14 +4,23 @@ This file is the repository-wide authority for every human or automated agent th
 
 ## Main-only Repository Workflow
 
-This repository uses `main` as its only active work and publication branch.
+This repository is **strictly main-only**. `main` is the only active work, integration, verification, and publication branch.
+
+These rules are non-negotiable unless the operator explicitly overrides them for one specific task:
 
 - Commit authorized changes directly to `main`.
-- Do not create feature, review, migration, agent, or publication branches and do not open new pull requests unless the operator explicitly overrides this rule for a specific task.
-- Existing historical branches and pull requests are legacy work items, not workflow precedent. Reconcile or merge them into `main` when needed, but do not model new work after them.
-- GitHub Pages production publication is driven by `main`. Any change intended to affect the public site must land on `main` and must either touch a Pages-triggered path or explicitly dispatch the Pages workflow.
-- Do not create a branch solely to trigger, stage, or review publication.
-- When reporting completion, report `main` and the exact `main` head. Direct-main work does not require a review branch or pull request.
+- **Never create a feature, review, migration, verification, safety, staging, agent, publication, reconciliation, or temporary branch.**
+- **Never create a branch as a workaround** for uncertainty, validation, tool limitations, GitHub Pages triggering, migration testing, or a desire to preserve a clean `main` history.
+- **Never open a new pull request for work in this repository** unless the operator explicitly instructs you to do so for that specific change.
+- Existing historical branches and pull requests are legacy work items only. Their existence is not workflow precedent and must never be used to infer that branches or PRs are acceptable for new work.
+- When an existing historical branch or pull request contains work that must land, reconcile or merge it into `main`; do not create another branch around it.
+- If a tool can write directly to `main`, use the direct-main operation. Do not build a temporary GitHub Actions workflow merely to mutate the repository when a direct repository write is available.
+- If direct-main mutation is genuinely unavailable, do **not** substitute a branch. Report the limitation rather than silently changing the repository workflow.
+- GitHub Pages production publication is driven by `main`. Any change intended to affect the public site must land on `main` and must either touch a Pages-triggered path or use the existing Pages workflow's explicit dispatch path. Do not create a branch solely to trigger, stage, test, or review publication.
+- Verification belongs on the exact `main` head. Do not use a side branch as a verification environment.
+- When reporting completion, report `main` and the exact `main` head SHA. Direct-main work does not require a review branch or pull request.
+
+Before performing any Git write, verify that the destination is `main`. If a planned operation would create or update any other branch, stop that operation and use the direct-main path instead unless the operator explicitly authorized the non-main branch in the current task.
 
 ## Instruction Scope
 
@@ -210,7 +219,7 @@ The public site is `https://auto-research.starintel.actor/`.
 - Keep internal site links relative.
 - Do not hard-code branch-preview URLs into exported pages.
 - Preserve source directory structure in published note paths.
-- Never claim pages were published unless the target-branch publication workflow completed successfully.
+- Never claim pages were published unless the `main` publication workflow completed successfully for the exact intended `main` head.
 - A local `_site` build proves generation, not deployment.
 - Never commit secrets, credentials, private evidence, private datasets, authorization headers, browser-session material, or raw sensitive solver results to source or generated pages.
 
@@ -231,7 +240,7 @@ The Pages workflow must:
 9. fail when generated pages expose prohibited secret material or `github.io` links;
 10. reject tracked `_site/` and `.cache/` output;
 11. avoid paid provider calls;
-12. deploy only from the expected target branch or an explicit manual dispatch;
+12. deploy production only from `main` or an explicit manual dispatch of the existing Pages workflow;
 13. publish with the `auto-research.starintel.actor` domain.
 
 Do not maintain contradictory local and CI workflows.
@@ -287,8 +296,8 @@ When substantive Org files changed, also run the changed-file validation command
 
 Report:
 
-- branch and exact head SHA;
-- pull request and target branch;
+- `main` and the exact `main` head SHA;
+- any existing historical pull request consumed or merged, if applicable; direct-main work does not require a pull request;
 - applicable `AGENTS.md` files read;
 - complete tracked scope inspected;
 - files created, changed, deleted, moved, or superseded;
@@ -297,4 +306,4 @@ Report:
 - unresolved risks and research gaps;
 - publication workflow result and only `auto-research.starintel.actor` page links.
 
-Do not enable auto-merge. Merge directly only after every required check for the current head is complete and green, the branch is current and mergeable, review requirements are satisfied, discussions are resolved, and the expected current head SHA is supplied to the merge operation. After merging, verify the merge commit on the target branch and verify the target-branch publication workflow.
+Do not enable auto-merge. This repository is main-only: perform authorized work directly on `main`. If consuming an existing historical pull request, merge it only after every required check for its current head is complete and green, it is current and mergeable, review requirements are satisfied, discussions are resolved, and the expected current head SHA is supplied to the merge operation. After any direct-main change or merged historical pull request, verify the exact `main` head and verify the `main` publication workflow when publication is in scope.

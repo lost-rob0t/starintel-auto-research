@@ -76,6 +76,7 @@ def render_dashboard(root: Path) -> str:
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Research review — StarIntel Research</title>
   <link rel="stylesheet" href="../assets/site.css">
+  <link rel="stylesheet" href="../assets/research-pending.css">
   <script defer src="../assets/site.js"></script>
   <script defer src="../assets/research-pending.js"></script>
 </head>

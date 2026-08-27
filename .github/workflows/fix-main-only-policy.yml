@@ -1,0 +1,79 @@
+name: Fix main-only repository policy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/fix-main-only-policy.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Enforce main-only workflow policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("AGENTS.md")
+          text = path.read_text(encoding="utf-8")
+
+          section = """## Main-only Repository Workflow
+
+This repository uses `main` as its only active work and publication branch.
+
+- Commit authorized changes directly to `main`. Do not create feature, review, migration, agent, or publication branches and do not open new pull requests unless the operator explicitly overrides this rule for a specific task.
+- Existing historical branches and pull requests are legacy work items, not workflow precedent. Reconcile or merge them into `main` when needed, but do not model new work after them.
+- GitHub Pages production publication is driven by `main`. Any change intended to affect the public site must land on `main` and must either touch a Pages-triggered path or explicitly dispatch the Pages workflow. Do not create a branch solely to trigger or stage publication.
+- When reporting completion, report `main` and the exact `main` head. Direct-main work does not require a review branch or pull request.
+
+"""
+
+          marker = "## Repository Mission and Boundaries\n"
+          if "## Main-only Repository Workflow\n" not in text:
+              if marker not in text:
+                  raise SystemExit("main-only insertion marker missing")
+              text = text.replace(marker, section + marker, 1)
+
+          old_report = "- branch and exact head SHA;\n- pull request and target branch;"
+          new_report = "- `main` and exact head SHA;\n- any existing pull request consumed or merged, if applicable; direct-main work does not require a pull request;"
+          if old_report in text:
+              text = text.replace(old_report, new_report, 1)
+          elif new_report not in text:
+              raise SystemExit("completion report policy marker missing")
+
+          old_final = "Do not enable auto-merge. Merge directly only after every required check for the current head is complete and green, the branch is current and mergeable, review requirements are satisfied, discussions are resolved, and the expected current head SHA is supplied to the merge operation. After merging, verify the merge commit on the target branch and verify the target-branch publication workflow."
+          new_final = "Do not enable auto-merge. This repository is main-only: perform authorized work directly on `main`. If consuming an existing historical pull request, merge it only after every required check for its current head is complete and green, it is current and mergeable, review requirements are satisfied, discussions are resolved, and the expected current head SHA is supplied to the merge operation. After any direct-main change or merged historical pull request, verify the exact `main` head and verify the main-branch publication workflow when publication is in scope."
+          if old_final in text:
+              text = text.replace(old_final, new_final, 1)
+          elif new_final not in text:
+              raise SystemExit("final git policy marker missing")
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+          git diff --check
+          grep -n "Main-only Repository Workflow" AGENTS.md
+          grep -n "direct-main work does not require" AGENTS.md
+          grep -n "This repository is main-only" AGENTS.md
+
+      - name: Commit policy directly to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/fix-main-only-policy.yml
+          git config user.name "starintel-policy-fix"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add AGENTS.md .github/workflows/fix-main-only-policy.yml
+          git commit -m "docs: enforce main-only repository workflow"
+          git push origin HEAD:main

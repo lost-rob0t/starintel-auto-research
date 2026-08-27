@@ -1,41 +1,56 @@
 :PROPERTIES:
 :ID:       quasar-lisp-actor-discovery-006
 :END:
-#+title: QUASAR-RESEARCH-006 Lisp Actor Discovery and Actor Studio Visibility
-#+description: Analyze why Quasar's Actor Studio shows browser JavaScript actors but not the Common Lisp/Sento actor system, reconcile the gap with existing Quasar actor-runtime research, and define the smallest useful native-actor visibility slice.
+#+title: QUASAR-RESEARCH-006 Operator Actor Capability Discovery and gserver Runtime Observation
+#+description: Research how Quasar should expose runnable Common Lisp actor capabilities by accepted target/document types while keeping internal cl-gserver/Sento topology out of the normal Actor Studio catalog.
 #+status: REVIEW
-#+filetags: :starintel:quasar:research:actors:common-lisp:sento:actor-studio:discovery:adard:approval:
+#+filetags: :starintel:quasar:research:actors:common-lisp:cl-gserver:sento:actor-studio:targets:documents:normalization:adard:approval:
 #+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
 #+created: [2026-08-27 Thu]
 #+last_modified: [2026-08-27 Thu]
 
 | Version | Date       | Description of change | Did nsaspy approve it |
 |---------+------------+-----------------------+-----------------------|
-| 0.1.0   | 2026-08-27 | Research current Quasar browser/native actor surfaces and the missing discovery projection. | No |
+| 0.1.0   | 2026-08-27 | Initial native actor visibility research. | No |
+| 0.2.0   | 2026-08-27 | Separate operator-facing actor capabilities from cl-gserver runtime topology; add target/document type matching and normalization actors. | No |
 
 * Research Question
 
-Why does Quasar's Actor Studio expose browser JavaScript actors while the Common Lisp actors running in the Quasar control plane are not visible, and what is the smallest architecture change that makes native Lisp actors discoverable without creating a second actor system or violating Quasar's existing runtime boundaries?
+How should Quasar discover and present Common Lisp actors that an operator can intentionally run against selected targets or documents, while still using cl-gserver/Sento for execution and liveness without exposing every internal supervisor, router, worker, coordinator, or transport actor in Actor Studio?
+
+The motivating examples are:
+
+- a normalization actor that accepts =person= documents and emits canonical document updates;
+- an OSINT actor that accepts a =username= or =person= target and emits account/evidence documents;
+- a lookup actor backed by a supervised cl-gserver subsystem whose internal workers are implementation details.
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research findings | Quasar operator | PENDING | Confirm that the diagnosed visibility gap matches desired product behavior | This document |
-| Existing architecture reconciliation | Quasar operator | PENDING | Confirm QUASAR-RESEARCH-004 remains authoritative for dual runtimes | Existing Architecture Already Decides the Runtime Model |
-| Implementation authorization | Quasar operator | BLOCKED | Explicit approval of this research and QUASAR-008 design | [[file:../../design/star-server/QUASAR-008-lisp-actor-discovery-and-actor-studio.org][QUASAR-008]] |
+| Research findings | Quasar operator | PENDING | Confirm the capability-vs-runtime distinction and matching model | This document |
+| Existing architecture reconciliation | Quasar operator | PENDING | Confirm QUASAR-RESEARCH-004 and STAR-LANG-RESEARCH-013 remain authoritative boundaries | Related Nodes |
+| Implementation authorization | Quasar operator | NOT STARTED | Explicit approval of this research and QUASAR-008 | [[file:../../design/star-server/QUASAR-008-lisp-actor-discovery-and-actor-studio.org][QUASAR-008]] |
 
 No row is implied approval.
 
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-27 | Created the initial review-stage Lisp actor discovery research. | GPT-5.6 Sol | Quasar main and prior Auto-Research architecture nodes |
+| 2026-08-27 | Reworked discovery around operator-facing actor capabilities, target/document acceptance contracts, normalization actors, and separate gserver runtime observation. | GPT-5.6 Sol | Operator clarification plus STAR-LANG-RESEARCH-013 cl-gserver runtime facade |
+
 * Repositories and Exact Research Baseline
 
-This analysis was performed against:
+This pass reconciles:
 
 - =lost-rob0t/quasar= main at =b608fd91379e35ff65ef71f34867050d2983c077=;
 - =lost-rob0t/quasar-ui= indexed source at =28684ae94953bfec199ed103172526f10a767d32=;
-- =lost-rob0t/starintel-auto-research= main at =1a2a979ea0cb3c5e763f5b69f6be3219d49e942c=.
+- =lost-rob0t/starintel-auto-research= main at =1a2a979ea0cb3c5e763f5b69f6be3219d49e942c=;
+- the existing review branch for this ADARD package.
 
-Primary inspected Quasar files:
+Primary inspected Quasar surfaces include:
 
 - =frontend/src/components/ActorManager.jsx=;
 - =frontend/src/lib/actors.js=;
@@ -44,199 +59,358 @@ Primary inspected Quasar files:
 - =control-plane/src/actors/melissa/supervisor.lisp=;
 - =docs/UI-MIGRATION.md=.
 
-Primary prior architecture node:
+* Related Nodes
 
 - [[file:QUASAR-RESEARCH-004-dual-actor-supervisor-runtime.org][QUASAR-RESEARCH-004 Dual Actor Supervisor Runtime]].
+- [[file:../star-lang/STAR-LANG-RESEARCH-013-cl-gserver-runtime-facade.org][STAR-LANG-RESEARCH-013 Optional cl-gserver Runtime Adapter]].
+- [[file:../../design/cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]].
+- [[file:../../design/star-server/STAR-SERVER-000-composable-intelligence-gservers.org][STAR-SERVER-000 Composable Intelligence gservers]].
+- [[file:../../design/star-server/QUASAR-004-canonical-runtime-and-fork-alignment.org][QUASAR-004 Canonical Runtime and Fork Alignment]].
 
 * Current Browser Actor Surface
 
-The current Actor Studio is a browser-manifest editor and browser execution surface.
-
-=ActorManager.jsx= builds the visible catalog from:
+Actor Studio currently builds its visible catalog from browser definitions:
 
 #+begin_src javascript
 [...BUILTIN_ACTORS, ...customActors]
 #+end_src
 
-where =customActors= comes from browser settings and the editor explicitly labels the source body as a =JavaScript actor function=.
+The editor treats these entries as browser actor manifests with JavaScript source. That model is appropriate for browser actors, but it cannot represent a Common Lisp actor capability merely by serializing a running Sento actor instance.
 
-The selected actor can be cloned, edited, saved, deleted, or run through the browser-side =runActor= path. Built-ins are read-only, but they are still browser actor definitions. The runtime panel reports browser custom-execution state and the count of actors already present in the browser-facing store.
+* Current Common Lisp Runtime Surface
 
-Therefore the Actor Studio currently has no native-runtime inventory source to render.
+The Common Lisp control plane already starts a Sento actor system and creates the =quasar-control-plane= actor. The Melissa subsystem creates a supervisor, request router, lookup workers, normalizer, forwarder, and optional HTTP bridge.
 
-* Current Common Lisp Actor Surface
+Those facts prove two things:
 
-The Quasar control plane already has a real Common Lisp actor system.
+1. Quasar already has a native actor runtime;
+2. most running actors are runtime implementation objects, not operator commands.
 
-=start-control-plane=:
+The original 0.1 research incorrectly leaned toward exposing intentionally public native runtime instances. The operator clarification establishes a stricter product boundary: *runtime existence alone does not make an actor an Actor Studio entry*.
 
-1. installs canonical commands;
-2. creates a Sento actor system;
-3. spawns the =quasar-control-plane= command actor;
-4. retains the actor-system handle inside the control-plane object.
+* Existing cl-gserver Research Already Separates Contract From Runtime
 
-The Melissa subsystem creates additional Sento actors, including:
+STAR-LANG-RESEARCH-013 defines cl-gserver as an optional execution adapter. It explicitly keeps semantic actor contracts separate from runtime topology and describes an optional runtime directory using =all-actors=, =find-actors=, and =running-p=.
 
-- a Melissa supervisor actor;
-- lookup workers;
-- a request router;
-- a normalizer;
-- a forwarder;
-- an optional HTTP bridge.
+That is the correct pattern for Quasar:
 
-The subsystem already has enough local knowledge to produce operational status, including actor-path strings for the router and workers.
+#+begin_example
+semantic actor capability
+        |
+        | may bind to
+        v
+cl-gserver actor/runtime instance
+        |
+        v
+runtime observation / liveness
+#+end_example
 
-This proves the native actors exist. The missing feature is not actor creation; it is a stable public projection of those actors into the Quasar UI runtime contract.
+The semantic contract answers =what can the operator run?=.
+The runtime observation answers =is its native execution backing alive?=.
 
-* Existing Architecture Already Decides the Runtime Model
+Neither should be substituted for the other.
 
-QUASAR-RESEARCH-004 already rejects a browser-only actor architecture. It defines one versioned =ActorRuntime= contract with:
+* Core Finding: Two Different Discovery Surfaces
 
-- =BrowserActorRuntime= for bounded browser actors; and
-- =LocalLispActorRuntime= for the persistent Common Lisp/Sento runtime.
+Quasar needs two distinct discovery surfaces.
 
-That research already requires operations including:
+** Operator Actor Capability Catalog
 
-- =discover-capabilities=;
-- =list-actor-types=;
-- =list-actors=;
-- =inspect-actor=;
-- =list-children=;
-- lifecycle operations where supported.
+This is the normal Actor Studio source.
 
-Therefore this feature MUST implement/reconcile that existing contract. It MUST NOT introduce a second native actor abstraction, another supervisor framework, or an unrelated actor database merely to make the UI list actors.
+It contains only actor definitions explicitly marked operator-facing. Each definition describes semantic inputs, outputs, requirements, and invocation behavior independent of transient runtime paths.
 
-* UI Migration State Confirms the Gap
+Examples:
 
-=docs/UI-MIGRATION.md= marks =Actors/research/targets= as transitional:
+- =normalize-person= accepts =person= documents;
+- =normalize-account= accepts =account= documents;
+- =username-hunt= accepts =person= and =username= targets;
+- =melissa-lookup= accepts supported person/contact inputs while hiding its worker pool.
 
-- browser responsibility: UI, progress, capability state;
-- durable/runtime authority: Quasar runtime or the owning StarIntel actor service.
+** Runtime Topology / Observation
 
-The migration order explicitly calls for moving actor/research lifecycle to supervised Lisp actors or the owning StarIntel service while preserving browser-safe standalone actions.
+This is an operational/debug/admin source.
 
-The requested Lisp-actor visibility work is therefore part of an already-declared migration, not a new architectural direction.
+It may contain:
 
-* Root Cause
+- control-plane actor;
+- supervisors;
+- routers;
+- workers;
+- coordinators;
+- bridges;
+- plugin-owned runtime actors.
 
-The visibility gap is the combination of four missing pieces:
+It exists to report liveness, topology, generation/restart state, and diagnostics. It MUST NOT automatically populate normal Actor Studio entries.
 
-1. *No stable native actor inventory projection.* The Sento runtime is owned by Common Lisp, but Quasar does not expose a canonical, versioned actor descriptor list to the browser.
-2. *Actor Studio has one catalog source.* It assumes visible actors are browser manifests from =BUILTIN_ACTORS= or browser settings.
-3. *Browser actor manifests and native actor instances are different things.* A browser manifest contains editable JavaScript source; a native Sento actor is a running supervised instance and must not be represented as editable JavaScript.
-4. *No origin/runtime discriminator is currently required by the UI catalog.* The UI cannot safely merge browser definitions and native runtime instances without distinguishing their authority and supported operations.
+* Actor Capability Is the Stable Product Object
 
-* What Sento Enumeration Should Not Mean
+The stable object presented to Quasar should be an =ActorCapability= or equivalent semantic actor definition.
 
-Do not make the UI depend on undocumented traversal of Sento implementation internals.
-
-Even if Sento can enumerate actor paths internally, Quasar needs a product-level registry/projection because:
-
-- not every internal actor should necessarily be public;
-- runtime metadata must be scrubbed before it reaches the UI;
-- stable Quasar actor IDs cannot depend on pointer identity or transient object printing;
-- Quasar needs explicit role, parent, capabilities, and lifecycle state semantics;
-- external/owning StarIntel actor services may later participate in the same UI without sharing Sento internals.
-
-The native inventory should therefore be explicitly registered/projected at Quasar-owned actor creation boundaries.
-
-* Required Native Actor Descriptor
-
-Research conclusion: the browser needs a bounded, policy-safe descriptor rather than Lisp object serialization.
-
-Minimum useful fields:
+Minimum research shape:
 
 #+begin_src json
 {
-  "actor_id": "quasar.native.control-plane",
-  "runtime_id": "quasar.local.sbcl",
-  "runtime_kind": "local-native",
-  "origin": "quasar-control-plane",
-  "role": "command-authority",
-  "label": "Quasar control plane",
-  "path": "/user/quasar-control-plane",
-  "parent_id": null,
-  "state": "running",
-  "capabilities": ["inspect"],
-  "metadata": {}
+  "schema_version": "1.0",
+  "actor_id": "star.actor.normalize-person",
+  "label": "Normalize person",
+  "kind": "document-transform",
+  "operator_visible": true,
+  "accepts": {
+    "targets": [],
+    "documents": [
+      {"dtype": "person", "schema": "0.9"}
+    ]
+  },
+  "produces": {
+    "documents": [
+      {"dtype": "person", "mode": "update"}
+    ]
+  },
+  "execution": {
+    "runtime": "native",
+    "backend": "cl-gserver"
+  },
+  "capabilities": ["run", "preview"]
 }
 #+end_src
 
-The exact path syntax is not a durable public identity. =actor_id= is the stable Quasar identifier; =path= is runtime diagnostic metadata.
+Important properties:
+
+- =actor_id= is semantic and stable;
+- =operator_visible= is explicit and defaults closed for native internals;
+- accepted target/document types drive selection filtering;
+- produced types make expected effects inspectable before execution;
+- execution backend is metadata, not semantic identity;
+- the same semantic contract may later bind to a standalone Common Lisp handler, cl-gserver actor, remote Star service, or another approved adapter.
+
+* Target Acceptance
+
+Target actors should declare the target forms they accept rather than appear universally runnable.
+
+A target selector may include:
+
+- canonical target type, such as =person=, =username=, =domain=, =email=, or =organization=;
+- optional document-derived target compatibility;
+- cardinality limits;
+- required fields or predicates;
+- runtime/service requirements.
+
+Example:
+
+#+begin_src json
+{
+  "actor_id": "star.actor.username-hunt",
+  "kind": "target-actor",
+  "accepts": {
+    "targets": ["username", "person"],
+    "documents": []
+  },
+  "produces": {
+    "documents": ["account", "relation", "evidence"]
+  }
+}
+#+end_src
+
+Quasar can therefore show the actor only when the active selection can satisfy the declared contract.
+
+* Document Acceptance and Normalization Actors
+
+Normalization actors are a first-class reason not to model discovery as raw runtime enumeration.
+
+A normalization actor should be able to declare:
+
+- accepted document =dtype= values;
+- optional schema/version range;
+- optional required fields/predicates;
+- selection cardinality;
+- whether it is deterministic/idempotent;
+- whether it previews changes;
+- produced document/update classes.
+
+Example Common Lisp/Star-style declaration direction:
+
+#+begin_src lisp
+(actor normalize-person
+  (:runtime native
+   :kind document-transform
+   :operator-visible t
+   :accepts-documents ((person :schema "0.9"))
+   :produces-documents ((person :mode update))
+   :capabilities (preview run)
+   :handler normalize-person))
+#+end_src
+
+The exact syntax is not approved by this research; the semantics are.
+
+A normalization actor MUST NOT need to be represented as a long-lived visible worker in order to appear in Actor Studio. Its contract may resolve to a handler or supervised actor only when invoked.
+
+* Runtime Observation Model
+
+When the execution backend is cl-gserver, Quasar may reconcile the semantic capability with a runtime observation such as:
+
+#+begin_src json
+{
+  "actor_id": "star.actor.normalize-person",
+  "runtime_id": "quasar.local.sbcl",
+  "backend": "cl-gserver",
+  "available": true,
+  "state": "running",
+  "runtime_path": "/user/document-normalizers/normalize-person",
+  "generation": 3
+}
+#+end_src
+
+The runtime path and generation are diagnostic. They do not define the actor capability.
+
+For pooled/supervised implementations, one semantic actor may map to several runtime actors. The catalog should still contain one operator-facing capability.
+
+Example:
+
+#+begin_example
+Actor Studio: Melissa Lookup
+          |
+          v
+semantic actor capability
+          |
+          v
+Melissa subsystem supervisor
+   /       |       \
+worker 0 worker 1 worker 2
+#+end_example
+
+Actor Studio shows =Melissa Lookup=, not four infrastructure rows.
+
+* Matching Model in Quasar
+
+Quasar should derive runnable actions from the current selection.
+
+Conceptually:
+
+#+begin_example
+selected targets/documents
+        |
+        v
+normalize selection types
+        |
+        v
+match ActorCapability.accepts
+        |
+        +---- reject incompatible actors
+        |
+        v
+check execution availability/capabilities
+        |
+        v
+show runnable actions
+#+end_example
+
+This permits context-sensitive actor UX:
+
+- select a =person= document -> show person normalization and compatible enrichment actors;
+- select an =account= document -> show account normalization/lookup actors;
+- select a =username= target -> show username collectors;
+- select incompatible mixed documents -> hide or explain actors whose cardinality/type contract cannot be satisfied.
+
+* Browser Actors and Native Actors Can Share the Semantic Catalog
+
+The catalog view model can unify presentation without unifying execution authority.
+
+Browser built-ins/custom actors may be adapted into the same semantic fields:
+
+- stable ID;
+- kind;
+- accepts;
+- produces;
+- capabilities;
+- runtime origin.
+
+Execution remains delegated to the correct runtime adapter.
+
+This removes the current assumption that every visible actor is JavaScript while preserving the standalone browser runtime.
+
+* What MUST NOT Be Exposed by Default
+
+Normal Actor Studio MUST NOT list an actor merely because =all-actors= returns it.
+
+Default-hidden runtime actors include:
+
+- Quasar command-authority actor;
+- subsystem supervisors;
+- routers;
+- worker pool members;
+- internal normalizer pipeline workers that are not independently operator-invokable;
+- forwarders;
+- transport bridges;
+- coordinators;
+- telemetry actors;
+- plugin infrastructure actors.
+
+An internal actor becomes operator-facing only through an explicit semantic capability definition.
+
+* Operational Topology Still Has Value
+
+The runtime directory remains useful for:
+
+- health/debug views;
+- supervisor tree inspection;
+- verifying that declared native capabilities have execution backing;
+- diagnosing restart loops;
+- viewing mailbox pressure where safely exposed;
+- comparing expected and observed runtime topology.
+
+This should be a separate advanced/runtime surface, not Actor Studio's default catalog.
 
 * Smallest Useful Vertical Slice
 
-The first implementation slice should be visibility-first, not remote-control-first.
+After approval, the first implementation slice should:
 
-It should:
+1. define a versioned operator actor capability descriptor;
+2. add explicit native capability registration with =operator_visible= defaulting false;
+3. expose a bounded capability catalog through the existing control-plane/runtime adapter;
+4. add accepted target/document selectors and produced document declarations;
+5. represent at least one document-normalization actor fixture;
+6. represent at least one target actor fixture;
+7. reconcile capability availability against cl-gserver runtime observation without leaking the whole topology;
+8. update Actor Studio to display/filter compatible browser and native actor capabilities;
+9. keep raw runtime topology available only through a separate/admin-facing interface;
+10. prove the behavior with Common Lisp, frontend, and real-stack tests.
 
-1. create an explicit Common Lisp registry/projection for Quasar-owned native actors;
-2. register the always-present =quasar-control-plane= command actor;
-3. register Melissa subsystem actors when that subsystem is enabled;
-4. expose one capability-checked native actor list command through the existing control-plane protocol;
-5. add a native-runtime adapter in the browser;
-6. merge native descriptors with browser actor manifests in Actor Studio;
-7. display native actors as read-only runtime instances with a clear =Common Lisp / native= origin badge;
-8. keep browser actors functional when the Lisp runtime is disconnected;
-9. add Common Lisp, component, and real-stack E2E tests.
+* Research Acceptance Evidence
 
-Remote pause/resume/restart/message-send controls are intentionally not required for the first slice. They should appear only when a later capability contract makes their semantics explicit and tests authorization/lifecycle behavior.
+Implementation evidence should prove:
 
-* Canonical Ownership Boundary
-
-The merged Actor Studio is a presentation union, not a merged authority.
-
-#+begin_example
-Browser actor manifests -----------+
-                                    |
-                                    v
-                              Actor Studio UI
-                                    ^
-                                    |
-Native actor descriptors <--- LocalLispActorRuntime adapter
-                                    ^
-                                    |
-                           Common Lisp control plane
-                                    |
-                                    v
-                               Sento actors
-#+end_example
-
-Rules:
-
-- browser definitions remain browser-owned;
-- native actor lifecycle/state remains runtime-owned;
-- Actor Studio never converts native actors into editable JavaScript source;
-- the browser never treats its local catalog as authoritative for native runtime existence;
-- loss of the Lisp connection removes/marks native runtime inventory unavailable without deleting browser definitions.
-
-* quasar-ui Reconciliation
-
-The standalone =quasar-ui= repository contains the same actor-surface family, including =src/lib/actors.js=, =src/lib/actors-core.js=, Actor Manager tests, and actor documentation.
-
-Before implementation, maintainers must determine the current synchronization/source-of-truth rule between =quasar/frontend= and =quasar-ui=. The native actor UI change must land through the canonical path and then flow to any mirror according to that rule. Copy-pasting divergent actor contracts into both repos is rejected.
-
-* Acceptance Evidence Required Before Implementation Merge
-
-Minimum proof after approval:
-
-- Common Lisp unit test: the control-plane native registry contains the control-plane actor after startup;
-- Common Lisp subsystem test: enabled Melissa actors appear with stable IDs, roles, parent relationships, and scrubbed metadata;
-- lifecycle test: stopped/replaced actors do not leave a false =running= entry;
-- protocol test: native actor listing returns a versioned bounded descriptor and never serializes Lisp objects/conditions;
-- frontend unit/component test: Actor Studio shows browser and Common Lisp entries simultaneously with distinct origins;
-- disconnected test: browser actors remain usable while native actor inventory is unavailable;
-- anti-spoof test: a custom browser actor cannot claim native authority merely by choosing a native-looking ID or label;
-- real-stack E2E: starting the actual Common Lisp/Vite stack produces at least the always-present native control-plane actor in Actor Studio.
+- internal gserver actors do not appear in Actor Studio merely because they run;
+- one semantic capability may map to multiple runtime workers;
+- a document normalization actor appears for compatible =dtype= and not incompatible documents;
+- a target actor appears only for accepted target types;
+- native availability reflects cl-gserver observation when required;
+- browser actors remain usable while the native runtime is disconnected;
+- an operator-facing capability remains identified by semantic =actor_id= across worker restarts/path changes;
+- metadata is bounded and scrubbed;
+- capability matching does not require loading/serializing arbitrary Lisp actor objects.
 
 * Research Conclusion
 
-Quasar does not lack Lisp actors. It lacks the adapter and public native-actor projection required to make the already-running Sento actors visible to Actor Studio.
+Quasar should not expose “the Lisp actors” as a raw list of running Sento/cl-gserver processes.
 
-The correct next move is to realize the =LocalLispActorRuntime.listActors= portion of the existing dual-runtime architecture, backed by an explicit Quasar-owned native actor registry/projection, and merge those read-only runtime instances into the existing Actor Studio without weakening browser standalone behavior.
+It should expose *operator-facing semantic actor capabilities* whose contracts declare which target types and document types they accept and what they produce. cl-gserver provides an execution backend and runtime observation plane for those capabilities, while its supervisors, routers, workers, and other internal topology remain hidden from the normal Actor Studio catalog.
+
+This model directly supports future normalization actors: a normalization capability can be discoverable for compatible documents even if its implementation is a handler, a lazily spawned actor, or a supervised pool.
 
 * Decision Gate
 
-This research remains =REVIEW=. No Quasar implementation work is authorized by the existence of this document.
+This research remains =REVIEW=.
 
-Implementation begins only after explicit operator approval of this research and [[file:../../design/star-server/QUASAR-008-lisp-actor-discovery-and-actor-studio.org][QUASAR-008 Lisp Actor Discovery and Actor Studio Integration]].
+Implementation begins only after explicit operator approval of this research and [[file:../../design/star-server/QUASAR-008-lisp-actor-discovery-and-actor-studio.org][QUASAR-008 Operator Actor Capability Catalog and gserver Runtime Binding]].
+
+* Footnotes and Glossary
+
+- *Actor capability*: Stable semantic definition of an operator-invokable actor action, including accepted inputs, produced outputs, execution requirements, and capabilities.
+- *Actor Studio*: Quasar UI surface for discovering, inspecting, creating where applicable, and running operator-facing actor capabilities.
+- *cl-gserver*: Common Lisp actor runtime used as an optional native execution backend; Sento is the actor-system implementation used by current Quasar code/research.
+- *runtime observation*: Bounded liveness/topology information about an execution instance, separate from the actor capability contract.
+- *target type*: Canonical class of investigation target accepted by an actor, such as person, username, domain, email, or organization.
+- *document dtype*: Canonical StarIntel document type, such as person, account, entity, relation, or evidence.
+- *normalization actor*: Actor capability that validates/canonicalizes existing documents and emits proposed canonical updates rather than being identified by a persistent worker process.
+- *operator-visible*: Explicit policy bit declaring that a semantic actor capability may appear in normal Actor Studio discovery.

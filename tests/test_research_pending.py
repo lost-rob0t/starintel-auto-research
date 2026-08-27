@@ -163,6 +163,7 @@ class ResearchPendingTests(unittest.TestCase):
         self.assertIn('<option value="repository">Repository</option>', document)
         self.assertIn('<option value="path">Path</option>', document)
         self.assertIn("Public API only · no browser token", document)
+        self.assertIn("../assets/research-pending.css", document)
         self.assertIn("../assets/research-pending.js", document)
 
     def test_dashboard_writes_extensionless_pages_route(self) -> None:
@@ -181,6 +182,16 @@ class ResearchPendingTests(unittest.TestCase):
         output = build_research_pending.write_dashboard(site, root)
         self.assertEqual(output, site / "research-pending" / "index.html")
         self.assertTrue(output.is_file())
+
+    def test_pr_client_is_public_only_and_covers_personal_and_org_repositories(self) -> None:
+        script = (ROOT / "pages" / "static" / "research-pending.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("user:lost-rob0t is:pr is:open research", script)
+        self.assertIn("org:starintel-labs is:pr is:open research", script)
+        self.assertNotIn("Authorization", script)
+        self.assertNotIn("GH_TOKEN", script)
+        self.assertNotIn("GITHUB_TOKEN", script)
 
 
 if __name__ == "__main__":

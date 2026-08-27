@@ -228,7 +228,8 @@ const records = [
   {{ repository: 'starintel-labs/starintel-server', title: 'Legacy research branch', body: 'roam/research/star-server/STAR-RESEARCH-060.org', head_ref: 'research/star-server-060' }},
   {{ repository: 'starintel-labs/starintel-server', title: 'Legacy branch without record', body: 'research review', head_ref: 'research/ordinary' }},
   {{ repository: 'starintel-labs/starintel-server', title: 'Human-gated review', body: '## Human-gated ADARD review package\\n\\nResearch and design only.', head_ref: 'agent/review' }},
-  {{ repository: 'starintel-labs/starintel-server', title: 'Keyword only', body: 'research ADARD', head_ref: 'feature/ordinary' }}
+  {{ repository: 'starintel-labs/starintel-server', title: 'Keyword only', body: 'research ADARD', head_ref: 'feature/ordinary' }},
+  {{ repository: 'lost-rob0t/dotfiles', title: 'Marker documentation', body: 'Use `<!-- starintel-research-approval:v1 -->` for approvals.', head_ref: 'feature/docs' }}
 ];
 process.stdout.write(JSON.stringify(records.map(classify)));
 """
@@ -240,7 +241,7 @@ process.stdout.write(JSON.stringify(records.map(classify)));
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(json.loads(result.stdout), [False, False, False, True, True, True, False, True, False])
+        self.assertEqual(json.loads(result.stdout), [False, False, False, True, True, True, False, True, False, False])
 
 
 if __name__ == "__main__":

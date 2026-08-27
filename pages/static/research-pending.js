@@ -73,7 +73,7 @@
   }
 
   function hasResearchApprovalMarker(item) {
-    return String(item.body || "").includes(RESEARCH_APPROVAL_MARKER);
+    return String(item.body || "").split(/\r?\n/).some((line) => line.trim() === RESEARCH_APPROVAL_MARKER);
   }
 
   function hasLegacyResearchReviewConvention(item) {

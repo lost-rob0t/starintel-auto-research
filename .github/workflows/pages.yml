@@ -105,7 +105,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/sync.py
-          python3 scripts/research_approval_migration.py --check
+          python3 scripts/research_approval_migration.py --check --verify
           git diff --exit-code -- . ':(exclude)_site/**' ':(exclude).cache/**'
 
       - name: Validate changed repository documents
@@ -176,6 +176,28 @@ jobs:
             git ls-files '_site/**' '.cache/**'
             exit 1
           fi
+
+      - name: Verify canonical research queue
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/research_approval_migration.py --check --verify
+          python3 - <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          root = Path.cwd()
+          page = (root / "_site/research-pending/index.html").read_text(encoding="utf-8")
+          rows = re.findall(r'<tr class="research-row(?: [^"]+)?"', page)
+          if "is-legacy" in page:
+              raise SystemExit("research-pending contains an unmigrated legacy row")
+          if '<th>Repository</th>' not in page:
+              raise SystemExit("research-pending is missing its repository column")
+          if not rows:
+              raise SystemExit("research-pending contains no canonical pending rows")
+          print(f"research_pending=PASS canonical_rows={len(rows)} legacy_rows=0")
+          PY
 
       - name: Verify CAPTCHA publication artifacts
         shell: bash

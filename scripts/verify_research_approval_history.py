@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from research_approval_migration import (
+    CANONICAL_SCHEMA,
     MigrationError,
     _canonical_values,
     _metadata_values,
@@ -41,6 +42,13 @@ def _blob_sha(root: Path, text: str) -> str:
     return _git(root, ["hash-object", "--stdin"], input_text=text).strip()
 
 
+def _is_adard_canonical(metadata: dict[str, list[str]]) -> bool:
+    values = _metadata_values(metadata)
+    if values.get("approval_schema") != CANONICAL_SCHEMA:
+        return False
+    return _canonical_values(metadata) is not None
+
+
 def _first_canonical_snapshot(
     root: Path,
     base_commit: str,
@@ -48,7 +56,7 @@ def _first_canonical_snapshot(
     source: str,
 ) -> str:
     _, _, _, source_metadata = _split_header(source)
-    if _canonical_values(source_metadata) is not None:
+    if _is_adard_canonical(source_metadata):
         return source
 
     commits = _git(
@@ -61,7 +69,7 @@ def _first_canonical_snapshot(
         except MigrationError:
             continue
         _, _, _, metadata = _split_header(candidate)
-        if _canonical_values(metadata) is not None:
+        if _is_adard_canonical(metadata):
             return candidate
 
     raise MigrationError(

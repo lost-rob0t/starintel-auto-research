@@ -86,6 +86,48 @@ class ResearchApprovalHistoryTests(unittest.TestCase):
             with self.assertRaisesRegex(MigrationError, "research body changed during migration"):
                 verify_repository(root)
 
+    def test_legacy_approval_schema_before_adard_migration_is_ignored(self) -> None:
+        root, temporary = self.setup_repo()
+        with temporary:
+            path = root / "roam" / "research" / "test" / "record.org"
+            old_schema = LEGACY.replace(
+                "#+status: REVIEW\n",
+                "#+status: REVIEW\n"
+                "#+approval_schema: prolog-rlm.research-approval.v1\n"
+                "#+approval_state: PENDING\n"
+                "#+approval_actor: legacy-migration\n"
+                "#+approval_evidence: legacy metadata\n"
+                "#+approval_base_commit: legacy\n"
+                "#+approval_base_blob: legacy\n"
+                "#+approval_decided_at: NONE\n",
+            )
+            path.write_text(old_schema, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "legacy approval namespace")
+            base_commit = self.git(root, "rev-parse", "HEAD")
+            base_blob = self.git(root, "hash-object", str(path))
+
+            adard = old_schema.replace(
+                "#+approval_schema: prolog-rlm.research-approval.v1\n"
+                "#+approval_state: PENDING\n"
+                "#+approval_actor: legacy-migration\n"
+                "#+approval_evidence: legacy metadata\n"
+                "#+approval_base_commit: legacy\n"
+                "#+approval_base_blob: legacy\n"
+                "#+approval_decided_at: NONE\n",
+                "#+approval_schema: adard.research-approval.v1\n"
+                "#+approval_state: PENDING\n"
+                "#+approval_actor: research-approval-migration\n"
+                "#+approval_evidence: namespace migration\n"
+                f"#+approval_base_commit: {base_commit}\n"
+                f"#+approval_base_blob: {base_blob}\n"
+                "#+approval_decided_at: NONE\n",
+            )
+            path.write_text(adard, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "migrate to adard approval namespace")
+            self.assertEqual(verify_repository(root), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

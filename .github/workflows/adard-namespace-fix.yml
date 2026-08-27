@@ -1,0 +1,84 @@
+name: One-shot canonical ADARD approval namespace migration
+
+on:
+  push:
+    branches:
+      - fix/adard-research-approval-namespace
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Apply deterministic namespace migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          old='prolog-rlm.research-approval.v1'
+          new='adard.research-approval.v1'
+          mapfile -t files < <(git grep -Il -F "$old" || true)
+          if (( ${#files[@]} == 0 )); then
+            echo "No occurrences of $old found" >&2
+            exit 1
+          fi
+          printf 'namespace_migration files=%d\n' "${#files[@]}"
+          python3 - "$old" "$new" "${files[@]}" <<'PY'
+          from pathlib import Path
+          import sys
+
+          old, new, *paths = sys.argv[1:]
+          old_bytes = old.encode()
+          new_bytes = new.encode()
+          for raw in paths:
+              path = Path(raw)
+              source = path.read_bytes()
+              migrated = source.replace(old_bytes, new_bytes)
+              if migrated == source:
+                  raise SystemExit(f"expected namespace absent from {path}")
+              path.write_bytes(migrated)
+          PY
+          if git grep -n -F "$old"; then
+            echo "incorrect namespace remains" >&2
+            exit 1
+          fi
+          git grep -n -F "$new" >/dev/null
+
+      - name: Verify repository-native approval migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile scripts/research_approval_migration.py scripts/research_queue.py scripts/validate-docs.py scripts/validate-changed-docs.py
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
+          python3 scripts/sync.py
+          python3 scripts/research_approval_migration.py --check --verify
+          python3 scripts/validate-changed-docs.py --changed-since origin/main --audit-date "$(date -u +%F)"
+          bash scripts/publish-pages
+          python3 scripts/check-pages-links.py _site
+          git diff --check
+          if git diff --exit-code -- . ':(exclude)_site/**' ':(exclude).cache/**'; then
+            echo "migration unexpectedly produced no tracked changes" >&2
+            exit 1
+          fi
+
+      - name: Commit verified migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -f -- .github/workflows/adard-namespace-fix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          if git grep -n -F 'prolog-rlm.research-approval.v1'; then
+            echo "incorrect namespace remains in final tree" >&2
+            exit 1
+          fi
+          git diff --cached --check
+          git commit -m 'fix(adard): migrate canonical research approval namespace'
+          git push origin HEAD:fix/adard-research-approval-namespace

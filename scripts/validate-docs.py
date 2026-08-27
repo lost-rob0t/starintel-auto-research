@@ -398,15 +398,15 @@ def audit_document(
     cls = document_class(path, root) or "unknown"
     text = path.read_text(encoding="utf-8")
     problems: list[Problem] = []
+    migration_only = path.resolve() in metadata_only
 
     identifiers = ID_RE.findall(text)
-    if not identifiers:
+    if not identifiers and not migration_only:
         problems.append(Problem(path, "missing-file-id", cls, "add and preserve a stable file-level :ID:"))
     for identifier in identifiers:
         all_ids.setdefault(identifier, []).append(path)
 
     metadata = keyword_map(text)
-    migration_only = path.resolve() in metadata_only
     if not migration_only:
         for key in REQUIRED_METADATA:
             if not metadata.get(key):

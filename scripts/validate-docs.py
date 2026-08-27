@@ -54,7 +54,7 @@ RESEARCH_APPROVAL_FIELDS = {
     "approval_base_blob",
     "approval_decided_at",
 }
-RESEARCH_APPROVAL_SCHEMA = "prolog-rlm.research-approval.v1"
+RESEARCH_APPROVAL_SCHEMA = "adard.research-approval.v1"
 RESEARCH_APPROVAL_STATES = {"PENDING", "APPROVED", "REJECTED"}
 
 ID_RE = re.compile(r"^\s*:ID:\s+(\S+)\s*$", re.MULTILINE | re.IGNORECASE)

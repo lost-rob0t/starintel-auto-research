@@ -55,12 +55,45 @@
     render();
   }
 
+  const RESEARCH_APPROVAL_MARKER = "<!-- starintel-research-approval:v1 -->";
+  const LEGACY_RESEARCH_REVIEW_HEADING = "## Human-gated ADARD review package";
   const SEARCH_QUERIES = [
-    "user:lost-rob0t is:pr is:open research",
-    "org:starintel-labs is:pr is:open research",
-    "user:lost-rob0t is:pr is:open ADARD",
-    "org:starintel-labs is:pr is:open ADARD",
+    { query: 'user:lost-rob0t is:pr is:open "starintel-research-approval:v1" in:body', explicit: true },
+    { query: 'org:starintel-labs is:pr is:open "starintel-research-approval:v1" in:body', explicit: true },
+    { query: "user:lost-rob0t is:pr is:open head:research-approval", explicit: false },
+    { query: "org:starintel-labs is:pr is:open head:research-approval", explicit: false },
+    { query: "user:lost-rob0t is:pr is:open head:research/", explicit: false },
+    { query: "org:starintel-labs is:pr is:open head:research/", explicit: false },
+    { query: 'user:lost-rob0t is:pr is:open "Human-gated ADARD review package" in:body', explicit: false },
+    { query: 'org:starintel-labs is:pr is:open "Human-gated ADARD review package" in:body', explicit: false },
   ];
+
+  function branchName(item) {
+    return String(item.head_ref || (item.head && item.head.ref) || "");
+  }
+
+  function hasResearchApprovalMarker(item) {
+    return String(item.body || "").split(/\r?\n/).some((line) => line.trim() === RESEARCH_APPROVAL_MARKER);
+  }
+
+  function hasLegacyResearchReviewConvention(item) {
+    const body = String(item.body || "");
+    const branch = branchName(item);
+    if (body.includes(LEGACY_RESEARCH_REVIEW_HEADING) && body.includes("Research and design only.")) {
+      return true;
+    }
+    return branch.startsWith("research/") && /(?:^|[`\s])roam\/research\/[^`\s]+\.org(?:[`\s]|$)/.test(body);
+  }
+
+  function isResearchApprovalPr(item) {
+    return hasResearchApprovalMarker(item)
+      || branchName(item).startsWith("research-approval/")
+      || hasLegacyResearchReviewConvention(item);
+  }
+
+  if (typeof globalThis !== "undefined") {
+    globalThis.starintelResearchApproval = { RESEARCH_APPROVAL_MARKER, isResearchApprovalPr };
+  }
 
   function repositoryFromUrl(value) {
     const match = String(value || "").match(/\/repos\/([^/]+\/[^/]+)$/);
@@ -68,7 +101,7 @@
   }
 
   async function searchPullRequests() {
-    const responses = await Promise.all(SEARCH_QUERIES.map(async (query) => {
+    const responses = await Promise.all(SEARCH_QUERIES.map(async ({ query }) => {
       const url = new URL("https://api.github.com/search/issues");
       url.searchParams.set("q", query);
       url.searchParams.set("sort", "updated");
@@ -85,16 +118,38 @@
       return response.json();
     }));
 
-    const deduped = new Map();
-    for (const response of responses) {
+    const candidates = new Map();
+    responses.forEach((response, index) => {
       for (const item of response.items || []) {
-        deduped.set(item.html_url, {
+        const candidate = {
           ...item,
           repository: repositoryFromUrl(item.repository_url),
+          explicit: SEARCH_QUERIES[index].explicit,
+        };
+        const previous = candidates.get(item.html_url);
+        candidates.set(item.html_url, previous ? { ...previous, ...candidate, explicit: previous.explicit || candidate.explicit } : candidate);
+      }
+    });
+
+    const records = [];
+    for (const candidate of candidates.values()) {
+      if (isResearchApprovalPr(candidate) && (hasResearchApprovalMarker(candidate) || hasLegacyResearchReviewConvention(candidate))) {
+        records.push(candidate);
+        continue;
+      }
+      if (!candidate.explicit && candidate.pull_request && candidate.pull_request.url) {
+        const response = await fetch(candidate.pull_request.url, {
+          cache: "no-store",
+          headers: { Accept: "application/vnd.github+json" },
         });
+        if (response.ok) {
+          const detail = await response.json();
+          const enriched = { ...candidate, ...detail, repository: candidate.repository };
+          if (isResearchApprovalPr(enriched)) records.push(enriched);
+        }
       }
     }
-    return [...deduped.values()].sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
+    return records.sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)));
   }
 
   function appendPr(container, item) {
@@ -170,7 +225,7 @@
 
       container.replaceChildren();
       for (const item of matches) appendPr(container, item);
-      status.textContent = `${matches.length} open research-related PR${matches.length === 1 ? "" : "s"} shown · live public GitHub data`;
+      status.textContent = `${matches.length} open research-approval PR${matches.length === 1 ? "" : "s"} shown · live public GitHub data`;
       if (!matches.length && records.length) {
         const empty = document.createElement("p");
         empty.className = "review-empty";
@@ -196,13 +251,13 @@
         status.textContent = `Could not load live PRs: ${error.message}`;
         appendFallbackLink(
           container,
-          "https://github.com/pulls?q=is%3Aopen+is%3Apr+user%3Alost-rob0t+research",
-          "Search lost-rob0t research PRs ↗"
+          "https://github.com/pulls?q=is%3Aopen+is%3Apr+user%3Alost-rob0t+%22starintel-research-approval%3Av1%22+in%3Abody",
+          "Search marked lost-rob0t approval PRs ↗"
         );
         appendFallbackLink(
           container,
-          "https://github.com/pulls?q=is%3Aopen+is%3Apr+org%3Astarintel-labs+research",
-          "Search starintel-labs research PRs ↗"
+          "https://github.com/pulls?q=is%3Aopen+is%3Apr+org%3Astarintel-labs+head%3Aresearch-approval",
+          "Search legacy research-approval branches ↗"
         );
       } finally {
         refresh && (refresh.disabled = false);
@@ -220,6 +275,7 @@
     startPullRequests();
   }
 
+  if (typeof document === "undefined") return;
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start, { once: true });
   } else {

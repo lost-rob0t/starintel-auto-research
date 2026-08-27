@@ -238,6 +238,15 @@ Do not maintain contradictory local and CI workflows.
 - Never claim a check passed unless it was executed and its result was observed.
 - Never claim a command was run when it was inferred from CI configuration or prior history.
 
+## Research Approval Guardrails
+
+- The durable research queue scope is `roam/research/**/*.org`, excluding only the auxiliary `index.org`, `sources.org`, and `search-log.org` files already excluded by `scripts/research_queue.py`. Do not migrate design documents, ADRs, indexes, runbooks, or ordinary notes because they contain the word “research”.
+- Use `python3 scripts/research_approval_migration.py` for corpus migration. Do not hand-edit a batch of research records. The tool must remain deterministic, idempotent, header-only, and fail closed on contradictory approval evidence.
+- Preserve every `#+status:` value and every research body byte-for-byte. Canonical approval fields must remain immediately after lifecycle metadata, use `prolog-rlm.research-approval.v1`, and keep lifecycle and approval as independent dimensions.
+- A model or agent that discovers a new malformed approval shape, legacy table, or queue false positive must add the exact shape as a regression fixture, extend the parser or classifier and its validator, and update the GitHub Actions guard in the same change. Correcting one document without extending the guard is incomplete.
+- Before migration, record `--dry-run` totals, lifecycle counts, inferred approval counts, canonical records, and every ambiguity. After migration, run `python3 scripts/research_approval_migration.py --check --verify` and prove zero unmigrated records, unchanged lifecycle fields, unchanged bodies, and zero second-pass changes.
+- Approval PR discovery must use the exact `<!-- starintel-research-approval:v1 -->` body line or an explicitly documented strict legacy convention. Arbitrary occurrences of `research` or `ADARD` are never sufficient inclusion criteria.
+
 ## Git and Completion
 
 Before completion, run and record the exact output of:

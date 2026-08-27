@@ -16,6 +16,7 @@ Repository-root instructions, workflow scripts, Agent Zero support, focused skil
 - `scripts/mark-design.py`
 - `scripts/sync.py`
 - `scripts/validate-docs.py`
+- `scripts/research_approval_migration.py`
 - `scripts/search.py`
 - `scripts/save-research`
 
@@ -67,6 +68,20 @@ python3 scripts/validate-docs.py \
 ```
 
 The deterministic `--fix` mode repairs structural omissions without fabricating approval. Review its diff before committing.
+
+Research approval migration is a separate, header-only operation. It scans the
+same `roam/research/**/*.org` scope consumed by the review queue, reports the
+legacy evidence mapping, and fails closed on contradictory decisions:
+
+```bash
+python3 scripts/research_approval_migration.py --dry-run
+python3 scripts/research_approval_migration.py
+python3 scripts/research_approval_migration.py --check --verify
+```
+
+Lifecycle remains in `#+status:`. Only an explicit human research-conclusion
+decision can produce `APPROVED` or `REJECTED`; lifecycle state, publication
+status, and design-promotion approval cannot do so.
 
 ## Org-roam Pages
 

@@ -45,6 +45,17 @@ APPROVAL_HEADER = [
 ]
 CHANGELOG_HEADER = ["Date", "Change", "Author or actor", "Evidence"]
 REQUIRED_METADATA = ("title", "description", "status", "filetags")
+RESEARCH_APPROVAL_FIELDS = {
+    "approval_schema",
+    "approval_state",
+    "approval_actor",
+    "approval_evidence",
+    "approval_base_commit",
+    "approval_base_blob",
+    "approval_decided_at",
+}
+RESEARCH_APPROVAL_SCHEMA = "prolog-rlm.research-approval.v1"
+RESEARCH_APPROVAL_STATES = {"PENDING", "APPROVED", "REJECTED"}
 
 ID_RE = re.compile(r"^\s*:ID:\s+(\S+)\s*$", re.MULTILINE | re.IGNORECASE)
 KEYWORD_RE = re.compile(r"^#\+([A-Za-z0-9_-]+):\s*(.*?)\s*$", re.MULTILINE)
@@ -198,6 +209,41 @@ def changed_files(root: Path, since: str | None) -> set[Path]:
     return {(root / line).resolve() for line in result.stdout.splitlines() if line.strip()}
 
 
+def approval_metadata_only_files(root: Path, since: str | None) -> set[Path]:
+    """Identify migrations whose diff is limited to canonical header fields."""
+
+    if not since:
+        return set()
+    result = subprocess.run(
+        ["git", "diff", "--unified=0", f"{since}...HEAD", "--", "roam/research"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(result.stderr.strip() or f"git diff failed for {since}")
+    current: Path | None = None
+    candidates: set[Path] = set()
+    changed: set[Path] = set()
+    for line in result.stdout.splitlines():
+        if line.startswith("diff --git "):
+            current = root / line.split(" b/", 1)[-1]
+            candidates.add(current.resolve())
+            continue
+        if current is None or line.startswith(("+++", "---", "@@")):
+            continue
+        if not line.startswith(("+", "-")):
+            continue
+        content = line[1:].strip()
+        if not content:
+            continue
+        match = KEYWORD_RE.match(content)
+        if not match or not match.group(1).lower().startswith("approval_"):
+            changed.add(current.resolve())
+    return candidates - changed
+
+
 def stable_file_id(path: Path, root: Path) -> str:
     relative = path.relative_to(root / "roam").as_posix()
     digest = hashlib.sha256(relative.encode("utf-8")).hexdigest()[:32]
@@ -346,61 +392,101 @@ def audit_document(
     root: Path,
     all_ids: dict[str, list[Path]],
     changed: set[Path],
+    metadata_only: set[Path],
     audit_date: str,
 ) -> list[Problem]:
     cls = document_class(path, root) or "unknown"
     text = path.read_text(encoding="utf-8")
     problems: list[Problem] = []
+    migration_only = path.resolve() in metadata_only
 
     identifiers = ID_RE.findall(text)
-    if not identifiers:
+    if not identifiers and not migration_only:
         problems.append(Problem(path, "missing-file-id", cls, "add and preserve a stable file-level :ID:"))
     for identifier in identifiers:
         all_ids.setdefault(identifier, []).append(path)
 
     metadata = keyword_map(text)
-    for key in REQUIRED_METADATA:
-        if not metadata.get(key):
-            problems.append(Problem(path, f"missing-{key}", cls, f"add a non-empty #+{key}: value"))
+    if not migration_only:
+        for key in REQUIRED_METADATA:
+            if not metadata.get(key):
+                problems.append(Problem(path, f"missing-{key}", cls, f"add a non-empty #+{key}: value"))
 
-    approval_exemption = metadata.get("approval_exemption", "").strip()
-    approval_bounds = section_bounds(text, "Approval Table")
-    if not approval_bounds and not approval_exemption:
-        problems.append(Problem(path, "missing-approval-table", cls, "add the canonical five-column Approval Table"))
-    elif approval_exemption and len(approval_exemption) < 8:
-        problems.append(Problem(path, "approval-exemption-without-reason", cls, "state a concrete exemption reason"))
-    elif approval_bounds:
-        header, rows = parse_table(text[approval_bounds[0] : approval_bounds[1]])
-        if header != APPROVAL_HEADER:
-            problems.append(Problem(path, "malformed-approval-header", cls, "use: " + " | ".join(APPROVAL_HEADER)))
-        for number, raw in enumerate(rows, start=1):
-            row = normalize_row(raw, 5)
-            if row[0].lower() == "approval area":
-                continue
-            state = row[2].upper()
-            if state not in ALLOWED_APPROVAL_STATES:
-                problems.append(Problem(path, f"invalid-approval-state-row-{number}", cls, f"use one of {sorted(ALLOWED_APPROVAL_STATES)}"))
-            if state == "APPROVED" and not row[4].strip():
-                problems.append(Problem(path, f"approved-without-evidence-row-{number}", cls, "add real evidence or downgrade the state"))
-            if state == "NOT APPLICABLE" and not (row[3].strip() or row[4].strip()):
-                problems.append(Problem(path, f"not-applicable-without-reason-row-{number}", cls, "record why the approval area does not apply"))
+    approval_metadata = {key for key in metadata if key.startswith("approval_")}
+    if approval_metadata:
+        missing_approval = RESEARCH_APPROVAL_FIELDS - approval_metadata
+        if missing_approval:
+            problems.append(
+                Problem(
+                    path,
+                    "partial-research-approval-metadata",
+                    cls,
+                    "provide all canonical #+approval_* fields or remove the partial migration",
+                )
+            )
+        elif metadata.get("approval_schema") != RESEARCH_APPROVAL_SCHEMA:
+            problems.append(
+                Problem(
+                    path,
+                    "unsupported-research-approval-schema",
+                    cls,
+                    f"use {RESEARCH_APPROVAL_SCHEMA}",
+                )
+            )
+        elif metadata.get("approval_state", "").upper() not in RESEARCH_APPROVAL_STATES:
+            problems.append(
+                Problem(
+                    path,
+                    "invalid-research-approval-state",
+                    cls,
+                    f"use one of {sorted(RESEARCH_APPROVAL_STATES)}",
+                )
+            )
+        else:
+            for key in ("approval_actor", "approval_evidence", "approval_base_commit", "approval_base_blob"):
+                if not metadata.get(key, "").strip():
+                    problems.append(Problem(path, f"empty-{key}", cls, f"populate #+{key}:"))
 
-    changelog_exemption = metadata.get("changelog_exemption", "").strip()
-    changelog_bounds = section_bounds(text, "Changelog")
-    if not changelog_bounds and not changelog_exemption:
-        problems.append(Problem(path, "missing-changelog", cls, "add the canonical Changelog table"))
-    elif changelog_exemption and len(changelog_exemption) < 8:
-        problems.append(Problem(path, "changelog-exemption-without-reason", cls, "state a concrete exemption reason"))
-    elif changelog_bounds:
-        header, rows = parse_table(text[changelog_bounds[0] : changelog_bounds[1]])
-        if header != CHANGELOG_HEADER:
-            problems.append(Problem(path, "malformed-changelog-header", cls, "use: " + " | ".join(CHANGELOG_HEADER)))
-        if not rows:
-            problems.append(Problem(path, "empty-changelog", cls, "record at least the current verified material change"))
-        if path.resolve() in changed and not any(row and row[0].strip() == audit_date for row in rows):
-            problems.append(Problem(path, "changed-without-current-changelog-entry", cls, f"add a {audit_date} changelog row"))
+    if not migration_only:
+        approval_exemption = metadata.get("approval_exemption", "").strip()
+        approval_bounds = section_bounds(text, "Approval Table")
+        if not approval_bounds and not approval_exemption:
+            problems.append(Problem(path, "missing-approval-table", cls, "add the canonical five-column Approval Table"))
+        elif approval_exemption and len(approval_exemption) < 8:
+            problems.append(Problem(path, "approval-exemption-without-reason", cls, "state a concrete exemption reason"))
+        elif approval_bounds:
+            header, rows = parse_table(text[approval_bounds[0] : approval_bounds[1]])
+            if header != APPROVAL_HEADER:
+                problems.append(Problem(path, "malformed-approval-header", cls, "use: " + " | ".join(APPROVAL_HEADER)))
+            for number, raw in enumerate(rows, start=1):
+                row = normalize_row(raw, 5)
+                if row[0].lower() == "approval area":
+                    continue
+                state = row[2].upper()
+                if state not in ALLOWED_APPROVAL_STATES:
+                    problems.append(Problem(path, f"invalid-approval-state-row-{number}", cls, f"use one of {sorted(ALLOWED_APPROVAL_STATES)}"))
+                if state == "APPROVED" and not row[4].strip():
+                    problems.append(Problem(path, f"approved-without-evidence-row-{number}", cls, "add real evidence or downgrade the state"))
+                if state == "NOT APPLICABLE" and not (row[3].strip() or row[4].strip()):
+                    problems.append(Problem(path, f"not-applicable-without-reason-row-{number}", cls, "record why the approval area does not apply"))
 
-    if path.resolve() in changed and section_bounds(text, "Footnotes and Glossary") is None:
+    if not migration_only:
+        changelog_exemption = metadata.get("changelog_exemption", "").strip()
+        changelog_bounds = section_bounds(text, "Changelog")
+        if not changelog_bounds and not changelog_exemption:
+            problems.append(Problem(path, "missing-changelog", cls, "add the canonical Changelog table"))
+        elif changelog_exemption and len(changelog_exemption) < 8:
+            problems.append(Problem(path, "changelog-exemption-without-reason", cls, "state a concrete exemption reason"))
+        elif changelog_bounds:
+            header, rows = parse_table(text[changelog_bounds[0] : changelog_bounds[1]])
+            if header != CHANGELOG_HEADER:
+                problems.append(Problem(path, "malformed-changelog-header", cls, "use: " + " | ".join(CHANGELOG_HEADER)))
+            if not rows:
+                problems.append(Problem(path, "empty-changelog", cls, "record at least the current verified material change"))
+            if path.resolve() in changed and not any(row and row[0].strip() == audit_date for row in rows):
+                problems.append(Problem(path, "changed-without-current-changelog-entry", cls, f"add a {audit_date} changelog row"))
+
+    if path.resolve() in changed and path.resolve() not in metadata_only and section_bounds(text, "Footnotes and Glossary") is None:
         problems.append(Problem(path, "changed-without-glossary", cls, "add a document-relevant Footnotes and Glossary section"))
 
     architectural = cls == "architecture" or ":architecture:" in metadata.get("filetags", "")
@@ -515,10 +601,11 @@ def audit_captcha_index(root: Path, files: Sequence[Path]) -> list[Problem]:
 def audit(root: Path, since: str | None, audit_date: str) -> list[Problem]:
     files = substantive_files(root)
     changed = changed_files(root, since)
+    metadata_only = approval_metadata_only_files(root, since)
     ids: dict[str, list[Path]] = {}
     problems: list[Problem] = []
     for path in files:
-        problems.extend(audit_document(path, root, ids, changed, audit_date))
+        problems.extend(audit_document(path, root, ids, changed, metadata_only, audit_date))
     for identifier, paths in sorted(ids.items()):
         unique = sorted(set(paths))
         if len(unique) > 1:

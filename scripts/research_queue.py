@@ -12,6 +12,18 @@ REPOSITORY = "lost-rob0t/starintel-auto-research"
 BRANCH = "main"
 SITE_BASE = "https://auto-research.starintel.actor"
 CANONICAL_PENDING = "PENDING"
+CANONICAL_SCHEMA = "prolog-rlm.research-approval.v1"
+CANONICAL_APPROVAL_FIELDS = frozenset(
+    {
+        "APPROVAL_SCHEMA",
+        "APPROVAL_STATE",
+        "APPROVAL_ACTOR",
+        "APPROVAL_EVIDENCE",
+        "APPROVAL_BASE_COMMIT",
+        "APPROVAL_BASE_BLOB",
+        "APPROVAL_DECIDED_AT",
+    }
+)
 LEGACY_REVIEW_READY = frozenset({"REVIEW", "RESEARCHED", "VERIFIED"})
 AUXILIARY_FILENAMES = frozenset({"index.org", "sources.org", "search-log.org"})
 KEYWORD_RE = re.compile(r"^\s*#\+([A-Za-z0-9_-]+):\s*(.*?)\s*$", re.IGNORECASE)
@@ -66,6 +78,8 @@ def _review_class(keywords: dict[str, str]) -> tuple[bool, bool, str, str]:
     approval_schema = keywords.get("APPROVAL_SCHEMA", "").strip()
 
     if approval_state:
+        if approval_schema != CANONICAL_SCHEMA or not CANONICAL_APPROVAL_FIELDS.issubset(keywords):
+            return False, False, lifecycle, "INVALID"
         return approval_state == CANONICAL_PENDING, False, lifecycle, approval_state
 
     # A document that started canonical migration should not silently fall back

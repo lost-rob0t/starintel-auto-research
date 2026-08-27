@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -40,6 +42,15 @@ def org_text(
         lines.append(f"#+approval_schema: {approval_schema}")
     if approval_state is not None:
         lines.append(f"#+approval_state: {approval_state}")
+        lines.extend(
+            [
+                "#+approval_actor: test-operator",
+                "#+approval_evidence: test evidence",
+                "#+approval_base_commit: 0123456789abcdef0123456789abcdef01234567",
+                "#+approval_base_blob: fedcba9876543210fedcba9876543210fedcba98",
+                "#+approval_decided_at: 2026-08-27",
+            ]
+        )
     lines.extend(["", "* Research", "Body.", ""])
     return "\n".join(lines)
 
@@ -163,6 +174,8 @@ class ResearchPendingTests(unittest.TestCase):
         self.assertIn('<option value="repository">Repository</option>', document)
         self.assertIn('<option value="path">Path</option>', document)
         self.assertIn("Public API only · no browser token", document)
+        self.assertIn("<th>Repository</th>", document)
+        self.assertIn("lost-rob0t/starintel-auto-research", document)
         self.assertIn("../assets/research-pending.css", document)
         self.assertIn("../assets/research-pending.js", document)
 
@@ -183,15 +196,51 @@ class ResearchPendingTests(unittest.TestCase):
         self.assertEqual(output, site / "research-pending" / "index.html")
         self.assertTrue(output.is_file())
 
-    def test_pr_client_is_public_only_and_covers_personal_and_org_repositories(self) -> None:
+    def test_pr_client_is_public_only_and_uses_explicit_research_approval_queries(self) -> None:
         script = (ROOT / "pages" / "static" / "research-pending.js").read_text(
             encoding="utf-8"
         )
-        self.assertIn("user:lost-rob0t is:pr is:open research", script)
-        self.assertIn("org:starintel-labs is:pr is:open research", script)
+        self.assertIn('"starintel-research-approval:v1" in:body', script)
+        self.assertIn("head:research-approval", script)
+        self.assertIn("head:research/", script)
+        self.assertIn('"Human-gated ADARD review package" in:body', script)
+        self.assertNotIn("is:pr is:open research", script)
+        self.assertNotIn("is:pr is:open ADARD", script)
         self.assertNotIn("Authorization", script)
         self.assertNotIn("GH_TOKEN", script)
         self.assertNotIn("GITHUB_TOKEN", script)
+
+    def test_pr_classifier_excludes_keyword_false_positives_and_retains_strict_matches(self) -> None:
+        script = ROOT / "pages" / "static" / "research-pending.js"
+        harness = f"""
+const fs = require('fs');
+const vm = require('vm');
+const source = fs.readFileSync({json.dumps(str(script))}, 'utf8');
+const context = {{}};
+vm.runInNewContext(source, context);
+const classify = context.starintelResearchApproval.isResearchApprovalPr;
+const records = [
+  {{ repository: 'lost-rob0t/dotfiles', title: 'ADARD UI', body: 'research dashboard', head_ref: 'feature/ui' }},
+  {{ repository: 'prolog-rlm/root', title: 'Implement solver', body: 'ordinary implementation', head_ref: 'feature/runtime' }},
+  {{ repository: 'starintel-labs/starintel-server', title: 'Fix tests', body: 'research test fix', head_ref: 'fix/tests' }},
+  {{ repository: 'lost-rob0t/dotfiles', title: 'Research approval', body: '<!-- starintel-research-approval:v1 -->', head_ref: 'feature/docs' }},
+  {{ repository: 'starintel-labs/starintel-server', title: 'Old review', body: 'legacy review', head_ref: 'research-approval/star-server-041' }},
+  {{ repository: 'starintel-labs/starintel-server', title: 'Legacy research branch', body: 'roam/research/star-server/STAR-RESEARCH-060.org', head_ref: 'research/star-server-060' }},
+  {{ repository: 'starintel-labs/starintel-server', title: 'Legacy branch without record', body: 'research review', head_ref: 'research/ordinary' }},
+  {{ repository: 'starintel-labs/starintel-server', title: 'Human-gated review', body: '## Human-gated ADARD review package\\n\\nResearch and design only.', head_ref: 'agent/review' }},
+  {{ repository: 'starintel-labs/starintel-server', title: 'Keyword only', body: 'research ADARD', head_ref: 'feature/ordinary' }}
+];
+process.stdout.write(JSON.stringify(records.map(classify)));
+"""
+        result = subprocess.run(
+            ["node", "-e", harness],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(result.stdout), [False, False, False, True, True, True, False, True, False])
 
 
 if __name__ == "__main__":

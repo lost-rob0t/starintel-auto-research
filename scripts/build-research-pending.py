@@ -48,7 +48,8 @@ def _row(root: Path, item) -> str:
         f'<a href="{_escape(relative_website_url(root, item.path))}">{_escape(item.title)}</a>'
         f'<span class="research-path">{_escape(item.relative_path.as_posix())}</span>'
         '</td>'
-        f'<td>{_escape(item.project)}</td>'
+        f'<td>{_escape(REPOSITORY)}</td>'
+         f'<td>{_escape(item.project)}</td>'
         f'<td><span class="state-pill">{_escape(item.status)}</span></td>'
         f'<td><span class="approval-pill{(" legacy" if item.legacy else "")}">{_escape(item.approval_state)}</span></td>'
         f'<td>{_escape(kind)}</td>'
@@ -145,7 +146,7 @@ def render_dashboard(root: Path) -> str:
     <p id="research-filter-status" class="review-status" aria-live="polite">{len(canonical)} canonical pending item(s)</p>
     <div class="review-table-wrap">
       <table class="review-table">
-        <thead><tr><th>Research</th><th>Project</th><th>Lifecycle</th><th>Approval</th><th>Mode</th><th>Review</th></tr></thead>
+        <thead><tr><th>Research</th><th>Repository</th><th>Project</th><th>Lifecycle</th><th>Approval</th><th>Mode</th><th>Review</th></tr></thead>
         <tbody id="research-rows">{rows}</tbody>
       </table>
     </div>

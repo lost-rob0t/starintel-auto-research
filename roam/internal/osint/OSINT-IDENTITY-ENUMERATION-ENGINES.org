@@ -1,0 +1,192 @@
+:PROPERTIES:
+:ID:       starintel-internal-osint-identity-enumeration-engines
+:END:
+#+title: OSINT Identity Enumeration Engines
+#+description: Internal deep feature enumeration for username/account discovery engines feeding the StarIntel Identity Domain Server research.
+#+filetags: :starintel:internal:osint:identity:username:research:
+
+* Status
+
+Internal staging only. Related research issue: #160.
+
+Do not promote this document into ARARD/ARADR conclusions until explicitly instructed.
+
+* Architecture Rule
+
+These projects are not separate StarIntel actor boundaries. They are references for a shared Identity Domain Server capability, currently named =identity.enumerateAccounts=.
+
+The implementation order remains:
+
+1. StarLang
+2. extend StarLang
+3. Common Lisp
+4. Python only as a last-resort external adapter
+
+* WhatsMyName
+
+- Upstream :: https://github.com/WebBreacher/WhatsMyName
+- Role :: platform detection registry / dataset
+
+** Deep feature surface
+
+- community-maintained username detection dataset
+- single =wmn-data.json= registry consumed by multiple independent tools
+- hundreds of public profile sites
+- per-site profile/check URL description
+- positive-response signatures
+- negative/not-found signatures
+- categories for filtering
+- dataset-driven rather than runtime-driven architecture
+- explicit inclusion requirement that the profile is publicly accessible
+- explicit inclusion requirement that username appears in the URL
+- excludes sites that transform usernames into opaque numeric identifiers
+- false-positive reduction is a primary design objective
+- continuous community maintenance for URL, response-code, and content drift
+- adding/fixing providers is a data contribution rather than a checker-runtime code change
+- used by web clients, CLI tools, desktop apps, Maltego transforms, SpiderFoot, Blackbird, and other consumers
+- registry/data licensing is separate from the runtime using it
+
+** What StarIntel needs
+
+- a versioned =identityPlatformRegistry= dataset independent of the executor
+- each probe record should include platform ID, tags/categories, profile template, request/check template, positive signature, negative signature, status expectations, side-effect policy, health status, validation evidence, license/source, and last validation time
+- the Identity Domain Server owns execution
+- registry updates must not require recompiling the whole domain server
+- registry health validation should be automated
+- existing =user-hunt= should consume this generic registry instead of embedding WMN-specific assumptions
+
+* Sherlock
+
+- Upstream :: https://github.com/sherlock-project/sherlock
+- Role :: username enumeration runtime / site-registry consumer
+
+** Deep feature surface
+
+- username search across 400+ social networks/sites
+- one or many usernames per run
+- similar-username templates using ={?}= substitutions for underscore, dash, and period variants
+- per-site selection
+- configurable request timeout
+- proxy support
+- raw-response dumping for troubleshooting/evidence
+- found-only or all-result output modes
+- browse/open result workflow
+- local site-data mode
+- NSFW filtering
+- exclusion controls
+- text output
+- JSON output
+- CSV output
+- XLSX output
+- active maintenance focused heavily on false positives, transient HTTP errors, and broken site detections
+- current upstream maintenance demonstrates that 5xx responses and provider drift must not be treated as simple not-found results
+
+** What StarIntel needs
+
+- bounded username-variant generation before enumeration
+- generated variants are candidate observations with derivation provenance
+- variant generation feeds the same =identity.enumerateAccounts= capability rather than becoming a Sherlock-specific capability
+- optional bounded response evidence capture for ambiguous probes
+- explicit transient/provider-error result classes
+- never map HTTP 5xx directly to =notFound=
+
+* NExfil
+
+- Upstream :: https://github.com/thewhiteh4t/nexfil
+- Role :: fast username enumeration runtime
+
+** Deep feature surface
+
+- profile search across 300+ platforms
+- explicit performance goal of broad lookup within seconds
+- explicit low-false-positive design goal
+- single-username mode
+- multiple comma-separated usernames
+- batch input from file
+- configurable timeout
+- text result persistence
+- update-check support
+- proxy mode configuration
+- single proxy or proxy-file model
+- HTTP and HTTPS proxy protocol selection
+- CLI designed around fast broad fan-out
+- upstream documentation historically advertised some output/Tor functionality before full implementation, demonstrating the need to version capability claims against actual code/releases
+
+** What StarIntel needs
+
+- scan profiles such as =fast=, =balanced=, and =exhaustive=
+- batch enumeration should be a native fan-out plan rather than shell-level looping
+- execution deadline/budget should be explicit
+- transport/proxy policy must be independent from provider registry semantics
+- benchmark precision, partial completion, latency, and provider coverage
+- do not port NExfil wholesale unless later tests identify a probe strategy not expressible by the shared registry executor
+
+* Blackbird
+
+- Upstream :: https://github.com/p1ngul1n0/blackbird
+- Role :: username/email enumeration plus interpretation/reporting
+
+** Deep feature surface
+
+- username searches over 600+ platforms
+- email search
+- integrates WhatsMyName data
+- smart filtering aimed at reducing false positives
+- CSV export
+- polished PDF reporting
+- automated post-enumeration analysis
+- optional AI behavioral/technical profile generated from the sites where the identifier was found
+- AI mode is designed to send site names rather than raw target data
+- AI results can be incorporated into generated reports
+- current maintenance history shows the same provider drift and false-positive pressure as other username engines
+
+** What StarIntel needs
+
+- enumeration remains observational: platform, profile URL, probe evidence, time, source, and confidence
+- post-enumeration interpretation must be a separate analysis capability
+- an LLM-generated profile must never become the source evidence layer
+- any analysis should consume an explicit policy-approved projection of observations
+- output claims must retain supporting observation references and confidence
+- reuse the shared =identity.enumerateAccounts= executor rather than duplicating WMN checks
+
+* Shared StarIntel Contract Direction
+
+A provider probe should return an outcome from a closed vocabulary such as:
+
+- =found=
+- =notFound=
+- =unknown=
+- =blocked=
+- =rateLimited=
+- =partial=
+- =error=
+
+Each observation should preserve:
+
+- queried username
+- derivation source if the username was generated
+- platform ID
+- profile URL
+- probe strategy/version
+- registry version
+- request time
+- evidence/signature that caused classification
+- HTTP/provider metadata allowed by policy
+- provider-health context
+- provenance/source
+
+* StarLang Requirements To Verify
+
+- dynamic registry-driven fan-out
+- bounded concurrency
+- deadlines and cancellation
+- bounded retries
+- typed partial-result aggregation
+- variant-generation operator or reusable domain library
+- provider-health state
+- registry version loading and refresh
+- provenance-preserving deduplication
+- bounded recursive pivots from newly discovered identifiers
+- proxy/transport adapter selection
+
+StarLang already has several relevant runtime primitives; the gap audit is tracked in auto-research issue #165.

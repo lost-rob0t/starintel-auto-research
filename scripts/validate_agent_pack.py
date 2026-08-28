@@ -20,6 +20,16 @@ def validate_static() -> None:
         "scripts/mark-design.py", "scripts/sync.py",
         "scripts/search.py", "scripts/save-research.py",
         "agent-zero/usr/agents/starintel/prompts/agent.system.main.specifics.md",
+        "agent-zero/usr/agents/starintel-adard-gated/prompts/agent.system.main.specifics.md",
+        "agent-zero/usr/agents/starintel-adard-gated/prompts/agent.system.main.communication.md",
+        "agent-zero/usr/agents/starintel-source-enrichment/prompts/agent.system.main.specifics.md",
+        "agent-zero/usr/agents/starintel-source-enrichment/prompts/agent.system.main.communication.md",
+        "agent-zero/usr/agents/starintel-contract-audit/prompts/agent.system.main.specifics.md",
+        "agent-zero/usr/agents/starintel-contract-audit/prompts/agent.system.main.communication.md",
+        "agent-zero/usr/agents/starintel-implementation/prompts/agent.system.main.specifics.md",
+        "agent-zero/usr/agents/starintel-implementation/prompts/agent.system.main.communication.md",
+        "agent-zero/usr/agents/starintel-verification/prompts/agent.system.main.specifics.md",
+        "agent-zero/usr/agents/starintel-verification/prompts/agent.system.main.communication.md",
     ]
     missing = [p for p in required if not (ROOT / p).is_file()]
     if missing:

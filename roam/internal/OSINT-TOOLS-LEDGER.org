@@ -8,11 +8,11 @@
 
 * Purpose
 
-Track every OSINT tool encountered during StarIntel feature research before research conclusions are promoted into ARARD/ARADR documents.
+Track every retained OSINT tool encountered during StarIntel feature research before research conclusions are promoted into ARARD/ARADR documents.
 
-This ledger is intentionally tool-centric. Architecture decisions remain domain-server-centric.
+This ledger is tool-centric for research traceability. Architecture decisions remain domain-server-centric. Provider names mentioned inside a tool's feature surface do not automatically become separate StarIntel components.
 
-For every tool record:
+For every retained tool record:
 
 - deeply enumerate the actual feature surface
 - identify the smallest reusable capability set rather than cloning the product
@@ -35,6 +35,15 @@ For every tool record:
 
 Tools do not define architecture boundaries. Related capabilities are grouped into coherent domain servers. Providers and algorithms live behind capability contracts inside those servers.
 
+* Research Issues
+
+- #159 MailAccess -> Identity Domain Server capabilities
+- #160 username/account enumeration engines
+- #161 email-account existence and Google identity pivots
+- #162 infrastructure discovery and attack-surface mapping
+- #163 SpiderFoot automation, event propagation, and correlation
+- #164 IntelOwl artifacts, playbooks, pivots, and analysis lifecycle
+
 * Tool Records
 
 ** RESEARCHING MailAccess
@@ -42,11 +51,11 @@ Tools do not define architecture boundaries. Related capabilities are grouped in
 - Repository :: https://github.com/KatrielMoses/MailAccess
 - Primary cluster :: identity intelligence
 - Likely domain server :: Identity Domain Server
-- Initial architectural decision :: absorb useful behavior into the identity domain rather than creating a MailAccess actor
+- Research issue :: #159
 - Current StarIntel overlap :: existing =user-hunt= / WhatsMyName username enumeration
-- Research issue :: pending
+- Architectural decision hypothesis :: absorb useful behavior into the identity domain rather than creating a MailAccess actor
 
-*** Feature surface
+*** Deep feature surface
 
 **** Investigation orchestration
 
@@ -64,13 +73,13 @@ Tools do not define architecture boundaries. Related capabilities are grouped in
 
 - derived username generation from email local-parts
 - WhatsMyName site-registry enumeration
-- Maigret-style large platform-registry enumeration
-- Sherlock-style platform checks
-- Nexfil-style platform checks
-- Blackbird-style social-account checks
+- Maigret large platform-registry enumeration
+- Sherlock platform checks
+- Nexfil platform checks
+- Blackbird social-account checks
 - Holehe account-existence checks
 - user-scanner vectors
-- URL/domain deduplication across overlapping provider registries
+- URL/domain deduplication across overlapping registries
 - multi-source confirmation when independent engines agree
 - username pivots from discovered accounts
 - account existence heuristics based on status codes and response markers
@@ -110,7 +119,7 @@ Tools do not define architecture boundaries. Related capabilities are grouped in
 
 **** Domain and infrastructure enrichment
 
-- DNS record extraction including MX, SPF, DMARC, DKIM, A, and NS
+- DNS records including MX, SPF, DMARC, DKIM, A, and NS
 - WHOIS lookup and privacy detection
 - domain intelligence and optional Shodan enrichment
 - ransomware-victim domain correlation
@@ -165,17 +174,12 @@ Tools do not define architecture boundaries. Related capabilities are grouped in
 
 **** Reporting and interoperability
 
-- JSON export
-- CSV export
-- Markdown export
-- PDF export
-- STIX 2.1 export
-- Maltego XML export
+- JSON, CSV, Markdown, PDF, STIX 2.1, and Maltego XML export
 - graph API
 - webhook/chat integrations
 - security-summary generation
 
-*** Candidate StarIntel capability families
+*** What StarIntel needs
 
 Keep these as capability families inside the Identity Domain Server unless later research proves a stronger boundary:
 
@@ -186,9 +190,9 @@ Keep these as capability families inside the Identity Domain Server unless later
 - =identity.checkExposure=
 - =identity.pivotContacts=
 
-Cross-domain pivots such as DNS/infrastructure enrichment should call the relevant infrastructure domain server rather than be duplicated in Identity.
+Cross-domain pivots such as DNS/infrastructure enrichment call the Infrastructure Domain Server rather than being duplicated in Identity.
 
-*** StarLang implications to research
+*** StarLang implications
 
 - bounded concurrent fan-out over provider registries
 - typed partial-result envelopes
@@ -200,6 +204,543 @@ Cross-domain pivots such as DNS/infrastructure enrichment should call the releva
 - deduplication with provenance preservation
 - durable investigation state and resumable fan-out
 
-*** Status
+** RESEARCHING Maigret
 
-Deep feature enumeration started. No ARARD/ARADR research document has been modified or approved from this ledger entry.
+- Repository :: https://github.com/soxoj/maigret
+- Primary cluster :: identity intelligence
+- Domain server :: Identity Domain Server
+- Research issue :: #160
+- Architectural decision hypothesis :: use as the strongest reference for registry-driven username enumeration and recursive identity pivots; do not embed the Python package by default
+
+*** Deep feature surface
+
+**** Platform registry
+
+- supports 3,000+ sites
+- ranked default scan over a high-value subset with full-scan option
+- tags for categories and countries
+- remote site-database refresh with local fallback
+- custom/extensible site definitions
+- request URL templates and site-specific existence logic
+
+**** Enumeration
+
+- username-only starting point
+- concurrent checks across many sites
+- account-existence classification
+- support for ordinary web, Tor, and I2P targets
+- domain checking in addition to username checking
+- handling for blocks, censorship, CAPTCHA, 403s, and timeouts
+- proxy-oriented operating model
+
+**** Profile extraction
+
+- fetch profile pages and site APIs after a hit
+- extract account-owner metadata
+- extract linked accounts and identifiers
+- keyword matching in discovered pages
+- derive new usernames/IDs from findings
+
+**** Recursive investigation
+
+- recursively search newly discovered usernames and identifiers
+- create a graph of pivots and discovered accounts
+- prevent the initial enumeration from being the terminal result
+
+**** Scope and ranking
+
+- site ranking by traffic/popularity
+- category/country tag filters
+- run all sites or bounded top-site subsets
+- multiple usernames per invocation
+
+**** Reports and machine output
+
+- HTML report
+- PDF report
+- XMind report
+- NDJSON / simple JSON
+- CSV
+- text
+- interactive D3 graph
+- Neo4j Cypher export with idempotent re-import behavior
+
+**** Embedding and UX
+
+- CLI
+- Python library API
+- web interface
+- graph browsing
+- optional AI-generated investigation summary
+
+*** What StarIntel needs
+
+- one versioned platform-probe registry
+- one typed =identity.enumerateAccounts= capability with strategy fields rather than Maigret-specific code paths
+- recursive identity pivots as bounded StarLang workflow semantics
+- account metadata extraction as a follow-up capability, not mixed into the existence test contract
+- tags/ranking to let the planner choose fast, regional, category-specific, or exhaustive sweeps
+- explicit blocked/unknown outcomes rather than silently treating network defenses as not-found
+- graph relations with per-probe provenance
+
+*** StarLang implications
+
+- registry-driven dynamic fan-out
+- bounded recursion with visited-set/cycle control
+- per-probe deadlines
+- proxy/adapter selection metadata
+- typed =found/notFound/blocked/unknown/partial= result states
+- post-hit pipeline activation
+
+** RESEARCHING Holehe
+
+- Repository :: https://github.com/megadose/holehe
+- Primary cluster :: identity intelligence
+- Domain server :: Identity Domain Server
+- Research issue :: #161
+- Architectural decision hypothesis :: copy the account-existence technique family, not the Python module layout
+
+*** Deep feature surface
+
+**** Service probing
+
+- checks whether an email is registered on 120+ services
+- uses multiple public account flows depending on provider: registration, login, password recovery, or another provider-specific check
+- aims to avoid triggering a notification to the target address
+- each service is its own provider-specific probe module
+
+**** Result model
+
+- service name
+- explicit rate-limit flag
+- boolean existence signal
+- partially obfuscated recovery email when exposed
+- partially obfuscated recovery phone number when exposed
+- provider-specific extra fields
+
+**** Execution model
+
+- asynchronous networking
+- reusable HTTP client
+- embeddable module functions as well as CLI
+- provider table documents the probe method and known frequent rate-limit behavior
+
+**** Provider drift risk
+
+- techniques depend on public login/register/recovery flows
+- provider endpoints and response semantics can change independently
+- rate limits are service-specific
+- some outcomes expose only partial recovery hints
+
+*** What StarIntel needs
+
+- =identity.emailAccountPresence= as a provider-registry strategy under =identity.enrichEmail=
+- provider probe type =register/login/recovery/other=
+- explicit =exists/notExists/ambiguous/rateLimited/blocked/error= outcome
+- recovery hints stored as observations with provenance, never promoted directly to confirmed identity
+- health/drift monitoring because these probes are unusually fragile
+- do not reproduce modules whose workflow would notify or modify the target account
+
+*** StarLang implications
+
+- provider-specific request/response strategy declarations
+- secret-safe evidence capture/redaction
+- rate-limit state
+- policy flag forbidding side-effectful probes
+- health tests for provider drift
+
+** RESEARCHING GHunt
+
+- Repository :: https://github.com/mxrch/GHunt
+- Primary cluster :: Google identity and public asset pivots
+- Domain server :: Identity Domain Server, with cross-domain geolocation/asset calls
+- Research issue :: #161
+- Architectural decision hypothesis :: reproduce/publicly wrap individual Google pivots behind typed capabilities; do not make GHunt itself the domain boundary
+
+*** Deep feature surface
+
+**** Authentication/session support
+
+- authenticated Google-session workflow
+- browser companion for login/cookie acquisition
+- listener mode
+- base64 cookie import
+- manual cookie entry
+- session state required for some Google surfaces
+
+**** Identity modules
+
+- email-address lookup
+- Gaia ID lookup
+- conversion/pivot between Google identity identifiers where available
+- structured JSON export
+
+**** Google Drive investigation
+
+- inspect public/shared Drive file or folder targets
+- treat Drive identifiers as investigation pivots
+
+**** Geolocation
+
+- BSSID geolocation capability
+- outputs suitable for structured JSON processing
+
+**** Digital Asset Links discovery
+
+- =spiderdal= mode for discovering assets using Google's Digital Asset Links ecosystem
+- links web/app assets rather than treating identity lookup as the only Google capability
+
+**** Integration
+
+- CLI module dispatch
+- fully asynchronous implementation
+- Python library embedding
+- JSON output
+
+*** What StarIntel needs
+
+- typed Google identity provider capabilities behind =identity.findPublicProfiles= / =identity.enrichEmail=
+- authenticated-session adapter with explicit credential scope and expiry
+- Gaia ID as a first-class external identifier observation
+- Drive inspection routed to a document/cloud-asset domain if it grows beyond identity pivots
+- BSSID geolocation routed to a Geospatial Domain Server
+- Digital Asset Links routed to Infrastructure/Application-Asset discovery
+- every cross-domain pivot should retain the originating identity observation
+
+*** StarLang implications
+
+- session/credential references as capabilities, never raw cookie literals in plans
+- adapter lifecycle for authenticated browser-derived sessions
+- cross-domain invocation and provenance chain
+- structured provider modules with async calls and typed JSON results
+
+** RESEARCHING OWASP Amass
+
+- Repository :: https://github.com/owasp-amass/amass
+- Primary cluster :: infrastructure intelligence
+- Domain server :: Infrastructure Domain Server
+- Research issue :: #162
+- Architectural decision hypothesis :: use Amass as the reference for recursive asset discovery, source fusion, and infrastructure relationship modeling
+
+*** Deep feature surface
+
+**** Collection techniques
+
+- passive API integrations across passive DNS, search, threat intelligence, Internet scan, code, and asset databases
+- certificate sources including certificate-transparency services and optional active pulls
+- DNS brute forcing
+- reverse DNS sweeping
+- NSEC zone walking
+- zone transfers
+- FQDN alterations/permutations
+- similarity-based hostname guessing
+- routing/ASN/BGP data sources
+- search-engine and web scraping
+- web archives
+- WHOIS sources
+
+**** Target and relationship discovery
+
+- domains and subdomains
+- FQDNs
+- IP addresses
+- netblocks
+- ASNs
+- certificates
+- routing relationships
+- source-derived infrastructure associations
+
+**** Active/passive modes
+
+- OSINT/passive discovery
+- active reconnaissance techniques
+- configurable data sources and credentials
+- recursive enumeration workflows
+
+**** Persistence and modeling
+
+- graph database persistence between executions
+- Open Asset Model / uniform asset representation in the broader project
+- asset database for navigation and management
+- scripting engine for custom enumeration control
+
+**** Operational behavior
+
+- many heterogeneous provider integrations
+- source-specific API keys
+- long-running discovery state
+- repeated runs over an evolving attack surface
+
+*** What StarIntel needs
+
+- Infrastructure Domain Server with typed =domain, fqdn, ipAddress, netblock, asn, certificate, service= assets
+- source observations separate from canonical asset identity
+- passive discovery and active validation as different capability classes/policies
+- recursive pivots with scope guards
+- DNS mutation/permutation strategy library
+- certificate-transparency collection
+- routing/ASN enrichment
+- change observations between runs
+- planner chooses providers based on credentials, expected value, cost, scope, and prior health
+
+*** StarLang implications
+
+- durable recursive graph expansion
+- scope/exclusion predicates
+- active-vs-passive side-effect policy metadata
+- source fan-out and observation deduplication
+- long-running resumable jobs
+- change-set generation across runs
+
+** RESEARCHING SpiderFoot
+
+- Repository :: https://github.com/smicallef/spiderfoot
+- Primary cluster :: OSINT automation and correlation
+- Domain server :: Investigation/Discovery Domain Server plus cross-domain capability calls
+- Research issue :: #163
+- Architectural decision hypothesis :: extract event-driven discovery and correlation semantics; do not reproduce its 200+ module catalog as StarIntel actors
+
+*** Deep feature surface
+
+**** Scan inputs
+
+- IP address
+- domain/subdomain
+- hostname
+- CIDR subnet
+- ASN
+- email address
+- phone number
+- username
+- person's name
+- Bitcoin address
+
+**** Module graph
+
+- 200+ modules
+- publisher/subscriber flow where emitted events activate downstream modules
+- modules act as both collectors and analyzers
+- internal extractors coexist with provider/API modules
+- external tools such as DNSTwist, WhatWeb, Nmap, and CMSeeK can be invoked
+
+**** Discovery families
+
+- host/subdomain/TLD enumeration
+- email, phone, and person-name extraction
+- cryptocurrency-address extraction
+- DNS resolution/zone transfer
+- threat-intelligence and blacklist lookup
+- social-account enumeration
+- cloud bucket/blob/space discovery
+- IP geolocation
+- web scraping/content analysis
+- image/document/binary metadata analysis
+- dark-web search
+- port/banner discovery
+- breach search
+
+**** Correlation
+
+- YAML-configurable correlation rules
+- bundled rule set
+- rule layer separate from collectors
+- correlations run over accumulated events/results
+
+**** Storage and query
+
+- SQLite-backed scan data
+- custom querying
+- persistent scan results suitable for later navigation
+
+**** Operator surfaces
+
+- web UI
+- CLI
+- visualizations
+- CSV/JSON/GEXF export
+- API key import/export
+- Tor integration
+- Docker deployment
+
+**** Monitoring concepts
+
+- commercial HX adds repeated attack-surface monitoring
+- change notifications
+- multi-target scans
+- investigations/collaboration
+- API and external output integrations
+- screenshotting
+
+*** What StarIntel needs
+
+- typed document/event subscriptions generated from capability manifests
+- newly emitted documents can activate compatible capabilities
+- bounded recursive discovery with traceable cause
+- declarative correlation rules separate from collectors
+- explain why a rule/capability fired
+- scan/job persistence and replay
+- safe external-process capability adapters
+- provider modules stay in their correct domain servers; Investigation coordinates rather than owning all source code
+
+*** StarLang implications
+
+- data-driven typed subscriptions
+- bounded recursive activation
+- rule evaluation and explainability
+- execution trace edges =input -> capability -> output=
+- job persistence/restart
+- capability filters and scan profiles
+
+** RESEARCHING IntelOwl
+
+- Repository :: https://github.com/intelowlproject/IntelOwl
+- Primary cluster :: analysis orchestration and threat enrichment
+- Domain server :: Investigation/Analysis Domain Server with source-specific calls to other domains
+- Research issue :: #164
+- Architectural decision hypothesis :: use IntelOwl as a reference for artifact/job/playbook/pivot lifecycle, not as a dependency
+
+*** Deep feature surface
+
+**** Artifact model
+
+- files and observables are reusable artifacts
+- the same artifact can be analyzed multiple times
+- analysis is a job/request rather than mutation of the artifact itself
+
+**** Plugin classes
+
+- analyzers retrieve external intelligence or run local analysis tools
+- connectors export results to external platforms
+- pivots trigger/chains follow-up analysis
+- visualizers present analyzer/playbook-specific results
+- ingestors automatically turn incoming streams into jobs
+- playbooks package repeatable combinations of plugins
+- data models normalize heterogeneous analyzer output
+- user events attach analyst evaluation/context
+
+**** Analysis coverage
+
+- IP/domain/URL/hash observable enrichment
+- file analysis
+- Office/RTF/PDF metadata/static analysis
+- PE/ELF/APK analysis
+- strings/deobfuscation
+- YARA/ClamAV
+- emulation/capability extraction
+- JavaScript analysis
+- Android analysis
+- SPF/DMARC validation
+- PCAP analysis
+- honeyclients/browser analysis
+- scanners
+- numerous external threat-intelligence services
+
+**** Playbooks and pivots
+
+- repeatable shared analysis sequences
+- predefined playbooks for free analyzers, static analysis, URL/IP reputation, DNS, and operational response flows
+- pivots connect analyses instead of forcing operators to manually re-enter results
+
+**** Ingestors and automation
+
+- continuous/periodic IOC ingestion
+- each ingested item can create a job through an attached playbook
+- automation runs under service/robot identities
+- permissions/config ownership matter for automated runs
+
+**** Investigation/analyst layer
+
+- investigations group findings
+- user events capture analyst judgments
+- GUI dashboards and visualizers
+- collaboration around findings
+
+**** Integration
+
+- REST API
+- official client libraries
+- connectors to MISP/OpenCTI and other destinations
+- scale-out architecture
+
+*** What StarIntel needs
+
+Standardize shared semantics across domain servers:
+
+- target/artifact identity
+- immutable or append-only analysis jobs
+- declarative playbooks
+- pivots / result bindings
+- capability selection by input type
+- analyst assessment documents
+- service identities for automated ingestion
+- visualizer declarations for result types
+- normalized result envelope without erasing source-native evidence
+
+Do not centralize every analyzer in one server. Investigation/Analysis coordinates capabilities owned by other domain servers.
+
+*** StarLang implications
+
+- first-class playbook/job state
+- typed result bindings and pivots
+- service identity/capability permissions
+- scheduled/stream ingestor triggers
+- visualizer metadata in capability manifests
+- reusable artifact references and historical analyses
+
+* Current Domain-Server Clusters
+
+** Identity Domain Server
+
+Current retained references:
+
+- MailAccess
+- Maigret
+- Holehe
+- GHunt identity modules
+- existing StarIntel user-hunt / WhatsMyName behavior
+
+Core capability direction:
+
+- account enumeration
+- email enrichment/account presence
+- public-profile pivots
+- identity resolution/correlation
+- exposure checks
+- contact pivots
+
+** Infrastructure Domain Server
+
+Current retained references:
+
+- OWASP Amass
+- MailAccess infrastructure pivots only as callers
+- GHunt Digital Asset Links as a caller/cross-domain source
+
+Core capability direction:
+
+- infrastructure discovery
+- DNS/certificate/routing enrichment
+- topology relations
+- active validation separated from passive collection
+- change observation
+
+** Investigation/Discovery/Analysis Domain Server
+
+Current retained references:
+
+- SpiderFoot
+- IntelOwl
+
+Core capability direction:
+
+- typed capability activation
+- jobs/playbooks/pivots
+- bounded recursive discovery
+- correlation rules
+- execution traces
+- analyst assessment
+- resumability
+
+* Promotion Gate
+
+This ledger is staging material only. No entry becomes an ARARD/ARADR conclusion until the user explicitly instructs the research to be added/promoted.

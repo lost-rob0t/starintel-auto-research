@@ -1,0 +1,205 @@
+:PROPERTIES:
+:ID:       starintel-internal-osint-tools-ledger
+:END:
+#+title: StarIntel OSINT Tool Ledger
+#+description: Internal running inventory of OSINT tools discovered during feature research. This is not an approval document and does not authorize implementation.
+#+filetags: :starintel:internal:osint:tools:ledger:
+#+todo: DISCOVERED RESEARCHING MAPPED BLOCKED | REVIEWED REJECTED
+
+* Purpose
+
+Track every OSINT tool encountered during StarIntel feature research before research conclusions are promoted into ARARD/ARADR documents.
+
+This ledger is intentionally tool-centric. Architecture decisions remain domain-server-centric.
+
+For every tool record:
+
+- deeply enumerate the actual feature surface
+- identify the smallest reusable capability set rather than cloning the product
+- map those capabilities into an existing or proposed OSINT domain-server cluster
+- prefer implementation in StarLang
+- if StarLang cannot express a required primitive, record the missing language/runtime capability so StarLang can be extended
+- use Common Lisp when the capability genuinely belongs below the StarLang surface or needs a Lisp library/adapter
+- use Python only when StarLang plus Common Lisp cannot reasonably implement or wrap the required dependency
+- preserve provenance, confidence, failure states, rate limits, and partial results
+- do not create one actor per upstream feature or provider
+
+* Implementation Preference
+
+1. StarLang
+2. Extend StarLang where the required semantic/runtime primitive is missing
+3. Common Lisp library or adapter
+4. Python only as a last-resort external process boundary
+
+* Domain-Server Rule
+
+Tools do not define architecture boundaries. Related capabilities are grouped into coherent domain servers. Providers and algorithms live behind capability contracts inside those servers.
+
+* Tool Records
+
+** RESEARCHING MailAccess
+
+- Repository :: https://github.com/KatrielMoses/MailAccess
+- Primary cluster :: identity intelligence
+- Likely domain server :: Identity Domain Server
+- Initial architectural decision :: absorb useful behavior into the identity domain rather than creating a MailAccess actor
+- Current StarIntel overlap :: existing =user-hunt= / WhatsMyName username enumeration
+- Research issue :: pending
+
+*** Feature surface
+
+**** Investigation orchestration
+
+- email-address investigation entrypoint
+- concurrent module fan-out
+- bounded module concurrency
+- per-module timeout behavior
+- persistent-server and one-shot CLI execution modes
+- module auto-discovery
+- optional modules gated by configuration or credentials
+- explicit skipped/partial status instead of making one missing provider fail the full investigation
+- JSONL/pipeline integration
+
+**** Username and account discovery
+
+- derived username generation from email local-parts
+- WhatsMyName site-registry enumeration
+- Maigret-style large platform-registry enumeration
+- Sherlock-style platform checks
+- Nexfil-style platform checks
+- Blackbird-style social-account checks
+- Holehe account-existence checks
+- user-scanner vectors
+- URL/domain deduplication across overlapping provider registries
+- multi-source confirmation when independent engines agree
+- username pivots from discovered accounts
+- account existence heuristics based on status codes and response markers
+- platform-health based demotion or skipping of fragile checks
+
+**** Email identity enrichment
+
+- discover alternate email addresses from public identity signals
+- generate bounded email permutations
+- search public pages for email appearances
+- domain-level email harvesting
+- harvest from code, certificate-transparency logs, registries, keyservers, employee pages, web indexes, and inferred naming patterns
+- distinguish direct email matches from derived candidate addresses
+
+**** Identity correlation
+
+- identity graph across email, usernames, accounts, names, avatars, profile URLs, and breach observations
+- name-signal aggregation from independent sources
+- confidence bands rather than a single boolean identity match
+- weighted source classes
+- shadow-profile detection across alternate emails
+- temporal clustering of account creation or observation windows
+- avatar perceptual-similarity clustering
+- explicit supporting-source attribution for a merged identity claim
+- false-positive controls for common names and disposable email domains
+
+**** Public-profile pivots
+
+- Gravatar profile/hash lookup
+- GitHub profile and commit identity lookup
+- PGP key UID lookup
+- ORCID identity lookup
+- Hacker News profile lookup
+- social-profile lookups
+- linked-URL extraction from profile content
+- extraction of additional emails, names, and phone numbers from public profile text
+
+**** Domain and infrastructure enrichment
+
+- DNS record extraction including MX, SPF, DMARC, DKIM, A, and NS
+- WHOIS lookup and privacy detection
+- domain intelligence and optional Shodan enrichment
+- ransomware-victim domain correlation
+- infrastructure clustering support
+
+**** Historical and web discovery
+
+- Wayback/CDX lookup for historical public appearances of an email
+- search-engine dorks
+- press-release contact extraction
+- public web source discovery
+
+**** Breach and credential-exposure intelligence
+
+- HIBP integration
+- XposedOrNot integration
+- LeakCheck public-source integration
+- BreachDirectory integration
+- deep breach probing against prioritized breach corpora
+- canonical breach normalization across duplicate sources
+- breach data-class extraction
+- credential-risk scoring
+- risk indicators and severity bands
+- cached breach corpus metadata
+- infostealer signal lookup
+
+**** Phone and messaging pivots
+
+- phone validation
+- messaging-account hints
+- Telegram/WhatsApp username/account hints
+
+**** Evidence and result model
+
+- normalized findings
+- source-module attribution
+- confidence and severity fields
+- per-module metadata
+- explicit partial status and retry hints
+- canonical deduplication while retaining source attribution
+- graph export
+
+**** Operational resilience
+
+- rate-limit awareness
+- provider health tracking
+- persistent health state
+- automatic skip/demotion of degraded platform checks
+- configurable concurrency and timeout controls
+- optional provider/API-key behavior
+- local cache of provider/platform registries
+
+**** Reporting and interoperability
+
+- JSON export
+- CSV export
+- Markdown export
+- PDF export
+- STIX 2.1 export
+- Maltego XML export
+- graph API
+- webhook/chat integrations
+- security-summary generation
+
+*** Candidate StarIntel capability families
+
+Keep these as capability families inside the Identity Domain Server unless later research proves a stronger boundary:
+
+- =identity.enumerateAccounts=
+- =identity.enrichEmail=
+- =identity.resolveIdentity=
+- =identity.findPublicProfiles=
+- =identity.checkExposure=
+- =identity.pivotContacts=
+
+Cross-domain pivots such as DNS/infrastructure enrichment should call the relevant infrastructure domain server rather than be duplicated in Identity.
+
+*** StarLang implications to research
+
+- bounded concurrent fan-out over provider registries
+- typed partial-result envelopes
+- deadlines/timeouts and bounded retries
+- capability/provider health state
+- capability registry data loading and periodic refresh
+- confidence/evidence aggregation rules
+- cross-domain capability invocation
+- deduplication with provenance preservation
+- durable investigation state and resumable fan-out
+
+*** Status
+
+Deep feature enumeration started. No ARARD/ARADR research document has been modified or approved from this ledger entry.

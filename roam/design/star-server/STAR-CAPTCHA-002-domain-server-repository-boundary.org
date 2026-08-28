@@ -1,0 +1,189 @@
+:PROPERTIES:
+:ID:       star-captcha-002-domain-server-repository-boundary
+:END:
+#+title: STAR-CAPTCHA-002 CAPTCHA Domain Server and Repository Boundary
+#+description: Approved StarIntel architecture for a shared CAPTCHA domain server, opportunistic actor integration, public provider adapters, and a private in-house solver implementation.
+#+status: APPROVED
+#+approval_schema: adard.research-approval.v1
+#+approval_state: APPROVED
+#+approval_actor: human-reviewer
+#+approval_evidence: Project-owner decision 2026-08-28: CAPTCHA solving system approved; make it a domain server; actors should use it when running; migrate ordinary solver actors out of starintel-pro-actors; do not open-source the in-house solver.
+#+approval_decided_at: 2026-08-28
+#+filetags: :starintel:design:star-server:captcha:domain-server:actors:starlang:public-private-boundary:
+
+* Decision
+
+CAPTCHA solving is a first-class StarIntel domain server.
+
+The domain server owns the shared CAPTCHA protocol, capability discovery, authorization, routing, lifecycle, health, deadlines, result typing, and solver selection. Individual OSINT actors do not embed solver implementations and do not depend directly on a specific CAPTCHA provider.
+
+Actors encountering a challenge MAY use the CAPTCHA Domain Server when it is registered, healthy, authorized for the current target/purpose, and able to satisfy the exact challenge contract. Absence of the domain server is not a fatal runtime dependency.
+
+The implementation preference is:
+
+1. StarLang orchestration and domain behavior;
+2. extend StarLang when a required runtime or language primitive is missing;
+3. Common Lisp libraries/adapters for implementation details that belong below the StarLang surface;
+4. Python only when neither StarLang nor Common Lisp can reasonably implement or wrap the required dependency.
+
+* Domain Boundary
+
+The logical service is =CaptchaDomainServer=.
+
+It exposes bounded internal capabilities such as:
+
+- =captcha.detectedChallenge=
+- =captcha.solve=
+- =captcha.applyResult=
+- =captcha.providerHealth=
+- =captcha.capabilities=
+
+These are capability contracts, not promises that every challenge family is supported.
+
+The domain server coordinates the existing broker/router and detection-resolution designs:
+
+- [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Capability Router]]
+- [[id:star-captcha-001-detection-resolution-orchestrator][STAR-CAPTCHA-001 CAPTCHA Detection and Resolution Orchestrator]]
+
+The broker, run supervision, policy, capability registry, budgets, deduplication, telemetry, and ephemeral-result references are domain-server internals. Provider adapters and local solvers register exact capabilities with the domain server.
+
+* Opportunistic Actor Integration
+
+An actor that encounters a supported challenge follows this flow:
+
+1. preserve the source request/session and emit a typed challenge observation;
+2. query the runtime capability catalog for a healthy =captcha.solve= capability;
+3. if the CAPTCHA Domain Server is absent or unhealthy, return a typed =blockedByChallenge= or partial result and continue according to the caller's policy;
+4. if present, submit only the bounded challenge descriptor and opaque session/artifact references required by the exact capability;
+5. the domain server authorizes the request and selects an eligible solver;
+6. the solver returns an opaque typed result reference;
+7. the source actor or authorized apply capability applies the result in the required source context;
+8. downstream acceptance is recorded separately from solver completion;
+9. the original actor resumes its collection workflow.
+
+No actor should busy-loop, brute-force retry, or silently reinterpret a challenge as =notFound=.
+
+* StarLang Requirements
+
+The preferred StarLang surface must support or be extended to support:
+
+- domain-server declaration and runtime registration;
+- capability discovery by typed contract;
+- optional capability dependencies;
+- supervised request actors/runs;
+- bounded deadlines and cancellation;
+- opaque artifact/session/result references;
+- exact capability matching;
+- typed partial and blocked outcomes;
+- health-aware routing;
+- cross-domain request/reply;
+- resumable continuation after a challenge result;
+- policy/capability checks before dispatch;
+- provenance linking the challenge, solver attempt, result application, and downstream acceptance.
+
+If one of these cannot currently be expressed in StarLang, the first implementation task is to add the missing StarLang primitive rather than bypassing the language with an ad-hoc Python controller.
+
+* Public Repository Boundary
+
+The ordinary, redistributable CAPTCHA actor implementations should live with the public StarIntel actor implementation in =lost-rob0t/starintel-server= rather than in the private =lost-rob0t/starintel-pro-actors= repository.
+
+Public/migratable components include:
+
+- the CAPTCHA domain-server protocol and StarLang declarations;
+- provider-neutral broker/router logic;
+- challenge detection and resolution orchestration;
+- runtime capability registration schema;
+- external provider adapters whose source and dependencies are suitable for redistribution;
+- provider fixtures that contain no credentials or sensitive captured sessions;
+- generic browser/application integration that contains no private solver logic;
+- fake-provider and owned-fixture tests;
+- health, timeout, cancellation, partial-result, and contract-drift tests.
+
+Existing provider design nodes currently under the =starintel-pro-actors= namespace are design inputs for this migration, including:
+
+- [[id:star-pro-captcha-001-nonecap-adapter][STAR-PRO-CAPTCHA-001 NoneCap hCaptcha Adapter]]
+- [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Adapter]]
+- [[id:star-pro-captcha-003-2captcha-adapter][STAR-PRO-CAPTCHA-003 2Captcha Adapter]]
+
+Their provider-specific behavior remains behind the same =captcha.solve= domain-server contract.
+
+* Private In-House Solver Boundary
+
+StarIntel's own in-house solver is explicitly NOT open source.
+
+The public repositories may expose only the stable interface required for a private solver to register and execute as an exact CAPTCHA capability. They must not contain or reconstruct the private implementation.
+
+Keep private:
+
+- in-house solver source code;
+- private model weights;
+- training pipeline implementation where it reveals the private solver;
+- private training and evaluation corpora;
+- private challenge-specific heuristics;
+- model selection/routing logic unique to the private solver;
+- private tuning data and production acceptance telemetry that would disclose solver internals;
+- deployment secrets and private inference endpoints.
+
+The private solver MAY register at runtime exactly like another solver provider. Public code must not require it to exist.
+
+The existing self-sourced research remains architectural evidence but does not authorize publishing the private implementation:
+
+- [[id:star-pro-research-008-self-sourced-captcha-solver-stack][STAR-PRO-RESEARCH-008 Self-Sourced CAPTCHA Solver Actor Stack]]
+- [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors]]
+
+STAR-PRO-CAPTCHA-004 is therefore implementation-sensitive design material. Any public successor must describe only the stable registration/request/result boundary and must omit in-house solver internals.
+
+* Security Boundary
+
+The CAPTCHA Domain Server is not a public arbitrary-target solve relay.
+
+Required invariants:
+
+- internal authenticated actor/domain-server calls only;
+- explicit authorization and target/purpose policy before solving;
+- exact challenge capability matching;
+- opaque session and result references instead of raw cookie/token transport;
+- bounded retries, deadlines, concurrency, and budgets;
+- no proxy rotation or anti-detection behavior intended to evade target controls;
+- no persistent logging of solution tokens or browser secrets;
+- explicit unsupported/blocked outcomes;
+- downstream acceptance verification distinct from provider completion.
+
+* Repository Migration Plan
+
+** Phase 1 — Design normalization
+
+- make this domain-server design the repository-boundary authority;
+- re-home ordinary provider adapter design from the =starintel-pro-actors= design namespace into the regular StarIntel actor/domain-server design namespace;
+- preserve research citations and capability contracts;
+- mark private in-house solver material as non-public implementation detail.
+
+** Phase 2 — Public actor migration
+
+Move or reimplement redistributable solver/provider actors from =lost-rob0t/starintel-pro-actors= into =lost-rob0t/starintel-server=.
+
+Do not copy private solver implementation, private models, private corpora, credentials, or production secrets.
+
+** Phase 3 — StarLang domain server
+
+Express the domain server, solver capability interface, optional dependency semantics, and challenge continuation flow in StarLang. Add missing StarLang primitives before falling back to lower-level implementation.
+
+** Phase 4 — Actor adoption
+
+Update OSINT actors incrementally. Actors that can encounter CAPTCHAs should declare an optional =captcha.solve= dependency and resume from a typed result. Initial candidates include browser-backed collection, identity enumeration, web search/scraping, and infrastructure discovery actors where their normal authorized source path can encounter a challenge.
+
+* Acceptance Criteria
+
+- CAPTCHA is represented as one coherent domain server rather than a loose group of unrelated actors.
+- Actors can discover and use it when available without making it a hard startup dependency.
+- Absence/unavailability produces typed blocked or partial outcomes.
+- public external-provider adapters are no longer architecturally tied to =starintel-pro-actors=.
+- the private in-house solver registers through the public contract but its implementation is absent from public repositories.
+- StarLang is the preferred orchestration surface and missing primitives produce StarLang work rather than immediate Python workarounds.
+- no public arbitrary-target solve endpoint exists.
+
+* Changelog
+
+| Date       | Change |
+|------------+--------|
+| 2026-08-28 | Project owner approved CAPTCHA as a domain server, opportunistic actor use, migration of ordinary solver actors to the regular public actor repository, and a non-OSS boundary for the in-house solver. |

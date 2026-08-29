@@ -1,0 +1,128 @@
+:PROPERTIES:
+:ID:       starintel-star-server-043-sento-bounded-admission
+:END:
+#+title: STAR-SERVER-043 Sento Bounded Mailboxes and StarIntel Admission
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+#+filetags: :starintel:design:star-server:sento:mailbox:admission:p0:
+
+* Approval Table
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Active ARDR policy | APPROVED | Exact pinned Sento queue/mailbox source | [[id:starintel-ardr-issue-190-sento-bounded-mailbox-admission][ARDR-ISSUE-190]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator review | [[https://github.com/lost-rob0t/starintel-server/issues/36][server #36]] |
+| Implementation authorization | StarIntel operator | PENDING | Explicit authorization for an exact slice | [[https://github.com/lost-rob0t/starintel-server/issues/36][server #36]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/full-gate evidence | |
+
+* Decision
+Keep Sento's existing bounded mailbox implementation and FIFO behavior. StarIntel configures positive mailbox capacities and translates =queue-full-error= into a typed admission/overload result. Do not replace the queue backend merely to add limits.
+
+Execution capacity and backlog capacity remain separate:
+
+#+begin_example
+actor mailbox capacity != dispatcher worker concurrency
+#+end_example
+
+#188/#189 bounds the latter. This design bounds the former and composes it with HTTP, Rabbit, task and publication admission.
+
+* Actor-local contract
+Every production actor/domain endpoint that accepts data-plane work must have an explicit positive mailbox capacity or inherit a validated bounded default. =0=/=nil= unbounded Sento mailboxes are forbidden for ordinary production data-plane actors unless a narrowly documented exception exists.
+
+When Sento signals =queue-full-error=, translate it at the StarIntel boundary into a stable overload result. Preserve backend condition as internal diagnostic cause only.
+
+Conceptual result:
+
+#+begin_example
+OverloadResult {
+  boundary
+  componentId
+  reason
+  depth?
+  capacity
+  policy
+  retryAfter?
+  correlationId
+  observedAt
+}
+#+end_example
+
+* Policy
+V1 policies:
+
+- =reject/reply-busy=: default for actor/domain submission;
+- =block-until-deadline=: optional only when the caller supplies an absolute deadline; waiting must occur outside Sento's FIFO primitive;
+- =drop-new=: allowed only for explicitly lossy telemetry-style paths and must produce drop accounting;
+- =drop-old=: not part of the default P0 contract; requires separate workload-specific proof because it discards accepted work.
+
+No policy may silently convert overload into success.
+
+* Control reserve
+Do not implement hidden priority insertion into Sento's FIFO queue.
+
+Control operations that must remain responsive under data saturation use a separate bounded control actor/mailbox or an existing control path backed by #177 reserved control capacity. Health, shutdown, lifecycle supervision and lease renewal must not queue behind an arbitrarily full data mailbox.
+
+* Rabbit coupling
+Rabbit prefetch/in-flight is an upstream admission window, not an unrelated tuning constant.
+
+Derive it from actual granted processing capacity plus an explicit bounded per-worker in-flight factor. The formula must be deterministic and capped by downstream actor/service capacities. A consumer must stop pulling/settle according to existing Rabbit ownership semantics when downstream admission says busy; it may not keep accumulating 200 deliveries because that was the old constant.
+
+* HTTP coupling
+HTTP bulk/single mutation endpoints perform admission before expanding work into deeper actor/task messages. Overload maps to stable 429/503 semantics according to whether the boundary is capacity pressure or dependency/unavailability, with retry metadata only when justified.
+
+* Downstream queues
+Task, publication and persistence handoff queues touched by accepted work must be bounded too. A bounded Sento mailbox followed by an unbounded lparallel/publish queue is not acceptance.
+
+* Observability
+Expose safe read-only values:
+
+- mailbox depth/capacity;
+- accepted/rejected/dropped counts;
+- admission policy;
+- dispatcher used/free lanes from #188 where relevant;
+- Rabbit in-flight/prefetch;
+- task/publish queue depth/capacity;
+- overload result counts by boundary/reason.
+
+* Proposed implementation slices
+All remain =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — Sento mailbox configuration + typed queue-full translation
+RED first: capacity-2 actor with two queued items; third submission currently exposes backend/raw failure. Desired result is typed overload with depth/capacity and zero handler invocation for rejected item.
+
+** Slice 2 — explicit admission API
+Add reject/reply-busy and deadline-bounded blocking semantics outside Sento queue internals. RED: blocking request without deadline is rejected.
+
+** Slice 3 — control/data separation
+RED: saturated data mailbox while health/stop/control request still completes through its separate bounded control path.
+
+** Slice 4 — Rabbit prefetch derivation
+RED: fixture with granted worker count 2 and bounded per-worker in-flight factor must not retain old constant 200.
+
+** Slice 5 — downstream bounded queues + diagnostics
+RED: synthetic pipeline saturates actor/task/publish stages and proves accepted outstanding work remains under declared aggregate bounds.
+
+* Adversarial Review
+Rejected:
+
+- custom mailbox implementation despite Sento already supporting =max-queue-size=;
+- equating mailbox depth with dispatcher concurrency;
+- unbounded producer blocking;
+- drop-old by default;
+- shared saturated FIFO for data and critical control traffic;
+- Rabbit prefetch independent of real granted capacity;
+- raw Sento conditions as public API;
+- moving the unbounded queue one stage downstream;
+- adding StarLang syntax for host queue mechanics.
+
+* Acceptance
+- production data-plane Sento mailboxes are bounded;
+- existing Sento FIFO and actor serialization semantics remain unchanged;
+- full mailbox yields typed overload, never silent loss/success;
+- blocking requires deadline;
+- control paths remain responsive under data saturation;
+- Rabbit in-flight work is bounded from real processing grants;
+- downstream task/publish queues are bounded;
+- overload metrics expose pressure before memory growth;
+- no new scheduler, queue backend, StarLang syntax or external controller is introduced;
+- implementation remains blocked until explicit operator authorization.

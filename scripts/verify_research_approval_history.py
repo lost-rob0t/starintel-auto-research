@@ -73,8 +73,12 @@ def _first_canonical_snapshot(
 ) -> str:
     if source is not None:
         _, _, _, source_metadata = _split_header(source)
-        if _is_adard_canonical(source_metadata):
-            return source
+        try:
+            if _is_adard_canonical(source_metadata):
+                return source
+        except MigrationError as error:
+            anchor = base_commit or "source"
+            raise MigrationError(f"{relative_path}@{anchor}: {error}") from error
 
     revision = "HEAD" if base_commit is None else f"{base_commit}..HEAD"
     commits = _git(
@@ -87,8 +91,11 @@ def _first_canonical_snapshot(
         except MigrationError:
             continue
         _, _, _, metadata = _split_header(candidate)
-        if _is_adard_canonical(metadata):
-            return candidate
+        try:
+            if _is_adard_canonical(metadata):
+                return candidate
+        except MigrationError as error:
+            raise MigrationError(f"{relative_path}@{commit}: {error}") from error
 
     anchor = "repository history" if base_commit is None else f"after {base_commit}"
     raise MigrationError(
@@ -131,7 +138,11 @@ def verify_file(root: Path, path: Path) -> None:
     current_text = path.read_text(encoding="utf-8")
     _, _, _, current_metadata_raw = _split_header(current_text)
     current_metadata = _metadata_values(current_metadata_raw)
-    if _canonical_values(current_metadata_raw) is None:
+    try:
+        canonical = _canonical_values(current_metadata_raw)
+    except MigrationError as error:
+        raise MigrationError(f"{relative_path}: {error}") from error
+    if canonical is None:
         raise MigrationError(f"{relative_path}: canonical approval metadata is missing")
 
     base_commit = current_metadata.get("approval_base_commit", "")

@@ -1,0 +1,120 @@
+:PROPERTIES:
+:ID:       starintel-ardr-issue-190-sento-bounded-mailbox-admission
+:END:
+#+title: ARDR-ISSUE-190 P0 Sento bounded mailbox and admission semantics
+#+status: READY_FOR_DESIGN
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+approval_evidence: machine research/design readiness is not implementation approval
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+#+filetags: :starintel:research:ardr:star-server:sento:mailbox:admission:p0:
+
+* Approval Table
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research -> design readiness | Active ARDR policy | APPROVED | Exact pinned Sento source + server #36 establish the bounded-admission seam | [[https://github.com/lost-rob0t/starintel-server/issues/36][server #36]] |
+| Architecture/design | StarIntel operator | PENDING | Review bounded admission design | [[id:starintel-star-server-043-sento-bounded-admission][STAR-SERVER-043]] |
+| Implementation authorization | StarIntel operator | PENDING | Explicit operator authorization for an exact slice | [[https://github.com/lost-rob0t/starintel-server/issues/36][server #36]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/full-gate evidence | |
+
+* Seed and ranking
+Selected [[https://github.com/lost-rob0t/starintel-server/issues/36][starintel-server #36]], the next P0 runtime issue after #34/#35/#37 research/design. It is dependency-ready for design because #177 defines process capacity, #188/#189 define Sento execution-lane accounting, and #182/#183 define lifecycle/quiesce ownership.
+
+* Exact Sento baseline
+StarIntel pins =mdbergmann/cl-gserver@6a510c5b58469e72e6363bd3a6059d80b9a5c320=.
+
+At that exact revision, =message-box-base= already accepts =max-queue-size=. =0= or =nil= selects an unbounded queue; a positive value selects =queue-bounded=. The bounded queue tracks =fill-count=, exports =queued-count=, and =pushq= signals =queue-full-error= immediately when =fill-count >= max-items=. It does not silently drop, overwrite, or block waiting for capacity.
+
+This is important: StarIntel does not need a replacement mailbox implementation to obtain hard actor queue bounds. It needs to configure the existing Sento primitive and translate its raw queue-full condition into the StarIntel admission/result contract.
+
+* Dispatcher interaction
+A =message-box/dp= still owns its own actor mailbox queue even though execution runs on shared dispatcher workers. Therefore two independent limits exist and must not be conflated:
+
+1. mailbox backlog per actor;
+2. execution capacity in the dispatcher, bounded by #188/#189.
+
+Bounding dispatcher workers alone does not bound queued actor messages. Bounding actor mailboxes alone does not bound HTTP, Rabbit prefetch, task queues, or publication queues.
+
+* Existing Sento semantics to preserve
+- positive =max-queue-size= selects the built-in bounded queue;
+- queue-full is an immediate =queue-full-error=;
+- =queued-count= reports current mailbox depth;
+- =message-box/dp= preserves one-actor-at-a-time state execution through its mailbox lock;
+- =message-box/bt= and =message-box/dp= use the same base queue selection;
+- no generic drop-old/drop-new policy exists in the pinned backend;
+- no generic priority/control-reserve mailbox exists in the pinned backend.
+
+* Research decision
+Use Sento's bounded mailbox as the actor-local hard bound. Do not replace its queue semantics in P0.
+
+StarIntel owns the policy layer above it:
+
+- actor/mailbox configuration chooses a positive capacity;
+- submission catches/classifies =queue-full-error= at the actor/domain boundary;
+- the caller receives a typed overload result rather than an uncaught backend condition;
+- blocking admission is allowed only with an explicit caller deadline and must happen outside the mailbox queue primitive;
+- drop-old is forbidden by default because it destroys already-accepted actor work; any future use requires a separately proven lossy workload;
+- control/health/shutdown/lease-renewal traffic must not depend on spare capacity in the same saturated data mailbox. Use separate control actors/mailboxes or an already-separated control path, not hidden priority insertion into Sento's FIFO.
+
+* End-to-end capacity model
+#36 must compose several bounds rather than invent one magic queue size:
+
+#+begin_example
+HTTP admission
+  -> service/domain admission
+  -> actor mailbox capacity
+  -> Sento dispatcher execution lanes (#188)
+  -> downstream task/publish/storage bounds
+
+Rabbit:
+  broker prefetch/in-flight
+  -> consumer worker capacity
+  -> actor/service admission
+#+end_example
+
+Rabbit prefetch should be derived from the granted processing concurrency and explicit per-worker in-flight allowance. It must not remain a hard-coded 200 independent of actual Sento/consumer capacity.
+
+* Typed overload result
+The stable StarIntel result should carry at least:
+
+- boundary/component ID;
+- reason =capacity-exhausted= / =deadline-expired= / =quiescing=;
+- current depth when observable;
+- capacity;
+- admission policy;
+- retry-after when evidence/policy can compute one, otherwise absent;
+- correlation/trace ID;
+- timestamp.
+
+Do not leak raw queue objects or backend condition text as the public contract.
+
+* Adversarial findings
+Rejected:
+
+1. replacing Sento queues merely to get bounded mailboxes — capability already exists;
+2. treating dispatcher lane count as mailbox capacity — execution and backlog are different resources;
+3. globally blocking producers without deadlines — deadlock/latency amplification;
+4. drop-old as a default — destroys accepted work and provenance;
+5. one shared data/control mailbox with reserved numeric slots — FIFO saturation can still starve control semantics and complicates acceptance accounting;
+6. hard-coded Rabbit prefetch 200 — disconnects broker in-flight work from real processing capacity;
+7. returning raw =queue-full-error= through HTTP/Rabbit/domain APIs — backend leakage and inconsistent retry semantics;
+8. unbounded task/publish queues after a bounded mailbox — merely moves the memory leak downstream.
+
+* RED-first targets
+1. actor configured with mailbox capacity 2: third queued submission must currently surface raw/backend failure; desired contract is a typed StarIntel overload result with depth=2/capacity=2.
+2. mailbox capacity 2 on a dispatcher-backed actor must remain 2 regardless of dispatcher worker count.
+3. blocking admission without deadline is rejected.
+4. saturated data mailbox cannot prevent a separate control-path health/stop fixture from completing.
+5. Rabbit prefetch fixture must derive from granted processing capacity rather than constant 200.
+6. bounded mailbox followed by bounded fake task/publish queues proves no stage can accumulate unbounded accepted work.
+
+* Decision
+Research is sufficient for design. Preserve Sento's existing bounded queue and add StarIntel admission/result semantics around it. Implementation authorization remains =PENDING / AWAITING_OPERATOR_APPROVAL=.
+
+* Provenance
+- =mdbergmann/cl-gserver@6a510c5.../src/mbox/message-box.lisp=: =max-queue-size= chooses bounded/unbounded mailbox queue; both dispatcher and pinned mailboxes inherit it.
+- =mdbergmann/cl-gserver@6a510c5.../src/queue/queue.lisp=: bounded queue uses =fill-count= and signals =queue-full-error= immediately at capacity; exports =queued-count=.
+- [[id:starintel-ardr-issue-188-workload-dispatchers-router-pools][ARDR-ISSUE-188]]: execution-lane accounting is separate from mailbox backlog.
+- [[https://github.com/lost-rob0t/starintel-server/issues/36][starintel-server #36]]: owning P0 admission/overload issue.

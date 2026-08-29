@@ -1,0 +1,73 @@
+:PROPERTIES:
+:ID:       starintel-ardr-issue-178
+:END:
+#+title: ARDR-ISSUE-178 Bixby account linking through central ZITADEL
+#+description: Durable research transaction for migrating Bixby user authorization from the legacy server OAuth authority to central ZITADEL.
+#+status: REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: research-issue-backfill
+#+approval_evidence: machine research/design readiness is not implementation approval
+#+approval_base_commit: 36ce245209dccbc9645a1ae9532a8604bdd27b0b
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+#+filetags: :starintel:research:ardr:issue:bixby:zitadel:oauth:identity:p0:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research -> design readiness | Active ARDR policy | APPROVED | Completed issue research sufficient for design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/178][#178]] |
+| Design | StarIntel operator review | PENDING | Design review/decision | [[https://github.com/lost-rob0t/starintel-auto-research/issues/179][#179]] |
+| Implementation | StarIntel operator | NOT STARTED | Explicit operator implementation approval | |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Migrated substantive Bixby/ZITADEL research from issue-only state into a durable Org transaction. | GPT-5.6 Sol | Issues 178 and 179; operator instruction |
+
+* Issue Authority
+
+- Research issue: [[https://github.com/lost-rob0t/starintel-auto-research/issues/178][#178]]
+- Design-review issue: [[https://github.com/lost-rob0t/starintel-auto-research/issues/179][#179]]
+- Owning infra issue: [[https://github.com/starintel-labs/starintel-infra/issues/39][starintel-infra#39]]
+
+* Verified Problem
+
+Older Bixby work treated standalone `starintel-server` OAuth as the public user identity authority, while current StarIntel architecture makes self-hosted ZITADEL at `auth.starintel.actor` the canonical identity authority. Maintaining both as Bixby identity providers would create competing account/token authorities and drift.
+
+Current Bixby contracts support standard OAuth 2.0 authorization-code flows and PKCE, concrete authorize/token endpoints, client ID, Samsung-side secret-key storage, scopes, HTTPS endpoints, and Bixby-managed user tokens. ZITADEL supports authorization code, PKCE, strict redirect registration, OIDC discovery/JWKS, standard issuer/audience/time claims, and per-application scopes/roles.
+
+* Research Conclusion
+
+The canonical signed-in Bixby flow is Bixby -> `auth.starintel.actor`/ZITADEL authorize -> user login/consent -> exact Samsung callback -> ZITADEL token exchange -> Bixby-managed delegated user token -> Bixby gateway -> private owner APIs.
+
+ZITADEL owns human authentication and authorization-code issuance. Bixby is one registered client. The gateway is a resource server: it independently validates signature, issuer, audience, expiry/time, and operation scopes and keeps its own service identity separate from the delegated user token. Owner services remain final operation-specific authorization authorities.
+
+Guest Intelligence remains a separate public-safe path. A failed signed-in request must never silently fall back to guest authority.
+
+Existing StarIntel capability meanings should be reused rather than inventing Bixby-only permissions. Ordinary login/account creation does not imply operator/admin capability.
+
+The legacy server OAuth provider should not be deleted blindly: inventory real non-Bixby callers, separate reusable authorization helpers from provider endpoints, preserve actual compatibility users, and deprecate/remove only through later bounded work.
+
+No new StarLang syntax is justified; identity deployment/configuration and gateway JWT validation are runtime/infra concerns.
+
+* Adversarial Findings
+
+Rejected: dual public identity providers for Bixby, a server OAuth facade in front of ZITADEL, gateway-issued human tokens, trusting Samsung/Bixby without local JWT validation, reusing user bearer tokens as infrastructure credentials, granting Operations from login alone, guest fallback after auth failure, per-request introspection coupling, and deleting legacy OAuth without caller inventory.
+
+* RED-First Targets
+
+Desired implementation tests must first fail while current Bixby metadata still names the legacy server OAuth authority; wrong issuer, wrong audience, expired token, missing operation scope, invalid signed-in-to-guest fallback, and legacy client inventory all need explicit negative fixtures.
+
+* Research Decision
+
+Evidence is sufficient for design; implementation remains operator-only.
+
+* Footnotes and Glossary
+
+- *Resource server* :: A service that validates and enforces access tokens for protected APIs without becoming the human login/token issuer.
+- *Delegated principal* :: A bounded user identity/capability context derived from a validated user token and carried through trusted internal service calls.

@@ -1,0 +1,79 @@
+:PROPERTIES:
+:ID:       starintel-ardr-issue-176
+:END:
+#+title: ARDR-ISSUE-176 One total StarIntel runtime thread budget
+#+description: Durable research transaction for the process-wide StarIntel runtime thread-budget authority.
+#+status: REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: research-issue-backfill
+#+approval_evidence: machine research/design readiness is not implementation approval
+#+approval_base_commit: 36ce245209dccbc9645a1ae9532a8604bdd27b0b
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+#+filetags: :starintel:research:ardr:issue:runtime:threads:budget:p0:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research -> design readiness | Active ARDR policy | APPROVED | Completed issue research sufficient for design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/176][#176]] |
+| Design | StarIntel operator review | PENDING | Design review/decision | [[https://github.com/lost-rob0t/starintel-auto-research/issues/177][#177]] |
+| Implementation | StarIntel operator | NOT STARTED | Explicit operator implementation approval | |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Migrated the substantive issue-only thread-budget research into a durable Org transaction. | GPT-5.6 Sol | Issues 176 and 177; operator instruction |
+
+* Issue Authority
+
+- Research issue: [[https://github.com/lost-rob0t/starintel-auto-research/issues/176][#176]]
+- Design-review issue: [[https://github.com/lost-rob0t/starintel-auto-research/issues/177][#177]]
+- Owning server implementation issue: [[https://github.com/lost-rob0t/starintel-server/issues/34][starintel-server#34]]
+
+* Verified Problem
+
+StarIntel configures several execution sources independently: Sento shared/custom dispatchers, multiple Rabbit consumer groups, event consumers, a separate lparallel kernel, pinned producer/storage agents, timers/schedulers, and Hunchentoot workers. A nominal concurrency knob can therefore multiply OS threads instead of enforcing one process-wide ceiling.
+
+The architectural defect is absence of one authority that can compute, before long-lived startup, whether the composed runtime fits inside the operator's declared thread budget.
+
+* Research Conclusion
+
+StarIntel needs one runtime resource-budget authority owned by the server runtime/component layer. Every runtime component capable of creating/reserving OS threads declares its demand before activation. Startup computes a deterministic closed plan, rejects unsatisfiable minima before side effects, and components receive only their granted allocation.
+
+The model needs one maximum ceiling, reserved control capacity, declared fixed overhead, per-component min/desired/max demand, workload class, ownership, and live observed-versus-declared accounting.
+
+Core invariants:
+- one process-wide runtime-owned thread ceiling;
+- control capacity reserved from data-plane saturation;
+- no hidden raw thread creation outside registered runtime adapters;
+- no reuse of one worker knob as independent capacity in multiple pools;
+- fail-fast preflight for impossible minima;
+- live diagnostics mapping owned threads to component allocations;
+- lifecycle ownership aligned with shutdown/join semantics;
+- queue/admission/prefetch sizing coupled to granted capacity rather than independent guesses.
+
+No new StarLang syntax is justified. StarLang actors may expose resource-profile metadata, but Common Lisp runtime/component code owns planning and enforcement.
+
+The v1 allocation policy should remain deterministic: subtract fixed overhead, reserve control minima, satisfy all required minima, fail if they exceed the ceiling, then distribute remaining capacity within explicit desired/max bounds. Dynamic autoscaling is out of scope until fixed planning is correct.
+
+* Adversarial Findings
+
+Rejected approaches include merely lowering defaults, counting threads only after startup, letting each actor self-size, using one giant executor for all workloads, ignoring timer/HTTP/foreign overhead, reusing reserved dispatcher identities as custom pools, and adding autoscaling before deterministic enforcement exists.
+
+* RED-First Target
+
+A deterministic fixture where component minima exceed the configured process ceiling must fail on untouched server code because no central budget validator exists. Another fixture must show a single `ingest-workers` value multiplied across independent subsystems exceeding the intended process budget.
+
+* Research Decision
+
+Research is sufficient for design; implementation remains operator-only. Design-review issue 177 carries the proposed Common Lisp special-variable/process-authority shape.
+
+* Footnotes and Glossary
+
+- *Runtime-owned thread* :: An OS thread created/reserved by StarIntel runtime components, excluding separately documented VM/foreign-runtime overhead.
+- *Thread grant* :: The explicit allocation a component may realize after the process-wide plan is validated.

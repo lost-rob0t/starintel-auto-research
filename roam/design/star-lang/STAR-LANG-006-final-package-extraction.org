@@ -3,20 +3,20 @@
 :END:
 #+title: STAR-LANG-006 Dependency-Ordered Final Package Extraction
 #+description: Define an acyclic migration from the authoritative StarLang prototype monolith into independently loadable final ASDF systems without duplicate implementations.
-#+status: REVIEW
-#+filetags: :starintel:design:star-lang:asdf:packages:actor-protocol:compiler:runtime:migration:
+#+status: APPROVED
+#+filetags: :starintel:design:star-lang:asdf:packages:actor-protocol:compiler:runtime:migration:approved:prototype-retirement:
 #+created: [2026-08-13 Thu]
-#+last_modified: [2026-08-13 Thu]
+#+last_modified: [2026-08-29 Sat]
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research basis | Research reviewer | PENDING | Package-boundary audit identifies current dependency knots and viable extraction order | STAR-LANG-RESEARCH-017 |
-| Architecture | Project maintainer | PENDING | Approve semantic ownership, dependency direction, and one-authority migration rule | This design |
-| Security | Security reviewer | NOT APPLICABLE | No security behavior change is introduced by the migration itself | Migration invariants |
-| Operations | Operator | PENDING | Approve independent ASDF/Nix/CI validation of final systems | Validation strategy |
-| Implementation | Repository maintainer | NOT STARTED | Green dependency-ordered extraction PRs beginning with star-actor-protocol service URI ownership | Future StarLang PRs |
+| Research basis | Research reviewer | APPROVED | Package-boundary audit identifies current dependency knots and viable extraction order | STAR-LANG-RESEARCH-017; operator approval 2026-08-29 |
+| Architecture | Project maintainer | APPROVED | Approve semantic ownership, dependency direction, one-authority migration, shared STAR URI ownership, and prototype retirement | Operator approval 2026-08-29 |
+| Security | Security reviewer | NOT APPLICABLE | No new security behavior is introduced by package extraction itself; existing security contracts remain authoritative | Migration invariants |
+| Operations | Operator | APPROVED | Approve independent ASDF/Nix/CI validation of final systems | Operator approval 2026-08-29; Validation strategy |
+| Implementation | Repository maintainer | NOT STARTED | Green dependency-ordered extraction into final systems and verified deletion of superseded prototype code | Future StarLang implementation evidence |
 
 * Decision
 
@@ -28,7 +28,8 @@ moved concept.
 
 Final systems MUST NOT depend on =starlang-prototype= or the prototype core
 package. During migration, the dependency direction is final systems inward,
-with =starlang-prototype= acting only as a compatibility/end-to-end aggregate.
+with =starlang-prototype= acting only as a strictly temporary compatibility and
+end-to-end aggregate. It is a deletion target, not a permanent product layer.
 
 * Layer model
 
@@ -107,57 +108,75 @@ For every moved symbol or behavior:
 1. implement it in the final package;
 2. add direct final-system tests;
 3. change prototype callers to import/call the final implementation;
-4. delete or reduce the prototype definition so it no longer contains an
-   independent implementation;
-5. keep compatibility aliases/wrappers only when existing package-qualified
-   callers need them;
-6. prove existing aggregate tests still pass.
+4. delete the prototype definition once all tracked callers use the final owner;
+5. keep a thin compatibility wrapper only when a specific still-supported caller requires it;
+6. forbid independent logic, state machines, parsing, policy, or serialization in that wrapper;
+7. prove existing aggregate tests still pass;
+8. remove the wrapper as soon as its last tracked caller is migrated.
 
 A slice is not complete if both prototype and final packages contain independent
-copies of the same parser, validator, state machine, or serializer.
+copies of the same parser, validator, state machine, serializer, resolver, or
+runtime behavior.
 
-* First extraction slice: STAR service URI
+* First extraction slice: shared STAR URI value model
 
-=star-actor-protocol= SHALL become authoritative for canonical STAR service
-identity.
+The original package-extraction draft treated =star-actor-protocol= as the owner
+of a StarLang-specific =domain:address:actor-name= URI model. That ownership is
+superseded by STAR-LANG-004 and STAR-SERVER-041.
 
-It owns:
+The first URI extraction slice SHALL instead consume the shared RFC 3986 STAR URI
+value model and conformance fixtures. StarLang SHALL NOT create or retain a
+second canonical URI parser.
 
-- =star-service-uri= structure;
-- domain/address/actor-name accessors;
-- strict token validation;
-- =make-star-service-uri=;
-- =parse-star-service-uri=;
-- =star-service-uri-string=;
-- =star-service-uri-target-p=;
-- =ensure-star-service-uri=;
-- actor-name consistency validation;
-- protocol-local invalid-URI condition.
+The final StarLang-facing protocol layer owns only StarLang projection and
+validation rules such as:
 
-It does not own:
+- actor and service declarations may carry canonical STAR resource URIs;
+- actor resources require resource kind =actor=;
+- service resources require resource kind =service=;
+- duplicate canonical resource claims inside one manifest are invalid;
+- portable manifests contain canonical STAR identity, never live runtime references;
+- runtime adapters map canonical identity to local/runtime routing material.
 
-- source spans or parser syntax;
-- manifest lowering from StarLang source;
-- runtime directory state;
-- actor liveness;
-- dispatch transport.
+The reusable shared URI boundary owns:
+
+- RFC 3986 parsing and canonicalization;
+- authority representation;
+- path segments;
+- resource-kind/resource-path extraction;
+- percent-encoding normalization;
+- legacy compatibility parsing and explicit migration targeting.
+
+New final systems MUST NOT depend on legacy tuple accessors as canonical identity.
+Legacy tuple input may exist only in an explicit compatibility module until its
+callers are migrated.
 
 * Service URI compatibility strategy
 
-The existing prototype package currently exports the URI API. During migration,
-existing callers may continue resolving symbols from
-=star-lang.core-surface.prototype= through thin wrappers or imports.
+Legacy input such as:
 
-Those compatibility definitions SHALL delegate directly to
-=star-actor-protocol=. They may translate a protocol condition to the existing
-prototype compiler condition where source-aware compatibility requires it.
+#+begin_example
+star://domain:address:actor-name
+#+end_example
 
-The URI data representation SHOULD be final-owned. Compatibility accessors must
-not construct a second incompatible struct type.
+is compatibility input only. New manifests MUST emit hierarchical canonical
+identities such as:
+
+#+begin_example
+star://gserver.starintel.actor/actor/user-hunt
+star://bbpd.starintel.actor/service/recon
+#+end_example
+
+There is no universal inferred rewrite from the legacy tuple to a new authority
+and resource path. Migration requires an explicit canonical target or
+application-owned mapping, per STAR-LANG-004 / STAR-SERVER-041.
+
+Any compatibility definitions still exported from the prototype SHALL delegate
+to the shared URI implementation and MUST NOT construct a second URI data model.
 
 * Subsequent extraction order
 
-After service URI ownership is green:
+After shared STAR URI consumption is green:
 
 1. move portable lifecycle/wire envelope data and validation into
    =star-actor-protocol=;
@@ -171,10 +190,14 @@ After service URI ownership is green:
 8. move remaining parser/expander/compiler IR ownership into
    =starlang-compiler=;
 9. migrate concrete transport/process/HTTP behavior behind final adapter ports;
-10. remove =starlang-prototype= only after all product entry points and tests
-    execute final systems directly.
+10. migrate all product CLI/API entry points off =starlang-prototype=;
+11. remove compatibility wrappers whose callers are gone;
+12. delete =prototype/= when the repository-wide completion audit proves no
+    remaining product, test, build, Nix, ASDF, CLI, fixture, or documentation
+    dependency requires it.
 
-Each step may be its own PR if that keeps the dependency change reviewable.
+Each step may be its own implementation PR if that keeps the dependency change
+reviewable in the StarLang implementation repository.
 
 * ASDF requirements
 
@@ -200,7 +223,8 @@ Nix validation SHALL prove:
 - required Common Lisp dependencies are explicitly present in the SBCL closure;
 - final systems do not work only because =starlang-prototype= happened to load
   first;
-- aggregate tests still run from a clean temporary working directory.
+- product commands and tests run without adding =prototype/= to the source registry
+  once their final-system port is complete.
 
 * Source diagnostic preservation
 
@@ -221,41 +245,55 @@ for migrated compiler diagnostics.
 
 * Frozen compatibility surfaces
 
-The following must remain unchanged unless a separate compatibility decision is
-approved:
+The following remain stable unless a separate compatibility decision changes
+them:
 
-- canonical manifest fixture bytes and hashes;
-- canonical =star://domain:address:actor-name= strings;
+- canonical manifest fixture bytes and hashes where not superseded by an approved protocol migration;
+- RFC-based canonical STAR URI semantics from STAR-LANG-004 / STAR-SERVER-041;
 - wire protocol version and field spelling;
-- actor-name dispatch compatibility;
+- explicitly retained actor-name dispatch compatibility;
 - deterministic lifecycle outcome semantics;
 - source span/import-origin diagnostics.
 
-* PR #17 treatment
+Legacy =star://domain:address:actor-name= strings are NOT a frozen canonical
+surface. They are compatibility inputs scheduled for retirement.
 
-Open StarLang PR #17 remains an umbrella migration contract. It should not be
-merged while it contains only the broad plan, nor should the entire plan be
-implemented as one mechanical copy.
+* Prototype Retirement Is a Completion Requirement
 
-Implementation may either be committed to that branch in dependency-ordered
-slices or supersede it with linked narrow PRs. In either case, completion means
-real final-system authority, not only documentation.
+Prototype retirement is part of this design, not optional cleanup.
 
-* Acceptance: first service URI slice
+The implementation SHALL repeatedly remove prototype ownership during migration:
+
+- no new feature is implemented only in =prototype/=;
+- every completed slice deletes its duplicate prototype implementation;
+- final tests replace prototype-only tests where the behavior has moved;
+- final fixtures replace prototype-owned fixture authority;
+- the installed CLI must execute final systems directly;
+- Nix/ASDF release closures must not require =starlang-prototype=;
+- documentation and examples must stop teaching prototype packages once final
+  equivalents exist;
+- compatibility forwarding is allowed only for an identified caller and is
+  removed when that caller migrates;
+- the repository-wide final audit must search source, tests, ASDF, Nix,
+  workflows, scripts, fixtures, examples, and docs for prototype dependencies;
+- if the audit proves the port complete, =prototype/= SHALL be deleted in the
+  same implementation effort rather than left behind "just in case".
+
+A dedicated lost-rob0t/star-lang issue tracks this proof-and-delete gate.
+
+* Acceptance: first shared URI slice
 
 The first extraction slice is complete when:
 
-1. =asdf:load-system :star-actor-protocol= loads the real URI implementation;
-2. =asdf:test-system :star-actor-protocol= tests canonical round trips and typed
-   malformed inputs;
-3. Quasar and BBP examples remain canonical;
-4. actor-name mismatch remains rejected;
-5. existing prototype URI/manifest/runtime-directory/dispatcher tests remain
-   green;
-6. no URI implementation remains duplicated in =service-uri-prototype.lisp=;
-7. =star-actor-protocol= does not depend on or load =starlang-prototype=;
+1. final StarLang systems consume the shared RFC-based STAR URI implementation;
+2. URI conformance uses STAR-SERVER-041 shared fixtures;
+3. new manifests emit hierarchical canonical actor/service resource URIs;
+4. legacy tuple input is confined to an explicit compatibility boundary;
+5. explicit migration mappings are required for legacy tuple conversion;
+6. no independent canonical URI parser remains under =prototype/=;
+7. final protocol/compiler systems do not depend on =starlang-prototype=;
 8. compiler call sites retain source-aware error behavior where applicable;
-9. CI independently loads/tests =star-actor-protocol=;
+9. CI independently loads/tests the final URI consumer systems;
 10. Nix remains green.
 
 * Acceptance: overall migration
@@ -263,18 +301,21 @@ The first extraction slice is complete when:
 The package-extraction work item is complete only when:
 
 - all product behavior is owned by final ASDF systems;
-- =starlang-prototype= is either removed or contains only explicitly temporary
-  compatibility/end-to-end composition;
 - no final system imports =star-lang.core-surface.prototype=;
+- no final system, product CLI, release closure, or normal test suite loads =starlang-prototype=;
 - compiler/runtime dependency direction is acyclic;
 - final systems have independent tests;
-- frozen compatibility fixtures remain green;
-- full CI and Nix validation pass from clean environments.
+- approved compatibility fixtures remain green;
+- full CI and Nix validation pass from clean environments;
+- a repository-wide search finds no required runtime dependency on =prototype/=;
+- any remaining references are historical documentation explicitly marked as historical;
+- =prototype/= is deleted once those conditions are proven.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-08-29 | Port to current Org governance format, record operator approval, replace stale tuple-URI ownership with the approved shared RFC URI model, and make prototype deletion a completion gate | ChatGPT agent | Operator approval in conversation 2026-08-29; STAR-LANG-004; STAR-SERVER-041; source diff |
 | 2026-08-13 | Define dependency-ordered semantic extraction from prototype authority into final StarLang ASDF systems | ChatGPT agent | STAR-LANG-RESEARCH-017 and current repository audit |
 
 * Footnotes and Glossary
@@ -284,3 +325,4 @@ The package-extraction work item is complete only when:
 - *Portable protocol layer* — Runtime-neutral data/validation used by compiler and runtime without depending on either layer's internal state.
 - *Source-aware condition* — Compiler diagnostic enriched with source span, origin chain, phase, and syntax context.
 - *Semantic extraction* — Moving behavior according to architectural ownership, including splitting historically mixed files when necessary.
+- *Prototype retirement* — Verified deletion of the transitional =prototype/= tree after final-system ownership and all required call paths are proven complete.

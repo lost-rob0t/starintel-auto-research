@@ -1,0 +1,231 @@
+:PROPERTIES:
+:ID:       starintel-star-server-048-concrete-adapter-extraction
+:END:
+#+title: STAR-SERVER-048 Concrete Adapter Extraction Behind Typed Runtime Ports
+#+description: Design for incrementally extracting HTTP, CouchDB, RabbitMQ, Valkey, and scheduler effects behind StarIntel's explicit runtime-owned typed ports.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:design:star-server:common-lisp:adapters:ports:p1:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Active ARDR policy | APPROVED | Current source-backed research is sufficient for design | [[id:starintel-star-research-041-concrete-adapter-extraction][STAR-RESEARCH-041]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of this exact adapter-extraction design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/196][Auto-Research #196]] |
+| Implementation authorization | StarIntel operator | PENDING | Exact implementation slice authorized in canonical workflow | [[https://github.com/lost-rob0t/starintel-server/issues/41][starintel-server #41]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED, GREEN, regression, full deterministic gate, exact-head evidence | |
+
+* Canonical Inputs
+
+- [[id:starintel-star-research-041-concrete-adapter-extraction][STAR-RESEARCH-041]].
+- [[id:starintel-star-server-046-embeddable-server-library-boundary][STAR-SERVER-046]].
+- [[id:starintel-star-server-047-explicit-library-api-runtime-ports][STAR-SERVER-047]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/41][starintel-server #41]].
+- server #37 remains lifecycle/composition authority.
+
+* Decision
+
+Extract concrete effects one vertical operation at a time behind the typed ports introduced by #40. Preserve the existing service implementations until each call path is proven through a contract suite. The service composition root owns concrete adapter construction and supplies those instances to the existing =star.runtime= owner.
+
+Do not create a parallel runtime, a generic service locator, or a second lease abstraction.
+
+#+begin_example
+HTTP / Rabbit / embedded caller
+          |
+          v
+ typed application operation
+(runtime + service-call-context + request)
+          |
+          v
+     narrow typed ports
+       /   |    |   \
+ CouchDB Rabbit Valkey timer ...
+          |
+          v
+ star.runtime/service composition root owns concrete instances
+#+end_example
+
+* Dependency Rule
+
+The dependency graph is one-way:
+
+1. core values, conditions, and port protocols know no concrete adapter;
+2. application services depend on core/ports;
+3. concrete adapters depend on core/ports and their concrete library;
+4. transport ingress depends on application operations and transport translation;
+5. =star.runtime= / service composition code constructs and owns the concrete adapters.
+
+No concrete adapter may import another adapter to orchestrate an application use case.
+
+* Port Shape
+
+Ports are capability-specific and small. A concrete CouchDB object may implement several protocols, but application code should request only the capability it uses. Candidate boundaries, added only when a migrated vertical requires them:
+
+- document repository: get/put/update/delete with typed revision/conflict outcomes;
+- query repository: search/view/query with bounded request/result contracts;
+- outbox repository: durable mutation/event state;
+- publication port: typed event/message publication with known/unknown outcome classification;
+- lease store: reuse existing =star.leases:lease-store= protocol;
+- scheduler port: register/cancel bounded timer/recovery operations;
+- clock/ID/audit ports from #40 where needed.
+
+Ports never expose raw CouchDB clients/pools, Rabbit connections/channels, Sento actors/routers, Clack handles, sockets, timer thread objects, or Valkey connections.
+
+* HTTP Adapter
+
+HTTP owns only transport concerns after the common strict request boundary:
+
+- method/path/header/content-type/body extraction;
+- authentication token extraction into the existing =service-call-context=;
+- request/correlation/deadline translation;
+- typed request construction;
+- typed application result -> HTTP status/header/body projection;
+- CORS and version/compatibility alias behavior.
+
+HTTP does not query CouchDB, publish Rabbit messages, acquire leases, or schedule work directly when an application operation owns that use case.
+
+* CouchDB Adapter
+
+CouchDB owns:
+
+- connection/session/pool mechanics;
+- request construction and bounded transport;
+- revision/conflict semantics;
+- view installation/query transport;
+- concrete persistence/outbox/quarantine storage behavior;
+- normalization of concrete library failures into typed port outcomes.
+
+Existing =star.databases.couchdb= functions may initially back the adapter. Extraction is successful when application packages stop importing that concrete package, not when files merely move.
+
+* Rabbit Adapter
+
+Rabbit owns:
+
+- connection/channel owner semantics;
+- exchange/queue/binding topology;
+- envelope encoding/decoding;
+- settlement on the owner boundary;
+- bounded prefetch/backpressure integration from #36;
+- retry/DLQ/quarantine transport mechanics;
+- mapping broker failures to typed publication/ingress outcomes.
+
+Application services decide whether a logical event should be produced. Rabbit decides how the approved event crosses AMQP.
+
+* Valkey Adapter
+
+Keep the existing backend-neutral =lease-store= protocol as authority. =valkey-store=, scripts, serialization, server-time behavior, and atomic fencing remain concrete implementation details. #41 only ensures composition through the runtime-owned port and prevents application/HTTP code from depending directly on Valkey details.
+
+* Scheduler Adapter
+
+Scheduling effect is intentionally last among the initial adapters unless a selected vertical requires it. The application service produces a typed schedule/recovery intention and absolute deadline; the adapter registers/cancels the timer under #37 lifecycle ownership. Timer callbacks re-enter an application operation rather than containing domain policy.
+
+* Contract Testing Pattern
+
+Each extracted port gets one reusable conformance suite:
+
+- deterministic fake implementation for application tests;
+- concrete adapter runs the same semantic cases where applicable;
+- concrete-only integration cases test connection/revision/broker/timer mechanics;
+- transport adapters get projection tests independent of external services.
+
+A conformance suite tests application-visible semantics, not byte-for-byte equality of backend internals.
+
+* Proposed Implementation Slices
+
+All slices are =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — first read-only repository vertical
+
+Depends on realized #39 core and #40 runtime/port contract.
+
+Choose the smallest existing document/query operation with an injected I/O seam. Define one narrow repository port, fake implementation, typed application result, and concrete CouchDB adapter implementation.
+
+Mandatory RED:
+
+- construct runtime A with fake repository A;
+- invoke the selected operation;
+- fake A is the only repository observed;
+- application/core test closure must not load =cl-couch=;
+- untouched baseline fails because the selected operation still depends on the current concrete/default CouchDB seam or lacks the port.
+
+GREEN cannot be obtained by mocking a concrete package symbol; the application operation must depend on the port.
+
+** Slice 2 — concrete CouchDB conformance
+
+Run success, not-found, conflict/invalid where relevant, deadline/timeout, backend-unavailable, and malformed-backend-result cases against the concrete adapter. Preserve current repository behavior unless the approved typed contract intentionally corrects it.
+
+** Slice 3 — HTTP projection
+
+Route one existing endpoint through the same application operation. RED proves a fake application service can drive the HTTP response with zero CouchDB/Rabbit calls. Malformed/auth-denied input reaches zero application mutation ports.
+
+** Slice 4 — Rabbit vertical
+
+Select one logical ingress or publication path. Reuse the same application operation/result model and keep settlement/topology in Rabbit code. RED proves broker ingress cannot bypass application authorization/idempotency/deadline policy.
+
+** Slice 5 — existing lease-store composition
+
+Wire existing =lease-store= as a runtime port used by the #32 application lease service. No new lease algebra or Valkey rewrite.
+
+** Slice 6 — scheduler effect
+
+Extract one target/recovery timer interaction behind a scheduler port while #37 remains lifecycle authority.
+
+** Slice 7 — expand operation-by-operation
+
+Only after the first vertical proves dependency direction. Move remaining concrete package imports outward and add ASDF/package gates preventing regression.
+
+* Architectural Acceptance Criteria
+
+- application/core packages load and test without concrete CouchDB/Rabbit/HTTP/Valkey/timer libraries that they do not implement;
+- one explicit runtime owns adapter instances;
+- fake-backed application tests require no network, actor system, broker, database, or timer threads;
+- concrete adapters satisfy typed contract suites;
+- HTTP and Rabbit ingress call the same application policy where they represent the same operation;
+- adapter errors become typed outcomes before transport projection;
+- ambiguous mutation outcomes are not automatically retried unless idempotency authority permits it;
+- existing lease protocol remains authoritative;
+- no adapter-to-adapter orchestration or giant service-locator object;
+- no StarLang syntax or external supervisor is introduced.
+
+* Adversarial Review
+
+** Reject: big-bang package extraction
+
+Moving five integrations at once maximizes merge risk and can preserve the same dependency graph behind new names. A vertical proves dependency direction with executable tests.
+
+** Reject: callback bag as dependency injection
+
+A plist/object containing dozens of function slots is an untyped service locator. Keep protocols small and capability-specific.
+
+** Reject: wrappers around globals
+
+A function that reads =*couchdb-pool*= or =*runtime*= internally is not instance isolation. The concrete instance must be supplied by the runtime-owned port.
+
+** Reject: HTTP/Rabbit as application orchestrators
+
+Transport adapters must not duplicate authorization, persistence, lease, idempotency, or target policy. Otherwise embedded callers get different semantics.
+
+** Reject: generic rewrite of =lease-store=
+
+It already provides the backend-neutral seam. Rename-only abstraction work creates risk with no new invariant.
+
+** Reject: retry hidden in adapters
+
+Retry is allowed only when the operation contract says replay is safe or can resolve the original idempotency identity. Unknown mutation outcomes remain explicit.
+
+* Decision / Handoff State
+
+Design is ready for operator review. Owning implementation issue: [[https://github.com/lost-rob0t/starintel-server/issues/41][starintel-server #41]]. No slice is implementation-authorized.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created bounded P1 adapter-extraction design and adversarial review from current server source and STAR-RESEARCH-041. | GPT-5.6 Sol | Auto-Research #195/#196; server master =8fb297d...= |
+
+* Footnotes and Glossary
+
+- *Conformance suite* :: Shared semantic tests run against fake and concrete implementations of one port where the same application-visible contract applies.
+- *Service locator* :: Broad object/table from which code looks up arbitrary dependencies at runtime; rejected because it hides dependency requirements.
+- *Transport projection* :: Conversion between transport-specific input/output and typed application requests/results.
+- *Composition root* :: Service/runtime code that creates concrete adapters and supplies them to application services.

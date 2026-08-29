@@ -3,20 +3,20 @@
 :END:
 #+title: STAR-LANG-005 Resolver Effect Ports
 #+description: Define the injected fetch and SHA-256 boundaries that remove process execution from StarLang resolver semantics without moving network access into the compiler/runtime.
-#+status: REVIEW
-#+filetags: :starintel:design:star-lang:resolver:ports:http:sha256:imports:common-lisp:security:
+#+status: APPROVED
+#+filetags: :starintel:design:star-lang:resolver:ports:http:sha256:imports:common-lisp:security:approved:
 #+created: [2026-08-13 Thu]
-#+last_modified: [2026-08-13 Thu]
+#+last_modified: [2026-08-29 Sat]
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research basis | Research reviewer | PENDING | Resolver-port research supports the proposed separation and security invariants | STAR-LANG-RESEARCH-016 |
-| Architecture | Project maintainer | PENDING | Approve the exact effect-port ownership and two-phase migration | This design |
-| Security | Security reviewer | PENDING | Approve HTTPS-only redirects, explicit proxy, streaming byte limits, finite timeouts/deadline, and digest-before-parse | Security policy section |
-| Operations | Operator | PENDING | Approve dependency isolation and Nix closure strategy | Packaging section |
-| Implementation | Repository maintainer | NOT STARTED | Green phase-1 StarLang PR followed by native-adapter phase | Future implementation evidence |
+| Research basis | Research reviewer | APPROVED | Resolver-port research supports the proposed separation and security invariants | STAR-LANG-RESEARCH-016; operator approval 2026-08-29 |
+| Architecture | Project maintainer | APPROVED | Approve the exact effect-port ownership and two-phase migration | Operator approval 2026-08-29 |
+| Security | Security reviewer | APPROVED | Approve HTTPS-only redirects, explicit proxy, streaming byte limits, finite timeouts/deadline, and digest-before-parse | Operator approval 2026-08-29; Security policy section |
+| Operations | Operator | APPROVED | Approve dependency isolation and Nix closure strategy | Operator approval 2026-08-29; Packaging section |
+| Implementation | Repository maintainer | NOT STARTED | Green phase-1 StarLang implementation followed by native-adapter phase | Future implementation evidence |
 
 * Decision
 
@@ -296,6 +296,26 @@ may be optional keywords or an explicit resolver-context keyword.
 
 No source-language syntax change is required.
 
+* Approved Prototype Retirement
+
+The prototype implementation is temporary migration scaffolding, not a supported
+long-term runtime tier.
+
+- No new resolver behavior may be implemented only under =prototype/=.
+- When a resolver behavior has a final-system owner, prototype callers SHALL be
+  redirected to that owner and the duplicate prototype implementation SHALL be
+  deleted in the same migration slice whenever practical.
+- Compatibility wrappers may exist only while tracked callers still require
+  them; wrappers MUST contain no independent resolver policy.
+- Final resolver, compiler, runtime, and adapter ASDF systems MUST NOT depend on
+  =starlang-prototype= or load files from =prototype/=.
+- Once the final resolver path passes its direct ASDF, Nix, offline-cache,
+  security, and aggregate conformance gates, the corresponding prototype
+  resolver files and shell compatibility paths SHALL be removed rather than
+  retained as a second implementation.
+- Repository-wide prototype retirement is verified by the dedicated StarLang
+  completion/removal issue created from the 2026-08-29 operator approval.
+
 * Acceptance
 
 Phase 1 is conformant when:
@@ -317,7 +337,8 @@ Phase 2 is conformant when:
 2. default resolver execution no longer invokes =curl= or =sha256sum=;
 3. redirect/TLS/proxy/timeout/byte-limit tests exercise the native adapter;
 4. ASDF/Nix dependency direction keeps networking out of compiler-only systems;
-5. the shell-removal item in the implementation ledger may then be marked done.
+5. the shell-removal item in the implementation ledger may then be marked done;
+6. no final resolver system depends on =starlang-prototype= or =prototype/=.
 
 * Deferred work
 
@@ -333,6 +354,7 @@ Phase 2 is conformant when:
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-08-29 | Port to current Org governance format, record operator approval, and make prototype retirement an explicit migration invariant | ChatGPT agent | Operator approval in conversation 2026-08-29; source diff |
 | 2026-08-13 | Initial design for injected resolver fetch/digest effects and two-phase removal of curl/sha256sum | ChatGPT agent | STAR-LANG-RESEARCH-016 and current loader audit |
 
 * Footnotes and Glossary
@@ -342,3 +364,4 @@ Phase 2 is conformant when:
 - *Compatibility adapter* — Transitional implementation that preserves current behavior behind the new port boundary.
 - *Native adapter* — Common Lisp implementation of an effect, such as Ironclad SHA-256 or bounded HTTPS transport.
 - *Compiler-only closure* — ASDF/Nix dependency set sufficient to compile already resolved StarLang graphs without an HTTP client or network execution.
+- *Prototype retirement* — Removal of the transitional =prototype/= implementation after final-system ownership and conformance are proven.

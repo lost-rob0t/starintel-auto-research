@@ -1,0 +1,232 @@
+:PROPERTIES:
+:ID:       starintel-star-research-042-component-handles-registry-readiness-health
+:END:
+#+title: STAR-RESEARCH-042 Runtime Component Handles, Registry, Readiness, and Health
+#+description: ARDR research for starintel-server issue 42, reconciling component discovery with the existing star.runtime lifecycle owner.
+#+status: READY_FOR_DESIGN
+#+filetags: :starintel:star-server:research:runtime:components:health:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Explicit operator research decision | Pending |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of canonical design | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main publication workflow succeeds | Pending |
+
+Lifecycle readiness is not approval. This research may advance to design under ARDR policy; no row above is changed by machine readiness.
+
+* Problem
+
+=lost-rob0t/starintel-server#42= asks for component handles, a registry, readiness, and dependency-aware health. Current source has moved since the issue was written: =star.runtime= now owns process lifecycle and already retains concrete runtime handles, consumer thread ownership, Rabbit/CouchDB readiness probes, and =/live=/=/ready= projections. The correct problem is therefore not to invent another component manager.
+
+The remaining gap is a *public/runtime lookup and generation contract* over the lifecycle components defined by the #37 design. Callers still reach raw globals or concrete actor references, while readiness still treats several non-NIL handles as healthy. A stopped/restarted actor or adapter has no opaque generation-bearing handle that can fail stale before dispatch.
+
+* Current-source evidence
+
+Inspected =starintel-server/source/runtime-lifecycle.lisp= on current =master=.
+
+Verified existing behavior:
+
+- =star.runtime:star-runtime= is the existing lifecycle authority.
+- Runtime retains actor-system, Rabbit consumer/event-consumer, HTTP, and lparallel handles.
+- Rabbit consumers retain and join only owned threads.
+- CouchDB and Rabbit have explicit readiness probes.
+- Consumer readiness checks parent and worker state.
+- Actor-system, kernel, and HTTP readiness still collapse to =non-NIL handle && runtime running=.
+- Shutdown and startup remain process-owned through =star.runtime=.
+
+This overlaps heavily with canonical #37 research/design (=STAR-RESEARCH-037=/=STAR-SERVER-045/046 lineage in the runtime work): #37 owns lifecycle component registration, dependency graph, lifecycle state, reconnect generation/fencing, and required-component readiness. #42 must consume that registry rather than duplicate it.
+
+* Research decision
+
+Define one *component identity/handle projection* on top of the existing =star.runtime= component registry.
+
+A component handle is an opaque immutable value identifying one runtime component incarnation:
+
+#+begin_example
+ComponentHandle {
+  runtimeId
+  componentId
+  generation
+}
+#+end_example
+
+A registry entry is runtime-owned state, not a second service locator:
+
+#+begin_example
+ComponentEntry {
+  componentId
+  generation
+  lifecycleState
+  required?
+  capabilities[]
+  acceptedTypes[]
+  ingressRef?
+  transportKind
+  dispatcherRef?
+  dependencies[]
+  readiness
+  health
+  pressureSnapshot?
+}
+#+end_example
+
+The entry may reference runtime-private resources, but public/application callers receive only the opaque handle and typed capability/health projection. Raw Sento actor refs, Rabbit channels, CouchDB pools, Clack handles, and thread objects do not cross the boundary.
+
+* Generation semantics
+
+Generation belongs to component incarnation, not lookup count.
+
+- first successful realization of a registered component receives a generation;
+- ordinary messages/lookups do not increment it;
+- replacement/restart that installs a new owned ingress/resource increments generation monotonically;
+- stale handle generation never resolves to the replacement component;
+- reconnect that preserves the same logical component may use the #37 reconnect-attempt generation internally, but only successful replacement of the public component incarnation changes the handle generation;
+- stop fences the current handle before resources can be reused by a later incarnation.
+
+This prevents a cached raw actor reference from silently addressing a replacement actor with different state/authority.
+
+* Lookup and dispatch boundary
+
+Required operations are intentionally small:
+
+#+begin_example
+lookupComponent(runtime, componentId)
+  -> ComponentHandle | unavailable
+
+inspectComponent(runtime, handle)
+  -> ComponentSnapshot | staleHandle | unavailable
+
+resolveCapability(runtime, capability, callerContext)
+  -> bounded ComponentHandle[]
+
+sendViaHandle(runtime, handle, typedMessage, callerContext)
+  -> typed lifecycle result
+#+end_example
+
+=resolveCapability= is discovery, not authorization. Caller context and the owning application/domain operation still determine whether an invocation is authorized. A component advertising a capability cannot grant it to a caller.
+
+* Health model
+
+Keep three distinct dimensions:
+
+- *liveness*: process/control runtime can answer control probes;
+- *readiness*: all required components and required dependencies are ready, runtime is running, and required capacity/accounting invariants hold;
+- *degraded*: runtime may remain live/possibly ready under explicitly optional failures or pressure, with reasons exposed to operators.
+
+Each component publishes a typed snapshot with bounded reason codes. Runtime readiness is derived from required component snapshots and dependency state. Do not infer health from object presence.
+
+Pressure is diagnostic input, not a new admission authority. Mailbox depth/capacity and dispatcher lane pressure come from #35/#36 and are projected read-only through component snapshots.
+
+* Dependency semantics
+
+The #37 lifecycle graph remains canonical. #42 adds no second dependency graph.
+
+A component snapshot may expose direct dependency IDs plus their current state. Runtime readiness follows the already-validated lifecycle dependency graph. A required dependency becoming unready makes its dependent component unready/degraded according to declared component policy; it does not mutate graph topology at runtime.
+
+* Actor and transport identity
+
+A component can expose one of several ingress kinds without callers depending on implementation:
+
+- local actor;
+- local router/dispatcher ingress;
+- Rabbit/remote route;
+- in-process application service;
+- no data ingress (control/health-only component).
+
+The opaque handle remains stable in shape across kinds. Locality and transport are registry metadata, not separate caller APIs.
+
+* StarLang boundary
+
+No new StarLang syntax is justified for the registry itself. StarLang actor/domain-server manifests may declare stable component identity, capabilities, accepted message types, dependencies, and resource profile. The Common Lisp runtime realizes those declarations and owns generation/health/resources. StarLang callers use typed capability/domain invocation rather than obtaining raw host objects.
+
+This preserves StarLang-first architecture without moving host-process lifecycle authority into the language.
+
+* Security and adversarial review
+
+Rejected:
+
+1. *Second component manager beside =star.runtime=* — duplicates #37 lifecycle authority.
+2. *Registry as generic service locator returning raw objects* — leaks concrete resources and recreates ambient globals.
+3. *Capability discovery equals authorization* — confused-deputy/privilege escalation.
+4. *Generation increments on every reconnect attempt* — mixes internal attempt fencing with public incarnation identity.
+5. *Stale handle auto-upgrades to latest generation* — defeats stale-reference detection.
+6. *Readiness from non-NIL handles* — current source already demonstrates this weak shortcut for actor/kernel/HTTP.
+7. *One global health boolean* — loses component/dependency/pressure reason and optional-vs-required semantics.
+8. *Registry owns mailbox admission/thread budgets* — #34-#36 remain capacity/admission authorities.
+9. *Public capabilities expose private topology* — external discovery must project features, not private routes/hosts/resources.
+10. *Actor name string as authority* — names identify lookup targets; authority remains typed caller context + operation policy.
+
+* Requirements mapped to StarIntel
+
+- Reuse #37 component IDs and lifecycle graph as registry keys.
+- Attach one monotonic public incarnation generation to each realized component.
+- Return opaque generation-bearing handles, never raw actor/resources.
+- Resolve typed capabilities to bounded authorized candidates without granting invocation authority.
+- Fence stale handles before dispatch.
+- Project local/router/Rabbit ingress through one typed handle contract.
+- Derive runtime readiness from required component health, dependency health, and runtime invariants.
+- Project #35/#36 pressure read-only for diagnostics.
+- Keep external/public capability discovery topology-safe.
+- Remove the extra HTTP-owned Rabbit connection only if current source still contains it; current inspected lifecycle path states Rabbit publication is actor-owned, so this original #42 defect appears already repaired and must not be reintroduced as work.
+
+* Proposed implementation handoff
+
+Owning repository: =lost-rob0t/starintel-server=, existing issue #42.
+
+All slices remain =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+1. Pure component-handle value + registry lookup/generation semantics on fake #37 component entries.
+2. Stale-handle fencing and typed inspect/dispatch resolution, fake ingress only.
+3. Capability index over registered component metadata with authorization kept outside discovery.
+4. Readiness/health snapshot derived from #37 required-component graph and explicit probes.
+5. Migrate one local actor/router lookup from raw actor reference to handle resolution.
+6. Migrate one remote/Rabbit route behind the same handle contract and prove equivalent typed failure semantics.
+7. Add bounded operator diagnostics with pressure projection from #35/#36 and no private topology in public capability output.
+
+* RED-first targets
+
+First RED, pure and deterministic:
+
+#+begin_example
+register component search generation N
+obtain handle(search,N)
+replace component -> generation N+1
+inspect/send using handle(search,N)
+=> staleHandle
+=> zero invocation of N+1 ingress
+#+end_example
+
+Untouched current server must fail because no opaque generation-bearing component handle/registry contract exists.
+
+Additional REDs:
+
+- capability discovery returns a component but an unauthorized caller still invokes zero handler calls;
+- required component with non-NIL retained resource and explicit health=false makes runtime unready;
+- optional component failure produces degraded diagnostics without silently becoming required;
+- dependency A unready makes required dependent B unready through the existing graph;
+- local and Rabbit ingress expose the same stale/unavailable typed handle outcomes;
+- public capability projection contains no Rabbit host, CouchDB host, raw actor ref, credential ref value, or private endpoint.
+
+* Unresolved questions
+
+- Exact public generation persistence across complete process restart should be decided with #37 persistence semantics. In-process monotonicity is required; cross-process generation must not claim durability until a durable runtime/component incarnation source exists.
+- The exact distinction between =unavailable= and =staleHandle= in transport-facing projections should reuse #40 typed application-result conventions once realized.
+
+Neither question blocks the pure handle/registry design.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created bounded ARDR research for server #42; reconciled issue wording with current star.runtime lifecycle and #37 ownership. | ARDR Auto-Research | starintel-server #42; current =source/runtime-lifecycle.lisp=; Auto-Research #182/#183 |
+
+* Footnotes and Glossary
+
+[fn:component-handle] *Component handle*: opaque immutable reference to one runtime component incarnation, containing identity and generation but not a concrete actor/socket/client object.
+
+[fn:generation] *Generation*: monotonically increasing identity for replacement component incarnations used to reject stale references.
+
+[fn:readiness] *Readiness*: whether the runtime can safely accept its declared required workload, derived from required component and dependency health rather than process liveness alone.

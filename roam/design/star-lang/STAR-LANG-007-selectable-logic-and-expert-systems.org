@@ -2,34 +2,45 @@
 :ID:       star-lang-design-007-selectable-logic-and-expert-systems
 :END:
 #+title: STAR-LANG-007 Selectable Logic Backends and Expert Systems
-#+description: Implementation-ready StarLang design for explicit LISA, SWI-Prolog, and N-Prolog runtime selection plus a safe expert-system source layer that lowers to backend-neutral logic IR and supervised actor-owned sessions.
-#+status: REVIEW
-#+filetags: :starintel:design:star-lang:logic:expert-systems:lisa:swi-prolog:n-prolog:compiler:actors:
+#+description: Approved StarLang architecture for backend-neutral logic and expert systems over LISA, SWI-Prolog, and N-Prolog with closed compiler-owned IR, deterministic backend selection, supervised sessions, proofs, budgets, replay, and final-system ownership.
+#+status: APPROVED
+#+filetags: :starintel:design:star-lang:logic:expert-systems:lisa:swi-prolog:n-prolog:compiler:actors:approved:prototype-retirement:
 #+created: [2026-08-13 Thu]
-#+last_modified: [2026-08-13 Thu]
+#+last_modified: [2026-08-29 Sat]
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research basis | Research reviewer | PENDING | Approve three-backend and expert-surface research conclusions | STAR-LANG-RESEARCH-022 and STAR-LANG-RESEARCH-023 |
-| Architecture | StarLang maintainer | PENDING | Approve package ownership, compiler phases, runtime boundary, semantic profiles, and backend pinning | This design |
-| Language surface | StarLang maintainer | PENDING | Approve proposed expert syntax and diagnostic model | Source surface and compiler design |
-| Security | Security reviewer | PENDING | Approve executable-package trust model, named-query restriction, effect denial, isolation, and budgets | Security invariants |
-| Operations | Operator | PENDING | Approve Nix dependencies, engine processes, observability, cancellation, and replay requirements | Runtime/Nix sections |
-| Implementation | Repository maintainer | NOT STARTED | Green implementation slices in dependency order with final-system ownership | Implementation plan and acceptance gates |
+| Research basis | Research reviewer | APPROVED | Three-backend and expert-surface research supports the architecture | STAR-LANG-RESEARCH-021, 022, 023, 026, 027, 028; operator approval 2026-08-29 |
+| Architecture | StarLang maintainer | APPROVED | Approve package ownership, compiler phases, runtime boundary, semantic profiles, backend pinning, replay, and prototype retirement | Operator approval 2026-08-29 |
+| Language surface | StarLang maintainer | APPROVED | Approve the closed expert/logic source surface and diagnostics model | Operator approval 2026-08-29; STAR-LANG-009 |
+| Security | Security reviewer | APPROVED | Approve digest-locked executable packages, named-operation restriction, effect denial, isolation, and budgets | Operator approval 2026-08-29; Security invariants |
+| Operations | Operator | APPROVED | Approve optional engine dependencies, worker processes, observability, cancellation, replay, and exact backend identity | Operator approval 2026-08-29 |
+| Implementation | Repository maintainer | NOT STARTED | Final-owned implementation slices with conformance fixtures and no duplicated prototype implementation | Future lost-rob0t/star-lang evidence |
 
 * Related Nodes
 
-- [[file:../../research/star-lang/STAR-LANG-RESEARCH-022-three-backend-logic-runtime-selection.org][STAR-LANG-RESEARCH-022 Three-Backend Logic Runtime Selection]]
-- [[file:../../research/star-lang/STAR-LANG-RESEARCH-023-expert-system-language-surface.org][STAR-LANG-RESEARCH-023 Expert-System Language Surface]]
-- [[file:../../research/star-lang/STAR-LANG-RESEARCH-021-star-logic-runtime-integration.org][STAR-LANG-RESEARCH-021 Star-Logic Runtime Integration]]
 - [[file:STAR-LANG-006-final-package-extraction.org][STAR-LANG-006 Dependency-Ordered Final Package Extraction]]
+- [[file:STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
+- [[file:STAR-LANG-010-lisa-expert-system-backend.org][STAR-LANG-010 LISA Expert-System Backend]]
+- [[file:STAR-LANG-011-swi-prolog-expert-system-backend.org][STAR-LANG-011 SWI-Prolog Expert-System Backend]]
+- [[file:STAR-LANG-012-n-prolog-expert-system-backend.org][STAR-LANG-012 N-Prolog Expert-System Backend]]
 - [[file:../../indexes/star-lang/STAR-LANG-INDEX-001-implementation.org][STAR-LANG-INDEX-001 Common Lisp Implementation]]
 
-* Decision
+* Objective
 
-StarLang SHALL add a backend-neutral =star-logic= layer with exactly three initial concrete inference backend IDs:
+Give StarLang one portable symbolic-reasoning surface while preserving the real
+semantic differences between production-rule engines and Prolog engines.
+
+A StarLang program should be able to declare facts, named reasoning operations,
+expert rules, goals, questions, conclusions, explanation requirements, budgets,
+and backend policy without embedding native LISA/Common Lisp or Prolog code.
+
+* Approved Decision
+
+StarLang SHALL provide a backend-neutral =star-logic= layer with these initial
+concrete backend IDs:
 
 #+begin_example
 lisa
@@ -37,49 +48,69 @@ swi-prolog
 n-prolog
 #+end_example
 
-StarLang source SHALL support =:backend auto= or an explicit pin to one of those IDs.
+Source may request =auto= or explicitly pin one backend. =auto= is a deterministic
+selection policy, not a fourth backend.
 
-StarLang SHALL also add =expert-system= source sugar for typed facts, rules, goals, questions, conclusions, explanations, and optional uncertainty. Expert sugar SHALL lower completely into closed compiler-owned IR before execution. No StarLang source form may embed raw LISA/Common Lisp code, raw Prolog source, a native engine handle, or an unrestricted executable goal.
+The selected backend SHALL be resolved before execution and recorded in the
+materialized run plan with its adapter version, engine version/build identity,
+package digest, mapping digest, semantic profiles, and capability evidence.
 
-The selected concrete backend SHALL be resolved before execution and SHALL be immutable for the materialized run plan. Runtime recovery may move work to an equivalent instance of that same pinned backend/build contract; it SHALL NOT silently change engine type.
+A durable run SHALL NOT silently change backend type. Recovery may use an
+equivalent instance of the same pinned backend/build contract. Cross-backend
+execution is an explicit comparison or migration run.
 
-* Non-Goals
+* Approved Public Feature Set
 
-This design does not:
+The portable public logic API remains the approved =star.logic.api/1= contract
+from STAR-LANG-009:
 
-- make LISA, SWI-Prolog, and N-Prolog universally equivalent;
-- replace STAR-LANG-006 package extraction;
-- implement a new Prolog engine;
-- immediately fork/rewrite LISA into =star-rules=;
-- expose arbitrary Prolog/Lisp snippets in =.star=;
-- make inference engines responsible for HTTP/filesystem/database effects;
-- define defeasible/default logic;
-- define an unrestricted metaprogramming language for expert rules;
-- claim N-Prolog supports SWI tabled semantics;
-- claim LISA is always faster than Prolog.
+#+begin_example
+assert!
+retract!
+solve
+solutions
+exists?
+explain
+#+end_example
+
+The expert layer adds closed compiler-owned forms for:
+
+- typed facts and fact roles;
+- rules and rule conditions;
+- goals and answer cardinality;
+- questions with typed answers;
+- checked conclusions;
+- explanation requirements;
+- optional uncertainty profiles;
+- explicit backend policy;
+- resource budgets;
+- session mutation policy.
+
+No public form exposes a native engine object, arbitrary Lisp form, arbitrary
+Prolog goal, module name, predicate indicator, =call/1= term, FFI operation,
+filesystem effect, network effect, shell command, or database effect.
 
 * Architectural Invariants
 
-1. =starlang-compiler= remains the sole implementation of StarLang source parsing and semantic compilation.
-2. Untrusted =.star= source never enters Common Lisp =READ= or =EVAL=.
-3. Engine-native source or runtime objects never enter normalized IR.
-4. Backend selection is deterministic over explicit plan inputs.
-5. Explicit backend pins cannot override semantic capability checks.
-6. A materialized plan contains exactly one backend ID.
-7. Runtime load affects instance selection only, never engine semantics.
-8. Canonical source documents are never mutated by an inference backend.
-9. Derived conclusions carry stable justification identity when explanation is required.
-10. Questions leave the inference engine through a typed question port.
-11. Rule/query packages are digest-locked executable artifacts.
-12. Backend migration is an explicit comparison run, not transparent failover.
-13. Direct/fake runtime tests work without LISA, SWI-Prolog, or N-Prolog installed.
-14. Final ASDF systems do not depend on =starlang-prototype=.
+1. =starlang-compiler= is the sole StarLang source parser and semantic compiler.
+2. Untrusted =.star= source never enters Common Lisp =READ= or =EVAL= as engine source.
+3. Native LISA or Prolog source never enters normalized StarLang IR.
+4. Backend selection is deterministic over explicit materialization inputs.
+5. Explicit pins cannot bypass semantic capability checks.
+6. One materialized session has exactly one backend ID.
+7. Runtime load may choose an instance, not reinterpret semantics.
+8. Canonical StarIntel documents are never backend-owned mutable state.
+9. Derived conclusions have stable identities.
+10. Required explanations use normalized proof records rather than fabricated traces.
+11. Questions leave inference through a typed question port.
+12. Executable rule/query packages are digest-locked artifacts.
+13. Budgets and cancellation capabilities are declared truthfully as hard, cooperative, or unsupported.
+14. Engine-free fake-runtime tests remain possible without installing any real backend.
+15. Final logic systems MUST NOT depend on =starlang-prototype= or files under =prototype/=.
 
-* Package Ownership
+* Final Package Ownership
 
-The implementation SHALL follow the one-authority migration rule from STAR-LANG-006.
-
-Proposed final systems:
+Approved final systems include:
 
 #+begin_example
 star-logic-protocol
@@ -102,241 +133,50 @@ starlang-expert-runtime
 starlang-expert-testing
 #+end_example
 
-Optional aggregate:
+Optional aggregate systems may expose =star-logic= and =starlang-expert=, but the
+portable packages SHALL NOT depend on concrete adapters.
+
+The dependency direction is:
 
 #+begin_example
-star-logic
-starlang-expert
+portable StarLang protocol/data
+        |
+        v
+star-logic portable protocol/types/capabilities/proofs
+        |
+        +--> starlang-expert-ir -> starlang-expert-compiler
+        |
+        +--> starlang-expert-runtime
+                    |
+                    +--> LISA adapter
+                    +--> SWI adapter
+                    `--> N-Prolog adapter
 #+end_example
 
-** =star-logic-protocol=
+* Semantic Profiles
 
-Owns:
-
-- stable backend IDs;
-- adapter protocol generics;
-- engine-neutral conditions;
-- operation/session state enums;
-- semantic profile identifiers.
-
-Dependencies: portable Common Lisp utilities only.
-
-** =star-logic-types=
-
-Owns:
-
-- backend descriptors;
-- backend policy values;
-- logic usage records;
-- normalized results;
-- normalized fact deltas;
-- package/mapping identities.
-
-It does not own parser syntax.
-
-** =star-logic-capabilities=
-
-Owns capability vocabulary, compatibility matching, deterministic backend filtering, and selection-policy data.
-
-** =star-logic-packages=
-
-Owns resolved package manifest structures and exact digest/version compatibility checks. It never evaluates package source.
-
-** =star-logic-mappings=
-
-Owns engine-neutral fact mapping records and mapping validation.
-
-** =star-logic-proofs=
-
-Owns =star.logic.derivation/1= normalized proof records and validators.
-
-** =star-logic-budget=
-
-Owns semantic budget reservation/debit records and adapter limit capability declarations.
-
-** =star-logic-replay=
-
-Owns backend-selection events, normalized operation terminal records, verification comparison, and migration comparison records.
-
-** Adapter systems
-
-Each adapter system owns all native-engine integration and depends inward on =star-logic-*= portable systems.
-
-No portable system depends on an adapter.
-
-** =starlang-expert-ir=
-
-Owns expert-system IR records and canonical JSON schema declarations. It depends on portable StarLang schema/type IDs and =star-logic-types= but not on engine adapters.
-
-** =starlang-expert-compiler=
-
-Owns expert sugar parsing/expansion validation, binding/type analysis, semantic-profile derivation, and lowering to expert/logic IR.
-
-It is syntax/source-aware and belongs in the compiler layer.
-
-** =starlang-expert-runtime=
-
-Owns ExpertSessionActor state machine, question port, conclusion store, session journal integration, backend lease coordination, and proof normalization orchestration.
-
-It does not parse =.star= source.
-
-* Dependency Graph
+Initial profile vocabulary includes:
 
 #+begin_example
-star-actor-protocol      star-canonical-json
-          \                 /
-           \               /
-            star-logic-protocol
-                   |
-       +-----------+-----------+
-       |           |           |
-star-logic-types  capabilities proofs
-       |           |           |
-       +------+----+-----------+
-              |
-       starlang-expert-ir
-              |
-       starlang-expert-compiler
-
-runtime side:
-
-star-logic-protocol/types/capabilities
-              |
-       starlang-expert-runtime
-              |
-       +------+------+------+
-       |             |      |
-     LISA           SWI   N-Prolog
-    adapter        adapter  adapter
-#+end_example
-
-Compiler and portable IR never depend on concrete adapters.
-
-* Backend Identifiers
-
-Canonical serialized values:
-
-#+begin_example
-"auto"
-"lisa"
-"swi-prolog"
-"n-prolog"
-#+end_example
-
-=auto= is policy, not a backend descriptor.
-
-Common Lisp host APIs MAY accept keyword conveniences, but serializers emit canonical strings and validate them before package interning.
-
-* Semantic Profile Vocabulary
-
-Initial required profile IDs:
-
-#+begin_example
+star.logic.runtime/1
 star.logic.query/1
 star.logic.tabled/1
 star.logic.constraints/1
 star.logic.production/1
 star.logic.expert-session/1
 star.logic.portable-prolog/1
-
 star.expert.relational/1
 star.expert.production/1
 star.expert.consultation/1
 #+end_example
 
-Profiles are versioned. Changing observable negation, agenda, duplicate, retraction, answer-order, or proof semantics requires a profile version change.
+Profiles are versioned semantic promises. Two backends producing similar answers
+does not make their agenda, negation, duplicate, answer-order, mutation, tabling,
+constraint, or proof semantics equivalent.
 
-* Backend Descriptor Schema
+* Compiler Pipeline
 
-Canonical shape:
-
-#+begin_src lisp
-(defstruct logic-backend-descriptor
-  id
-  adapter-version
-  engine-name
-  engine-version
-  engine-build-digest
-  semantic-profiles
-  capabilities
-  package-profiles
-  proof-formats
-  isolation-classes
-  hard-limits
-  cooperative-limits
-  unsupported-limits
-  benchmark-record-ids)
-#+end_src
-
-The descriptor is runtime-discovered but checked against deployment expectations. The materialized plan records the exact observed descriptor identity.
-
-* Backend Policy Source Syntax
-
-Existing =reason= grows a backend field:
-
-#+begin_src lisp
-(reason ownershipPath
-  (:backend swi-prolog
-   :capability recursiveGraphQuery
-   :proof required)
-  ...)
-#+end_src
-
-=expert-system= also carries backend policy:
-
-#+begin_src lisp
-(expert-system transactionRisk
-  (:version "1.0.0"
-   :backend auto
-   :profile expertSession
-   :uncertainty boolean
-   :explain required)
-  ...)
-#+end_src
-
-The source reader treats =swi-prolog= etc. as language identifiers/data, not Common Lisp package symbols with executable semantics.
-
-* Parser Changes
-
-The closed parser SHALL add only the tokens/forms needed for the approved expert surface.
-
-Proposed source forms:
-
-#+begin_example
-expert-system
-facts
-rules
-rule
-when
-all
-any
-exists
-absent
-notProvable
-then
-conclude
-assertSessionFact
-retractSessionFact
-because
-goals
-goal
-questions
-ask
-needs
-prompt
-explain
-#+end_example
-
-Parser tests SHALL prove:
-
-- valid forms receive syntax objects and spans;
-- malformed forms fail in the read/core-validation phase;
-- unknown field names remain rejected by existing field-name rules where applicable;
-- no host reader dispatch, package syntax, reader macros, or arbitrary Lisp forms are accepted.
-
-* Compiler Phase Changes
-
-Final compiler pipeline:
+The approved compiler flow is:
 
 #+begin_example
 READ
@@ -344,101 +184,46 @@ READ
 EXPAND
   hygienic language macros
 EXPERT-EXPAND
-  expert sugar -> closed expert core forms
+  expert sugar -> closed expert core
 CORE-VALIDATE
-  structural grammar checks
+  structural grammar
 TYPE-BIND
-  schemas, variables, patterns, expressions
+  schemas, patterns, variables, expressions
 EXPERT-SEMANTIC
-  mutation, negation, agenda, uncertainty, question checks
+  negation, mutation, agenda, uncertainty, question rules
 LOGIC-POLICY
-  semantic profile + backend requirements
+  semantic profiles + required capabilities + backend policy
 LOWER
-  expert IR + logic-call IR
+  expert IR + logic operation IR
 MATERIALIZE
-  package/mapping resolution + backend selection
+  package/mapping resolution + deterministic backend selection
 EMIT
-  canonical JSON / runtime plan / adapter artifact requests
+  canonical runtime plan + generated backend artifact requests
 #+end_example
 
-Every phase attaches stable source diagnostics.
+Every phase retains source spans and origin chains for diagnostics.
 
-* Expert-System IR
+* Expert IR
 
-#+begin_src lisp
-(defstruct expert-system-ir
-  id
-  version
-  source-span
-  backend-policy
-  semantic-profile
-  fact-types
-  rules
-  goals
-  questions
-  uncertainty-policy
-  explanation-policy
-  mutation-policy
-  budget
-  required-capabilities)
+The compiler-owned IR SHALL represent at least:
 
-(defstruct expert-rule-ir
-  id
-  source-span
-  condition-root
-  actions
-  salience
-  group
-  evidence-operation
-  explanation-policy)
+- expert-system ID/version;
+- backend policy;
+- semantic profiles;
+- typed fact roles;
+- rules and stable rule IDs;
+- condition tree;
+- checked actions;
+- goals;
+- questions;
+- uncertainty policy;
+- explanation policy;
+- mutation policy;
+- budgets;
+- required capabilities;
+- source spans/origins.
 
-(defstruct expert-goal-ir
-  id
-  query-pattern
-  answer-cardinality
-  required-p
-  explanation-policy
-  budget)
-
-(defstruct expert-question-ir
-  id
-  trigger
-  parameter-bindings
-  answer-type
-  prompt-resource
-  cache-policy
-  retry-policy
-  timeout-policy)
-#+end_src
-
-All references crossing JSON boundaries are stable IDs/strings/closed records.
-
-* Condition IR
-
-Initial condition kinds:
-
-#+begin_example
-fact-pattern
-all
-any
-exists
-absent
-not-provable
-equals
-different
-less-than
-less-or-equal
-greater-than
-greater-or-equal
-member
-named-predicate
-#+end_example
-
-=named-predicate= refers only to a declared pure predicate in a digest-locked expert/logic package. It is not an arbitrary callable function.
-
-* Action IR
-
-Initial action kinds:
+Closed rule actions in v1 are limited to:
 
 #+begin_example
 conclude
@@ -446,40 +231,30 @@ assert-session-fact
 retract-session-fact
 #+end_example
 
-Question requests are generated by the expert-session coordinator from question declarations/triggers, not arbitrary rule RHS host calls.
+External side effects require a separate capability/idempotency/replay design.
 
-Future external actions require a separate design because inference effects need capability, idempotency, and replay semantics.
+* Variables and Negation
 
-* Variable and Binding Rules
+- Rule variables use the =?name= convention.
+- Variables must be introduced before use and have one static type in a rule/goal.
+- Nested shadowing is rejected in v1.
+- Compiler emits stable binding IDs; adapters map them privately.
 
-1. Source rule variables use the =?name= convention.
-2. Every variable is introduced before use.
-3. One variable has one static type in one rule/goal/question trigger.
-4. Rule-local variables cannot escape except through typed action fields.
-5. Nested rebinding/shadowing is rejected in v1.
-6. Compiler emits stable binding IDs.
-7. Backend lowering maps binding IDs privately.
-
-* Negation Contract
-
-The compiler SHALL distinguish:
+Negation remains explicit and semantically distinct:
 
 #+begin_example
-(absent PATTERN)
-(notProvable QUERY)
-(different LEFT RIGHT)
-(contradicts PROPOSITION)
+absent
+notProvable
+different
+contradicts
 #+end_example
 
-=absent= requires a semantic profile with working-memory absence semantics.
+The compiler rejects a construct when the selected backend/profile cannot
+provide the required semantics.
 
-=notProvable= requires a profile defining closed-world/query negation.
+* Mutation and Authority
 
-The compiler SHALL reject a construct when the selected/potential backend set cannot support the required semantic profile.
-
-* Mutation Contract
-
-Fact roles:
+Fact roles include:
 
 #+begin_example
 source
@@ -488,696 +263,195 @@ derived
 questionAnswer
 #+end_example
 
-Rules:
+Source facts and canonical StarIntel documents are immutable from the inference
+runtime. Session facts may change only under the declared session mutation
+policy. Question answers are journaled session facts. Derived conclusions belong
+to the proof/inference layer and never become canonical StarIntel writes merely
+because an engine produced them.
 
-- source facts are immutable;
-- session facts may be asserted/retracted only when mutation policy allows;
-- derived conclusions are owned by the inference/proof system;
-- question answers are journaled session facts;
-- no backend writes canonical StarIntel documents directly.
+* Proof Contract
 
-* Explanation Contract
-
-Canonical proof format:
+Required explanation output uses:
 
 #+begin_example
 star.logic.derivation/1
 #+end_example
 
-Required node types:
+Normalized proof nodes may include source facts, session facts, question answers,
+rule/clause applications, goals, bindings, assumptions, contradictions,
+conclusions, uncertainty combination, and budget truncation.
 
-#+begin_example
-sourceFact
-sessionFact
-questionAnswer
-ruleApplication
-clauseApplication
-goal
-parameterBinding
-conclusion
-assumption
-contradiction
-uncertaintyCombination
-budgetTruncation
-#+end_example
-
-Backend-native trace data may be attached under a namespaced diagnostic field but does not replace the normalized proof.
-
-* Uncertainty Contract
-
-Initial source policies:
-
-#+begin_example
-boolean
-certaintyFactorV1
-dempsterShaferV1
-#+end_example
-
-=boolean= is required for the v1 expert runtime.
-
-The other algebras SHALL remain capability-gated until there are:
-
-- exact numeric domains;
-- combination rules;
-- conflict semantics;
-- retraction behavior;
-- deterministic precision/rounding rules;
-- proof-node representation;
-- cross-backend fixtures for every backend claiming support.
-
-Rule syntax SHOULD use semantic operations such as =support= and =oppose= rather than copying a LISA-specific =belief= keyword into the portable core.
+Backend-native diagnostics may be attached as bounded namespaced metadata but do
+not replace the normalized proof. Missing proof evidence is reported as proof
+unavailable; it is never synthesized.
 
 * Backend Selection
 
-Materialization input:
+Materialization filters registered backend descriptors by:
 
-#+begin_src lisp
-(defstruct logic-selection-request
-  backend-policy
-  semantic-profile
-  required-capabilities
-  required-hard-limits
-  required-isolation
-  package-compatibility
-  proof-policy
-  benchmark-policy)
-#+end_src
+1. semantic profile;
+2. required capabilities;
+3. package and mapping compatibility;
+4. required isolation class;
+5. required hard limits;
+6. proof policy;
+7. explicit pin when present;
+8. otherwise a stable versioned default/benchmark policy.
 
-Selection:
+Unresolved ties fail rather than depending on runtime registration order.
+Selection evidence records accepted/rejected candidates and the exact reason.
 
-1. list registered descriptors;
-2. filter by semantic profile;
-3. filter by required capabilities;
-4. filter by package compatibility;
-5. filter by hard limits/isolation;
-6. apply explicit pin if present;
-7. otherwise use stable versioned default/benchmark policy;
-8. reject unresolved ties;
-9. record selected descriptor and selection explanation.
+* Approved LISA Role
 
-* Selection Explanation
+LISA is the primary production-rule backend for:
 
-Every materialized plan SHALL include machine-readable selection evidence.
+- persistent working memory;
+- RETE incremental matching;
+- agenda/firing behavior;
+- salience;
+- negative/existential conditional elements where fixture-proven;
+- object-backed StarIntel facts;
+- incremental fact deltas.
 
-#+begin_src json
-{
-  "requested": "auto",
-  "semanticProfile": "star.expert.production/1",
-  "requiredCapabilities": [
-    "working-memory.delta",
-    "agenda.salience",
-    "proof.justification"
-  ],
-  "candidates": [
-    {"id": "lisa", "status": "accepted"},
-    {"id": "swi-prolog", "status": "rejected", "reason": "agenda.salience unavailable"},
-    {"id": "n-prolog", "status": "rejected", "reason": "agenda.salience unavailable"}
-  ],
-  "selected": "lisa",
-  "policy": "star.logic.default-routing/1"
-}
-#+end_src
+It does not automatically claim SWI tabling, generic recursive-query, or
+constraint semantics.
 
-Canonical JSON field spelling must follow existing StarLang lowerCamelCase rules.
+* Approved SWI-Prolog Role
 
-* LISA Adapter
+SWI-Prolog is the primary relational backend for:
 
-System: =star-logic-adapter-lisa=.
+- recursive named operations;
+- tabled evaluation;
+- bounded multi-answer enumeration;
+- identity-preserving relational projection;
+- approved constraint profiles such as CLP(FD);
+- process-isolated workers through the approved SWI adapter protocol.
 
-Initial target: maintained LISA version pinned by Nix/ASDF source identity.
+It does not automatically claim LISA production agenda or salience semantics.
 
-Adapter responsibilities:
+* Approved N-Prolog Role
 
-- create isolated engine/session state;
-- install compiler-generated trusted rule artifacts;
-- map checked fact values;
-- apply ordered deltas;
-- run/walk engine under budgets;
-- observe activations/firings/conclusions;
-- normalize explanation events;
-- reset/close session;
-- report exact capabilities.
+N-Prolog is an approved conservative relational backend for a deliberately small,
+fixture-proven portable subset.
 
-Prohibitions:
+It uses a pinned external worker and StarIntel-owned framed protocol. Features are
+advertised only after they are independently proven against the exact pinned
+N-Prolog build. SWI feature names do not grant N-Prolog capability by analogy.
 
-- no arbitrary =eval= of StarLang-supplied forms;
-- no arbitrary method/function calls from rule RHS;
-- no global shared expert working memory across sessions;
-- no unsupported claim that LISA implements SWI tabled semantics.
-
-Performance promotion gate:
-
-The adapter may be functionally supported before being an =auto= default for large workloads. =auto= routing to LISA for high-volume production rules requires benchmark records satisfying LISA-RESEARCH-001 gates.
-
-* SWI-Prolog Adapter
-
-System: =star-logic-adapter-swi=.
-
-Phase-one transport: SWI MQI over local Unix-domain socket where supported.
-
-Adapter responsibilities:
-
-- launch exact pinned SWI worker/saved state;
-- authenticate MQI connection;
-- perform capability/version handshake;
-- expose only StarIntel-owned wrapper predicates;
-- load digest-locked packages;
-- map typed facts/parameters;
-- stream normalized answers;
-- enforce timeout/answer/output limits;
-- optionally use inference limits as one logical-work dimension;
-- cancel cooperatively then escalate to connection/process termination;
-- normalize proof-carrying query results;
-- reset or discard workers according to isolation class.
-
-No user-selected arbitrary module/predicate indicator may cross MQI.
-
-* N-Prolog Adapter
-
-System: =star-logic-adapter-nprolog=.
-
-Phase-one transport: child process with StarIntel-owned framed request/response wrapper.
-
-Responsibilities:
-
-- launch exact pinned =npl= binary;
-- record binary hash/version;
-- load exact bootstrap/rule package;
-- configure JSON/string mode deterministically;
-- one active query per worker initially;
-- normalize answers/failure/errors;
-- terminate worker for hard cancellation when necessary;
-- discard killed/unclean workers;
-- advertise only fixture-proven capabilities.
-
-No transparent fallback from SWI-specific packages.
-
-* Fake Adapter
-
-System: =star-logic-testing= SHALL provide an engine-free fake adapter.
-
-It supports deterministic fixture scripts such as:
-
-#+begin_src lisp
-(make-fake-logic-backend
- :id "fake"
- :semantic-profiles '("star.expert.relational/1")
- :script '((:open :ok)
-           (:query "goal-1" :answers (("level" . "high")))
-           (:close :ok)))
-#+end_src
-
-The fake adapter is not a public fourth production backend. It exists only under testing/internal composition.
-
-Compiler/runtime conformance must not require external engines for every unit test.
+Hard cancellation may terminate and replace a worker. A killed or uncertain
+worker is never reused.
 
 * Expert Session Runtime
 
-System: =starlang-expert-runtime=.
+One =ExpertSessionActor= owns one logical expert session. The runtime coordinates:
 
-#+begin_example
-ExpertSessionSupervisor
-`-- ExpertSessionActor
-    +-- BackendLease
-    +-- FactProjectionWorker
-    +-- QuestionPort
-    +-- ConclusionStore
-    +-- ProofNormalizer
-    +-- LogicBudgetLedger
-    `-- SessionJournal
-#+end_example
+- pinned backend lease;
+- fact projection;
+- ordered fact deltas;
+- goals;
+- typed questions;
+- conclusions;
+- normalized proofs;
+- budgets;
+- cancellation;
+- session journal;
+- replay.
 
-One ExpertSessionActor owns one logical session state.
+Question UI, LLM, or operator interaction is an adapter to the typed question
+port and is not inference semantics.
 
-* Session State
-
-#+begin_src lisp
-(defstruct expert-session-state
-  session-id
-  plan-id
-  backend-id
-  backend-lease-id
-  fact-generation
-  goal-states
-  question-states
-  conclusion-index
-  budget-state
-  terminal-state)
-#+end_src
-
-Backend-private session state is not serialized into this structure.
-
-* Question Port Protocol
-
-Portable interface:
-
-#+begin_src lisp
-(defgeneric request-expert-question (port request))
-(defgeneric cancel-expert-question (port question-request-id reason))
-#+end_src
-
-Request record:
-
-#+begin_src lisp
-(defstruct expert-question-request
-  request-id
-  session-id
-  question-id
-  parameters
-  answer-schema-id
-  prompt-resource-id
-  deadline
-  attempt)
-#+end_src
-
-Answer record:
-
-#+begin_src lisp
-(defstruct expert-question-answer
-  request-id
-  status
-  checked-value
-  source
-  received-at-logical-sequence)
-#+end_src
-
-A UI/LLM/operator integration is an adapter to this port, not part of logic semantics.
-
-* Session Events
-
-Canonical event family =star.expert.event/1= SHALL include:
-
-- opened;
-- backendSelected;
-- factAsserted;
-- factRetracted;
-- questionRequested;
-- questionAnswered;
-- questionDeclined;
-- goalStarted;
-- goalSatisfied;
-- conclusionDerived;
-- conclusionRevoked;
-- proofRecorded;
-- budgetExhausted;
-- cancelled;
-- failed;
-- closed.
-
-Rule activation/fire events may be included when the semantic profile exposes them; Prolog backends need not fabricate agenda activations.
-
-* Replay
-
-Recorded session data SHALL be sufficient to:
-
-- restore source/session/question facts in logical order;
-- reproduce backend selection identity;
-- rerun the same pinned backend/package in verify mode;
-- compare normalized conclusions/proofs;
-- replay question answers without asking the external question port again;
-- create an explicit migration run against a different backend.
-
-Question prompt presentation changes do not change logical replay if question ID, parameters, answer schema, and returned answer remain identical.
-
-* Cancellation
-
-Cancellation modes:
-
-#+begin_example
-cooperative
-sessionHard
-runtimeHard
-#+end_example
-
-The runtime maps modes to adapter capabilities.
-
-Backend switching is never a cancellation fallback.
-
-* Resource Budgets
-
-Expert package budget:
-
-#+begin_src lisp
-(:budget
-  (:wallTimeMs 15000
-   :answers 250
-   :conclusions 500
-   :ruleFirings 10000
-   :inferences 500000
-   :questions 20
-   :proofNodes 50000
-   :outputBytes 8388608
-   :memoryBytes 268435456))
-#+end_src
-
-Not every dimension applies to every engine. The materializer verifies mandatory dimensions against adapter hard/cooperative limit declarations.
+Replay records enough information to rerun the same backend/package contract and
+compare normalized conclusions/proofs. Replaying recorded question answers does
+not ask the external question port again.
 
 * Security Invariants
 
-1. Expert and logic packages are executable artifacts and require exact digest identity.
-2. The compiler generates backend artifacts; untrusted source cannot supply backend artifact bytes directly.
-3. Prolog adapter calls named wrapper operations only.
-4. LISA adapter actions come from a closed action IR only.
-5. File/network/process/FFI/database effects are absent from expert rule actions.
-6. Question answers are schema-validated before becoming facts.
-7. Prompts cannot inject executable engine syntax.
-8. Backend environment contains minimum necessary variables/files.
-9. Rule/query package output is size-bounded.
-10. Proof data is bounded and validated.
-11. Dataset/case/session scope is enforced in fact projection.
-12. Secrets do not enter packages, proofs, journals, or generated fixtures.
-
-* Canonical JSON
-
-New schemas SHALL be emitted through existing canonical JSON ownership and lowerCamelCase field policy.
-
-Minimum schemas:
-
-#+begin_example
-org.star-lang/logic-backend-policy@1
-org.star-lang/logic-backend-descriptor@1
-org.star-lang/logic-selection-evidence@1
-org.star-lang/logic-call@1
-org.star-lang/expert-system@1
-org.star-lang/expert-rule@1
-org.star-lang/expert-question@1
-org.star-lang/expert-session-event@1
-org.star-lang/logic-derivation@1
-#+end_example
-
-Golden byte fixtures SHALL freeze serialization after approval.
-
-* Nix Integration
-
-Root StarLang flake SHALL eventually expose optional logic feature sets without making every engine necessary for compiler-only work.
-
-Conceptual package split:
-
-#+begin_example
-starlang-core
-starlang-with-lisa
-starlang-with-swi
-starlang-with-nprolog
-starlang-with-logic-all
-#+end_example
-
-Exact flake attribute names require implementation review of the current flake.
-
-Requirements:
-
-- exact source/version pinning;
-- no global Quicklisp/system package dependency assumptions;
-- SWI binary available only in derivations/tests that need it;
-- N-Prolog built from pinned source when enabled;
-- LISA source pinned through the project dependency mechanism;
-- engine versions/build hashes visible to adapter handshake;
-- =nix flake check -L= includes fake/core tests always and engine conformance when the engine derivation is part of the check closure.
-
-* CI Layers
-
-** Layer 1 — engine-free
-
-Always required:
-
-- ASDF load/test for portable logic systems;
-- parser/expert compiler tests;
-- canonical JSON fixtures;
-- backend selection tests with fake descriptors;
-- ExpertSessionActor fake-adapter tests;
-- replay tests;
-- security negative tests.
-
-** Layer 2 — SWI
-
-- MQI startup/handshake;
-- framed Unicode/query tests;
-- cancellation;
-- tabled query fixture;
-- proof wrapper fixture;
-- reset/isolation;
-- replay.
-
-** Layer 3 — N-Prolog
-
-- binary version/hash handshake;
-- JSON/string-mode fixture;
-- portable-Prolog conformance;
-- hard cancellation/process replacement;
-- Unicode;
-- documented CLP(FD) subset if enabled.
-
-** Layer 4 — LISA
-
-- rule-package compile/install;
-- joins/negative/existential CEs;
-- salience ordering;
-- fact delta/reset;
-- conclusions/proofs;
-- belief capability tests when enabled;
-- actor session isolation;
-- allocation/performance benchmark as non-flaky recorded benchmark job, not unit-test timing assertion.
-
-* Test Fixtures
-
-Create source fixtures under StarLang final fixture ownership:
-
-#+begin_example
-fixtures/logic/reason-auto.star
-fixtures/logic/reason-swi.star
-fixtures/logic/reason-nprolog.star
-fixtures/logic/reason-invalid-pin.star
-fixtures/expert/animal-relational.star
-fixtures/expert/transaction-risk.star
-fixtures/expert/troubleshooting-questions.star
-fixtures/expert/recursive-ownership-swi.star
-fixtures/expert/streaming-alert-lisa.star
-fixtures/expert/portable-prolog.star
-#+end_example
-
-Every fixture has expected normalized IR plus expected diagnostics/results where appropriate.
-
-* Static Negative Tests
-
-Required failures:
-
-- unknown backend ID;
-- pinning LISA for tabled-only profile;
-- pinning N-Prolog for SWI-only package;
-- using salience in relational-only profile;
-- unbound rule variable;
-- mismatched variable type;
-- mutation of source fact;
-- raw Prolog/Lisp escape attempt;
-- arbitrary rule RHS call;
-- bare ambiguous =not= form;
-- unsupported uncertainty algebra;
-- unbounded question loop;
-- proof required but backend/package has no proof implementation;
-- mandatory hard memory/inference limit unsupported by selected backend.
-
-* Backend Conformance Matrix
-
-Initial expected claims:
-
-| Feature | LISA | SWI-Prolog | N-Prolog |
-|---------+------+------------+----------|
-| boolean typed facts | yes via mapping | yes via mapping | yes via mapping |
-| relational named query | limited/non-primary | yes | yes portable subset |
-| recursive query | not profile default | yes | yes only tested non-tabled subset |
-| tabling | no | yes | no initial claim |
-| incremental tabling | no | yes | no initial claim |
-| production agenda | yes | no initial equivalence claim | no |
-| salience | yes | no portable claim | no portable claim |
-| persistent working-memory deltas | yes | possible only under separate profile, not v1 default | no initial claim |
-| CLP(FD) | no | yes | narrower documented/tested subset |
-| explanation | adapter normalization | proof-carrying wrapper | proof wrapper only when implemented |
-| uncertainty | LISA-native/adapter capability | library/package only | library/package only if proven |
-| process isolation | optional worker process; in-process trusted baseline | yes MQI | yes child process |
-
-This table is an implementation target, not permission to advertise unimplemented capabilities. Runtime descriptors remain source of truth.
-
-* Observability
-
-Metrics SHALL be tagged by backend ID, adapter version, semantic profile, package ID/digest, and operation kind.
-
-Common metrics:
-
-- sessions opened/closed;
-- active sessions;
-- query/operation count;
-- p50/p95/p99 duration;
-- answer/conclusion counts;
-- proof nodes/bytes;
-- budget trips;
-- cancellations;
-- crashes/restarts;
-- selection rejection reasons;
-- replay mismatches.
-
-LISA-specific diagnostics:
-
-- alpha tests/rejects;
-- beta probes/matches;
-- activations created/fired/cancelled;
-- tuple allocations if exposed;
-- GC/allocated bytes where measurable.
-
-SWI-specific diagnostics:
-
-- MQI worker/connection count;
-- query timeout/cancel escalation;
-- Prolog inference counter where used;
-- table statistics where explicitly queried.
-
-N-Prolog-specific diagnostics:
-
-- worker replacements;
-- protocol parse failures;
-- query process duration;
-- capability handshake/version mismatch.
-
-* Implementation Slices
-
-Do not land this as one giant PR.
-
-** Slice 1 — portable logic protocol
-
-Deliver:
-
-- backend IDs/policy;
-- descriptors/capabilities;
-- fake adapter;
-- conditions;
-- unit tests.
-
-No external engine dependency.
-
-** Slice 2 — logic-call IR and compiler policy
-
-Deliver:
-
-- backend policy parsing for =reason=;
-- logic-call schema fields;
-- selection/meterialization with fake descriptors;
-- selection evidence;
-- golden JSON.
-
-** Slice 3 — SWI adapter
-
-Deliver MQI production path, named wrapper, process lifecycle, budgets/cancellation, smoke fixtures.
-
-** Slice 4 — N-Prolog adapter
-
-Deliver process protocol, bootstrap wrapper, portable subset, conformance fixtures.
-
-** Slice 5 — LISA adapter
-
-Deliver owned sessions, rule artifact lowering, fact deltas, agenda/conclusion/proof normalization, actor isolation.
-
-** Slice 6 — expert parser/IR
-
-Deliver =expert-system= syntax, expert sugar expansion, binding/type/semantic validation, fake runtime fixtures.
-
-** Slice 7 — ExpertSessionActor + questions
-
-Deliver session state machine, question port, journal, replay, conclusion store, backend lease.
-
-** Slice 8 — expert backend lowering
-
-Deliver relational->SWI/N-Prolog and production->LISA lowering under declared profiles.
-
-** Slice 9 — proof/uncertainty
-
-Deliver =star.logic.derivation/1= and boolean explanations first; then gated uncertainty algebras.
-
-** Slice 10 — auto-selection benchmark policy
-
-Only after functional conformance: benchmark matching workloads and enable nontrivial =auto= ranking beyond stable semantic defaults.
-
-* Migration From STAR-LANG-RESEARCH-021
-
-STAR-LANG-RESEARCH-021 remains valid as the parent architecture: one =star-logic= semantic boundary, engine-neutral =logic-call= IR, capability routing, proof normalization, replay pinning, and no native engine objects.
-
-This design refines it in two places:
-
-1. SWI-Prolog and N-Prolog become separate public backend identities even though both may use shared Prolog protocol/term infrastructure.
-2. A first-class =expert-system= source layer is added above =star-logic=.
-
-Implementation SHOULD reuse shared =star-prolog= process/query infrastructure where available rather than duplicating it inside StarLang.
-
-* Interaction With STAR-LANG-006
-
-STAR-LANG-007 SHALL NOT create final compiler/runtime packages that depend back on =starlang-prototype=.
-
-If logic implementation begins before full prototype extraction completes:
-
-- portable =star-logic-*= systems may land when their dependencies are final-owned;
-- compiler integration waits for the relevant final compiler ownership or uses a thin compatibility forwarder with one-authority semantics;
-- new engine adapters live only in final adapter systems;
-- no second logic implementation is added under =prototype/=.
-
-* Acceptance Gate: Portable Logic Layer
-
-Complete when:
-
-1. final ASDF systems load independently;
-2. no final logic system loads =starlang-prototype=;
-3. backend descriptors and policy validate exact IDs;
-4. deterministic fake selection is tested;
-5. incompatible pins fail before execution;
-6. canonical JSON fixtures are stable;
-7. conditions are typed and source-independent;
-8. full aggregate StarLang tests remain green.
-
-* Acceptance Gate: Three Real Backends
-
-Complete when:
-
-1. LISA adapter executes a production-rule fixture and emits normalized conclusions;
-2. SWI adapter executes named MQI query and tabled-query fixtures;
-3. N-Prolog adapter executes portable query fixtures through the structured process protocol;
-4. each backend reports exact version/build identity;
-5. each backend can be explicitly pinned in a materialized StarLang plan;
-6. unsupported semantic pins fail cleanly;
-7. cancellation and hard failure are tested;
-8. same-backend replay is deterministic for canonical fixtures;
-9. cross-backend migration creates a comparison record.
-
-* Acceptance Gate: Expert Systems
-
-Complete when:
-
-1. =expert-system= parses through the closed reader;
-2. expert sugar disappears into closed IR;
-3. typed facts/rules/joins/conclusions work;
-4. goals work under at least LISA and SWI compatible fixtures;
-5. typed question request/answer/resume works with fake question port;
-6. explanation graph is produced for required-proof fixture;
-7. source facts cannot be mutated;
-8. ambiguous negation is rejected;
-9. unsupported salience/backend combination is rejected;
-10. a relational portable expert runs through both SWI and N-Prolog only after conformance is proven;
-11. a production expert runs through LISA with deterministic agenda fixture;
-12. tutorials can demonstrate explicit backend selection without native engine syntax.
-
-* Completion Gate
-
-This design reaches =APPROVED= implementation completion only when every approved slice has final package ownership, CI/Nix coverage, canonical fixtures, source-aware diagnostics, backend/version observability, replay tests, and no duplicated prototype implementation.
-
-Research approval and implementation completion remain separate states.
+1. Only compiler-generated digest-locked engine artifacts execute.
+2. Prolog adapters expose named operations only.
+3. LISA rule RHS behavior comes only from closed action IR.
+4. Engine artifacts cannot grant file/network/process/database/FFI capabilities.
+5. Prompts and question answers cannot inject executable engine syntax.
+6. Projected StarIntel facts retain identity and provenance.
+7. Session mutable state is isolated.
+8. Output and proof data are bounded and validated.
+9. Secrets do not enter generated packages, fixtures, proofs, or journals.
+10. Hard-cancelled or uncertain external workers are replaced.
+
+* Approved Prototype Retirement
+
+The new symbolic stack SHALL accelerate removal of the old prototype rather than
+extend it.
+
+- No =star-logic= implementation may be added under =prototype/=.
+- No LISA, SWI-Prolog, or N-Prolog production adapter may live under =prototype/=.
+- No new expert-system parser, IR, runtime, proof system, backend selector, or
+  package loader may be prototype-owned.
+- If temporary compiler integration still enters through a prototype API, it
+  SHALL immediately forward into one final owner and contain no duplicate logic.
+- Every implementation slice SHALL migrate its direct tests and fixtures to the
+  final systems and remove superseded prototype tests/implementations.
+- Final logic/expert ASDF systems SHALL load and test in a fresh process without
+  =starlang-prototype=.
+- Nix feature sets SHALL compose final systems directly.
+- Product docs/examples SHALL teach final systems once available, not prototype
+  package-qualified names.
+- The repository-wide completion audit SHALL inspect source, tests, fixtures,
+  ASDF, Nix, CLI, scripts, workflows, examples, and docs for prototype
+  dependencies.
+- When the overall StarLang port is proven complete, =prototype/= SHALL be
+  deleted rather than retained as a fallback implementation.
+
+* Implementation Order
+
+1. portable logic protocol/types/capabilities/conditions and fake adapter;
+2. logic operation IR and deterministic backend policy;
+3. SWI adapter and relational fixtures;
+4. N-Prolog adapter and independent portable-subset fixtures;
+5. LISA adapter and production-rule fixtures;
+6. expert parser/core IR and source-aware diagnostics;
+7. ExpertSessionActor, question port, journal, budgets, replay;
+8. backend-specific expert lowering;
+9. normalized proofs and boolean explanation fixtures;
+10. gated uncertainty profiles only after exact semantics exist;
+11. benchmark-informed =auto= routing only after functional conformance;
+12. remove each superseded prototype implementation as its final owner becomes authoritative.
+
+* Acceptance Gates
+
+Portable logic is complete when final systems load independently, fake selection
+is deterministic, incompatible pins fail before execution, canonical records are
+stable, and no final logic system loads =starlang-prototype=.
+
+Real backend support is complete when LISA, SWI-Prolog, and N-Prolog each pass
+their backend-specific design gates, report exact build identity, support
+explicit pinning, normalize failures, prove cancellation behavior, and replay
+deterministically for their canonical fixtures.
+
+Expert systems are complete when the closed reader parses the approved surface,
+expert sugar lowers fully into closed IR, typed facts/rules/goals/questions work,
+required proofs normalize correctly, source facts remain immutable, unsupported
+backend/profile combinations fail before execution, and tutorials require no
+native engine syntax.
+
+This design's implementation is complete only when every approved behavior has a
+final package owner and there is no duplicated prototype implementation.
+Repository-wide StarLang completion additionally requires the dedicated
+proof-and-delete issue to verify whether =prototype/= can be removed and, if so,
+remove it.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-13 | Define implementation-ready package layout, compiler phases, IR, backend adapters, ExpertSessionActor, question/proof/budget contracts, Nix/CI strategy, conformance matrix, and dependency-ordered implementation slices | ChatGPT agent | STAR-LANG-RESEARCH-022, STAR-LANG-RESEARCH-023, current StarLang package-extraction architecture |
+| 2026-08-29 | Port to current Org governance format, record approval of all three backends and the expert architecture, and make prototype retirement mandatory throughout implementation | ChatGPT agent | Operator approval in conversation 2026-08-29; STAR-LANG-009; source diff |
+| 2026-08-13 | Initial selectable-backend and expert-system architecture | ChatGPT agent | STAR-LANG-RESEARCH-021, 022, 023 and repository architecture audit |
 
 * Footnotes and Glossary
 
-- *Adapter* — Final ASDF system that translates portable =star-logic= operations into one native inference engine and normalizes results back into portable records.
-- *Backend pin* — Explicit selection of one concrete engine runtime in source/deployment policy; still subject to semantic validation.
-- *ExpertSessionActor* — Single actor owner of one interactive expert session, including ordered fact changes, goals, questions, conclusions, budget, and journal state.
-- *Question port* — Typed runtime effect interface for requesting missing expert information from an external participant without coupling the inference backend to UI/LLM/operator I/O.
-- *Selection evidence* — Machine-readable record showing candidates, rejection reasons, selected backend, and versioned policy used during materialization.
-- *Engine artifact* — Trusted compiler-generated LISA/Prolog package consumed by an adapter; not direct StarLang source.
-- *One-authority migration* — STAR-LANG-006 invariant that a migrated behavior has one implementation owner, with prototype code reduced to compatibility forwarding rather than duplicated logic.
+- *Backend pin* — Explicit request for one inference backend; still subject to capability/profile validation.
+- *Semantic profile* — Versioned statement of observable inference semantics rather than a backend marketing label.
+- *ExpertSessionActor* — Actor that owns one durable expert session and coordinates its backend, facts, questions, proofs, budgets, and replay.
+- *Named operation* — Compiler/package-declared logic entrypoint with a fixed typed contract; never an arbitrary native goal.
+- *Selection evidence* — Machine-readable explanation of backend candidates, rejection reasons, and final deterministic selection.
+- *Engine artifact* — Trusted compiler-generated LISA/Prolog package consumed by an adapter.
+- *Prototype retirement* — Migration discipline that removes =prototype/= ownership as final systems become authoritative and deletes the tree once the complete port is proven.

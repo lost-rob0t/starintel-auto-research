@@ -1,0 +1,168 @@
+:PROPERTIES:
+:ID:       starintel-star-research-041-concrete-adapter-extraction
+:END:
+#+title: STAR-RESEARCH-041 Concrete Adapter Extraction Behind Typed Runtime Ports
+#+description: Source-backed research for extracting StarIntel HTTP, CouchDB, RabbitMQ, Valkey, and scheduling effects behind the explicit runtime and typed-port boundary without a big-bang rewrite.
+#+status: READY_FOR_DESIGN
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+approval_evidence: lifecycle readiness is machine-authorized by active ARDR policy; human conclusion and implementation authorization remain pending
+#+approval_base_commit: 641b98d5cdad9d218c7974bb1c0f445ff9d26838
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+filetags: :starintel:research:star-server:common-lisp:adapters:ports:p1:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| ARDR research readiness | Active ARDR policy | APPROVED | Current source-backed evidence is sufficient for a bounded design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/195][Auto-Research #195]] |
+| Research conclusion | StarIntel operator | PENDING | Explicit human review of this research conclusion | [[https://github.com/lost-rob0t/starintel-server/issues/41][starintel-server #41]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of the resulting adapter design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/196][Auto-Research #196]] |
+| Implementation authorization | StarIntel operator | PENDING | Explicit authorization for an exact implementation slice | [[https://github.com/lost-rob0t/starintel-server/issues/41][starintel-server #41]] |
+
+* Issue Authority and Selection
+
+- Owning seed: [[https://github.com/lost-rob0t/starintel-server/issues/41][starintel-server #41]].
+- Research transaction: [[https://github.com/lost-rob0t/starintel-auto-research/issues/195][Auto-Research #195]].
+- Prerequisite library boundary: [[id:starintel-star-research-039-embeddable-server-library-boundary][STAR-RESEARCH-039]].
+- Prerequisite explicit runtime/ports: [[id:starintel-star-research-040-explicit-library-api-runtime-ports][STAR-RESEARCH-040]].
+- Project index: [[id:starintel-fourth-generation-index-000][STAR-INDEX-000]].
+
+The complete relevant open Auto-Research and StarIntel Server issue backlogs were enumerated before selection, together with materially related runtime/control-plane work. Current P0 #32-#38 already has canonical research/design and remains implementation-gated. P1 #39 and #40 received canonical research/design in the preceding dependency order. #41 is therefore the next unresolved issue-backed architecture gap required before later component/manifest/observability work can cleanly depend on explicit application services.
+
+* Current Source Baseline
+
+- Repository: =lost-rob0t/starintel-server=.
+- Branch: =master=.
+- Inspected commit: =8fb297d146e7332fae7e38170b5b49d49530ac53=.
+- No repository-root =AGENTS.md= exists at that commit; Auto-Research =AGENTS.md= governs these durable artifacts.
+- Primary source inspected: =source/starintel-gserver.asd=, =source/package.lisp=, =source/authorization/services.lisp=, =source/target-repository.lisp=, and =source/leases/protocol.lisp=.
+
+* Verified Findings
+
+** The concrete dependency closure is still monolithic
+
+=:starintel-gserver= is one serial ASDF system and directly depends on =cl-couch=, =cl-rabbit=, =sento=, =dexador=, =clack=, Hunchentoot, =ningle=, =lparallel=, sockets/TLS, JSON libraries, and other service/runtime libraries. HTTP routes, database code, actors, leases, lifecycle, admin, and CLI composition all live in the same system.
+
+This means package naming alone cannot prove an application/domain layer is independent from concrete adapters. #39 must establish the loadable core boundary and #40 must establish explicit typed application ports before #41 can make dependency closure itself enforce the separation.
+
+** The code already contains useful injection seams
+
+Current authorization services accept explicit =fetch-fn=, =delete-fn=, =update-fn=, and =publish-fn= arguments for several document operations. Current target repository query code similarly accepts an overrideable =query-fn=, although its default names the concrete CouchDB query function.
+
+These are useful transitional seams: application policy can already be tested separately from some concrete I/O. They should be converted into stable typed ports owned by the explicit runtime rather than replaced with another parallel abstraction.
+
+** Valkey lease work is already substantially adapter-shaped
+
+The lease subsystem defines a backend-neutral =lease-store= class with generic acquire, renew, release, get, list, revoke, health, and close operations. Memory and Valkey implementations sit behind that protocol.
+
+Therefore #41 must not redesign lease semantics or invent a second generic KV port. The Valkey extraction task is primarily package/dependency ownership and composition: keep the existing lease protocol below application service policy, keep Valkey scripts/serialization concrete, and wire the concrete store through the #40 runtime port bundle.
+
+** CouchDB remains a broad concrete package surface
+
+=:star.databases.couchdb= directly uses =cl-couch=, =star=, and =lparallel= and exports a large mixture of connection/pool state, view/query helpers, search helpers, outbox persistence, quarantine operations, target acceptance, and domain-named projections.
+
+A single giant generic “database adapter” would preserve this coupling under a different name. Application ports should be capability-specific—repository/query/outbox/etc.—while one concrete CouchDB implementation may implement several ports.
+
+** The root package is still a process/service package
+
+=:starintel-gserver= exports Rabbit, HTTP, CouchDB, authentication, worker, and other process configuration specials. That is compatible with a service composition root but not with a pure application contract.
+
+#41 should therefore move dependency direction, not merely rename packages: pure/application code depends on contracts; concrete adapters depend on those contracts; =star.runtime= or the service composition root constructs and owns adapters.
+
+* Research Decision
+
+Use incremental vertical extraction behind #40 ports. Preserve working concrete implementations and existing protocol seams. Do not perform a file-layout-first rewrite.
+
+Canonical dependency direction:
+
+#+begin_example
+core contracts / typed values
+          ^
+          |
+application operations + service-call-context
+          ^
+          |
+        ports
+          ^
+          |
+ HTTP | CouchDB | Rabbit | Valkey | scheduler concrete adapters
+          ^
+          |
+ star.runtime / service composition root owns instances + lifecycle
+#+end_example
+
+Adapters may share pure serialization/value helpers where those helpers belong in core, but one concrete adapter must not call another adapter to perform application orchestration.
+
+* Concrete Requirements
+
+1. Preserve #37 =star.runtime= as lifecycle/composition authority.
+2. Preserve #40 explicit runtime + =service-call-context= + typed request/result semantics.
+3. Preserve existing =lease-store= protocol; Valkey remains one implementation.
+4. Convert existing ad-hoc injected functions into stable narrow protocols as their vertical operation migrates.
+5. HTTP owns transport parsing/authentication projection/status/header/serialization only after the common strict-input boundary; it delegates application decisions.
+6. Rabbit owns broker connection/channel ownership, envelope transport, settlement, retry/DLQ mechanics, and broker-facing backpressure; it delegates application decisions.
+7. CouchDB owns pool/session/request/view/revision/storage mechanics. Domain/application code sees capability-specific persistence/query/outbox ports, not raw clients/pools.
+8. Scheduler/timer adapter owns timer registration/cancellation and runtime scheduling effects. Application policy computes what/when in typed values.
+9. Concrete adapters receive absolute deadlines/cancellation/idempotency data from the application call where relevant; adapters do not invent retry safety.
+10. Application/core package dependency closure must exclude concrete network/database/broker/runtime libraries.
+11. Adapter errors normalize into typed port outcomes/conditions before transport projection; application code must not parse Dexador/cl-couch/cl-rabbit error strings.
+12. No new StarLang syntax is required for this host-runtime refactor.
+
+* Dependency-Ordered Extraction
+
+The safest order is based on existing seams, not adapter prestige:
+
+1. *Contract harness*: establish one reusable port conformance test pattern after #39/#40 land.
+2. *CouchDB narrow vertical*: migrate one read-only document/query operation using an existing injected-function seam into an explicit repository port and concrete CouchDB adapter.
+3. *HTTP projection*: route one existing endpoint through that same application operation; HTTP sees only typed result -> HTTP response mapping.
+4. *Rabbit projection*: where the same logical operation has broker ingress/egress, route it through the same application operation rather than duplicating policy.
+5. *Valkey composition*: wire existing =lease-store= through runtime ports; do not rewrite protocol/scripts.
+6. *Scheduler*: extract timer effect only when a migrated target/recovery operation requires it.
+7. Expand vertically operation-by-operation; avoid a repository-wide flag day.
+
+* RED-First Target
+
+The first implementation slice depends on realization of #39 core and #40 explicit ports.
+
+Use a single read-only operation and two adapters:
+
+- fake repository adapter returns fixture document A;
+- concrete CouchDB adapter satisfies the same repository protocol/contract tests;
+- application operation sees only the repository port;
+- HTTP adapter invokes the application operation and projects its typed result.
+
+Mandatory RED on untouched post-#39/#40 baseline: the selected application operation still requires a concrete/default CouchDB function or concrete package dependency. GREEN requires the application package/test to run with only the fake port and without loading =cl-couch=, while the concrete CouchDB conformance suite independently proves equivalent success/not-found/timeout/error normalization.
+
+This RED must fail because the adapter boundary is missing, not because CouchDB is unavailable.
+
+* Adversarial Findings
+
+- Reject a big-bang five-adapter package move: it creates broad diffs before dependency direction is proven.
+- Reject a single =backend= or =services= object with dozens of callbacks: that is a service locator and hides dependencies.
+- Reject wrapping current globals in accessor functions without explicit runtime ownership: renamed ambient state is still ambient state.
+- Reject adapter-to-adapter orchestration such as HTTP calling CouchDB directly or Rabbit calling HTTP helpers; application services own orchestration.
+- Reject rewriting the existing lease-store algebra merely for uniform naming.
+- Reject retries inside adapters when mutation outcome is ambiguous and no idempotency contract authorizes replay.
+- Reject leaking raw connection/channel/client/actor/timer handles through public ports.
+
+* Unresolved Questions
+
+- The exact first CouchDB operation should be chosen at implementation time from the smallest operation already represented by #40 after that slice lands; research does not freeze an API that does not yet exist.
+- Whether query and persistence are one protocol or separate protocols should follow actual call cohesion in the first two migrated verticals, not an abstract repository pattern.
+- Scheduler extraction may need coordination with #37 component lifecycle and #33 recovery classifier; do not duplicate either authority.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created source-backed P1 research from server #41 after complete backlog reconciliation and current source audit. | GPT-5.6 Sol | server master =8fb297d...=; Auto-Research #195; inspected ASDF/packages/services/lease protocol |
+
+* Footnotes and Glossary
+
+- *Adapter* :: Concrete implementation that translates a typed StarIntel port into an external/runtime mechanism such as CouchDB, RabbitMQ, HTTP, Valkey, or a timer facility.
+- *Port* :: Narrow application-facing protocol describing required capability without exposing the concrete mechanism.
+- *Composition root* :: Runtime/service code that constructs concrete adapters and supplies them to application services; it owns wiring rather than domain policy.
+- *Vertical extraction* :: Migrating one complete operation from caller through application contract to a concrete adapter before broadening to more operations.

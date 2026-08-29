@@ -1,0 +1,319 @@
+:PROPERTIES:
+:ID:       d0391f98-dc3f-4805-94df-dd23e9b6d945
+:END:
+#+title: STAR-SERVER-045 Target-Lease Recovery and Race Proof Harness
+#+description: Design-ready architecture for deterministic lease race schedules, crash recovery classification, ambiguous-outcome resolution, and cross-layer stale-writer fencing proofs.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+approval_evidence: design readiness is not implementation approval
+#+approval_base_commit: 17bbc8528ee89e1891c9c1ea85e3ee936591b3ff
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+filetags: :starintel:design:star-server:leases:fencing:recovery:races:valkey:p0:org-roam:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Active ARDR policy | APPROVED | Source-backed research sufficient for bounded design | [[id:7f4928c1-3c52-4a87-bf82-2dc889635a33][STAR-RESEARCH-033]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of this exact recovery/race architecture | This document |
+| Implementation authorization | StarIntel operator | PENDING | Explicit authorization for an exact bounded implementation slice | [[https://github.com/lost-rob0t/starintel-server/issues/33][server #33]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/full-gate/exact-head evidence | |
+
+* Canonical Inputs
+
+- [[id:7f4928c1-3c52-4a87-bf82-2dc889635a33][STAR-RESEARCH-033 Target-Lease Recovery and Race Matrix]]
+- [[id:56b95ef4-b058-44e3-8a65-a038b7c46140][STAR-SERVER-032 Authenticated Target-Lease HTTP and Execution Enforcement]]
+- [[id:224359ad-5d27-472d-b3d7-b3e542bb41df][STAR-SERVER-029 Distributed Target Lease and Fencing Semantics]]
+- [[id:bc8066ec-d7a3-4d6a-afff-353d444e725a][STAR-SERVER-030 Backend-Neutral KV Lease Store Protocol]]
+- [[file:../../indexes/star-server/STAR-LEASE-INDEX-030-backend-neutral-kv-leases.org][STAR-LEASE-INDEX-030 Target Lease Stack]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/33][starintel-server #33]]
+
+* Decision
+
+Issue #33 is realized as a layered recovery/race proof program around the existing =star.leases= protocol and Valkey implementation. It MUST NOT add a second lease state machine, second fencing counter, or an application-local ownership cache treated as authority.
+
+The architecture has four test/proof layers:
+
+#+begin_example
+Layer 1  deterministic lease/recovery schedule model
+          |
+Layer 2  existing backend-neutral lease contract + missing recovery cases
+          |
+Layer 3  real Valkey TTL/restart/concurrency/fault evidence
+          |
+Layer 4  target execution + real fenced authoritative-effect acceptance
+#+end_example
+
+The layers share one scenario vocabulary and expected typed outcomes. A scenario only counts as proven for a layer when it exercises that layer's production boundary.
+
+* Recovery Authority Model
+
+Introduce a pure recovery-classification function/service boundary. Its inputs are data, not live actor objects:
+
+- canonical lease identity;
+- persisted execution identity/generation;
+- persisted lease ID/fencing token when present;
+- current typed lease-store observation;
+- original mutation request ID when an operation outcome is ambiguous;
+- recovery cause such as process restart, actor restart, backend reconnect, or operator recovery.
+
+Its output is one closed decision:
+
+- =resume-current= — exact current authority still active and policy permits continuation;
+- =reacquire-required= — no current authority; old attempt remains non-authoritative;
+- =stale-generation= — a different/newer authority exists;
+- =resolve-unknown-outcome= — original mutating operation must be resolved by request ID first;
+- =backend-unavailable= — authority cannot be established; authoritative work remains blocked;
+- =manual-fencing-floor-reconciliation= — backend restoration cannot prove a safe monotonic fencing floor.
+
+A recovery decision never creates authority. Only the existing acquisition path can create a new lease/fencing generation.
+
+* Execution Generation Rule
+
+A new successful acquisition after loss/restart creates a new execution authority. Do not mutate an old persisted execution record so that it appears to have always owned the new fence.
+
+Required relationship:
+
+#+begin_example
+execution attempt A -> lease/fence N -> terminal/lost/stale
+execution attempt B -> lease/fence N+1 -> current
+#+end_example
+
+Historical execution identity remains useful for audit/provenance, but N and N+1 are separate authorities.
+
+* Ambiguous-Outcome Resolver
+
+For mutating acquire/renew/release/revoke operations, a transport/backend timeout after possible submission yields =outcome-unknown=. Recovery MUST first replay/resolve the original request identity and digest.
+
+The resolver contract is:
+
+1. retain original operation kind, canonical identity, request ID, and request digest;
+2. query/replay through the existing idempotent operation boundary;
+3. if the original committed, return its original typed outcome;
+4. if the backend proves it did not commit, the caller may proceed according to normal state;
+5. if still ambiguous/unavailable, remain blocked and retry only within a bounded deadline/policy;
+6. never allocate a new generation merely because the original response was lost.
+
+* Deterministic Scenario Harness
+
+The first implementation artifact is a deterministic schedule harness using the in-memory lease backend or a narrow controllable test backend. It provides explicit barriers/events rather than correctness-by-sleep:
+
+- =before-acquire-linearization=
+- =after-acquire-linearization-before-response=
+- =before-renew-linearization=
+- =after-renew-linearization=
+- =before-release/revoke-linearization=
+- =after-lease-loss-before-effect=
+- =before-fenced-effect-linearization=
+- =after-fenced-effect-linearization-before-response=
+
+The harness controls actor/process simulation and clock advancement without replacing the production lease protocol under assertion. It may fake network delivery, process death, and time source for the memory backend; it MUST NOT fake the fencing decision when the test claims production fenced-effect evidence.
+
+* Scenario Matrix
+
+Every scenario has a stable identifier so the same semantic case can be projected into deterministic, real-Valkey, and cross-layer suites.
+
+| ID | Scenario | Minimum proof layer |
+|----+----------+---------------------|
+| LR-01 | simultaneous acquire A/B | deterministic + real Valkey |
+| LR-02 | renew just before expiry | deterministic + real Valkey |
+| LR-03 | renew at/after expiry cannot revive | deterministic + real Valkey |
+| LR-04 | release then reacquire, stale old release | backend-neutral + real Valkey |
+| LR-05 | acquire commits, response lost, same request replay | deterministic + real Valkey |
+| LR-06 | process crash after acquire | deterministic recovery + real Valkey TTL |
+| LR-07 | actor crash while lease active | deterministic recovery |
+| LR-08 | backend unavailable during renewal | deterministic fault + adapter integration |
+| LR-09 | A/N stalls, B/N+1 commits, A/N resumes | cross-layer fenced effect |
+| LR-10 | revoke while A/N computes | cross-layer fenced effect |
+| LR-11 | large caller clock skew | real Valkey server-time proof |
+| LR-12 | idempotency same request/same digest | backend-neutral + real Valkey |
+| LR-13 | idempotency same request/different digest | backend-neutral + real Valkey |
+| LR-14 | backend restart retaining fence floor | real Valkey operational fixture |
+| LR-15 | restored/failover state cannot prove fence floor | recovery classifier fail-closed fixture |
+
+* Cross-Layer Fenced-Effect Gate
+
+#32 owns the production integration seam. #33 owns the proof that it survives races.
+
+The mandatory end-state acceptance scenario is:
+
+#+begin_example
+1. A acquires target lease -> fence N.
+2. A receives immutable execution authority N.
+3. A reaches a controlled barrier before authoritative effect.
+4. A loses authority by expiry or revoke.
+5. B acquires -> fence N+1.
+6. B commits one authoritative effect through the production fenced seam.
+7. Release A barrier.
+8. A submits its delayed effect carrying N.
+9. Production fenced seam returns stale/lost authority.
+10. Read authoritative sink: B effect exists; A effect does not; no extra outbox/publication/terminal settlement is accepted for A.
+#+end_example
+
+A local comparison against an in-memory "latest fence" variable is not sufficient evidence. The acceptance seam must be the same boundary product code uses for authoritative target state, persistence/publication, or an explicit commit coordinator.
+
+* Crash and Restart Behavior
+
+** Process crash
+
+Do not rely on graceful release. TTL/fencing provides correctness. After restart, recovery inspects current lease state and classifies the persisted execution before work resumes.
+
+** Actor crash
+
+Supervision may restart an actor, but a new actor instance does not inherit authority just because its logical name matches. Authority inheritance is allowed only if the exact lease/owner/service-instance/fence remains current and the design explicitly preserves that service-instance identity. Otherwise reacquire through normal authority creation.
+
+** Backend reconnect
+
+Reconnect is not lease renewal. After a connectivity gap crossing the renewal safety window, the worker treats authority as lost/unknown until current state is revalidated.
+
+* Revocation Contract
+
+A successful revoke must make subsequent authoritative effects from the revoked authority fail. The existing lease script removes active state; the production fenced-effect seam therefore observes no matching active authority and rejects the old worker.
+
+Do not require the fencing counter itself to increment on revoke. A later acquisition increments it. The safety requirement during the interval between revoke and reacquire is exact active-authority validation at the commit boundary, not merely comparing the worker token with a historical numeric high-water mark.
+
+* Fencing-Floor Recovery
+
+The durable fence key is a separate long-lived authority component. Normal TTL expiry/release/revoke does not reset it.
+
+For backup restore, failover, or disaster recovery where the backend could regress that counter, startup/acquisition needs a fencing-floor guard supplied by deployment/recovery tooling:
+
+- =known-safe-floor(identity)= greatest generation known accepted downstream, when such evidence exists;
+- backend next token MUST be greater than that floor;
+- if neither backend state nor an external recovery record can establish a safe floor after a potentially regressive restore, acquisitions for affected identities remain blocked.
+
+Do not solve this by adding a second everyday fencing counter to StarIntel application code. A recovery floor is disaster-recovery evidence, not competing runtime authority.
+
+* Observability
+
+Emit typed audit/metric events at semantic transitions, without credentials or arbitrary payloads:
+
+- recovery classified;
+- outcome-unknown resolution started/resolved/still-unknown;
+- lease lost by expiry/revoke/rejection;
+- reacquisition created a new generation;
+- stale authoritative effect rejected;
+- fencing-floor reconciliation required/completed.
+
+Correlation should include safe target/lock identity projection, execution ID, lease ID where disclosure policy allows, fence generation, request ID, and trace ID.
+
+* Proposed Implementation Slices
+
+Every slice remains =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — pure recovery classifier + deterministic race schedule fixtures (P0)
+
+No network/process orchestration required.
+
+Mandatory RED-first target: construct persisted execution A carrying lease/fence N and a current observed lease for the same identity carrying N+1. On untouched current =master= there is no typed recovery classifier. The new test must fail for that missing behavior, then GREEN must return =stale-generation= and prove no acquire/renew/effect callback is invoked.
+
+Sibling REDs:
+
+- unknown mutation outcome -> =resolve-unknown-outcome=, not fresh acquisition;
+- no current lease -> =reacquire-required= without mutating old execution authority;
+- backend unavailable -> fail-closed decision;
+- exact current authority -> =resume-current= only when explicit policy permits.
+
+** Slice 2 — shared scenario harness over backend-neutral lease contract
+
+Add stable LR-* scenario identifiers and deterministic barriers. Reuse existing memory-store contract rather than writing a second fake lease algebra.
+
+** Slice 3 — real-Valkey expiry/concurrency/ambiguous-response cases
+
+Extend existing =t/valkey-lease-integration-test.lisp= with LR-01/02/03/05/11 evidence and restart cases that the existing harness can control. Preserve server-authoritative =TIME= semantics.
+
+** Slice 4 — #32 production fenced-effect race
+
+After #32 exposes one real fenced side-effect seam, implement LR-09 and LR-10. This is the mandatory stale-writer proof.
+
+** Slice 5 — operational restart/fencing-floor evidence
+
+Add controlled Valkey restart/restore fixtures and fail-closed fencing-floor reconciliation. Do not claim asynchronous failover safety beyond the tested durability configuration.
+
+* Adversarial Review
+
+** Reject: rewrite the lease store for #33**
+
+Current protocol/scripts already implement the required atomic lease operations. #33 tests/recovery must consume them.
+
+** Reject: actor liveness means lease ownership**
+
+A healthy or restarted actor can hold stale authority after expiry/reacquisition.
+
+** Reject: release on every crash as the safety mechanism**
+
+Crashes can prevent release. TTL plus fencing must remain correct without cleanup.
+
+** Reject: client clock decides expiry**
+
+Valkey =TIME= is already the authority. Client time is scheduling/diagnostic input only.
+
+** Reject: retry unknown acquire with a new request ID**
+
+The first acquire may have committed. New logical retry can allocate an unnecessary second generation and obscures what happened.
+
+** Reject: prove fencing only at renew/release**
+
+The dangerous operation is a stale authoritative side effect after the worker has already lost authority.
+
+** Reject: increment the fence on revoke solely to make tests easier**
+
+Exact active-authority validation already invalidates the worker immediately. The next acquisition supplies the higher generation.
+
+** Reject: pretend ordinary Valkey failover is linearizable**
+
+The design records and tests the actual durability configuration. Ambiguous/regressed restore state fails closed.
+
+** Reject: sleep-heavy deterministic suite**
+
+Use explicit barriers and controllable clocks for semantic races. Wall-clock waits belong only where real Valkey expiry behavior itself is under test.
+
+** Reject: implementation approval inferred from P0 status or completed design**
+
+Lifecycle readiness remains separate from operator authorization.
+
+* Acceptance Criteria
+
+- one canonical LR-* matrix exists and maps each scenario to required proof layers;
+- recovery never infers authority from actor/process/persisted-running state;
+- unknown mutation outcomes resolve the original idempotency identity before new logical work;
+- exact stale release/renew cannot affect a successor;
+- client clock skew cannot extend authority;
+- revocation blocks post-revoke authoritative effects before any successor lease exists;
+- a real production fenced-effect test proves A/N stale after B/N+1;
+- restart/failover tests never reuse a fencing generation already accepted downstream;
+- uncertain fencing floor fails closed rather than silently resetting;
+- deterministic race tests use barriers/controlled time, not arbitrary sleeps;
+- existing backend-neutral and Valkey lease tests remain authoritative and are extended rather than duplicated;
+- no new StarLang syntax, lease implementation, Python supervisor, or external coordinator is introduced;
+- implementation authorization remains operator-only.
+
+* Decision / Handoff State
+
+Design lifecycle: =DESIGN_READY_FOR_OPERATOR_REVIEW=.
+
+Owning implementation handoff: [[https://github.com/lost-rob0t/starintel-server/issues/33][starintel-server #33]].
+
+Implementation authorization: =PENDING / AWAITING_OPERATOR_APPROVAL=.
+
+* Unresolved Questions
+
+- Exact #32 production fenced-effect seam selected for Slice 4.
+- Exact StarIntel deployment durability settings required to make LR-14 meaningful.
+- Whether target recovery already persists enough authority metadata to classify every case without schema extension; implementation preflight must inspect the exact persisted target/job records before changing them.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created design/adversarial review from STAR-RESEARCH-033 and current server lease implementation. | ARDR Auto-Research | server #33; server master =8fb297d...=; current lease protocol/scripts/tests |
+
+* Footnotes and Glossary
+
+- *proof layer* :: The production boundary a scenario actually exercises; a pure model test does not count as real-Valkey or fenced-effect evidence.
+- *deterministic barrier* :: A test-controlled synchronization point used to force an exact race ordering without depending on scheduler timing.
+- *recovery classifier* :: Pure decision boundary that compares persisted execution state with current typed lease authority; it never creates authority.
+- *fencing-floor reconciliation* :: Disaster-recovery process proving new fencing generations exceed generations already accepted by authoritative sinks.

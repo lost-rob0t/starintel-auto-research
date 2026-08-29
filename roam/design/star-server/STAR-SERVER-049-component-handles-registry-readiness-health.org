@@ -1,0 +1,256 @@
+:PROPERTIES:
+:ID:       starintel-star-server-049-component-handles-registry-readiness-health
+:END:
+#+title: STAR-SERVER-049 Runtime Component Handles, Registry, Readiness, and Health
+#+description: Design for opaque generation-bearing component handles and health projection over the existing star.runtime lifecycle component registry.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:star-server:design:runtime:components:health:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Explicit operator research decision | Pending |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator design decision | Pending |
+| Security | StarIntel operator or delegated reviewer | PENDING | Review stale-handle/auth/topology boundaries | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main Pages workflow succeeds | Pending |
+
+=DESIGN_READY_FOR_OPERATOR_REVIEW= is lifecycle state only. Implementation remains =PENDING / AWAITING_OPERATOR_APPROVAL=.
+
+* Design goal
+
+Implement server issue #42 as a projection over the existing =star.runtime= lifecycle/component authority, not as another component manager.
+
+The design gives callers an opaque generation-bearing handle, typed capability lookup, stale-reference fencing, and explicit component health/readiness while keeping raw Sento/Rabbit/CouchDB/Clack/thread resources private to runtime adapters.
+
+* Dependencies and ownership
+
+- #37 / =STAR-SERVER-045= managed lifecycle design owns component registration, dependency graph, start/stop/reconnect and resource ownership.
+- #34/#35 own thread and Sento execution-lane capacity.
+- #36 owns mailbox/admission policy.
+- #40 owns public application operations and typed caller context/results.
+- #41 owns concrete adapter extraction.
+- This design owns only component identity/incarnation handles, lookup/capability indexes, stale fencing, and health projection.
+
+* Data model
+
+#+begin_example
+ComponentHandle {
+  runtimeId
+  componentId
+  generation
+}
+
+ComponentSnapshot {
+  componentId
+  generation
+  lifecycleState
+  required
+  capabilities
+  acceptedTypes
+  ingressKind
+  dependencies
+  readiness
+  healthReasons
+  pressure?
+}
+#+end_example
+
+Handles are immutable values. Snapshots are bounded data projections. Neither contains raw actor refs, sockets, database clients, channels, thread objects, credentials, or mutable host objects.
+
+* Registry contract
+
+Conceptual Common Lisp protocol:
+
+#+begin_example
+component-handle(runtime, component-id)
+  -> handle | component-unavailable
+
+component-snapshot(runtime, handle)
+  -> snapshot | stale-component-handle | component-unavailable
+
+components-for-capability(runtime, capability, service-call-context)
+  -> bounded handles
+
+resolve-component-ingress(runtime, handle, service-call-context)
+  -> private typed ingress | stale-component-handle | forbidden | unavailable
+#+end_example
+
+The last operation is runtime-internal/application-service-facing. Ordinary public callers do not receive the private ingress object.
+
+* Generation algorithm
+
+1. Registration establishes stable =componentId= but no usable public incarnation until successful realization.
+2. Successful realization installs one current generation and ingress/resource set atomically.
+3. Replacement/restart installs =generation+1= only after the new incarnation is accepted by lifecycle ownership.
+4. The previous generation is fenced before replacement becomes current.
+5. A lookup of a stale handle returns =stale-component-handle= and never transparently upgrades.
+6. Stop fences the current generation.
+7. #37 reconnect-attempt generations remain internal attempt fencing; they do not necessarily change public generation unless a new public component incarnation is installed.
+
+Cross-process generation persistence is explicitly not promised in v1 unless a durable incarnation source is later introduced.
+
+* Capability index
+
+The runtime maintains a derived index from declared registered component metadata:
+
+#+begin_example
+capability -> ordered component IDs
+message type -> ordered component IDs
+#+end_example
+
+The index is rebuilt/updated only from validated component registrations/incarnations. Emitted documents or untrusted messages cannot register executable capabilities.
+
+Discovery filters by caller-visible capability policy but is not sufficient authorization. The owning application/domain operation performs final authorization before ingress invocation.
+
+* Ingress abstraction
+
+Closed ingress kinds:
+
+- =local-actor=
+- =local-router=
+- =remote-route=
+- =application-service=
+- =control-only=
+
+Each private ingress adapter supports a common typed send/call boundary with correlation, deadline, cancellation and caller context where applicable. Transport-specific settlement remains inside the adapter.
+
+A handle does not change when a caller chooses local versus remote; it identifies the component incarnation. A replacement that changes incarnation increments generation.
+
+* Health/readiness projection
+
+Each #37 component adapter supplies explicit health/readiness. This design standardizes the projection:
+
+#+begin_example
+HealthState = healthy | degraded | unavailable | failed
+ReadinessState = ready | unready
+HealthReason = closed typed reason code + bounded safe metadata
+#+end_example
+
+Runtime readiness requires:
+
+- runtime state =running=;
+- every required component current generation is ready;
+- required dependency chain is ready;
+- required #34/#35 accounting invariants are valid when integrated;
+- no required component is failed/reconnecting/unavailable.
+
+Optional component failure may yield runtime =degraded= without making the whole runtime unready only when its registration explicitly says optional.
+
+Pressure snapshots may include bounded queue depth/capacity, Sento used/free lanes, or adapter-specific bounded status. They are diagnostic projections from #35/#36, not admission decisions.
+
+* Public vs operator discovery
+
+Public capability discovery may expose feature availability and authority requirements but must not expose:
+
+- private service hostnames/ports;
+- Rabbit exchange/queue credentials or connection details;
+- CouchDB/Valkey endpoints;
+- raw component ingress IDs when they reveal topology unnecessarily;
+- credential reference values;
+- actor object addresses or thread identities.
+
+Authenticated operator diagnostics may expose stable component IDs, generations, dependency states, safe pressure, and typed failure reasons.
+
+* Migration
+
+1. Add pure handle/snapshot/generation values and fake registry tests over the #37 component abstraction.
+2. Add stale fencing and capability indexes.
+3. Make readiness consume explicit component snapshots rather than actor/kernel/HTTP non-NIL checks.
+4. Migrate one local actor lookup to opaque handle resolution.
+5. Migrate one Rabbit/remote ingress to the same handle contract.
+6. Remove raw actor-reference maps only after every caller is migrated.
+
+Compatibility wrappers may resolve a component ID to the current handle at their outer boundary. They must not cache raw actor refs or silently upgrade a previously supplied stale handle.
+
+* Dependency-ordered proposed implementation slices
+
+All are =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — pure handle + generation registry
+
+No network/actors.
+
+RED:
+
+#+begin_example
+install search/N
+handle = lookup(search)
+replace search -> N+1
+inspect(handle N)
+=> stale-component-handle
+#+end_example
+
+Also reject duplicate current generation installation and unknown component ID.
+
+** Slice 2 — stale-fenced private ingress resolution
+
+Fake ingress only. Stale handle invokes zero current ingress calls. Deadline/authorization denial also invokes zero calls.
+
+** Slice 3 — capability index
+
+Derive capability/message-type indexes from validated registration. Prove discovery does not grant authority.
+
+** Slice 4 — readiness migration
+
+Replace actor/kernel/HTTP handle-presence checks with explicit component probes/snapshots. Required unhealthy component makes runtime unready even with a retained non-NIL resource.
+
+** Slice 5 — local actor/router migration
+
+Replace one raw actor destination lookup with handle resolution. Restart creates a new generation and old handle fails cleanly.
+
+** Slice 6 — remote/Rabbit migration
+
+Same handle outcome model for remote ingress. Transport failure remains typed adapter failure and cannot cause transparent stale-handle upgrade.
+
+** Slice 7 — diagnostics/capability projection
+
+Operator snapshot exposes safe generation/dependency/pressure. Public capability output proves private topology absent.
+
+* Mandatory acceptance criteria
+
+- exactly one lifecycle component registry/graph exists under =star.runtime=;
+- every public component reference is opaque and generation-bearing;
+- stale handles never auto-upgrade or invoke replacement ingress;
+- raw actors/routes/resources stay private to adapters/runtime;
+- capability discovery cannot bypass authorization;
+- required explicit health drives readiness;
+- optional degradation remains distinguishable;
+- dependency-aware readiness reuses #37 graph;
+- #35/#36 pressure is diagnostic-only here;
+- local and remote ingress share handle failure semantics;
+- no private topology leaks through public capability discovery;
+- no new StarLang syntax or external supervisor.
+
+* Adversarial review
+
+- *Second registry*: rejected; #37 registry is canonical.
+- *Generic object bag*: rejected; typed snapshots/closed ingress only.
+- *Auto-refresh stale handles*: rejected; hides replacement races.
+- *Generation from reconnect attempt count*: rejected; wrong identity layer.
+- *Raw actor refs in snapshots*: rejected; defeats lifecycle fencing.
+- *Discovery grants call authority*: rejected; confused deputy.
+- *Readiness = object exists*: rejected; current source already has this weak behavior.
+- *Health polling creates its own worker pool*: rejected; health uses existing control capacity/lifecycle.
+- *Public topology dump*: rejected; public feature discovery is a projection.
+- *Component registry owns queue/thread policy*: rejected; capacity authorities remain #34-#36.
+
+* Unresolved questions
+
+- Durable generation across complete process restart remains a later persistence decision. V1 must document process-scoped generation if no durable incarnation source exists.
+- Exact external error-code spelling should align with #40's typed result vocabulary once implemented.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Initial design from STAR-RESEARCH-042; reused #37 lifecycle registry and bounded #42 to handles/generation/health projection. | ARDR Auto-Research | server #42; current runtime source; Auto-Research #182/#183 |
+
+* Footnotes and Glossary
+
+[fn:incarnation] *Component incarnation*: one successfully installed realization of a logical component, identified by its generation.
+
+[fn:stale-handle] *Stale component handle*: handle whose generation is no longer the current installed incarnation; it must fail rather than redirect implicitly.
+
+[fn:capability-discovery] *Capability discovery*: lookup of components that declare a capability. Discovery does not itself authorize invocation.

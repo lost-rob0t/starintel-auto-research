@@ -1,0 +1,308 @@
+:PROPERTIES:
+:ID:       starintel-star-server-047-explicit-library-api-runtime-ports
+:END:
+#+title: STAR-SERVER-047 Explicit Library API, Runtime Context, and Typed Ports
+#+description: Design-ready Common Lisp application-service boundary that evolves the existing StarIntel runtime owner into an explicit embeddable API without duplicating lifecycle authority.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:design:star-server:common-lisp:library:runtime:ports:p1:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Active ARDR policy | APPROVED | Source-backed research sufficient for bounded design | [[id:starintel-star-research-040-explicit-library-api-runtime-ports][STAR-RESEARCH-040]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator review of this exact API/runtime design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/194][Auto-Research #194]] |
+| Implementation authorization | StarIntel operator | PENDING | Explicit operator authorization for an exact bounded slice | [[https://github.com/lost-rob0t/starintel-server/issues/40][starintel-server #40]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED, GREEN, regression, full-gate and exact-head evidence | |
+
+* Canonical Inputs
+
+- [[id:starintel-star-research-040-explicit-library-api-runtime-ports][STAR-RESEARCH-040 Explicit Library API, Runtime Context, and Typed Ports]].
+- [[id:starintel-star-research-039-embeddable-server-library-boundary][STAR-RESEARCH-039 Embeddable Server Library Boundary]].
+- [[id:starintel-star-server-046-embeddable-server-library-boundary][STAR-SERVER-046 Embeddable Server Library Boundary]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/37][starintel-server #37 lifecycle ownership]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/40][starintel-server #40]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/41][starintel-server #41 adapter extraction]].
+- [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000]].
+
+* Decision
+
+Evolve the existing =star.runtime:star-runtime= object into the explicit public composition/application owner. Do not create a second runtime object, second lifecycle framework, or transport-specific service API.
+
+The public architecture has three layers:
+
+#+begin_example
+StarLang capability declarations / embedded CL caller / HTTP / CLI / Rabbit ingress
+                              |
+                              v
+                    typed application operation
+                  (runtime + service-call-context
+                         + typed request)
+                              |
+                              v
+                     runtime-owned typed ports
+                              |
+          +-------------------+-------------------+
+          |                   |                   |
+          v                   v                   v
+     persistence          lease/auth          event/message/etc.
+       adapter              adapters              adapters
+          \                   |                   /
+           +------------------+------------------+
+                              |
+                              v
+                     existing star.runtime
+                  lifecycle/resource ownership
+#+end_example
+
+=star.runtime= remains the lifecycle authority from #37. The new API makes dependencies explicit through that owner; it does not move lifecycle policy into application services.
+
+* Public Runtime Contract
+
+The final public runtime constructor must be side-effect free. Construction stores normalized configuration, typed ports/service objects, and lifecycle metadata but creates no thread, actor system, listener, connection, timer, or kernel.
+
+Target public shape:
+
+#+begin_example
+(make-runtime :config config :ports ports)
+(start-runtime runtime)
+(stop-runtime runtime &key reason deadline)
+(runtime-state runtime)
+(runtime-health runtime)
+#+end_example
+
+The existing private =%make-star-runtime= and current =start-runtime init-file= behavior are migration inputs. The implementation evolves these rather than layering a second =runtime= type beside them.
+
+During migration, compatibility wrappers may resolve =*runtime*= and delegate to the explicit forms. No new public application operation may depend internally on =*runtime*=.
+
+* Caller Context Contract
+
+Reuse =star.auth:service-call-context= for caller authority and bounded call identity already represented there:
+
+- principal ID/type;
+- credential ID;
+- scopes;
+- correlation ID;
+- absolute deadline.
+
+Do not define a duplicate request context.
+
+Keep orthogonal operation data orthogonal:
+
+- idempotency key/request digest belongs to typed mutation requests or a small retry envelope where required;
+- trace/span metadata may extend the existing context or a typed observability carrier when #46/#121 defines the authoritative event contract;
+- cancellation is an explicit runtime/application token only where the operation can observe it.
+
+The design must not force every future cross-cutting concern into one ever-growing plist.
+
+* Port Boundary
+
+Define protocols only when a current application operation requires them. Initial protocol families may cover:
+
+- document contract/validation and canonical codec;
+- document/query persistence repository;
+- authorization policy;
+- lease store/application lease authority;
+- event/message publication;
+- clock and identifier generation;
+- audit/event sink;
+- scheduler where target/application semantics require scheduling.
+
+A port returns typed values/conditions and accepts typed application values. It must never hand callers raw CouchDB connections, Rabbit channels, Sento actors/routers, Clack handles, sockets, pools, or concrete thread objects.
+
+Concrete extraction and package placement of CouchDB/Rabbit/HTTP/Valkey/scheduler implementations remains #41. This design owns the contracts they implement.
+
+* Application Operations
+
+The public operation family grows vertically, not by adding empty API names. Each operation must have:
+
+- explicit runtime;
+- explicit =service-call-context=;
+- typed request value;
+- declared required port/capability set;
+- one absolute deadline path;
+- typed success/failure outcome;
+- explicit idempotency semantics for mutation;
+- zero dependency on HTTP request globals or ambient concrete adapter state.
+
+Target operation families from issue #40 remain:
+
+- document submit/update/get/search;
+- target submit/control where defined;
+- target-lease acquire/renew/release;
+- component/runtime inspection.
+
+The lease operations reuse the service/fencing semantics designed by server #32/#33 rather than creating a second lease API.
+
+* Isolation Contract
+
+The first meaningful multi-instance proof is **application isolation**, not two live network servers.
+
+Two inactive/fake-backed runtimes in one Lisp image must be able to carry different repositories, clocks, authorization policies, publishers and result state. An operation on runtime A must not invoke a port owned by runtime B or consult the compatibility default runtime.
+
+This can become true before Sento actor-system, HTTP listener and other concrete singleton globals are fully instance-owned.
+
+Full simultaneous live-production-runtime support is a later gate. It may only be claimed when concrete resources currently represented by =star.actors:*sys*=, producer/target globals, HTTP server state and similar process globals are migrated to explicit ownership.
+
+* Transport Equivalence
+
+HTTP and embedded Common Lisp are adapters over the same application result, not separate business logic paths.
+
+For a migrated operation:
+
+#+begin_example
+HTTP bytes -> strict parser/schema -> typed request
+                              \
+                               -> application operation -> typed result
+                              /
+embedded CL -----------------
+
+HTTP status/JSON <- projection of typed result
+embedded caller  <- same typed result
+#+end_example
+
+Transport adapters may authenticate/parse/serialize, but they cannot own a different persistence, authorization, lease or idempotency decision.
+
+* Compatibility Boundary
+
+Temporary compatibility is allowed where it is explicit:
+
+- =*runtime*= may identify the process default for legacy wrappers;
+- existing route functions may obtain that default at the outer adapter boundary and immediately call an explicit operation;
+- old public names may forward to new operations during migration.
+
+Rejected compatibility shape: explicit public function accepts a runtime argument but then silently reads =*runtime*=, =*sys*=, =*couchdb-pool*=, =*producer-agent*= or HTTP request specials internally.
+
+* Proposed Implementation Slices
+
+Every slice remains =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — explicit fake-backed runtime/service contract
+
+Dependency: #39 Slice 1 must provide the side-effect-free =starintel-server/core= boundary first.
+
+Define the minimum public runtime constructor/protocol and port bundle needed for one pure operation. Reuse =service-call-context=. No concrete adapter/network/thread creation.
+
+Mandatory RED-first fixture:
+
+1. construct fake-backed runtime A and B with distinct repository/clock/event probes;
+2. invoke the chosen public operation on A;
+3. require only A's probes to observe the call;
+4. require B's probes to remain untouched;
+5. bind =star.runtime:*runtime*= to B or NIL and prove A's explicit call result is unchanged.
+
+Untouched master must fail because no documented public constructor/application operation contract provides this behavior.
+
+** Slice 2 — typed result and call semantics
+
+For the first operation, prove authorization/deadline/idempotency rules at the application layer and stable typed outcomes. No HTTP status codes in the application contract.
+
+REDs include expired absolute deadline before port invocation, authorization denial with zero repository mutation, and same mutation idempotency identity returning/reconciling according to the operation's existing authority.
+
+** Slice 3 — first real vertical application operation
+
+Migrate the smallest current operation whose dependencies can be expressed through the new ports without dragging concrete adapter systems into core. Prefer one operation with a meaningful authorization boundary; exact choice is determined from the implementation dependency audit.
+
+** Slice 4 — HTTP/embedded equivalence
+
+Route one HTTP endpoint through the same application operation. RED proves an embedded typed request and an authenticated HTTP fixture reach the same fake-backed application result, with HTTP performing only parsing/authentication/projection responsibilities.
+
+** Slice 5 — compatibility-default demotion
+
+Convert the corresponding old entry point to a wrapper that resolves =*runtime*= only at its outer boundary and delegates. Static/runtime tests prove the explicit operation does not read compatibility globals.
+
+** Slice 6 — expand operation/port families
+
+Move document/search/target/lease/inspection capabilities one vertical slice at a time. Server #41 extracts their concrete adapters as needed.
+
+** Slice 7 — concrete multi-runtime proof
+
+Only after actor/HTTP/resource globals have explicit instance ownership. Start two non-conflicting production-shaped runtimes with separate fake or ephemeral external resources and prove no state/resource cross-talk. This is not a completion condition for Slice 1.
+
+* RED-First Targets
+
+The first RED is the two fake-backed runtime isolation fixture above.
+
+Additional mandatory regression targets as the design advances:
+
+- explicit runtime A behaves identically regardless of =*runtime*= binding;
+- authorization denial invokes zero downstream mutation ports;
+- expired deadline invokes zero downstream mutation ports;
+- an operation cannot obtain a raw adapter resource through the public result;
+- HTTP and embedded paths share the same typed application outcome;
+- compatibility wrapper calls the same explicit operation rather than a forked implementation;
+- fake port A cannot observe calls made through runtime B;
+- application-only test system loads without concrete CouchDB/Rabbit/HTTP/Sento dependencies once #39's core split exists.
+
+* Adversarial Review
+
+** Reject: invent a second runtime type
+
+Current =star.runtime:star-runtime= already owns lifecycle state/resources. A second public runtime would create ambiguous lifecycle and health authority.
+
+** Reject: rename globals but keep ambient dependency lookup
+
+Putting =*couchdb-pool*= or =*producer-agent*= behind prettier package names does not create dependency injection. The operation must reach dependencies through the explicit runtime-owned port set.
+
+** Reject: one giant generic “adapter” object
+
+It hides dependency requirements and recreates a service locator. Ports remain narrow and capability-specific.
+
+** Reject: duplicate =service-call-context=
+
+Current auth code already has typed principal/scope/correlation/deadline context. A parallel request-context would drift.
+
+** Reject: put HTTP status/JSON into service results
+
+That prevents embedded/Rabbit/CLI reuse and makes HTTP the application authority. Transport projection stays outside the operation.
+
+** Reject: require two live production runtimes in Slice 1
+
+Current concrete globals make that dishonest and would force unrelated Sento/HTTP ownership work into the public-contract proof.
+
+** Reject: let compatibility default remain hidden authority
+
+Legacy wrappers may use =*runtime*=, but explicit operations must not. Otherwise fake-backed isolation is cosmetic.
+
+** Reject: extract every adapter in #40
+
+That duplicates server #41. #40 establishes the ports and application contracts; #41 moves concrete adapter ownership behind them.
+
+** Reject: new StarLang host/runtime controls
+
+StarLang remains the declarative capability/domain layer. Raw Common Lisp runtime construction and adapter objects are host effects and do not become language syntax.
+
+* Acceptance Criteria
+
+- one existing =star.runtime= lifecycle authority remains;
+- public runtime construction is explicit and side-effect-free;
+- application operations take explicit runtime + existing =service-call-context= + typed request;
+- fake-backed runtime A/B operations are isolated from each other and from compatibility =*runtime*=;
+- ports expose typed capabilities rather than raw adapters/resources;
+- application results are transport-neutral and typed;
+- migrated HTTP and embedded calls use the same application operation/result;
+- authorization/deadline/idempotency decisions occur before authoritative effects at the proper application boundary;
+- compatibility globals are outer wrappers only for migrated operations;
+- #41 owns concrete adapter extraction;
+- no claim of simultaneous live multi-runtime support before singleton resources are actually migrated;
+- no new StarLang syntax, actor system, external supervisor, or second lifecycle control plane;
+- implementation remains blocked until an exact slice receives operator authorization.
+
+* Decision / Handoff State
+
+Design lifecycle is =DESIGN_READY_FOR_OPERATOR_REVIEW=. Architecture/design approval is =PENDING=. Implementation authorization is =PENDING / AWAITING_OPERATOR_APPROVAL=.
+
+Owning implementation issue: [[https://github.com/lost-rob0t/starintel-server/issues/40][starintel-server #40]].
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created design and adversarial review for explicit library operations/ports by evolving the existing runtime owner and reusing =service-call-context=. | ARDR worker | [[id:starintel-star-research-040-explicit-library-api-runtime-ports][STAR-RESEARCH-040]]; server master =8fb297d146e7332fae7e38170b5b49d49530ac53=; Auto-Research #194 |
+
+* Footnotes and Glossary
+
+- *Application isolation* :: Independent application/service state and port ownership between explicit runtime instances, without necessarily starting multiple concrete network/actor stacks.
+- *Service locator* :: A broad object or global registry queried dynamically for arbitrary dependencies; rejected here in favor of narrow typed ports.
+- *Transport projection* :: Conversion of a typed application outcome into HTTP JSON/status, CLI output, Rabbit envelope, or another transport representation.
+- *Compatibility wrapper* :: A legacy entry point that may resolve the process-default runtime only at its outer boundary and then delegates to the explicit operation.

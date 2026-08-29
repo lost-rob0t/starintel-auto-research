@@ -1,0 +1,154 @@
+:PROPERTIES:
+:ID:       starintel-star-research-040-explicit-library-api-runtime-ports
+:END:
+#+title: STAR-RESEARCH-040 Explicit Library API, Runtime Context, and Typed Ports
+#+description: Source-backed research for turning the existing StarIntel runtime owner into an explicit embeddable application contract without creating a second lifecycle authority.
+#+status: READY_FOR_DESIGN
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+approval_evidence: lifecycle readiness is machine-authorized by the active ARDR policy; human research conclusion and implementation authorization remain pending
+#+approval_base_commit: e6dbde75fc189e39d308387b0d4ad0e260d4c470
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+filetags: :starintel:research:star-server:common-lisp:library:runtime:ports:p1:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| ARDR research readiness | Active ARDR policy | APPROVED | Current source-backed evidence is sufficient to proceed to a bounded design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/193][Auto-Research #193]] |
+| Research conclusion | StarIntel operator | PENDING | Explicit human review of the research conclusion | [[https://github.com/lost-rob0t/starintel-server/issues/40][starintel-server #40]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of the resulting public API/runtime design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/194][Auto-Research #194]] |
+| Implementation authorization | StarIntel operator | PENDING | Explicit authorization for an exact implementation slice | [[https://github.com/lost-rob0t/starintel-server/issues/40][starintel-server #40]] |
+
+* Issue Authority and Selection
+
+- Owning implementation seed: [[https://github.com/lost-rob0t/starintel-server/issues/40][starintel-server #40]].
+- Research transaction: [[https://github.com/lost-rob0t/starintel-auto-research/issues/193][Auto-Research #193]].
+- Preceding library-boundary research: [[id:starintel-star-research-039-embeddable-server-library-boundary][STAR-RESEARCH-039]].
+- Preceding design: [[id:starintel-star-server-046-embeddable-server-library-boundary][STAR-SERVER-046]].
+- Project index: [[file:../../indexes/star-server/STAR-INDEX-000-fourth-generation.org][STAR-INDEX-000]].
+
+The complete relevant open Auto-Research and StarIntel Server issue backlogs were enumerated before selection, together with the current StarLang backlog and the cl-gserver fork backlog. The remaining P0 server issues already have current research/design authority and are waiting for operator implementation decisions. Server #39, the first P1 library prerequisite, received canonical research/design immediately before this cycle. Server #40 is therefore the next dependency-ordered P1 gap that is both concrete and not already owned by a canonical research/design pair.
+
+* Current Source Baseline
+
+- Repository: =lost-rob0t/starintel-server=.
+- Default branch: =master=.
+- Inspected commit: =8fb297d146e7332fae7e38170b5b49d49530ac53=.
+- Primary source: =source/runtime-lifecycle.lisp= and =source/package.lisp=.
+
+No repository-local =AGENTS.md= exists at the inspected server commit. Auto-Research repository policy therefore governs the research artifact while current Server source/tests remain implementation evidence.
+
+* Verified Findings
+
+** A runtime object already exists
+
+Current =star.runtime= exports =star-runtime=, =*runtime*=, =start-runtime=, =stop-runtime=, liveness/readiness operations, and accessors for owned consumers, actor system, HTTP server, kernel, timestamps, and stop reason.
+
+This invalidates the simplistic reading of issue #40 as “create a runtime object.” The server already has one lifecycle owner. The missing work is to make application operations and dependencies explicit through that owner or a narrowly contained application context rather than continuing to reach process globals.
+
+** Lifecycle ownership and application-service dependencies are currently mixed
+
+The runtime structure retains concrete process resources, but readiness and service behavior still reach global state. Current source includes =star.runtime:*runtime*=, =star.actors:*sys*=, producer/target/timer globals, =star.frontends.http-api:*http-server*=, process configuration specials, and global adapter/store hooks.
+
+Therefore a caller holding a =star-runtime= does not yet have a sufficient self-contained capability to invoke document/search/target/lease application behavior independently of ambient process state.
+
+** The codebase already contains a useful call-context primitive
+
+The current =star.auth= package exports =service-call-context= with principal identity/type, credential ID, scopes, correlation ID, and deadline. It also exports =current-service-call-context= for compatibility with ambient request state.
+
+Requirement: reuse and extend this existing typed context where necessary. Do not invent a second generic request-context type with overlapping principal/deadline/correlation semantics.
+
+Idempotency identity, trace/span identity, and cancellation may need explicit companion fields/contracts, but only where actual operations require them; they should not be hidden in dynamically scoped HTTP state.
+
+** Current package/API surface exposes implementation globals rather than a library contract
+
+The root package exports many mutable process settings and =main=. Persistence packages expose concrete CouchDB helpers and =*couchdb-pool*=; authentication exposes =*credential-store*= and request specials. This is a usable internal codebase, not yet a stable embeddable API boundary.
+
+Requirement: the public library API must expose operations and typed results, not raw actor refs, connection/channel/pool objects, HTTP server handles, or mutable implementation globals.
+
+** Multi-instance support has two distinct meanings
+
+Two independent fake-backed application contexts can and should be possible before two simultaneously live production server stacks are possible. The latter remains blocked by singleton process resources and concrete actor/HTTP globals.
+
+Requirement: use fake-backed isolation as the first architectural proof, but do not claim simultaneous live multi-runtime support until concrete resource ownership is instance-safe.
+
+* Concrete StarIntel Requirements
+
+1. Preserve =star.runtime= as the one lifecycle authority from server #37; #40 must not create another runtime manager.
+2. Build on the side-effect-free =starintel-server/core= boundary designed by #39/#46; public contracts belong below concrete adapters.
+3. Define one explicit runtime/application service boundary through which embedded callers invoke document, search, target, lease, and inspection operations.
+4. Reuse =star.auth:service-call-context= for principal/scopes/correlation/deadline semantics instead of duplicating it.
+5. Every mutating operation receives explicit idempotency identity/fingerprint when the operation contract supports retry; do not infer safe retry from transport behavior.
+6. Every operation returns typed domain/application outcomes that HTTP, CLI, Rabbit, and embedded adapters can project without parsing logs or implementation conditions.
+7. Define narrow protocols only for dependencies that application services actually use: document validation/codec, persistence/query repository, authorization, lease store, message/event publication, clock/ID generation, audit/event sink, and scheduling where required.
+8. Protocols must not expose concrete CouchDB connections, Rabbit channels, actor refs, Sento routers, sockets, or HTTP handles.
+9. Compatibility globals may select a default runtime/context temporarily, but new public operations must accept an explicit runtime/context and must not internally depend on the compatibility default.
+10. Adapter extraction itself remains server #41. #40 defines the ports and proves fake-backed service behavior; it does not mechanically move every concrete adapter.
+11. Full two-live-runtime production support remains a later acceptance gate after singleton actor/HTTP/resource ownership is removed.
+12. No new StarLang syntax is required. StarLang declarations may call capabilities exposed by this library boundary later; Common Lisp owns host lifecycle and adapter realization.
+
+* Proposed Public Shape
+
+The public surface should distinguish three concepts without multiplying authorities:
+
+- =star-runtime=: existing lifecycle/composition owner, extended to retain the application service bundle/ports it owns;
+- =service-call-context=: existing typed caller authority/deadline/correlation context;
+- application operations: stable functions/generics taking an explicit runtime (or an explicitly runtime-owned service object) plus =service-call-context= and typed request values.
+
+Illustrative contract only:
+
+#+begin_example
+(make-runtime :config normalized-config :ports fake-or-concrete-ports)
+(start-runtime runtime)
+(stop-runtime runtime)
+
+(submit-document runtime call-context request)
+(get-document runtime call-context request)
+(search-documents runtime call-context request)
+(submit-target runtime call-context request)
+(acquire-target-lease runtime call-context request)
+#+end_example
+
+The design may preserve compatibility wrappers that use =*runtime*=, but those wrappers are adapters around the explicit form rather than the implementation core.
+
+* RED-First Research Target
+
+The first valid RED should be pure and fake-backed after the #39 core system exists:
+
+1. construct runtime/context A with fake persistence/event ports A;
+2. construct runtime/context B with independent fake ports B;
+3. invoke one public application operation against A with an explicit =service-call-context=;
+4. assert only A's fake port observes the operation and B remains untouched;
+5. assert the same operation does not consult =star.runtime:*runtime*= or concrete CouchDB/Rabbit/actor globals.
+
+Untouched current server must fail because no documented public constructor/application operation boundary satisfies this contract.
+
+A sibling contract should drive the same typed request through an embedded call and the HTTP adapter and assert equivalent typed application outcome before transport serialization.
+
+* Contradictions and Unresolved Questions
+
+- Issue #40 names =make-runtime= as though the runtime object were absent. Current source already has =star-runtime= but its constructor is private and =start-runtime= takes an init-file rather than an explicit runtime. The implementation should evolve the existing owner rather than add a parallel type.
+- The existing =service-call-context= lacks some cross-cutting fields named by #40, notably explicit idempotency/trace/cancellation. Research does not assume those all belong in one struct; design should keep stable caller authority separate from per-operation retry/cancellation data where that produces cleaner contracts.
+- Whether the first vertical service operation should be read-only document lookup or a mutation depends on which current pure protocol can be extracted without dragging a concrete adapter into =starintel-server/core=. This is an implementation-order question, not a reason to broaden the design.
+
+* Research Decision
+
+Evidence is sufficient for design. The correct next architecture is an explicit application-service API around the existing runtime lifecycle owner, with typed ports and reuse of the current service-call context. The first proof is fake-backed isolation and transport equivalence, not simultaneous production actor systems.
+
+Research lifecycle is =READY_FOR_DESIGN=. Human research conclusion remains =PENDING= and implementation authorization remains =PENDING / AWAITING_OPERATOR_APPROVAL=.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created source-backed research for server #40 after complete backlog reconciliation; identified existing =star-runtime= and =service-call-context= as reuse boundaries and narrowed the first proof to explicit fake-backed application isolation. | ARDR worker | server master =8fb297d146e7332fae7e38170b5b49d49530ac53=; =source/runtime-lifecycle.lisp=; =source/package.lisp=; Auto-Research #193 |
+
+* Footnotes and Glossary
+
+- *Application service* :: A transport-independent operation that enforces application policy and calls typed dependency ports.
+- *Port* :: A narrow protocol representing a dependency capability without exposing its concrete adapter implementation.
+- *Compatibility default* :: A temporary ambient value such as =*runtime*= used only by legacy wrappers; it must not be required by the explicit public API.
+- *Lifecycle authority* :: The object responsible for owning and starting/stopping concrete runtime resources; in this design that remains =star.runtime=.

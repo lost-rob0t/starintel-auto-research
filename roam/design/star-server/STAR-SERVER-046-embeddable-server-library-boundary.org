@@ -1,0 +1,130 @@
+:PROPERTIES:
+:ID:       starintel-star-server-046-embeddable-server-library-boundary
+:END:
+#+title: STAR-SERVER-046 Embeddable StarIntel Server Library Boundary
+#+description: Design-ready incremental ASDF and package split that creates a side-effect-free embeddable core without duplicating runtime lifecycle ownership.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:design:star-server:common-lisp:asdf:embedding:p1:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Active ARDR policy | APPROVED | Source-backed research sufficient for design | [[id:starintel-star-research-039-embeddable-server-library-boundary][STAR-RESEARCH-039]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator review of this exact design | [[https://github.com/lost-rob0t/starintel-server/issues/39][starintel-server#39]] |
+| Implementation authorization | StarIntel operator | PENDING | Explicit operator authorization for an exact bounded slice | starintel-server#39 |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/full-gate/exact-head evidence | |
+
+* Decision
+
+Extract the server incrementally. Do not perform the issue body's entire proposed ASDF decomposition in one realization.
+
+The first boundary is a new =starintel-server/core= system containing only side-effect-free contracts and protocol definitions. Existing =starintel-gserver= remains the compatibility/service system and depends on the new core where appropriate. The executable remains a thin =program-op= entry point over the service composition root.
+
+* Dependency Direction
+
+#+begin_example
+StarLang declarations
+        |
+        v
+starintel-server/core
+  pure values / conditions / protocols / config normal form
+        |
+        +--------------------+
+        |                    |
+        v                    v
+future runtime          future adapters
+        \                    /
+         \                  /
+          v                v
+        service composition
+               |
+               v
+          CLI program-op
+#+end_example
+
+The first slice creates only the top pure boundary and compatibility wiring. It does not create empty placeholder systems for every future layer.
+
+* Core Inclusion Rule
+
+A source unit may enter =starintel-server/core= only when loading it:
+
+- creates no threads, timers, actor systems, kernels, sockets, HTTP listeners, Rabbit connections, CouchDB/Valkey traffic, or filesystem mutation;
+- does not depend on concrete HTTP, Rabbit, CouchDB, Valkey, Sento, Clack/Hunchentoot, or lparallel adapters;
+- defines values, conditions, immutable/value contracts, configuration normalization, or abstract protocols needed by more than one adapter/runtime surface.
+
+If a file mixes protocol and adapter implementation, split that file rather than importing the adapter into core.
+
+* Runtime Boundary
+
+Existing =star.runtime= remains the lifecycle authority. This design does not add another supervisor/composition framework.
+
+A later =starintel-server/runtime= extraction is valid only after runtime ownership is instance-safe enough to support it. Current globals such as =star.runtime:*runtime*= and =star.actors:*sys*= mean the issue's two-isolated-runtime acceptance test is not yet a truthful first-slice criterion.
+
+* Compatibility
+
+=:starintel-gserver= remains available through the migration. Existing applications and tests continue loading it. Its =program-op= behavior may remain initially; the important first invariant is that embedded callers can choose =starintel-server/core= without pulling the service dependency closure.
+
+Do not rename packages or move every source file merely to make the tree visually match the final architecture.
+
+* First Proposed Implementation Slice
+
+Owning repository: =lost-rob0t/starintel-server=.
+
+Issue: [[https://github.com/lost-rob0t/starintel-server/issues/39][#39]].
+
+Scope:
+
+1. define =starintel-server/core=;
+2. define its narrow public package(s);
+3. extract only the minimum already-pure contracts needed to establish a useful dependency direction;
+4. make =starintel-gserver= depend on/reuse those contracts;
+5. preserve existing service behavior.
+
+Mandatory RED-first target:
+
+- in a fresh Lisp image, =(asdf:load-system :starintel-server/core)= currently fails because the system is absent;
+- after GREEN, that load succeeds and an instrumented resource probe observes zero StarIntel-owned threads, actor systems, timers, kernels, listeners, or network connections;
+- an ASDF dependency assertion proves the core closure excludes Sento, cl-rabbit, cl-couch, Clack/Hunchentoot, and lparallel.
+
+Focused regression: existing =starintel-gserver= system/tests continue to load through the compatibility system.
+
+* Acceptance Criteria
+
+- core is useful, not an empty marker system;
+- core load is deterministic and side-effect-free;
+- concrete service adapters do not leak into core dependencies;
+- service startup still occurs only through explicit runtime/service calls;
+- existing root compatibility system remains supported;
+- no claim of two independent runtime instances until runtime globals are removed;
+- no new StarLang syntax and no external process introduced.
+
+* Adversarial Review
+
+Rejected approaches:
+
+- *Big-bang ten-system split*: too much dependency churn before proving one boundary.
+- *Empty ASDF systems*: produces architecture-shaped names without real isolation.
+- *Move files without dependency tests*: can leave adapter dependencies transitive while appearing modular.
+- *Duplicate lifecycle manager*: conflicts with =star.runtime= ownership already present.
+- *Treat package separation as resource isolation*: Common Lisp packages do not prevent load-time effects or global runtime coupling.
+- *Claim multi-instance support from ASDF modularity*: current process globals make that false.
+- *Break =starintel-gserver= immediately*: unnecessary compatibility damage.
+
+* Dependencies and Follow-up
+
+The pure core slice is dependency-ready. Runtime-system extraction and the issue's two-instance acceptance test remain downstream of P0 lifecycle/concurrency work and explicit removal of singleton runtime globals.
+
+Future adapter systems should be extracted only when a concrete embedded consumer or test benefits from omitting that adapter.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created incremental embeddable-library design and adversarial review for server #39 | ARDR worker | [[id:starintel-star-research-039-embeddable-server-library-boundary][STAR-RESEARCH-039]]; starintel-server master =8fb297d146e7332fae7e38170b5b49d49530ac53= |
+
+* Footnotes and Glossary
+
+[fn:asdf] ASDF is the Common Lisp system-definition and dependency-loading facility.
+[fn:dependency-closure] Dependency closure is the complete transitive set of systems loaded by an ASDF system.
+[fn:composition-root] The composition root selects concrete adapters and explicitly starts the service runtime.

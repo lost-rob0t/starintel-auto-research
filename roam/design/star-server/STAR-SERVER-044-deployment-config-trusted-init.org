@@ -1,0 +1,297 @@
+:PROPERTIES:
+:ID:       starintel-star-server-044-deployment-config-trusted-init
+:END:
+#+title: STAR-SERVER-044 Deployment Configuration and Trusted Init Boundary
+#+description: Design-ready StarIntel Server architecture for validated data-only deployment config, consistent secret references, and explicitly trusted Lisp startup extensions while preserving current Nix OCI/Compose packaging.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:design:star-server:deployment:config:secrets:p0:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Active ARDR policy | APPROVED | Current source-backed residual deployment audit is sufficient for design | [[id:starintel-ardr-issue-191-deployment-config-secrets-contract][ARDR-ISSUE-191]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of this exact config/trusted-extension boundary | [[https://github.com/lost-rob0t/starintel-auto-research/issues/192][#192]] |
+| Implementation authorization | StarIntel operator | PENDING | Explicit authorization for one bounded implementation slice | [[https://github.com/lost-rob0t/starintel-server/issues/38][starintel-server#38]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/full-gate/exact-head implementation evidence | |
+
+* Canonical Inputs
+
+- [[id:starintel-ardr-issue-191-deployment-config-secrets-contract][ARDR-ISSUE-191 deployment config residual audit]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/38][starintel-server #38]].
+- P0 runtime authorities: server #34/#35/#36/#37 and their canonical Auto-Research designs.
+- Current server baseline =8fb297d146e7332fae7e38170b5b49d49530ac53=.
+
+* Decision
+
+Keep the current Nix-built OCI image and current Compose service topology. Replace executable Lisp as the *ordinary/default configuration representation* with a closed typed data configuration layer in Common Lisp. Retain executable Lisp startup customization only as an explicitly trusted extension hook, separate from ordinary config.
+
+Secret resolution becomes an application-level adapter used consistently by server startup, administrative CLI, and container launches. The shell entrypoint may expose/mount secret references but does not own secret semantics.
+
+No new StarLang syntax, second process supervisor, secret database, or configuration language is introduced.
+
+* Ownership
+
+** Common Lisp server config layer owns
+
+- schema/version;
+- parsing and normalization;
+- environment/data-file override mapping;
+- type/range/cross-field validation;
+- secret-reference descriptors and safe resolution interface;
+- production-profile validation;
+- config diagnostics with mandatory redaction;
+- initialization of existing runtime authority values.
+
+** Existing runtime authorities own
+
+- thread budget/allocation: #34/#35;
+- mailbox/admission semantics: #36;
+- component lifecycle/readiness/shutdown: #37;
+- database/broker/auth adapters: their existing server components.
+
+The config layer provides validated inputs; it does not become a second runtime authority.
+
+** Container/Nix layer owns
+
+- image closure and runtime user;
+- mounted config/secret files;
+- service wiring and health dependencies;
+- explicit development versus production deployment profiles.
+
+** Trusted Lisp extension owns
+
+Only extra operator-supplied startup code explicitly enabled as such. It is not the ordinary settings format.
+
+* Closed Configuration Contract
+
+V1 schema covers only settings currently owned by StarIntel Server and required to replace the default init-file assignments. Unknown top-level or nested keys fail.
+
+Conceptual groups:
+
+#+begin_example
+server
+  profile
+  couchdb
+  rabbit
+  valkey
+  http
+  auth
+  runtime
+#+end_example
+
+Every field has a type, default/required state, constraints, source provenance (=default|file|environment|secret-ref=), and owning runtime target.
+
+Normalization is deterministic: equivalent accepted inputs produce the same redacted normalized form.
+
+* Data File and Environment Precedence
+
+V1 precedence:
+
+1. safe compiled defaults;
+2. optional data config file;
+3. explicit environment override;
+4. secret value resolution is deferred and does not overwrite the redacted normal form.
+
+The selected parser must parse inert data. It may be JSON, a restricted plist/S-expression reader with =*read-eval*= NIL and closed validation, or another already-supported data format. No parser choice may execute forms.
+
+Unknown environment variables outside the documented StarIntel namespace are irrelevant. Documented config environment names that fail parsing/range checks fail startup rather than silently falling back.
+
+* Secret Reference Contract
+
+Each secret-bearing field normalizes to metadata such as:
+
+#+begin_example
+SecretRef {
+  source: env | file | runtime-provider
+  locator/name
+  required?
+}
+#+end_example
+
+The normalized config, health output, logs and errors never contain the resolved secret bytes.
+
+Existing VALUE and VALUE_FILE inputs are compatibility adapters. For the new closed contract, specifying both for one secret is an ambiguity error unless a field has an explicitly documented compatibility exception.
+
+Resolution failures are typed:
+
+- secretMissing
+- secretFileUnreadable
+- secretFileEmpty
+- secretProviderUnavailable
+
+Error details may identify the configuration field and safe file path/reference but not the value.
+
+Server startup and =star-server admin= call the same resolver API so Compose =*_FILE= semantics cannot diverge again.
+
+* Trusted Init / Extension Contract
+
+Executable Lisp is retained as an explicit extension mechanism because removing it without caller inventory would be unnecessary compatibility breakage.
+
+Rules:
+
+1. basic server deployment starts from data config with no executable init file;
+2. trusted extension must be explicitly enabled by a distinct option such as a trusted-init path/flag; final CLI spelling is implementation-owned;
+3. extension executes only in a documented startup phase after base config normalization/validation and before dependent long-lived components start;
+4. if an extension mutates configuration-authority specials, validation is rerun before realization;
+5. diagnostics record trusted extension enabled/path identity or digest where safe, never source contents;
+6. production deployment documentation treats extension code as equivalent to application code authority.
+
+The existing =STAR_SERVER_INIT_FILE= compatibility path may be supported during migration, but it must not remain indistinguishable from ordinary data config.
+
+* Runtime Integration
+
+Config normalization occurs before long-lived actor, Rabbit, database, HTTP or worker realization whenever the setting affects those resources.
+
+Thread limits initialize the canonical #34 authority and cannot allocate workers directly. Dispatcher capacity follows #35. Queue/prefetch/admission values follow #36. Shutdown/readiness settings are consumed by #37.
+
+This makes validation fail-fast and prevents a config parser from creating side effects while discovering mistakes.
+
+* HTTP/TLS/Base-Path Contract
+
+A setting is considered supported only if an observed contract proves it changes the owning server behavior.
+
+For each retained HTTP setting:
+
+- listen address/port must match actual listener configuration;
+- base path must affect route mounting/capability/OpenAPI paths consistently;
+- TLS certificate/key settings are retained only if StarIntel Server owns direct TLS termination in a supported deployment profile;
+- if TLS is intentionally proxy-only, server config must not advertise dead certificate/key settings.
+
+The implementation slice must inventory current HTTP adapter support before promising fields.
+
+* Production Profile
+
+Production validation fails closed on known unsafe combinations, including:
+
+- auth development bypass enabled;
+- required secret missing/empty;
+- explicit checked-in/default bootstrap credential mode where current auth policy forbids it;
+- malformed public/base path/TLS combination where server owns that mode.
+
+Development conveniences must be explicit profile behavior and must not silently leak into production normalization.
+
+* Compatibility and Migration
+
+1. Introduce pure schema/parser/normalizer first; no startup mutation.
+2. Add one adapter mapping current environment inputs into the schema.
+3. Centralize secret resolution and migrate startup/admin callers.
+4. Make normal server startup consume normalized config.
+5. Add data config-file CLI/environment selection.
+6. Reclassify legacy =-i=/=STAR_SERVER_INIT_FILE= as trusted extension compatibility; document/deprecate only after caller inventory.
+7. Remove dead legacy settings only after observed-behavior tests prove they are unsupported and migration notes exist.
+8. Keep current OCI/Compose stack continuously regression-tested.
+
+* Proposed Implementation Slices
+
+Every slice remains =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — pure config schema + deterministic normalizer
+
+No network/thread/process side effects.
+
+Mandatory RED-first tests:
+
+- minimal valid data config currently has no closed normalized representation;
+- unknown key rejected;
+- invalid port/range/type rejected;
+- executable/read-eval form never executes and is rejected as config data;
+- equivalent input normalizes identically;
+- redacted snapshot contains no secret value.
+
+** Slice 2 — unified secret-ref resolver
+
+REDs:
+
+- VALUE + VALUE_FILE ambiguity handled by explicit rule;
+- unreadable/empty file returns typed error without value;
+- startup and admin resolve the same mounted secret-file fixture;
+- diagnostics cannot serialize secret bytes.
+
+** Slice 3 — environment + data-file adapters
+
+Map current supported environment variables into the normal form and add one inert config file format. Unknown documented keys/invalid values fail before startup.
+
+** Slice 4 — startup integration + trusted init split
+
+Normal startup requires no executable init. Legacy/trusted extension is explicit and base config is revalidated after extension before resource realization.
+
+** Slice 5 — observed HTTP/config behavior
+
+RED/GREEN contract tests for base path, listener port/address, retained TLS settings and other #38 configuration settings. Delete/deprecate dead settings rather than pretending support.
+
+** Slice 6 — production Compose/Nix hardening regression
+
+Preserve Nix closure image, non-root execution, service DNS/readiness, secret mounts and stack-test behavior; production profile does not publish internal DB/broker ports except where explicitly intended by deployment policy.
+
+* Adversarial Review
+
+** Reject: Docker rewrite
+
+Current packaging repaired the original closure problem. Rewriting it increases risk without solving the residual config boundary.
+
+** Reject: Lisp file as default config forever
+
+It grants code execution authority to routine data and prevents closed schema/unknown-key validation.
+
+** Reject: ban all Lisp init immediately
+
+Existing extension workflows may rely on it. Separate and explicitly trust it first; remove only with caller evidence.
+
+** Reject: shell-only secret semantics
+
+Direct CLI/admin and non-container launches must behave consistently. The application owns the semantic.
+
+** Reject: resolved secrets stored in config object/status
+
+Makes redaction fragile and expands lifetime/copying of secret bytes.
+
+** Reject: generic secret manager in #38
+
+Runtime secret stores/providers can be adapters later. This P0 needs a narrow reference/resolution contract, not another infrastructure control plane.
+
+** Reject: config owns thread/admission/lifecycle semantics
+
+Those authorities already exist in #34-#37; config only initializes validated inputs.
+
+** Reject: new StarLang deployment grammar
+
+Host ports/files/secrets/process resources are not domain-language semantics.
+
+** Reject: claim config field support without behavior test
+
+Dead settings are worse than rejected settings because operators believe policy is applied when it is not.
+
+* Acceptance Criteria
+
+- current Nix OCI image/Compose repairs remain intact;
+- ordinary deployment config is inert, typed, closed and validated before long-lived startup;
+- executable Lisp is optional explicit trusted extension authority, not ordinary config;
+- startup and admin use one secret-ref contract;
+- secret values cannot appear in normalized config/diagnostics/logs;
+- unknown/invalid settings fail rather than silently falling back;
+- retained HTTP/base-path/TLS settings have observed behavior tests;
+- production profile fails closed on unsafe auth/secret combinations;
+- config inputs feed #34-#37 rather than creating competing runtime authorities;
+- no new StarLang syntax or external config supervisor is introduced;
+- implementation remains blocked until an exact slice receives operator authorization.
+
+* Decision / Handoff State
+
+Design is complete enough for operator review. It is not approved for implementation.
+
+Owning implementation handoff: [[https://github.com/lost-rob0t/starintel-server/issues/38][starintel-server #38]].
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created design from ARDR #191 after current source disproved several stale #38 deployment defects and isolated the remaining config/secret/trusted-init boundary. | GPT-5.6 Sol | Auto-Research #191/#192; server =8fb297d...= |
+
+* Footnotes and Glossary
+
+- *Normal form* :: Deterministic redacted typed representation consumed by runtime adapters.
+- *Trusted init* :: Explicit executable Lisp extension with application-code authority, distinct from ordinary data configuration.
+- *Secret resolver* :: Application-level interface that resolves a reference only when needed and never serializes secret value into ordinary configuration state.

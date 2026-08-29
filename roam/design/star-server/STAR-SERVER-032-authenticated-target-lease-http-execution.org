@@ -2,528 +2,213 @@
 :ID:       56b95ef4-b058-44e3-8a65-a038b7c46140
 :END:
 #+title: STAR-SERVER-032 Authenticated Target-Lease HTTP and Execution Enforcement
-#+description: Normative design for versioned authenticated target-lease routes, idempotency, monotonic deadlines, capability and scope checks, problem responses, hidden-resource policy, shared embedded APIs, manifest-controlled dispatch, immutable execution envelopes, RabbitMQ handling, and stale-fence rejection.
-#+status: REVIEW
+#+description: Refreshed design for a thin authenticated lease application service, HTTP projection, immutable target execution authority, and stale-fence side-effect enforcement over the implemented lease-store stack.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
 #+filetags: :starintel:star-server:http:leases:authentication:authorization:fencing:targets:design:org-roam:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | StarIntel operator | APPROVED | Explicit approved research conclusion | [[id:2cfb4ff2-7111-4f8e-869a-ec9423acb143][STAR-RESEARCH-032]]; [[https://github.com/lost-rob0t/starintel-auto-research/issues/157][#157]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator review of this refreshed exact design | this document |
+| Implementation authorization | StarIntel operator | PENDING | Explicit bounded-slice authorization | [[https://github.com/lost-rob0t/starintel-server/issues/32][server #32]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/full-gate evidence | |
 
 * Source Links
 
 - [[file:../../indexes/star-server/STAR-LEASE-INDEX-030-backend-neutral-kv-leases.org][STAR-LEASE-INDEX-030 Target Lease Stack]]
-- [[file:../../research/star-server/STAR-RESEARCH-032-authenticated-target-lease-http-execution.org][STAR-RESEARCH-032 Authenticated Target-Lease HTTP and Execution Enforcement]]
-- [[file:STAR-SERVER-029-distributed-target-lease-and-fencing.org][STAR-SERVER-029 Distributed Target Lease and Fencing Semantics]]
-- [[file:STAR-SERVER-030-backend-neutral-kv-lease-store.org][STAR-SERVER-030 Backend-Neutral KV Lease Store Protocol]]
-- [[https://github.com/lost-rob0t/starintel-server/issues/32][starintel-server issue 32]]
-- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-principal-capability-contract.org][HTTP principal and capability contract]]
-- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-auth-kv-lease-boundary.org][HTTP authentication threat model — KV lease boundary]]
+- [[id:2cfb4ff2-7111-4f8e-869a-ec9423acb143][STAR-RESEARCH-032 Authenticated Target-Lease HTTP and Execution Enforcement]]
+- [[id:224359ad-5d27-472d-b3d7-b3e542bb41df][STAR-SERVER-029 Distributed Target Lease and Fencing Semantics]]
+- [[id:bc8066ec-d7a3-4d6a-afff-353d444e725a][STAR-SERVER-030 Backend-Neutral KV Lease Store Protocol]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/32][starintel-server #32]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/33][starintel-server #33]]
 
-* Normative Status
+* Decision
 
-This document defines the HTTP[fn:http] and execution-integration layer for StarIntel[fn:starintel] target leases. It consumes issue-29 lease semantics, issue-30 storage outcomes, and the issue-31 Valkey[fn:valkey] adapter through one target lease application service.
-
-The HTTP routes are adapters. They MUST NOT implement lease atomicity, call Valkey directly, or create alternate authorization logic.
-
-The words MUST, MUST NOT, REQUIRED, SHOULD, SHOULD NOT, and MAY are normative.[fn:normative]
-
-* Required Architecture
+Do not redesign the implemented lease protocol or Valkey backend. Complete issue #32 by inserting one authenticated application-service boundary above the existing lease-store protocol, projecting that same result algebra through HTTP and embedded Common Lisp calls, and carrying server-created immutable lease authority into target execution and fenced side-effect acceptance.
 
 #+begin_example
-HTTP route                  embedded Common Lisp caller
-    |                                 |
-    +---------- security context -----+
-                      |
-                      v
-          target-lease application service
-              | authorization policy
-              | issue-29 state machine
-              v
-          issue-30 lease-store protocol
-                      |
-                      v
-             issue-31 Valkey adapter
+HTTP adapter                 embedded caller
+     \                         /
+      -> service-call context -> target-lease service
+                                  -> existing lease-store protocol
+                                  -> existing Valkey adapter
+
+ target submission -> locking policy -> target-lease service
+                   -> immutable execution authority
+                   -> local actor / Rabbit delivery
+                   -> fenced effect acceptance
 #+end_example
 
-Target dispatch uses the same service:
+* Ownership
+
+** Existing lease-store stack
+
+Owns atomic acquire, renew, release, revoke, get/list, fencing-token allocation, receipt/state serialization, backend deadlines/outcomes, and Valkey-specific implementation. HTTP and target code MUST NOT duplicate these semantics.
+
+** Target-lease application service
+
+Owns authorization and disclosure policy, canonical target binding, idempotency request binding, deadline propagation, conversion of store outcomes into service outcomes, and creation/validation of immutable execution authority.
+
+** HTTP adapter
+
+Owns bounded syntax/header parsing and service-result projection only. It does not call Valkey directly and does not make an independent lease decision.
+
+** Target execution
+
+Owns enforcement that a required-lock target cannot be dispatched without current authority. Local and Rabbit paths consume the same authority shape.
+
+** Fenced effect boundary
+
+Owns the final acceptance check that prevents stale generations from making authoritative persistence/publication/settlement effects.
+
+* Service Contract
+
+Every call receives a closed context containing at least principal identity/type, granted capabilities/scopes, correlation identity, absolute deadline, and request/idempotency identity where applicable.
+
+Missing context is denial. In-process origin, package identity, localhost, or actor membership grants no implicit authority.
+
+Service operations cover acquire, renew, release, revoke, inspect, and bounded list. Each operation checks authorization before store invocation when possible.
+
+Service outcomes must distinguish at least:
+
+- acquired / renewed / released / found / listed;
+- conflict/held;
+- stale fence/precondition;
+- hidden/not-found;
+- unauthorized/forbidden;
+- invalid request;
+- idempotency conflict;
+- overloaded/rate-limited;
+- backend unavailable;
+- deadline exceeded with known no-commit;
+- outcome unknown where replay of the same idempotency key is required.
+
+* HTTP Projection
+
+Use the current server API-version/capability work as the path authority during implementation. Do not create a parallel version convention solely for leases.
+
+The adapter maps typed service outcomes into stable HTTP status/problem documents. It must preserve non-disclosure: another tenant/owner's hidden lease is indistinguishable from absence where policy requires it.
+
+No problem document may contain Valkey keys/scripts/errors, credentials, raw target bodies, stack traces, or private owner metadata.
+
+* Immutable Execution Authority
+
+Caller-controlled target JSON never becomes lease authority.
+
+For a target whose policy requires locking, the service constructs an immutable authority object from validated current lease state. Conceptually it carries:
 
 #+begin_example
-target request
-  -> resolve canonical target
-  -> load manifest locking policy
-  -> acquire or validate authority
-  -> construct immutable execution envelope
-  -> local actor or RabbitMQ dispatch
-  -> fenced side-effect services
-  -> terminal settlement and release
+leaseId
+canonicalTargetKey
+fencingToken
+ownerPrincipal
+executionId
+expiresAt / authority horizon
+correlationId
 #+end_example
 
-* Package Layout
+The exact Common Lisp representation is implementation-owned. Actor and Rabbit envelopes carry the server-created value or its typed wire projection. Mutation by a downstream actor does not increase authority.
+
+* Fenced Side-Effect Acceptance
+
+Dispatch-time validation alone is insufficient. A stale worker can continue computing after expiry/reacquisition.
+
+At least one authoritative side-effect seam must compare the submitted execution generation against current/highest accepted fencing state before committing the effect. The first implementation slice after dispatch integration should choose the narrowest real persistence/publication seam already used by target results.
+
+Required proof:
 
 #+begin_example
-star.target-leases.service
-star.target-leases.authorization
-star.target-leases.http
-star.target-leases.execution
-star.target-leases.fencing
-star.target-leases.testing
+worker A owns fence N and stalls
+worker B reacquires fence N+1
+B effect is accepted
+A later submits effect with N
+A effect is rejected as stale and cannot become authoritative
 #+end_example
 
-Only =star.target-leases.service= imports the issue-30 protocol. =star.target-leases.http= imports the service and HTTP boundary utilities. Actors and persistence packages import execution and fencing services, not Valkey packages.
+Rabbit acknowledgement must not turn stale rejected output into a successful authoritative result. Settlement behavior follows the typed stale-work policy and bounded retry/dead-letter rules.
 
-* Security Context
+* #33 Boundary
 
-Every HTTP request receives an immutable request security context from authentication middleware. Every embedded call receives an explicit service-call context.
-
-Required fields:
-
-- principal identifier and type;
-- non-secret credential identifier;
-- granted capabilities and scopes;
-- correlation identifier;
-- absolute monotonic deadline;
-- authenticated time;
-- source context when policy consumes it.
-
-A missing context denies. Local process execution, package name, call stack, loopback address, or actor registration MUST NOT imply authority.
-
-* Authorization
-
-All lease routes require authentication.
-
-| Operation | Required capability |
-|-----------+---------------------|
-| acquire | =targets:lease= |
-| renew | =targets:lease= |
-| release | =targets:lease= |
-| inspect | =targets:lease= or policy-selected =targets:read= |
-| list | =targets:lease= plus explicit list scope |
-| revoke | =targets:lease:revoke= or administrator policy |
-
-The authorization decision MUST bind:
+Issue #32 supplies the service/authority/fencing seams. Issue #33 owns the exhaustive expiry, crash, restart, failover, timeout-after-commit, renew/release/reacquire race, and multi-process matrix.
 
-- operation;
-- tenant and program;
-- dataset;
-- actor or workflow;
-- operation class;
-- canonical target identity;
-- authenticated principal and credential;
-- current lease owner for renew, release, inspect, and revoke;
-- correlation identifier;
-- decision identifier.
+Do not block the pure #32 service contract on the entire chaos harness, but do not mark the lease stack complete until #33 proves those failure modes.
 
-Request fields do not grant scope. The service resolves target and actor identity before authorization.
+* StarLang Boundary
 
-* Versioned Routes
+No new StarLang syntax is required. A StarLang actor/domain server may declare that execution requires lease authority and may receive the typed authority through its runtime contract. It cannot mint tokens, call Valkey, or bypass host authorization/fencing.
 
-Required routes:
+* Dependency-Ordered Proposed Slices
 
-#+begin_example
-POST   /v1/target-leases/acquire
-POST   /v1/target-leases/:lease-id/renew
-DELETE /v1/target-leases/:lease-id
-GET    /v1/target-leases/:lease-id
-GET    /v1/target-leases
-POST   /v1/target-leases/:lease-id/revoke
-#+end_example
+All slices remain =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
 
-The route names are stable for version 1. Backend names never appear in paths.
+1. *Pure target-lease service context/result contract* over fake existing lease-store protocol.
+2. *Authorization + idempotency + absolute deadline behavior* with zero HTTP dependency.
+3. *HTTP adapter projection* using the current versioned API/capability boundary.
+4. *Required-lock target dispatch authority* with server-created immutable envelope.
+5. *One real fenced side-effect seam* proving N rejected after N+1.
+6. *Local/Rabbit authority equivalence and settlement fixtures*.
+7. *#33 integration handoff* for the complete race/recovery matrix.
 
-* Common Request Headers
+* Mandatory RED-First Targets
 
-| Header | Requirement |
-|--------+-------------|
-| =Authorization= | required by middleware |
-| =Idempotency-Key= | required for acquire, renew, release, and revoke |
-| =X-Request-Timeout-Ms= | optional bounded client timeout request |
-| =X-Correlation-ID= | optional bounded caller correlation identifier |
-| =X-StarIntel-Fencing-Token= | required for release; MAY be accepted for renew in addition to body |
-| =Content-Type= | =application/json= for requests with bodies |
-| =Accept= | support =application/json= and =application/problem+json= |
+** Slice 1
 
-=Idempotency-Key= MUST be parsed as one bounded string. Multiple values reject. The key is scoped to principal, operation, and canonical request fingerprint.
+A fake lease store records every invocation. An unauthorized service context attempts acquire. Untouched current server must fail because no target-lease application service exists. GREEN returns typed authorization denial and store invocation count remains zero.
 
-* Deadline Contract
+A sibling fixture requires an authorized embedded call to produce the same typed service result consumed by the future HTTP adapter.
 
-Middleware converts the bounded timeout into one absolute monotonic deadline[fn:monotonic-deadline]. All service, storage, pool, and retry layers receive that same deadline.
+** Slice 3
 
-No layer may start a fresh full timeout.
+Given fixed service outcomes, HTTP projection fixtures prove conflict, stale, hidden/not-found, unauthorized, overload, unavailable, known timeout, and unknown mutation outcome remain distinct and redact backend/private data.
 
-Outcomes:
+** Slice 4
 
-- =deadline-exceeded=: mutation is known not to have committed;
-- =outcome-unknown=: mutation may have committed and requires replay with the same idempotency key.
+A required-lock target without server-created authority must fail before local actor send or Rabbit publish. A caller-supplied fake fencing token must not satisfy the check.
 
-The response for =outcome-unknown= MUST tell the caller to repeat the exact operation with the exact key. It MUST NOT tell the caller to create a new request.
+** Slice 5
 
-* Acquire Request
+Generation N stalls; N+1 becomes current and commits; later N effect is rejected with zero authoritative mutation.
 
-#+begin_src json
-{
-  "target": {
-    "tenant_id": "tenant-main",
-    "program_id": null,
-    "dataset_id": "dataset-a",
-    "actor_name": "collector",
-    "workflow_id": null,
-    "operation_class": "collect",
-    "target_id": "target_01"
-  },
-  "ttl_ms": 30000,
-  "maximum_lifetime_ms": 600000,
-  "execution_id": "run_01",
-  "trace_id": "trace_01",
-  "metadata": {}
-}
-#+end_src
+* Adversarial Review
 
-The route handler MUST:
+Rejected:
 
-1. parse and bound JSON;
-2. require the idempotency key;
-3. obtain the authenticated context;
-4. call =acquire-target-lease=;
-5. map the service result to HTTP;
-6. return only policy-safe owner metadata.
-
-Success returns =201 Created=, =Location: /v1/target-leases/<lease-id>=, =Cache-Control: no-store=, and the lease representation.
+- route handlers talking to Valkey scripts;
+- a second lease result algebra;
+- package/local-process trust as authorization;
+- caller-provided lease fields as execution authority;
+- fence check only at dispatch;
+- actor liveness as lease-current proof;
+- embedded callers bypassing authorization;
+- separate local and Rabbit authority semantics;
+- generic retry of unknown mutation outcome with a new idempotency key;
+- collapsing hidden lease into a revealing conflict response;
+- moving lease authority into StarLang or Prolog;
+- claiming #32 completion before #33 validates the full failure matrix.
 
-A replay of the same acquisition returns the same lease representation and location.
+* Acceptance Criteria
 
-* Renew Request
-
-#+begin_src json
-{
-  "fencing_token": 42,
-  "ttl_ms": 30000
-}
-#+end_src
-
-Renew MUST bind the route lease identifier, authenticated owner, current token, and request key. Success returns =200= with the replacement immutable lease representation.
-
-A stale token returns =412=. A hidden or absent lease returns =404=. A known lease owned by another visible principal returns =403= or =409= according to the deployment disclosure policy; the selected policy must be consistent.
-
-* Release Request
-
-The DELETE route uses an empty body and requires:
-
-#+begin_example
-Idempotency-Key: "..."
-X-StarIntel-Fencing-Token: 42
-#+end_example
-
-Success returns =204 No Content=. A replay also returns =204=.
-
-The service compares the route lease identifier, owner, and fencing token. Release MUST NOT reset the fencing counter.
-
-* Inspect and List
-
-=GET /v1/target-leases/:lease-id= returns =200= only when the caller may know the lease exists. Otherwise it returns the same =404= representation as an absent lease.
-
-List accepts bounded filters:
-
-#+begin_example
-GET /v1/target-leases?tenant=...&program=...&dataset=...&actor=...&target=...&owner=...&limit=...&cursor=...
-#+end_example
-
-At least one bounded scope filter is REQUIRED unless the caller has an explicit global administrative listing grant.
-
-List results include consistency mode, cursor, truncation flag, and policy-safe lease summaries. A listing is diagnostic and MUST NOT be used as proof of ownership.
-
-* Revoke
-
-#+begin_src json
-{
-  "reason": "incident-1234",
-  "expected_fencing_token": 42
-}
-#+end_src
-
-Revocation requires separate authorization and a reason. Success returns =200= with a terminal result or =204= when the response contract chooses no body.
-
-A revoke without an expected token may revoke the current active lease only when policy explicitly permits that administrative power. The action is high-priority audited.
-
-* Lease Representation
-
-#+begin_src json
-{
-  "schema": "starintel.target-lease-response/1",
-  "lease_id": "lease_01",
-  "canonical_target_key": "opaque-public-key",
-  "fencing_token": 42,
-  "state": "active",
-  "acquired_at": "2026-08-06T12:00:00Z",
-  "renewed_at": "2026-08-06T12:00:00Z",
-  "expires_at": "2026-08-06T12:00:30Z",
-  "renew_after": "2026-08-06T12:00:15Z",
-  "maximum_expires_at": "2026-08-06T12:10:00Z",
-  "owner": {
-    "principal_id": "principal_01",
-    "service_instance_id": "server_01",
-    "actor_instance_id": "actor_01"
-  },
-  "execution_id": "run_01",
-  "correlation_id": "01..."
-}
-#+end_src
-
-The owner object is filtered by policy. The canonical key exposed to clients MUST be an application encoding or fingerprint, never the Valkey key.
-
-* Problem Response Contract
-
-Errors use RFC 9457[fn:rfc9457] =application/problem+json=:
-
-#+begin_src json
-{
-  "type": "https://starintel.actor/problems/lease-conflict",
-  "title": "Target lease is already held",
-  "status": 409,
-  "detail": "The canonical target operation currently has an active lease.",
-  "instance": "urn:starintel:correlation:01...",
-  "code": "lease_conflict",
-  "correlation_id": "01...",
-  "retry_after_ms": 8500
-}
-#+end_src
-
-Required extension members:
-
-- stable =code=;
-- =correlation_id=;
-- retry fields when meaningful;
-- validation errors with JSON pointers when applicable;
-- =replay_same_idempotency_key=true= for unknown outcomes.
-
-Forbidden content:
-
-- credentials or bearer material;
-- backend key names;
-- Valkey script text or errors;
-- stack traces;
-- internal hostnames;
-- another owner's private metadata;
-- full arbitrary target documents.
-
-* Status Mapping
-
-| Service result | HTTP status | Problem code |
-|----------------+-------------+--------------|
-| acquired | 201 | none |
-| renewed | 200 | none |
-| released | 204 | none |
-| found/listed | 200 | none |
-| active conflict | 409 | =lease_conflict= |
-| stale token | 412 | =stale_fencing_token= |
-| hidden or absent | 404 | =lease_not_found= |
-| unauthenticated | 401 | =invalid_credential= |
-| visible but denied | 403 | =access_denied= |
-| malformed request | 400 | =malformed_request= |
-| semantic validation failure | 422 | =invalid_lease_request= |
-| idempotency key reused | 422 | =idempotency_key_reused= |
-| caller rate limit | 429 | =lease_rate_limited= |
-| backend unavailable | 503 | =lease_backend_unavailable= |
-| unsafe recovery state | 503 | =lease_recovery_required= |
-| outcome unknown | 503 | =lease_outcome_unknown= |
-| known deadline exceeded | 504 | =request_deadline_exceeded= |
-
-=Retry-After= is added for 429 or 503 only when the service can provide a meaningful value.
-
-* Embedded Common Lisp API
-
-#+begin_src lisp
-(defclass target-lease-service () ())
-
-(defgeneric acquire-target-lease
-    (service security-context request))
-(defgeneric renew-target-lease
-    (service security-context lease-id request))
-(defgeneric release-target-lease
-    (service security-context lease-id request))
-(defgeneric inspect-target-lease
-    (service security-context lease-id request))
-(defgeneric list-target-leases
-    (service security-context request))
-(defgeneric revoke-target-lease
-    (service security-context lease-id request))
-#+end_src
-
-HTTP routes call these functions. Embedded callers call the same functions with a =service-call-context=. The returned service result is independent of HTTP status codes.
-
-* Manifest-Controlled Target Dispatch
-
-The actor or dataset manifest declares:
-
-#+begin_src json
-{
-  "target_locking": {
-    "mode": "required",
-    "operation_class": "collect",
-    "default_ttl_ms": 30000,
-    "maximum_lifetime_ms": 600000,
-    "renew_fraction": 0.5,
-    "lease_loss_policy": "cancel"
-  }
-}
-#+end_src
-
-When =mode= is =required=:
-
-- the dispatch service MUST have active execution authority matching the canonical target;
-- raw user-supplied lease fields are ignored or rejected;
-- local actor tell and RabbitMQ publish receive the generated immutable execution envelope;
-- dispatch without authority returns =lease_required= before work begins.
-
-When =mode= is =optional=, the envelope may omit authority. When =forbidden=, lease-bound dispatch is rejected.
-
-* Execution Envelope
-
-#+begin_src json
-{
-  "schema": "starintel.target-execution/1",
-  "target": { "_id": "target_01", "actor": "collector" },
-  "authority": {
-    "canonical_target_key": "opaque-key",
-    "lease_id": "lease_01",
-    "fencing_token": 42,
-    "expires_at": "2026-08-06T12:00:30Z",
-    "execution_id": "run_01",
-    "owner_service_instance_id": "server_01",
-    "request_id": "request_01",
-    "trace_id": "trace_01"
-  }
-}
-#+end_src
-
-The envelope is immutable. The target actor validates that target identity and authority key agree.
-
-* Actor Lease Lifecycle
-
-For required-lock actors, an execution supervisor owns renewal.
-
-Responsibilities:
-
-- schedule renewal before =renew_after=;
-- send replacement handles to the actor only after successful renewal;
-- send =lease-lost= on expiry, stale token, revocation, unknown outcome beyond policy, or runtime drain;
-- stop new side effects after loss;
-- release after terminal successful settlement when policy permits;
-- allow expiry recovery when the process crashes.
-
-Long work MUST NOT let an actor renew indefinitely beyond the maximum lifetime without a new acquisition and larger fencing token.
-
-* Fenced Side-Effect Service
-
-All authoritative mutations use:
-
-#+begin_src lisp
-(defgeneric commit-fenced-effect
-    (service execution-authority effect-request))
-#+end_src
-
-The service MUST atomically compare the incoming token with the highest accepted generation for the protected resource and store the accepted generation with the effect.
-
-Protected boundaries include:
-
-- CouchDB create, update, and delete;
-- event and job state;
-- graph and search index mutation;
-- attachment commit;
-- target-result publication;
-- RabbitMQ success acknowledgement;
-- irreversible external calls.
-
-A lower token returns =stale-fence=. The side effect does not happen.
-
-* RabbitMQ Rules
-
-The execution envelope is serialized in the message body. Routing headers may duplicate bounded trace fields but are not authoritative.
-
-Consumer behavior:
-
-| Condition | Settlement |
-|-----------+------------|
-| valid current authority and effects committed | ack |
-| stale fencing token | terminal nack/dead-letter; no infinite requeue |
-| missing authority when required | dead-letter |
-| malformed envelope | dead-letter |
-| temporary backend unavailable | bounded requeue policy |
-| actor failure before effects | bounded retry according to target policy |
-| duplicate same execution | idempotent resume or ack existing completion |
-
-Success acknowledgement occurs only after all required fenced effects commit.
-
-* Rate and Capacity Controls
-
-The service limits:
-
-- operations per principal and credential;
-- active leases per principal and actor;
-- operations per canonical target;
-- list cost and result count;
-- global in-flight backend calls;
-- connection-pool usage;
-- retry count and total deadline.
-
-Caller-specific exhaustion maps to 429. Global or backend exhaustion maps to 503. Authentication and scope rejection happen before lease backend work.
-
-* Audit Events
-
-Every route and embedded operation records:
-
-- operation and result class;
-- principal and non-secret credential identifier;
-- tenant, program, dataset, actor, operation class, and target scope;
-- canonical key fingerprint;
-- lease identifier and fencing token when safe;
-- request, correlation, and decision identifiers;
-- HTTP status for HTTP calls;
-- latency, retries, and backend health;
-- replayed-result flag;
-- reason for revoke;
-- stale-fence rejection boundary.
-
-* Acceptance Tests
-
-Implementation is complete only when tests prove:
-
-1. every route authenticates before service access;
-2. capability and exact target scope deny before backend access;
-3. hidden and absent leases share one 404 shape;
-4. acquire, renew, release, and revoke replay by idempotency key;
-5. mismatched key reuse returns 422;
-6. conflict returns 409;
-7. stale token returns 412;
-8. overload and backend failure return structured 429 and 503;
-9. unknown outcome instructs same-key replay;
-10. HTTP and embedded APIs return equivalent service outcomes;
-11. required-lock targets cannot dispatch without authority;
-12. local and RabbitMQ targets carry the same envelope schema;
-13. expired actors receive lease loss;
-14. stale actors cannot persist, publish, acknowledge success, or commit external effects after a newer acquisition;
-15. problem responses contain no secrets or backend internals;
-16. no target actor or HTTP route imports a Valkey package.
-
-* Implementation Order
-
-1. Add target lease application-service package and result mapping.
-2. Convert request timeout to an absolute monotonic deadline.
-3. Add idempotency-header parsing and request fingerprints.
-4. Add RFC 9457 problem response helpers.
-5. Add versioned routes and authorization policies.
-6. Add manifest locking policy and execution envelope.
-7. Add actor renewal supervisor and lease-loss control message.
-8. Add fencing gates to every side-effect path.
-9. Add RabbitMQ settlement classifications.
-10. Run full HTTP, embedded, concurrency, expiry, redelivery, and stale-writer tests.
+- existing lease protocol/Valkey implementation remains the storage authority;
+- HTTP and embedded calls share one authenticated service contract;
+- unauthorized calls cannot touch the store;
+- idempotency/deadline/unknown-outcome semantics are explicit and bounded;
+- required-lock target cannot dispatch without current server-created authority;
+- local and Rabbit execution carry equivalent immutable authority;
+- stale generation cannot make an authoritative side effect after a newer fence exists;
+- responses do not disclose backend/private authority data;
+- #33 can exercise the resulting seams without bypassing them;
+- no new StarLang syntax or second lease control plane is introduced.
 
 * Footnotes and Glossary
 
-[fn:http] HTTP: Hypertext Transfer Protocol, the request-response protocol used by the StarIntel API.
+[fn:fencing] Fencing rejects stale generations at the receiver of an authoritative side effect, even if the stale worker remains alive.
+[fn:application-service] A thin application service applies caller authority and orchestration policy above the already implemented storage protocol.
+[fn:unknown-outcome] A mutation outcome is unknown when the caller cannot prove whether the backend committed; safe recovery replays the same idempotency identity.
 
-[fn:starintel] StarIntel: A local-first intelligence platform that collects, validates, connects, searches, analyzes, and exports structured documents through actor-based services.
+* Changelog
 
-[fn:valkey] Valkey: The key-value server selected by issue 31 as the initial target-lease backend.
-
-[fn:normative] Normative: A requirement that conforming implementations must follow.
-
-[fn:monotonic-deadline] Monotonic deadline: One absolute operation limit measured by a clock that only moves forward, preventing nested calls from each receiving a fresh timeout.
-
-[fn:rfc9457] RFC 9457: The Internet standard defining machine-readable problem details for HTTP APIs using =application/problem+json=.
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Refreshed design around the implemented lease-store/Valkey stack; narrowed remaining work to service, HTTP projection, dispatch authority, and stale-fence acceptance. | ARDR Auto-Research | refreshed STAR-RESEARCH-032; server #32; current lease source/history |

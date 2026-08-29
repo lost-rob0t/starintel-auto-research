@@ -1,10 +1,10 @@
 :PROPERTIES:
 :ID:       starintel-star-server-042-workload-dispatchers-router-pools
 :END:
-#+title: STAR-SERVER-042 Workload Dispatchers and Managed Router Pools
-#+description: Design-ready StarIntel runtime architecture for workload isolation, explicit named Sento dispatchers, managed stateless pools, keyed-affinity boundaries, thread-budget consumption, lifecycle ownership, and pressure observability.
+#+title: STAR-SERVER-042 Sento Total Concurrency Accounting
+#+description: Design-ready extension that preserves Sento router/dispatcher/mailbox semantics while enforcing one granted total across shared-dispatcher workers and ordinary pinned actors.
 #+status: DESIGN_READY_FOR_OPERATOR_REVIEW
-#+filetags: :starintel:design:star-server:sento:dispatcher:router:runtime:p0:
+#+filetags: :starintel:design:star-server:sento:dispatcher:router:concurrency:runtime:p0:
 #+created: [2026-08-29 Sat]
 #+last_modified: [2026-08-29 Sat]
 
@@ -12,343 +12,396 @@
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research basis | Active ARDR policy | APPROVED | Current source-backed research sufficient for design | [[id:starintel-ardr-issue-188-workload-dispatchers-router-pools][ARDR-ISSUE-188]] |
-| Architecture/design | StarIntel operator | PENDING | Explicit operator review of this exact design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/189][#189]] |
-| Security/capacity boundary | StarIntel operator | PENDING | Confirm control-reserve, keyed-state, and overload ownership boundaries | This design; #177; #183 |
+| Research basis | Active ARDR policy | APPROVED | Exact pinned Sento source supports this design | [[id:starintel-ardr-issue-188-workload-dispatchers-router-pools][ARDR-ISSUE-188]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator review of this revised exact design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/189][#189]] |
 | Implementation authorization | StarIntel operator | PENDING | Explicit operator authorization for an exact bounded slice | [[https://github.com/lost-rob0t/starintel-server/issues/35][starintel-server#35]] |
-| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/full-gate/exact-head implementation evidence | |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/full-gate/exact-head evidence | |
 
 * Canonical Inputs
 
-- [[id:starintel-ardr-issue-188-workload-dispatchers-router-pools][ARDR-ISSUE-188 P0 workload dispatchers and managed router pools]].
+- [[id:starintel-ardr-issue-188-workload-dispatchers-router-pools][ARDR-ISSUE-188 P0 Sento dispatcher/router total concurrency accounting]].
 - [[id:starintel-ardr-issue-176][ARDR-ISSUE-176 One total StarIntel runtime thread budget]].
 - [[file:../../research/cl-gserver/SENTO-000-sento-runtime-analysis.org][SENTO-000 Sento Runtime Analysis]].
 - [[file:../cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]].
-- [[https://github.com/lost-rob0t/starintel-auto-research/issues/183][Auto-Research #183 managed runtime lifecycle/reconnect design]].
 - [[https://github.com/lost-rob0t/starintel-server/issues/35][starintel-server #35]].
-- [[https://github.com/lost-rob0t/starintel-server/issues/36][starintel-server #36 admission/overload]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/36][starintel-server #36]].
+
+* Operator Direction / Supersession
+
+This revision supersedes the first STAR-SERVER-042 design shape that attempted to make a closed StarIntel workload topology and managed-router pool model the center of #35.
+
+The corrected requirement is:
+
+#+begin_quote
+Preserve Sento's router and dispatcher behavior. Add total concurrency accounting at the backend where Sento actually creates execution threads.
+#+end_quote
+
+Workload-specific named dispatchers remain available exactly as Sento already supports them. Routers retain their existing strategies and routee semantics. Neither needs a replacement abstraction for this P0.
 
 * Decision
 
-Extend the existing Common Lisp =star.runtime= composition with a closed workload-topology plan. The plan maps logical StarIntel workload classes to explicit Sento dispatchers, pinned owners, or managed routee pools using only capacity granted by the process-wide thread-budget authority.
+Add one aggregate *Sento execution-lane authority* beneath the existing actor-system dispatcher/pinned-mailbox realization path.
 
-Do not create a second actor system, second lifecycle controller, generic workflow engine, or StarLang-level host-thread API.
+The authority receives a numeric grant from StarIntel's already-defined process-wide thread planner. It tracks the Sento-owned actor-execution contribution to that process budget.
 
-The design deliberately separates four concepts that current code conflates:
-
-1. *workload class* — why work must be isolated;
-2. *executor/dispatcher allocation* — which granted runtime workers may execute it;
-3. *routee pool* — which equivalent actor/service instance receives one operation;
-4. *application state affinity* — which stable state owner must receive all operations for one key/generation.
-
-A dispatcher is not automatically a routee pool, and a raw router is not a keyed-affinity authority.
-
-* Runtime Ownership
-
-The existing runtime/component owner remains authoritative.
+The invariant is:
 
 #+begin_example
-star.runtime
-  |
-  +-- thread-budget plan (#177)
-  |
-  +-- component/lifecycle registry (#183)
-  |
-  +-- workload topology plan (this design)
-        |
-        +-- named Sento shared dispatchers
-        +-- explicitly justified pinned owners
-        +-- managed stateless routee pools
-        +-- keyed-affinity owners/adapters
-        +-- pressure/health projections
+used-sento-execution-lanes <= granted-sento-execution-lanes
 #+end_example
 
-Every realized dispatcher/pool has one stable runtime component owner ID and one declared thread-allocation/grant reference. Shutdown and restart are delegated to the component lifecycle design; this design only defines topology and routing semantics.
+No new user-facing total-thread configuration is introduced. The canonical process ceiling remains the existing process-wide authority from #177.
 
-* Closed Workload Classes
+* Preserve Existing Behavior
 
-Initial logical classes are:
+The implementation MUST retain:
 
-- =platform/control= — runtime lifecycle, component registry, health, routee management, overload decisions;
-- =platform/ingest= — validation and ingest coordination;
-- =platform/storage= — blocking CouchDB/repository operations;
-- =platform/rabbit= — Rabbit owner/reactor coordination;
-- =platform/target= — target scheduling, lease coordination, target-state dispatch;
-- =platform/cpu= — bounded CPU-heavy normalization/transforms;
-- =platform/research= — resumable research-job coordination.
+- actor-system named dispatcher configuration;
+- per-dispatcher =:workers= counts;
+- dynamic =register-new-dispatcher= semantics;
+- shared dispatcher's internal Sento router;
+- router =:random= strategy;
+- router =:round-robin= strategy;
+- custom count-to-index router strategies;
+- =message-box/dp= for actors on shared/named dispatchers;
+- =message-box/bt= for actors selecting reserved =:pinned=;
+- one-message-at-a-time state protection of dispatcher-backed actors;
+- existing dispatcher/router public behavior and tests.
 
-The list is closed in the first implementation. Unknown classes fail validation. Adding a class requires an explicit contract and tests rather than accepting arbitrary symbols from configuration.
+This feature changes whether new execution capacity may be realized, not how already-admitted actor messages are routed.
 
-A logical class may map to another class's executor only when the compiled topology explicitly says that isolation is shared. This prevents “seven labels means seven pools” from becoming another thread-multiplication bug.
+* Execution-Lane Model
 
-* Dispatcher Identity Rules
+A *Sento execution lane* is one long-lived Sento-owned actor processing thread.
 
-=:pinned= is reserved by Sento and MUST NOT be registered as a custom shared-dispatcher identifier.
+| Owner | Lane cost |
+|-------+-----------|
+| one shared-dispatcher worker | 1 |
+| shared dispatcher with N workers | N |
+| ordinary actor using =:pinned= | 1 |
+| ordinary actor using =message-box/dp= | 0 |
+| router object | 0 |
+| router routee membership | 0 |
 
-Canonical StarIntel shared-dispatcher IDs use explicit names such as:
+The model follows directly from the pinned dependency implementation: shared-dispatcher workers are themselves =:pinned= actors; =message-box/bt= owns one thread; =message-box/dp= owns no thread; routers only choose and forward to routees.
+
+* Authority Placement
+
+The concurrency ledger is process-scoped for StarIntel composition and may be referenced by the Sento actor system(s) created under that composition.
+
+Conceptual state:
 
 #+begin_example
-:platform/control
-:platform/ingest
-:platform/storage
-:platform/target
-:platform/cpu
-:platform/research
+sento-concurrency-authority
+  grant: integer
+  used: integer
+  owners: owner-id -> lane-reservation
 #+end_example
 
-=:platform/rabbit= may represent a coordination class without creating an ordinary shared dispatcher when Rabbit connection/channel ownership requires a dedicated owner/reactor thread. The topology records that owner as an executor kind rather than lying that all classes are Sento shared dispatchers.
-
-* Executor Kinds
-
-The first topology IR supports these closed executor kinds:
-
-- =shared-dispatcher= — Sento shared dispatcher whose worker count comes from an explicit thread grant;
-- =pinned-owner= — dedicated owner thread only for a component whose semantics require thread affinity;
-- =existing-owner= — component-owned executor already created under another approved runtime adapter, referenced but not duplicated;
-- =inline-control= — no additional pool; executes only on the explicitly designated control owner where safe.
-
-No executor kind may create threads before topology + budget + component-graph validation succeeds.
-
-* Thread-Budget Contract
-
-For every realized executor:
+Useful read-only projection:
 
 #+begin_example
-executor-id
-workload-class
-component-owner-id
-thread-grant-id
-workers-realized
-reserved-classification
+(:grant 8
+ :used 6
+ :free 2
+ :owners ((:dispatcher :shared 4)
+          (:dispatcher :storage 1)
+          (:pinned-actor "/user/rabbit-owner" 1)))
 #+end_example
 
-Invariants:
+Exact Common Lisp representation is implementation detail. A lock-protected counter and ownership hash table are sufficient.
 
-1. =workers-realized <= granted workers=.
-2. Data-plane executors cannot consume =platform/control= reserved grants.
-3. A dispatcher may not read =*ingest-workers*= or another local sizing knob to increase its worker count independently.
-4. A topology requiring more workers than granted fails before actor/thread/network startup.
-5. Existing pinned owner threads are accounted as demand rather than hidden overhead.
+The authority MUST NOT become a scheduler, priority engine, dispatcher replacement, or second process-budget owner.
 
-* Pool Contract
+* Startup Preflight
 
-A managed pool is runtime metadata plus a routee set and routing policy. It is not a second actor system.
+Configured shared dispatchers are known before worker creation. Their requested worker counts must be summed before the first dispatcher worker is realized.
 
-Pool metadata:
-
-- stable pool ID;
-- component owner ID + generation;
-- workload class/executor ID;
-- accepted operation/message contract;
-- stateless-or-keyed classification;
-- routee IDs/generations;
-- routing policy;
-- readiness/health state;
-- pressure snapshot;
-- lifecycle state;
-- declared minimum/maximum membership where applicable.
-
-The first bounded implementation does not require dynamic resizing.
-
-* Stateless Pools
-
-Use Sento round-robin only for genuinely equivalent stateless routees.
-
-Initial valid candidate: document validation/codec. Other candidates include immutable normalization/extraction and read-only search/query operations after their adapter boundaries are proven.
-
-Random routing is not selected as a default StarIntel policy because deterministic round-robin is easier to test/replay and sufficient for equivalent stateless routees.
-
-* Keyed/Stateful Pools
-
-Raw current Sento router selection is insufficient for target/dataset/job affinity because its custom strategy receives routee count but not the message/key.
-
-Therefore a pool marked =keyed= MUST declare a separate affinity owner/adapter capable of resolving:
+Given:
 
 #+begin_example
-(pool-id, generation, key) -> routee-id/generation
+:shared  workers=4
+:storage workers=4
+Sento grant=6
 #+end_example
 
-The first #35 implementation MUST NOT fake keyed support by using random or round-robin. If no approved affinity adapter exists for the selected slice, keyed pools remain validation-only/unsupported and the implementation stops before target/research migration.
+actor-system startup fails with a typed capacity condition before creating dispatcher worker threads.
 
-Candidate future strategy: deterministic rendezvous hashing over healthy routee identities and generation, or a coordinator-owned explicit key map where state migration/recovery requires stronger ownership. The exact strategy remains implementation/design follow-up; this design only forbids unsupported claims.
+Given:
 
-* Rabbit Boundary
+#+begin_example
+:shared  workers=4
+:storage workers=2
+Sento grant=6
+#+end_example
 
-RabbitMQ channel/connection ownership semantics remain adapter authority. =platform/rabbit= isolates Rabbit coordination/control traffic, but adding routees MUST NOT allow multiple actors to concurrently touch a channel owned by one reactor/thread.
+startup is an exact fit: =used= becomes 6 and =free= becomes 0.
 
-Rabbit publication and consumption may delegate CPU/parsing/application work outward after broker-owner operations are complete, subject to #36 bounded in-flight/admission rules.
+This preserves every local =:workers= setting while finally giving those settings one aggregate ceiling.
 
-* Storage Boundary
+* Dynamic Dispatcher Registration
 
-Blocking CouchDB work must not execute on =platform/control= or other latency-sensitive control capacity.
+=register-new-dispatcher= remains supported.
 
-Storage concurrency remains bounded by both:
+Before creating its worker actors, the operation atomically reserves the requested number of lanes.
 
-- dispatcher/executor grant; and
-- CouchDB connection-pool/adapter limits.
+If capacity is insufficient:
 
-Increasing one cannot silently exceed the other. #36 later defines queue/admission behavior when storage capacity is exhausted.
+- signal a typed =sento-concurrency-exhausted= or equivalent condition;
+- create no worker threads;
+- do not partially register the dispatcher.
 
-* Control Isolation
+If realization fails after reservation:
 
-Control capacity is used only for bounded lifecycle/health/registry/pool-management/lease-coordination actions that must remain responsive during saturation.
+- stop any workers already created;
+- remove incomplete registration;
+- release the entire reservation exactly once.
 
-Long-running storage, HTTP body processing, bulk transforms, provider calls, research work, or arbitrary application handlers are forbidden on control capacity.
+* Pinned Actor Creation
 
-A saturation test is an architectural acceptance gate: a deliberately blocked storage workload must not prevent a control health/registry operation from completing within its deterministic test deadline.
+An ordinary actor created with =:dispatcher :pinned= consumes one lane.
 
-* Pressure and Observability
+Reservation must occur before constructing the =message-box/bt= that starts its Bordeaux thread.
 
-The topology exposes a normalized read-only snapshot:
+If =free= is zero, actor creation fails before thread creation.
 
-- executor ID/workload class;
-- granted/realized workers;
-- pool membership + generation;
-- routee readiness/health;
-- mailbox/queue pressure when the underlying API can supply it;
-- accepted/completed/rejected counters when owned by the component;
-- current routing policy;
-- saturation/degraded flags.
+This requires a narrow internal hook in the actor-context/message-box realization path. It does NOT change what =:pinned= means to callers.
 
-Do not reach into arbitrary internal Sento slots from product APIs. Where the current public runtime lacks a required metric, expose it through a narrow adapter or leave the field =unknown=. =unknown= must not become numeric zero.
+* Dispatcher Workers Are Not Double-Charged
 
-#36 remains authority for overload result shape and queue/drop/reject/block behavior.
+A shared dispatcher first reserves N lanes as one atomic dispatcher realization.
 
-* StarLang Boundary
+Its internal N workers are then created as pinned actors under that existing reservation. Internal worker construction receives reservation ownership/tokens so the normal pinned-actor path does not increment the ledger again.
 
-No new StarLang syntax is needed for this P0 runtime slice.
+Required invariant:
 
-StarLang-defined actors/domain servers may later declare an abstract workload profile or logical execution requirement in a manifest. The compiled host runtime may map that profile onto this closed topology. StarLang source cannot choose raw thread counts, Sento dispatcher internals, or host function callbacks.
+#+begin_example
+dispatcher workers=4 -> used increases by exactly 4, never 8
+#+end_example
 
-This preserves the architecture order: StarLang declares domain behavior; Common Lisp runtime realizes bounded host execution effects.
+How reservation tokens are represented is private Sento/runtime machinery.
+
+* Pinned Thread Restart Semantics
+
+=message-box/bt= can restart its processing thread if that thread died while the mailbox remains live.
+
+Concurrency ownership belongs to the live pinned mailbox/actor, not to one particular thread object. Restarting the same mailbox therefore consumes no additional lane.
+
+A leaked restart must not increase =used=.
+
+* Release Semantics
+
+Reservations are released on confirmed owner termination, exactly once.
+
+** Ordinary pinned actor
+
+- stop requested: reservation remains owned while the mailbox thread may still be active;
+- actor/mailbox terminal stop: release one lane;
+- duplicate stop/notification: no second decrement.
+
+** Shared dispatcher
+
+- each worker reservation is associated with the dispatcher reservation;
+- dispatcher shutdown eventually releases N lanes after its workers terminate;
+- partial construction rollback releases any reserved but unrealized/terminated ownership;
+- duplicate dispatcher stop cannot release more than N.
+
+Unknown owner release is a deterministic error/diagnostic in tests rather than silently corrupting the counter.
+
+* Router Boundary
+
+Routers remain unchanged.
+
+A router has no execution lane of its own. Adding or removing a routee does not alter total concurrency merely because membership changed.
+
+If the routee is an already-existing pinned actor, its lane is already owned by that actor. If it is dispatcher-backed, its lane cost remains zero. The router never becomes a second capacity owner.
+
+Current limitations such as message-unaware custom strategy functions or lack of keyed affinity are separate future research. They are intentionally removed from this P0 implementation gate.
+
+* Dispatcher Identity
+
+=:pinned= remains the built-in dedicated-thread selection and MUST NOT be used as a custom named shared-dispatcher ID in StarIntel configuration.
+
+This is independent of total accounting but must be corrected because current Sento resolves =:pinned= before named-dispatcher lookup.
+
+StarIntel may retain whatever non-reserved named dispatcher IDs best express its existing workload separation. This design does not require a new closed workload-class schema.
+
+* Process-Budget Integration
+
+The process-wide planner remains authoritative for:
+
+- =*max-process-threads*=;
+- =*reserved-control-threads*=;
+- non-Sento runtime thread demands;
+- the number of Sento execution lanes granted to this authority.
+
+Sento does not independently read or reinterpret the process maximum as if every process thread belonged to it.
+
+Conceptually:
+
+#+begin_example
+process plan
+  max process threads = 32
+  reserved control = 4
+  non-Sento planned threads = X
+  granted Sento lanes = G
+
+Sento ledger
+  limit = G
+  used <= G
+#+end_example
+
+This keeps one process authority while allowing Sento to enforce its own exact realization boundary.
+
+* Observability
+
+Expose, at minimum:
+
+- granted Sento lanes;
+- used Sento lanes;
+- free Sento lanes;
+- reservation count by owner;
+- owner kind;
+- dispatcher ID or actor path where applicable.
+
+These values are useful to #36 admission/overload policy, but #36 remains responsible for queue admission, rejection, dropping, blocking, prefetch, and overload result semantics.
+
+No raw thread object needs to be exposed through the StarIntel product API.
 
 * Proposed Implementation Slices
 
-Every slice below remains =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+Every slice remains =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
 
-** Slice 1 — pure topology model + validator (P0 prerequisite)
+** Slice 1 — pure concurrency ledger + startup demand preflight
 
-No Sento runtime mutation yet.
+No production thread behavior is changed until the ledger tests are RED.
 
-Define closed values for workload class, executor kind, executor allocation, pool classification, and routing policy. Validate against explicit #177 thread grants and component owner IDs.
+Implement a small concurrency authority with atomic reserve/release and owner tracking. Add a pure configured-dispatcher demand calculation used before dispatcher initialization.
 
 Mandatory RED-first fixtures:
 
-- reserved custom dispatcher ID =:pinned= rejected;
-- unknown workload class rejected;
-- executor without thread-grant/component owner rejected;
-- requested workers greater than grant rejected;
-- data-plane executor consuming control-reserved grant rejected;
-- keyed pool with =random= rejected;
-- keyed pool with raw =round-robin= and no affinity adapter rejected;
-- duplicate executor/pool IDs rejected;
-- deterministic equivalent input -> byte/equal normalized topology.
+1. requested dispatcher workers 4 + 4 with grant 6 -> typed failure;
+2. exact fit 4 + 2 with grant 6 -> success, used=6/free=0;
+3. duplicate owner reservation rejected;
+4. over-release/unknown release rejected;
+5. duplicate release cannot decrement twice;
+6. deterministic owner snapshot/counts.
 
-Untouched server code must fail because no topology model/validator exists.
+** Slice 2 — shared-dispatcher realization integration
 
-** Slice 2 — explicit named shared dispatchers
+Reserve configured/dynamic dispatcher workers before their internal pinned actors start.
 
-Realize the first non-reserved named dispatchers from validated grants and remove the dead custom =:pinned= configuration.
+RED-first fixtures:
 
-RED-first integration fixture: configure one explicit shared dispatcher and prove its worker count equals the grant, while =:pinned= actor creation retains dedicated-thread semantics and cannot resolve the named shared pool.
+- 4-worker dispatcher raises used by exactly 4;
+- its internally pinned workers do not double-charge;
+- failed worker construction rolls back all four units;
+- dispatcher stop returns exactly four units.
 
-** Slice 3 — control/storage isolation migration
+** Slice 3 — ordinary pinned actor integration
 
-Move one blocking storage path off shared/control capacity and put control/health on explicit control capacity.
+Reserve one unit before =message-box/bt= starts.
 
-RED-first saturation fixture: block all storage workers, then prove a bounded control probe completes; untouched baseline should fail/isolate incorrectly.
+RED-first fixtures:
 
-** Slice 4 — first stateless managed routee pool
+- grant exhausted -> pinned actor construction fails before starting a thread;
+- dispatcher-backed actor creation leaves used unchanged;
+- pinned actor stop releases one;
+- pinned mailbox thread restart leaves used unchanged.
 
-Use deterministic round-robin for a stateless operation such as validation/codec. Register pool membership under the existing lifecycle/component owner and expose health/pressure snapshot.
+** Slice 4 — StarIntel process-plan wiring
 
-RED-first fixture proves two equivalent routees alternate deterministically, preserve per-actor serialized execution, and reject stale/removed generation metadata.
+Feed the Sento authority its numeric grant from #177's process planner and remove the dead StarIntel custom =:pinned= shared-dispatcher configuration.
 
-** Slice 5 — Rabbit owner integration
+Do not replace Sento routing or change dispatcher worker strategies.
 
-Represent existing Rabbit owner/reactor capacity in the topology and move delegable application work onto appropriate granted executors without violating channel ownership.
+** Slice 5 — diagnostics / #36 handoff
 
-** Slice 6 — keyed-affinity capability
-
-Only after a message-aware affinity adapter has its own RED contract. Migrate target/job stateful routing only after exact key/generation semantics are proven.
-
-** Slice 7 — #36 integration
-
-Expose executor/pool capacity and pressure inputs consumed by admission, prefetch, bounded mailbox, and structured overload policy. Do not implement #36 policy inside #35.
+Expose read-only total/used/free/owner counts to runtime health/diagnostics and as an input to later #36 admission policy.
 
 * Adversarial Review
 
-** Reject: one giant shared dispatcher
+** Reject: replace Sento routers with a StarIntel pool manager for this feature
 
-It preserves the existing failure mode: blocking storage or application work can starve lifecycle/health/lease coordination. A global thread ceiling without isolation is necessary but insufficient.
+Routers create no execution threads. Replacing routing policy does not solve the multiplicative dispatcher/pinned-thread count.
 
-** Reject: one dispatcher per label with independent worker counts
+** Reject: invent a closed workload-class DSL as the concurrency authority
 
-This recreates the thread-multiplication defect #34/#177 is intended to eliminate. Logical workload classes must consume one global plan.
+The existing Sento named-dispatcher model already expresses dispatcher separation. The missing invariant is aggregate capacity, not another naming layer.
 
-** Reject: custom dispatcher named =:pinned=
+** Reject: remove per-dispatcher =:workers=
 
-Current Sento source reserves that identifier before named dispatcher lookup. Keeping the name produces dead/misleading configuration.
+Local worker counts remain useful. The total authority constrains their sum; it does not flatten every dispatcher to one shared size.
 
-** Reject: use pinned actors everywhere for isolation
+** Reject: count actors rather than execution lanes
 
-Pinned actors create one thread per actor and destroy the ability to bound many equivalent stateless routees under a shared worker grant.
+Dispatcher-backed actors own no thread. Counting them would artificially cap actor population and destroy the reason Sento has shared dispatchers.
 
-** Reject: raw Sento random routing for stateful work
+** Reject: count router routees
 
-Random selection has no affinity or ordering contract.
+Routees may be pinned or dispatcher-backed. Membership is not capacity ownership and would double-count pinned actors.
 
-** Reject: call round-robin “keyed”
+** Reject: let each dispatcher maintain its own maximum only
 
-Round-robin is deterministic by call sequence, not by application key. Restart/concurrency/order changes break affinity.
+That preserves the original multiplication defect. Independent maxima need one aggregate ceiling.
 
-** Reject: routee-count custom strategy as keyed hashing
+** Reject: reserve once for the dispatcher and again through each internal =:pinned= worker
 
-The current custom strategy receives only routee count, not the message/key or routee identities. It cannot safely implement application-key affinity.
+That double-counts every shared-dispatcher worker.
 
-** Reject: pool manager that becomes a second lifecycle authority
+** Reject: decrement on stop request instead of termination
 
-Pool lifecycle, generation, stop/quiesce, and health must register with #183's component lifecycle rather than creating another control plane.
+That advertises capacity as free while its previous worker thread may still be alive.
 
-** Reject: queue/admission policy embedded in dispatcher design
+** Reject: use =bt:all-threads= as the authority
 
-That duplicates #36. This design surfaces capacity/pressure; #36 decides reject/block/drop/prefetch behavior.
+Process thread enumeration cannot distinguish ownership reliably and includes unrelated runtime threads. Accounting must be explicit at creation/release boundaries.
 
-** Reject: StarLang raw dispatcher/thread controls
+** Reject: add another user-facing max-concurrency config competing with =*max-process-threads*=
 
-Host thread/dispatcher internals are runtime effects. Exposing them directly in the language would bypass the global capacity authority.
+StarIntel already has the process authority. Sento receives a grant from it.
+
+** Reject: change random/round-robin/custom router semantics in the same slice
+
+No evidence requires that change to enforce total concurrency. Preserve existing behavior and tests.
 
 * Acceptance Criteria
 
-- no StarIntel custom shared dispatcher uses reserved =:pinned=;
-- every realized dispatcher/pinned owner maps to one component owner and one approved thread allocation;
-- impossible topology fails before long-lived side effects;
-- storage saturation cannot starve control/health/lease coordination;
-- stateless pools use deterministic equivalent-routee routing and preserve actor state serialization;
-- stateful pools cannot claim keyed affinity without a message-aware key/generation owner;
-- Rabbit ownership semantics remain intact;
-- pool/executor health and pressure are inspectable without leaking raw actors/threads to ordinary callers;
-- #36 can consume capacity/pressure without duplicating runtime topology;
-- #183 owns lifecycle; #177 owns thread capacity;
-- no new StarLang syntax, actor system, external supervisor, or Python controller is introduced;
+- existing Sento dispatcher/router/mailbox semantics remain intact;
+- existing router strategy tests remain green unchanged;
+- existing dispatcher behavior remains green except where new capacity failure is intentionally exercised;
+- all configured shared-dispatcher workers fit one aggregate Sento grant before worker realization;
+- dynamic dispatcher creation reserves atomically;
+- every shared-dispatcher worker costs exactly one lane;
+- every ordinary pinned actor costs exactly one lane;
+- dispatcher-backed actors cost zero additional lanes;
+- routers and routee membership cost zero additional lanes;
+- no double charging of internally pinned dispatcher workers;
+- no capacity leak on construction failure, stop, or thread restart;
+- total/used/free and ownership diagnostics are available;
+- StarIntel process thread budget remains the sole canonical process maximum;
+- =:pinned= is no longer used as a custom named StarIntel shared dispatcher;
+- no new StarLang syntax, routing system, scheduler, external supervisor, or Python controller is introduced;
 - implementation remains blocked until an exact slice receives operator authorization.
 
 * Decision / Handoff State
 
-This design is ready for operator review. It is not implementation-approved.
+This revised design is ready for operator review and supersedes the earlier workload-topology-first STAR-SERVER-042 text.
 
-Owning implementation issue: [[https://github.com/lost-rob0t/starintel-server/issues/35][starintel-server #35]]. The issue should be updated to reference this research/design and to carry the Slice 1 RED target as the first proposed realization transaction.
+Owning implementation proposal: [[https://github.com/lost-rob0t/starintel-server/issues/35][starintel-server #35]].
+
+Implementation authorization remains =PENDING / AWAITING_OPERATOR_APPROVAL=.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-29 | Created design and adversarial review from ARDR #188, current server source, current Sento source, and existing thread/lifecycle authorities. | GPT-5.6 Sol | Auto-Research #188/#189; server master =8fb297d...=; cl-gserver master =bcd08c5...= |
+| 2026-08-29 | Created initial workload dispatcher / managed-pool design. | GPT-5.6 Sol | Auto-Research #188/#189 |
+| 2026-08-29 | Replaced workload-topology-first design after operator correction; preserve Sento semantics and enforce one total execution-lane count at dispatcher/pinned backend. | GPT-5.6 Sol | exact Sento pin =6a510c5...=; revised ARDR-ISSUE-188 |
 
 * Footnotes and Glossary
 
-- *Executor* :: Runtime mechanism that actually executes a class of work, such as a Sento shared dispatcher or a dedicated owner thread.
-- *Managed pool* :: Routee set whose membership, generation, lifecycle metadata, health, and routing policy are owned by the runtime component model.
-- *Stateless routee* :: Equivalent worker whose correctness does not depend on receiving all work for one application key.
-- *Keyed affinity* :: Stable key-to-state-owner routing for one active generation.
-- *Control reserve* :: Thread/capacity allocation that data-plane work cannot consume.
+- *Execution lane* :: One Sento-owned long-lived actor-processing thread reserved by a shared-dispatcher worker or ordinary pinned actor.
+- *Concurrency authority* :: Small reservation ledger enforcing Sento's granted aggregate execution-lane maximum.
+- *Dispatcher-backed actor* :: Actor whose =message-box/dp= runs on existing shared-dispatcher workers and owns no dedicated thread.
+- *Pinned actor* :: Actor whose =message-box/bt= owns one dedicated processing thread.

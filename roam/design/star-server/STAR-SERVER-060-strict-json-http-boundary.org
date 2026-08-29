@@ -1,0 +1,240 @@
+:PROPERTIES:
+:ID:       starintel-star-server-060-strict-json-http-boundary
+:END:
+#+title: STAR-SERVER-060 Strict JSON HTTP Boundary
+#+description: Design-ready StarIntel HTTP boundary using one strict bounded JSON parser authority, deterministic duplicate-key rejection, compatibility conversion, and side-effect-free malformed-input handling.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+#+filetags: :starintel:design:star-server:http:json:security:jzon:tdd:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research evidence sufficiency | Active ARDR policy | APPROVED | Current source plus parser evidence is sufficient for this bounded design; this is lifecycle readiness only | [[id:starintel-star-server-research-060][STAR-RESEARCH-060]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator review of parser ownership, duplicate-key policy, limits, conversion, and route coverage | This document |
+| Implementation authorization | StarIntel operator | PENDING | Explicit operator authorization for an exact implementation slice | [[https://github.com/lost-rob0t/starintel-server/issues/130][server #130]] |
+| Implementation completion | Repository maintainer | NOT STARTED | Preserved RED, GREEN, focused/full regressions, exact-head evidence, and control-plane reconciliation | |
+
+No machine-generated readiness, issue state, merge, or green publication state authorizes implementation.
+
+* Canonical Inputs
+
+- [[id:starintel-star-server-research-060][STAR-RESEARCH-060 Strict JSON HTTP Boundary]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/130][starintel-server #130]].
+- [[https://github.com/lost-rob0t/starintel-server/pull/126][starintel-server PR #126 preserved RED]].
+- Current server baseline =8fb297d146e7332fae7e38170b5b49d49530ac53=.
+
+* Decision
+
+Make =star.frontends.http-api:parse-json-octets= the single public request-body syntax authority and make Jzon the only parser that reads untrusted JSON bytes.
+
+The boundary performs, in order:
+
+#+begin_example
+content type
+  -> byte limit
+  -> Jzon strict streaming parse + duplicate-key tracking + parser limits
+  -> in-memory compatibility conversion to existing JSOWN representation
+  -> route shape/schema validation
+  -> application behavior / side effects
+#+end_example
+
+Do not pass the original caller-controlled JSON text to YASON or JSOWN after Jzon has accepted it. The existing JSOWN representation may remain downstream, but it is produced from the already parsed Jzon value/event stream rather than by reparsing untrusted text.
+
+No StarLang syntax or actor behavior changes are required.
+
+* Strict Parser Contract
+
+The boundary calls Jzon with permissive extensions explicitly disabled rather than relying on library defaults:
+
+- comments: disabled;
+- trailing comma: disabled;
+- multiple top-level content: disabled;
+- nesting depth: explicit bounded value owned by HTTP configuration;
+- string length: explicit bounded value owned by HTTP configuration.
+
+The existing total request body bound remains authoritative before parser construction. The parser consumes the request octet vector directly so UTF-8 decoding belongs to the strict parser instead of a permissive pre-decoder/parser chain.
+
+All JSON parse/limit/encoding failures map into the current typed =http-input-error= client contract. The public response is HTTP 400 / =malformed_json= for invalid syntax or encoding unless an already-established more specific transport limit applies, such as HTTP 413 before parsing.
+
+* Duplicate-Key Contract
+
+Duplicate member names are rejected at any object nesting level.
+
+Reason: a first-wins/last-wins policy is unsafe at an authority boundary because different parsers or later components can disagree about which value controls fields such as identity, dataset, tenant, scopes, versions, idempotency keys, actor names, or target authority.
+
+Use the Jzon streaming event interface. Maintain a stack corresponding to object/array nesting. Each active object frame owns a set of member names. On =:object-key=, insertion of an existing name signals the boundary's malformed-input path before any application value is returned.
+
+Nested objects get independent key sets. The detector is bounded by the already bounded body/string/depth contract; it must not intern caller-supplied keys into a package.
+
+* Compatibility Conversion
+
+Current application code expects JSOWN-style values. The parser boundary therefore owns one explicit conversion from Jzon's typed CL values/events to the JSOWN representation.
+
+Conversion invariants:
+
+| JSON value | Required compatibility result |
+|------------+-------------------------------|
+| object | JSOWN object with string keys |
+| array | current JSOWN-compatible list/array representation used by =json-array-p= callers |
+| string | string preserving Unicode content |
+| number | numeric value accepted by current schema layer |
+| true | current JSOWN true representation |
+| false | current JSOWN false representation |
+| null | current JSOWN null representation distinct where existing handlers require it |
+
+The implementation must characterize these values with RED/GREEN fixtures before switching production parsing. It must not assume =nil= means the same thing for JSON false, null, and empty array across libraries.
+
+A later project may migrate StarIntel internals away from JSOWN. That migration is explicitly out of scope here.
+
+* Route Ownership
+
+All caller-controlled JSON body routes must call the shared boundary exactly once. The current canonical document, target compatibility, and bulk routes already call =parse-json-request= and therefore have the right ownership shape.
+
+Before implementation completion, audit the remaining =source/frontends/http-*.lisp= modules for direct =jsown:parse=, =yason:parse=, or =jzon:parse= on request content. Any such body parser must either be migrated to =parse-json-request= or documented as non-request parsing with a test proving that distinction.
+
+Do not add route-local regex checks, trailing-comma checks, or parser wrappers.
+
+* Side-Effect Boundary
+
+Parsing and route-level shape/schema validation complete before any of these effects can occur:
+
+- CouchDB/document mutation;
+- durable outbox mutation;
+- RabbitMQ publish/consumer submission;
+- actor/task submission;
+- credential/user mutation;
+- authorization/quota mutation;
+- target creation/dispatch;
+- target lease acquire/renew/release or fenced authoritative effect.
+
+Focused tests use spies/fakes around the first application-service seam and prove invocation count remains zero for malformed input.
+
+* Error Algebra
+
+Preserve existing transport ordering:
+
+1. unsupported content type -> existing 415 =unsupported_media_type=;
+2. body exceeds byte maximum -> existing 413 =request_body_too_large=;
+3. invalid JSON syntax/encoding/parser limit -> 400 =malformed_json=;
+4. wrong top-level shape -> existing =json_object_required= / =json_array_required=;
+5. schema/business validation -> existing 422 or domain-specific result.
+
+Every error remains inside =with-http-boundary= so correlation IDs are preserved. Parser internals, stack traces, raw credentials, and full hostile request bodies are not placed in public response envelopes.
+
+* Resource Limits
+
+The first implementation must expose deterministic configuration ownership for:
+
+- existing maximum request bytes;
+- maximum JSON nesting depth;
+- maximum JSON string/key length.
+
+Production numeric values for the two new parser limits are not invented by this design. They require compatibility tests against current canonical fixtures and representative large documents. A safe implementation can introduce conservative tested defaults only with evidence recorded in the implementation handoff.
+
+Do not parse the full body three times. Do not use host thread count, actor mailbox capacity, or Sento dispatcher counts as JSON resource-limit proxies.
+
+* Proposed Implementation Slices
+
+Every slice remains =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — strict syntax adapter + RED corpus
+
+Owner: =lost-rob0t/starintel-server=.
+
+Preserve the exact object-trailing-comma RED from PR #126. Add pure =parse-json-octets= fixtures for comments, array trailing comma, multiple top-level values, malformed escapes/numbers, invalid UTF-8, duplicate keys, depth overflow, and string-length overflow. No application effects are needed in this slice.
+
+RED-first target on untouched current behavior:
+
+#+begin_example
+{"_id":"strict-json-red",}
+=> expected http-input-error(400, "malformed_json")
+=> untouched boundary accepts it
+#+end_example
+
+Then introduce the Jzon strict streaming adapter and conversion, keeping the public =parse-json-octets= API stable.
+
+** Slice 2 — compatibility representation matrix
+
+Prove every JSON type required by current routes converts into the same service semantics expected by =require-json-object=, =require-json-array=, schema validators, auth/authorization handlers, and response-producing code. No route migration until this matrix is green.
+
+** Slice 3 — route convergence + zero-side-effect proof
+
+Audit all body-bearing HTTP routes. Remove/bypass independent permissive request parsers and prove each malformed hostile corpus case reaches zero application-service effects.
+
+** Slice 4 — stack/security regression
+
+Run focused HTTP tests, full deterministic server suite, Nix/closure gate, container-stack tests, schema lock, and security-negative/ZAP suite required by current server policy. Record exact resolved Jzon dependency identity and exact-head diff.
+
+* Mandatory Acceptance Criteria
+
+- object and array trailing commas are rejected;
+- comments and multiple top-level values are rejected;
+- duplicate keys at any object level are rejected;
+- invalid UTF-8 and malformed JSON cannot be normalized into valid application input;
+- body, nesting, and string limits are deterministic and bounded;
+- valid canonical JSON remains compatible with current service handlers;
+- =parse-json-octets= remains the shared transport boundary rather than route-specific fixes;
+- malformed input reaches zero authoritative side effects;
+- correlation/error contracts remain client-safe;
+- no raw untrusted body is reparsed through JSOWN/YASON after strict Jzon acceptance;
+- no StarLang, Sento, storage architecture, target fencing, or unrelated API behavior is changed;
+- implementation stays blocked until the exact slice is operator-authorized in the canonical approval workflow.
+
+* Adversarial Review
+
+** Reject: regex or textual trailing-comma scan
+
+It will mis-handle quoted strings, escapes, nesting, and future parser edge cases. This is a grammar problem and belongs to a real JSON parser.
+
+** Reject: keep YASON as the strict validator
+
+Its parser loop structurally permits a comma immediately before the closing object/array delimiter. The observed bug survives that validation shape.
+
+** Reject: Jzon validates, then JSOWN reparses the original bytes
+
+A permissive second parser becomes an unnecessary second interpretation of hostile input. Even if Jzon has already accepted the syntax, representation should be derived from the accepted parse rather than reparsing the attacker-controlled text.
+
+** Reject: Jzon + YASON + JSOWN triple parse
+
+This multiplies cost and semantic authorities. YASON's duplicate-key behavior is useful evidence for the policy, not justification for keeping three parsers in the transport path.
+
+** Reject: silently allow duplicate keys because RFC 8259 describes them as interoperability trouble rather than outright syntax failure
+
+StarIntel is allowed to enforce a narrower application boundary. Ambiguous authority-bearing member names are not useful compatibility.
+
+** Reject: migrate all application JSON representation in the same patch
+
+That broadens a security bug fix into a service-wide data-model migration and destroys the bounded RED/GREEN transaction.
+
+** Reject: expose parser condition text
+
+Library errors can contain implementation detail or excerpts of hostile input. Public errors stay on the existing stable envelope.
+
+* Contradictions and Compatibility Risks
+
+- Historical research assumed direct JSOWN parsing was still the main boundary. Current master has already introduced YASON validation; this design supersedes that stale source description.
+- PR #126 reported an array trailing comma control as rejected in its resolved runtime, while current YASON source is structurally permissive for both arrays and objects. Do not convert that discrepancy into a claimed guarantee; the implementation corpus must test the exact resolved local dependency closure.
+- Jzon is present in the ASDF dependency graph but is not separately identified in =qlfile.lock=. Exact resolved version/source must be captured before relying on version-specific condition names.
+
+* Decision / Handoff State
+
+This design is ready for operator review. It is not implementation-approved.
+
+Owning implementation issue: [[https://github.com/lost-rob0t/starintel-server/issues/130][starintel-server #130]].
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created bounded strict-JSON design from current server source, preserved PR #126 RED, YASON source audit, and existing Jzon capability. | GPT-5.6 Sol | STAR-RESEARCH-060; server =8fb297d...=; #130/#126 |
+
+* Footnotes and Glossary
+
+- *Syntax authority* :: The one parser whose acceptance grammar controls whether caller bytes are valid JSON at the HTTP transport boundary.
+- *Compatibility conversion* :: In-memory conversion from the strict parser's typed value/events to the current JSOWN-facing application representation without reparsing caller text.
+- *Duplicate-key frame* :: Per-object set of member names used while streaming to reject repeated names within that object.
+- *Side-effect seam* :: First application call capable of mutation, dispatch, publication, or authority change; malformed input must never cross it.
+- *RED corpus* :: Deterministic invalid-input fixtures that fail on the untouched defect baseline for the intended missing behavior.

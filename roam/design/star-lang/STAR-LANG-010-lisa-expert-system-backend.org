@@ -2,22 +2,23 @@
 :ID:       star-lang-design-010-lisa-expert-system-backend
 :END:
 #+title: STAR-LANG-010 LISA Expert-System Backend
-#+description: Backend-specific StarLang design for implementing the production-rule expert-system engine on LISA while preserving StarIntel object identity, provenance, deterministic session semantics, normalized proofs, and the portable star.logic.api/1 contract.
-#+status: REVIEW
-#+filetags: :starintel:design:star-lang:expert-systems:lisa:rete:production-rules:objects:proofs:
+#+description: Approved backend-specific StarLang design for LISA production-rule reasoning with identity-preserving StarIntel objects, RETE working memory, deterministic sessions, normalized proofs, budgets, replay, and star.logic.api/1 conformance.
+#+status: APPROVED
+#+filetags: :starintel:design:star-lang:expert-systems:lisa:rete:production-rules:objects:proofs:approved:prototype-retirement:
 #+created: [2026-08-16 Sun]
-#+last_modified: [2026-08-16 Sun]
+#+last_modified: [2026-08-29 Sat]
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Architecture | StarLang maintainer | PENDING | Approve LISA as the production-rule backend specialization of STAR-LANG-007 | This design |
-| Portable API | Logic runtime maintainer | APPROVED BY DEPENDENCY | Conform exactly to =star.logic.api/1= | STAR-LANG-009 |
-| StarIntel object reuse | StarIntel maintainer | PENDING | Demonstrate direct object-backed reasoning for at least one real StarIntel object family | Object-backed fact contract |
-| Proof semantics | Logic runtime maintainer | PENDING | Normalize LISA activations/support into =star.logic.derivation/1= | Proof normalization |
-| Security | Security reviewer | PENDING | Confirm closed compiler-generated rule artifacts and no arbitrary RHS host calls | Security invariants |
-| Implementation | Repository maintainer | NOT STARTED | Land final-owned adapter/runtime slices with CI fixtures | Implementation order |
+| Architecture | StarLang maintainer | APPROVED | Approve LISA as the production-rule backend specialization of STAR-LANG-007 | Operator approval 2026-08-29 |
+| Portable API | Logic runtime maintainer | APPROVED | Conform exactly to =star.logic.api/1= | STAR-LANG-009; operator approval 2026-08-29 |
+| Object-backed fact contract | StarIntel maintainer | APPROVED | Approve identity-preserving direct StarIntel object reasoning as the required design | Operator approval 2026-08-29 |
+| Proof semantics | Logic runtime maintainer | APPROVED | Approve normalization of LISA support/activation evidence into =star.logic.derivation/1= | Operator approval 2026-08-29 |
+| Security | Security reviewer | APPROVED | Approve closed compiler-generated rule artifacts and deny arbitrary RHS host calls | Operator approval 2026-08-29; Security invariants |
+| Object-backed conformance evidence | Repository maintainer | NOT STARTED | Demonstrate at least one real StarIntel object family through the final adapter | Future implementation fixture |
+| Implementation | Repository maintainer | NOT STARTED | Land final-owned adapter/runtime slices with CI/Nix fixtures and remove superseded prototype code | Future lost-rob0t/star-lang evidence |
 
 * Related Nodes
 
@@ -26,25 +27,33 @@
 - [[file:STAR-LANG-011-swi-prolog-expert-system-backend.org][STAR-LANG-011 SWI-Prolog Expert-System Backend]]
 - [[file:STAR-LANG-012-n-prolog-expert-system-backend.org][STAR-LANG-012 N-Prolog Expert-System Backend]]
 
-* Status and Authority
+* Objective
 
-This file is the authoritative design for LISA-specific expert-system behavior.
+Use LISA where StarLang needs production-rule semantics: persistent working
+memory, RETE-style incremental matching, agenda scheduling, salience, and
+rule-driven conclusions. Keep LISA behind the portable StarLang logic contract
+so native engine objects and executable host-language forms never leak into
+=.star= source or portable runtime records.
 
-STAR-LANG-007 remains the umbrella architecture and may summarize LISA behavior, but backend-specific implementation decisions, capability claims, object mapping, RETE/agenda semantics, lifecycle, and conformance gates belong here.
+* Approved Decision
 
-STAR-LANG-009 remains authoritative for the portable runtime API. This design MUST NOT redefine the meaning of =assert!=, =retract!=, =solve=, =solutions=, =exists?=, =explain=, portable operation states, fact identity, or normalized result records.
-
-* Decision
-
-StarLang SHALL implement LISA through the final-owned system:
+StarLang SHALL implement LISA through the final-owned ASDF system:
 
 #+begin_example
 star-logic-adapter-lisa
 #+end_example
 
-LISA is the primary backend for production-rule semantics including persistent working memory, RETE matching, agenda scheduling, salience, negative/existential conditional elements, object-backed facts, and incremental fact deltas.
+LISA is the primary backend for =star.expert.production/1= and related
+production-rule profiles.
 
-The adapter SHALL consume compiler-generated trusted rule artifacts. Untrusted =.star= source SHALL never be evaluated as Common Lisp or passed to native LISA macros directly.
+It SHALL support persistent session working memory, ordered fact deltas,
+RETE-style incremental matching, agenda activation/firing, compiler-validated
+salience, negative/existential conditional elements where fixture-proven,
+checked conclusions, bounded explanations, cancellation, budgets, and replay
+under the same pinned backend/package/build contract.
+
+LISA SHALL NOT claim SWI-Prolog tabling, generic recursive query semantics, or
+constraint profiles merely because equivalent behavior could be hand-coded.
 
 * Backend Boundary
 
@@ -58,84 +67,64 @@ starlang-expert-compiler
 closed expert / logic IR
      |
      v
-trusted LISA artifact lowering
+trusted digest-locked LISA artifact
      |
      v
 star-logic-adapter-lisa
      |
      v
-LISA engine/session
+isolated LISA session
      |
      v
 normalized conclusions + proofs + usage
 #+end_example
 
-Native LISA objects, agenda nodes, RETE nodes, activations, CLOS implementation details, or engine handles MUST NOT cross the portable =star-logic= boundary.
+Native LISA engine handles, CLOS implementation details, agenda nodes,
+activations, RETE nodes, or native working-memory objects MUST NOT cross the
+portable =star-logic= boundary.
 
 * StarIntel Object-Backed Fact Contract
 
-LISA's object-instance path is a required capability, not an optional optimization.
+Direct identity-preserving StarIntel object reasoning is required.
 
-At least one real StarIntel object family SHALL be accepted into an expert session without first being copied into a second expert-only application object.
-
-Conformance shape:
+Conformance target:
 
 #+begin_example
-FAIL: StarIntel Person -> copied expert-person object -> LISA
-PASS: StarIntel Person -> object-backed LISA fact -> rules
+FAIL: StarIntel Person -> unrelated expert-person copy -> LISA
+PASS: StarIntel Person -> identity-preserving object-backed fact -> LISA rules
 #+end_example
 
-The adapter SHALL preserve or maintain a stable mapping for:
+The adapter SHALL preserve or map at least:
 
-- authoritative StarIntel object/document identity;
-- schema identity and version;
-- provenance/source references;
-- relation/document references needed by rules or explanations;
-- verification/proof metadata required by the selected profile;
-- logical session fact identity;
-- object generation/change sequence where mutation observation is enabled.
+- authoritative StarIntel object/document ID;
+- schema ID and version;
+- provenance/evidence references;
+- relation/document references required by the rule package;
+- session fact identity;
+- object generation/revision when freshness matters;
+- proof/verification metadata required by the active profile.
 
-Backend representation is not application authority. LISA working memory MUST NOT become a second canonical mutable copy of StarIntel state.
+LISA working memory is disposable session state. It is never a second canonical
+StarIntel datastore.
 
 * Object Lifecycle
 
-The adapter SHALL define explicit operations for:
+The final adapter SHALL support:
 
-1. projecting or registering a StarIntel object into one expert session;
-2. asserting an object-backed fact;
-3. marking a mapped object as changed when an approved observed field changes;
-4. retracting the session visibility of an object without deleting canonical StarIntel state;
-5. rebuilding session working memory from journaled authoritative inputs during replay;
-6. rejecting stale or unmappable object generations when the active mapping contract requires freshness.
+1. project/register an authoritative StarIntel object into one session;
+2. assert the identity-preserving object-backed fact;
+3. mark an approved mapped change;
+4. retract session visibility without deleting canonical state;
+5. rebuild working memory from authoritative inputs plus journaled deltas;
+6. reject stale or unmappable generations where the mapping contract requires freshness.
 
-Direct object reuse MAY use LISA instance APIs internally, but the portable runtime sees only normalized StarLang fact identities and deltas.
-
-* Production Semantic Profile
-
-The initial LISA-backed expert profile is:
-
-#+begin_example
-star.expert.production/1
-#+end_example
-
-Required semantic claims:
-
-- persistent session working memory;
-- ordered fact deltas;
-- RETE-style incremental matching;
-- agenda activation and firing;
-- deterministic salience semantics for conformance fixtures;
-- negative and existential conditional elements where fixture-proven;
-- source/session/derived/questionAnswer fact roles;
-- normalized conclusion identity;
-- bounded explanation support;
-- deterministic replay under the same engine/package/build contract.
-
-LISA SHALL NOT claim SWI-Prolog tabled, constraint, or generic recursive-query semantics merely because some equivalent result can be hand-coded.
+The portable runtime sees only StarLang fact identities and normalized deltas.
 
 * Rule Artifact Contract
 
-The compiler SHALL lower approved expert IR into a trusted LISA rule package with exact package identity:
+Only the compiler may produce executable LISA rule artifacts.
+
+Each artifact records exact identity including:
 
 #+begin_example
 packageId
@@ -147,7 +136,7 @@ semanticProfile
 engineCompatibility
 #+end_example
 
-Rule actions are generated only from the closed action IR:
+Allowed rule actions come from closed StarLang action IR:
 
 #+begin_example
 conclude
@@ -155,11 +144,12 @@ assert-session-fact
 retract-session-fact
 #+end_example
 
-Arbitrary Common Lisp function calls, file/network/database effects, shell execution, FFI, or user-provided LISA RHS code are forbidden.
+Arbitrary Common Lisp calls, FFI, network/filesystem/database effects, shell
+execution, or user-supplied LISA RHS code are forbidden.
 
-* Working Memory
+* Working Memory and Authority
 
-Fact roles:
+Fact roles are:
 
 #+begin_example
 source
@@ -168,254 +158,157 @@ derived
 questionAnswer
 #+end_example
 
-Rules:
-
-- source facts are immutable from expert rules;
-- object-backed source facts retain authoritative StarIntel identity;
+- source facts are immutable from rules;
 - session facts are local to one ExpertSessionActor;
-- derived conclusions are owned by the inference/proof layer;
+- derived conclusions are inference/proof records;
 - question answers are journaled session facts;
-- global cross-session LISA working memory is forbidden.
+- cross-session global working memory is forbidden;
+- no rule may directly write canonical StarIntel documents.
 
 * Agenda and Salience
 
-LISA is authoritative for the production profile's agenda implementation, but StarLang defines the observable contract.
+LISA owns the implementation of the production agenda, while StarLang owns the
+observable profile semantics.
 
-The adapter SHALL expose normalized activation/firing events only when the selected profile requests them.
+Salience is compiler-validated and serialized in the trusted artifact. Dynamic
+host expressions for salience are forbidden. A profile that requires a stable
+ordering must define all ordering inputs; otherwise StarLang does not promise an
+incidental engine order.
 
-Salience SHALL be compiler-validated and serialized into the rule artifact. Dynamic arbitrary host expressions for salience are forbidden.
+* Conclusions and Proofs
 
-If two activations are otherwise unordered by the declared profile, StarLang MUST NOT promise a stable cross-engine order. Conformance fixtures requiring deterministic order SHALL fully specify the ordering inputs.
+Every normalized conclusion carries stable conclusion identity, rule identity,
+supporting fact/object IDs, logical session sequence, proof reference when
+required, and uncertainty contribution only under an approved uncertainty
+profile.
 
-* Conclusions
-
-A fired rule may produce a checked StarLang conclusion.
-
-Each conclusion SHALL carry:
-
-- stable conclusion ID;
-- rule ID;
-- support fact IDs/object IDs;
-- session logical sequence;
-- proof reference when enabled;
-- uncertainty contribution when enabled;
-- revocation state if the active profile supports truth-maintained revocation.
-
-LISA-native objects MUST NOT be returned as conclusion payloads across the portable boundary.
-
-* Proof Normalization
-
-The adapter SHALL normalize available LISA evidence into:
+Proof output uses:
 
 #+begin_example
 star.logic.derivation/1
 #+end_example
 
-Relevant normalized node kinds include:
+Normalized nodes may include source/session facts, question answers, rule
+applications, parameter bindings, conclusions, assumptions, contradictions,
+uncertainty combination, and budget truncation.
 
-#+begin_example
-sourceFact
-sessionFact
-questionAnswer
-ruleApplication
-parameterBinding
-conclusion
-assumption
-contradiction
-uncertaintyCombination
-budgetTruncation
-#+end_example
-
-Native activation/RETE diagnostics MAY be attached in a namespaced diagnostic field. They do not replace the portable proof graph.
-
-The adapter MUST NOT fabricate proof steps that LISA or the compiler-generated artifact did not establish.
+Native activation/RETE diagnostics may be attached as bounded namespaced
+metadata. The adapter MUST NOT fabricate proof steps.
 
 * Uncertainty
 
 Boolean reasoning is required for v1.
 
-Potential LISA-backed uncertainty capabilities MAY include:
+Potential certainty-factor or Dempster-Shafer profiles remain capability-gated
+until exact combination, conflict, retraction, precision, serialization, and
+proof semantics are fixture-proven. Native LISA belief features are evidence,
+not automatic portable capability claims.
 
-#+begin_example
-certaintyFactorV1
-dempsterShaferV1
-#+end_example
+* Session Isolation and Lifecycle
 
-They remain disabled until exact combination, conflict, retraction, precision, serialization, and proof-node behavior has conformance fixtures.
+One ExpertSessionActor owns one logical LISA session.
 
-LISA-native belief mechanisms are implementation evidence, not permission to expose engine-specific semantics through the portable API.
+Permitted deployment classes may include trusted in-process integration or a
+dedicated worker process when stronger isolation is required. The descriptor
+must state the actual isolation class.
 
-* Session Isolation
+Lifecycle includes backend start, session open, package load, initial facts,
+ordered deltas, run/walk to goal/quiescence/budget, question-answer resume,
+conclusion/proof observation, cancellation, reset/close, and backend stop.
 
-One logical ExpertSessionActor owns one logical LISA expert session.
+Recovery reconstructs the session from StarLang journaled inputs; arbitrary
+native LISA memory structures are not the replay format.
 
-Initial permitted isolation classes:
+* Budgets and Cancellation
 
-- trusted in-process engine instance where the LISA integration is sufficiently isolated;
-- dedicated worker process for stronger runtime isolation when required by deployment policy.
+The backend descriptor truthfully declares hard/cooperative/unsupported limits.
+Potential budgets include wall time, conclusions, rule firings, questions, proof
+nodes/bytes, output bytes, and memory where enforceable.
 
-No session may observe another session's working memory unless an explicit future shared-knowledge design defines that behavior.
+A cooperative limit MUST NOT be advertised as hard.
 
-* Lifecycle
+* Target Capability Set
 
-The adapter SHALL support:
+After fixture proof, the adapter may advertise:
 
-#+begin_example
-start backend
-open session
-load rule package
-apply initial facts
-apply ordered fact deltas
-run/walk until goal/quiescence/budget boundary
-observe conclusions/proofs
-apply question answers and resume
-cancel
-reset or close session
-stop backend
-#+end_example
+- typed facts via mapping;
+- direct identity-preserving StarIntel object-backed facts;
+- production agenda;
+- salience;
+- negative/existential conditional elements;
+- persistent working-memory deltas;
+- normalized explanation when package/profile supplies evidence;
+- optional process isolation.
 
-Recovery SHALL recreate state from journaled StarLang inputs and the same pinned backend/package identity. It SHALL NOT serialize arbitrary native LISA memory structures as the portable replay contract.
-
-* Cancellation and Budgets
-
-Supported cancellation classes SHALL be declared truthfully by the runtime descriptor.
-
-Budgets MAY include:
-
-- wall time;
-- conclusions;
-- rule firings;
-- proof nodes/bytes;
-- questions;
-- output bytes;
-- memory where enforceable.
-
-A cooperative budget that cannot be enforced as a hard engine limit MUST be advertised as cooperative, not hard.
-
-* Capability Claims
-
-Initial target claims after fixture proof:
-
-| Capability | LISA target |
-|------------+-------------|
-| typed facts via mapping | yes |
-| direct StarIntel object-backed facts | required |
-| production agenda | yes |
-| salience | yes |
-| negative/existential CEs | yes where fixture-proven |
-| persistent WM deltas | yes |
-| relational named query | limited/non-primary |
-| tabling | no |
-| CLP(FD) | no |
-| normalized explanation | yes when package/profile supplies evidence |
-| uncertainty | gated |
-| process isolation | optional |
-
-Runtime descriptors are the source of truth; this table is an implementation target only.
+It does not initially advertise tabling or CLP(FD). Runtime descriptors remain
+the source of truth; this document is the approved target contract, not evidence
+that code exists.
 
 * Security Invariants
 
 1. Untrusted StarLang source never enters Common Lisp =READ= or =EVAL= as LISA rule source.
-2. The compiler alone emits trusted LISA artifacts.
-3. Rule RHS actions are closed and effect-free except approved session mutations/conclusions.
-4. No arbitrary host function invocation is exposed.
-5. Source facts and canonical StarIntel documents cannot be mutated by the backend.
-6. Object mappings preserve authority and provenance boundaries.
-7. Package identity is digest-locked.
-8. Proof/output size is bounded.
-9. Session scope is enforced.
-10. Secrets are excluded from rule packages, proofs, fixtures, and journals unless a separate approved secret-reference design exists.
+2. Only compiler-generated digest-locked rule artifacts execute.
+3. Rule RHS behavior is closed and effect-free except approved session mutations/conclusions.
+4. Arbitrary host function invocation is unavailable.
+5. Canonical StarIntel objects/documents cannot be mutated by the backend.
+6. Object mappings preserve identity, provenance, and authority boundaries.
+7. Proof/output size is bounded and validated.
+8. Session scope is enforced.
+9. Secrets are excluded from generated packages, proofs, fixtures, and journals.
 
-* Observability
+* Approved Prototype Retirement
 
-Record at minimum:
+The LISA backend SHALL exist only in final systems.
 
-- backend/adapter/engine version and build digest;
-- semantic profile;
-- rule package digest;
-- sessions opened/closed;
-- working-memory fact counts;
-- fact delta counts;
-- activations created/fired/cancelled where exposed;
-- conclusions;
-- proof nodes/bytes;
-- budget trips;
-- cancellations;
-- crashes/restarts;
-- replay mismatches;
-- object-projection mapping failures.
-
-Performance diagnostics MAY include alpha tests/rejects, beta probes/matches, tuple allocation, and GC/allocation data when available.
+- No production LISA adapter, rule compiler, session owner, proof normalizer, or
+  capability descriptor may be implemented under =prototype/=.
+- Temporary prototype call sites may forward to =star-logic-adapter-lisa= while
+  being migrated, but may contain no independent LISA behavior.
+- LISA fixtures and tests move to final adapter/expert test systems as each slice lands.
+- Any superseded prototype LISA or generic expert implementation is deleted in the same migration slice once callers move.
+- Final LISA tests and Nix composition SHALL run without =starlang-prototype=.
+- Repository-wide StarLang completion requires proving no product path still needs the prototype and deleting =prototype/= when that proof passes.
 
 * Implementation Order
 
-** Slice 1 — adapter shell
-
-- final ASDF system;
-- descriptor/capability handshake;
-- engine/session lifecycle;
-- fake/compiler-generated package fixture.
-
-** Slice 2 — object-backed facts
-
-- one real StarIntel object family;
-- identity/provenance mapping;
-- assert/change/retract lifecycle;
-- replay fixture.
-
-** Slice 3 — production rule execution
-
-- joins;
-- negative/existential conditions;
-- salience;
-- deterministic agenda fixture;
-- checked conclusions.
-
-** Slice 4 — ExpertSessionActor integration
-
-- ordered deltas;
-- question-answer resume;
-- cancellation;
-- journal/replay;
-- isolation tests.
-
-** Slice 5 — proofs and diagnostics
-
-- normalized derivation graph;
-- activation diagnostics;
-- proof budgets;
-- replay comparison.
-
-** Slice 6 — gated uncertainty/performance
-
-Only after boolean conformance is green.
+1. final adapter system and exact backend descriptor/handshake;
+2. one real identity-preserving StarIntel object family;
+3. assert/change/retract lifecycle and replay fixture;
+4. production joins, negative/existential conditions, salience, deterministic agenda fixtures;
+5. ExpertSessionActor integration, ordered deltas, question resume, cancellation, isolation;
+6. normalized proof graph and proof budgets;
+7. uncertainty/performance profiles only after boolean conformance;
+8. remove each superseded prototype implementation/test as final ownership lands.
 
 * Acceptance Gate
 
-Complete when:
+Implementation is complete when:
 
 1. =star-logic-adapter-lisa= has final package ownership;
-2. one real StarIntel object family is reasoned over without an expert-only duplicate object;
-3. authoritative identity/provenance survives mapping and appears in normalized proof support;
-4. typed assert/change/retract deltas work in one isolated session;
+2. one real StarIntel object family is reasoned over without an unrelated expert-only duplicate;
+3. identity/provenance survives mapping and appears in normalized proof support;
+4. typed assert/change/retract deltas work in an isolated session;
 5. joins, negative/existential conditions, and salience have deterministic fixtures;
 6. rules emit normalized conclusions rather than native engine values;
-7. required-proof fixture produces =star.logic.derivation/1=;
+7. a required-proof fixture produces =star.logic.derivation/1=;
 8. source facts cannot be mutated by rules;
 9. arbitrary RHS host calls and raw LISA source are rejected;
 10. cancellation and budget behavior are fixture-proven;
-11. same-backend replay is deterministic for canonical fixtures;
-12. runtime descriptor advertises only fixture-proven capabilities.
+11. same-backend replay is deterministic;
+12. the descriptor advertises only fixture-proven capabilities;
+13. no final LISA path loads =starlang-prototype= or =prototype/=.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-16 | Split LISA backend authority out of STAR-LANG-007 and make direct StarIntel object-backed facts a mandatory backend gate | ChatGPT agent | STAR-LANG-007, STAR-LANG-009, approved operator direction |
+| 2026-08-29 | Port to current Org governance format, record LISA backend approval, separate design approval from implementation evidence, and require final-only ownership/prototype retirement | ChatGPT agent | Operator approval in conversation 2026-08-29; STAR-LANG-007; STAR-LANG-009; source diff |
+| 2026-08-16 | Split LISA backend authority out of STAR-LANG-007 and require direct StarIntel object-backed facts | ChatGPT agent | STAR-LANG-007, STAR-LANG-009 and prior operator direction |
 
-* Glossary
+* Footnotes and Glossary
 
-- *Object-backed fact* — A fact visible to LISA through an existing authoritative StarIntel object instance or identity-preserving mapping rather than an unrelated expert-only application object.
-- *Production profile* — StarLang semantic profile whose observable behavior includes persistent working memory and agenda-driven rule firing.
-- *Trusted rule artifact* — Compiler-generated digest-locked LISA package; never direct untrusted StarLang source.
-- *Working-memory delta* — Ordered session mutation represented through StarLang fact identity and mapped privately to the engine.
+- *Object-backed fact* — LISA-visible fact that preserves the authoritative StarIntel object identity instead of creating an unrelated expert-only canonical copy.
+- *Production profile* — Versioned StarLang semantics for persistent working memory and agenda-driven rule firing.
+- *Trusted rule artifact* — Compiler-generated digest-locked LISA package; never direct untrusted =.star= source.
+- *Working-memory delta* — Ordered session mutation represented through stable StarLang fact identity.
+- *Prototype retirement* — Removal of transitional prototype ownership as final LISA systems become authoritative.

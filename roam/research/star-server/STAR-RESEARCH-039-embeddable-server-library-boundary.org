@@ -1,0 +1,102 @@
+:PROPERTIES:
+:ID:       starintel-star-research-039-embeddable-server-library-boundary
+:END:
+#+title: STAR-RESEARCH-039 Embeddable StarIntel Server Library Boundary
+#+description: Source-backed research for separating the importable StarIntel Common Lisp library from service composition and executable startup.
+#+status: READY_FOR_DESIGN
+#+filetags: :starintel:research:star-server:common-lisp:asdf:embedding:p1:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| ARDR research readiness | Active ARDR policy | APPROVED | Current source-backed evidence is sufficient to proceed to design | This document; starintel-server#39 |
+| Research conclusion | StarIntel operator | PENDING | Explicit human review of the research conclusion | starintel-server#39 |
+| Implementation authorization | StarIntel operator | PENDING | Explicit authorization of an exact design slice | Not yet granted |
+
+* Problem
+
+[[https://github.com/lost-rob0t/starintel-server/issues/39][starintel-server#39]] asks for an importable Common Lisp StarIntel library with no hidden startup effects plus a separately packaged service executable. Current source confirms the issue remains real.
+
+The repository currently defines one serial ASDF system, =:starintel-gserver=. That same system declares =program-op=, =build-pathname "star-server"=, and =entry-point "star::main"= while loading document access, Rabbit consumers/producers, HTTP contracts and routes, databases, authorization, actors, runtime lifecycle, administration, and the CLI main function in one ordered component list.
+
+Loading that ASDF system does not itself call =main=, but it gives embedded callers no small public dependency boundary: they must load the service-oriented system and its complete dependency closure to reach reusable protocols and services.
+
+* Current Source Findings
+
+** ASDF boundary is monolithic
+
+=source/starintel-gserver.asd= is simultaneously the library definition and executable program definition. Its dependency list includes network/runtime packages such as =cl-rabbit=, =cl-couch=, =clack=, Hunchentoot, Sento, Bordeaux Threads, and =lparallel= even for callers that only need pure contracts or service protocols.
+
+** Package boundary is also broad
+
+=source/package.lisp= exports process configuration specials and =main= from the root =:starintel-gserver= / =:star= package while defining persistence, auth, Rabbit, actors, and HTTP packages in the same source unit. This makes the current package graph usable internally but not a clean embeddable public surface.
+
+** Lifecycle code already supplies a useful composition seam
+
+=source/runtime-lifecycle.lisp= has an explicit =star.runtime= package and =star-runtime= owner structure. =start-runtime= / =stop-runtime= own HTTP, Rabbit consumers, actor-system resources, timers, and lparallel lifecycle. =source/main.lisp= is already thin: its start command delegates to =star.runtime:start-runtime= and the process loop.
+
+This means the design should extract ASDF/package boundaries around existing runtime ownership rather than invent another lifecycle framework.
+
+* Concrete Requirements
+
+1. Loading the lowest-level embeddable system must not create actor systems, threads, timers, network connections, databases, HTTP listeners, or Rabbit consumers.
+2. Pure contracts, conditions, result types, configuration normal forms, and protocols must be loadable without service adapters.
+3. Runtime construction must be explicit and instance-owned. Existing =star.runtime= lifecycle work is the starting point, not something to duplicate.
+4. HTTP, CouchDB, RabbitMQ, Valkey, and executable CLI composition must remain optional dependency layers above the pure core.
+5. Existing =starintel-gserver= users need a compatibility system during migration; breaking the old system name in the first slice is unnecessary.
+6. The split must not move runtime behavior into ASDF load-time forms merely to make the file graph convenient.
+7. StarLang remains above these Common Lisp adapter/library boundaries; this work adds no new StarLang syntax.
+
+* Dependency Order
+
+This P1 work should follow the P0 runtime authority work because the extracted runtime system must expose the final lifecycle/concurrency/admission contracts rather than fossilize transitional globals. However, the first ASDF purity slice can be designed and tested independently because it creates no runtime resources.
+
+* Evidence-backed Scope Reduction
+
+The issue body proposes many final systems (=core=, =documents=, =runtime=, =persistence=, =messaging=, =targets=, =auth=, =http=, =service=). Source inspection does not justify creating all of them at once. A large mechanical split would create dependency cycles and compatibility churn before proving the boundary.
+
+The smallest useful first boundary is:
+
+- =starintel-server/core=: pure conditions, immutable/value contracts, configuration schema/normalization, and protocol definitions only;
+- existing =starintel-gserver=: compatibility/service system initially remains intact and may depend on the new core;
+- later slices extract runtime and adapters only after dependency tests prove the direction.
+
+* RED-first Research Target
+
+Before production mutation, add a test that loads only =starintel-server/core= in a fresh Lisp image and proves that no StarIntel-owned runtime thread, socket/listener, actor system, Rabbit connection, CouchDB request, timer, or lparallel kernel is created. Untouched =master= should fail initially because =starintel-server/core= does not exist.
+
+A second contract test should prove the core ASDF dependency closure excludes =cl-rabbit=, =cl-couch=, =clack= / Hunchentoot, and Sento.
+
+* Contradictions and Unresolved Questions
+
+- The issue requests two isolated runtime instances in one Lisp image, but current runtime code still has process globals such as =star.runtime:*runtime*= and actor globals such as =star.actors:*sys*=. ASDF splitting alone cannot truthfully satisfy multi-instance isolation. That acceptance criterion depends on the runtime-ownership work and must not be claimed by the first core slice.
+- Some current protocol definitions may live in files that also contain adapter implementation. Exact extraction boundaries require a dependency audit during realization; do not create nominal systems that still load side effects transitively.
+
+* Handoff
+
+Owning repository: =lost-rob0t/starintel-server=, issue #39.
+
+Proposed first implementation slice: add the pure =starintel-server/core= ASDF/package boundary and move only already-pure contracts required to make its dependency closure side-effect-free. Preserve =:starintel-gserver= as the compatibility/service system.
+
+Acceptance criteria:
+
+- fresh-image core load creates zero StarIntel runtime resources;
+- core dependency closure excludes network/actor/service adapters;
+- existing =starintel-gserver= remains loadable and testable;
+- no startup behavior moves into load-time forms;
+- no multi-instance claim until runtime globals are actually eliminated.
+
+Implementation authorization remains =PENDING / AWAITING_OPERATOR_APPROVAL=.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created source-backed research for issue #39 and reduced the first slice to a pure ASDF core boundary | ARDR worker | starintel-server master =8fb297d146e7332fae7e38170b5b49d49530ac53=; =source/starintel-gserver.asd=; =source/package.lisp=; =source/runtime-lifecycle.lisp=; =source/main.lisp= |
+
+* Footnotes and Glossary
+
+[fn:asdf] ASDF is the Common Lisp system-definition and dependency-loading facility.
+[fn:composition-root] A composition root is the narrow layer that chooses concrete adapters, constructs runtime objects, and starts/stops the service.
+[fn:load-time-side-effect] A load-time side effect is externally observable runtime activity caused merely by loading a system or source file rather than by an explicit application call.

@@ -1,0 +1,354 @@
+:PROPERTIES:
+:ID:       starintel-star-server-042-workload-dispatchers-router-pools
+:END:
+#+title: STAR-SERVER-042 Workload Dispatchers and Managed Router Pools
+#+description: Design-ready StarIntel runtime architecture for workload isolation, explicit named Sento dispatchers, managed stateless pools, keyed-affinity boundaries, thread-budget consumption, lifecycle ownership, and pressure observability.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:design:star-server:sento:dispatcher:router:runtime:p0:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Active ARDR policy | APPROVED | Current source-backed research sufficient for design | [[id:starintel-ardr-issue-188-workload-dispatchers-router-pools][ARDR-ISSUE-188]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator review of this exact design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/189][#189]] |
+| Security/capacity boundary | StarIntel operator | PENDING | Confirm control-reserve, keyed-state, and overload ownership boundaries | This design; #177; #183 |
+| Implementation authorization | StarIntel operator | PENDING | Explicit operator authorization for an exact bounded slice | [[https://github.com/lost-rob0t/starintel-server/issues/35][starintel-server#35]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/full-gate/exact-head implementation evidence | |
+
+* Canonical Inputs
+
+- [[id:starintel-ardr-issue-188-workload-dispatchers-router-pools][ARDR-ISSUE-188 P0 workload dispatchers and managed router pools]].
+- [[id:starintel-ardr-issue-176][ARDR-ISSUE-176 One total StarIntel runtime thread budget]].
+- [[file:../../research/cl-gserver/SENTO-000-sento-runtime-analysis.org][SENTO-000 Sento Runtime Analysis]].
+- [[file:../cl-gserver/SENTO-000-managed-component-runtime.org][SENTO-000 Managed Component Runtime]].
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/183][Auto-Research #183 managed runtime lifecycle/reconnect design]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/35][starintel-server #35]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/36][starintel-server #36 admission/overload]].
+
+* Decision
+
+Extend the existing Common Lisp =star.runtime= composition with a closed workload-topology plan. The plan maps logical StarIntel workload classes to explicit Sento dispatchers, pinned owners, or managed routee pools using only capacity granted by the process-wide thread-budget authority.
+
+Do not create a second actor system, second lifecycle controller, generic workflow engine, or StarLang-level host-thread API.
+
+The design deliberately separates four concepts that current code conflates:
+
+1. *workload class* — why work must be isolated;
+2. *executor/dispatcher allocation* — which granted runtime workers may execute it;
+3. *routee pool* — which equivalent actor/service instance receives one operation;
+4. *application state affinity* — which stable state owner must receive all operations for one key/generation.
+
+A dispatcher is not automatically a routee pool, and a raw router is not a keyed-affinity authority.
+
+* Runtime Ownership
+
+The existing runtime/component owner remains authoritative.
+
+#+begin_example
+star.runtime
+  |
+  +-- thread-budget plan (#177)
+  |
+  +-- component/lifecycle registry (#183)
+  |
+  +-- workload topology plan (this design)
+        |
+        +-- named Sento shared dispatchers
+        +-- explicitly justified pinned owners
+        +-- managed stateless routee pools
+        +-- keyed-affinity owners/adapters
+        +-- pressure/health projections
+#+end_example
+
+Every realized dispatcher/pool has one stable runtime component owner ID and one declared thread-allocation/grant reference. Shutdown and restart are delegated to the component lifecycle design; this design only defines topology and routing semantics.
+
+* Closed Workload Classes
+
+Initial logical classes are:
+
+- =platform/control= — runtime lifecycle, component registry, health, routee management, overload decisions;
+- =platform/ingest= — validation and ingest coordination;
+- =platform/storage= — blocking CouchDB/repository operations;
+- =platform/rabbit= — Rabbit owner/reactor coordination;
+- =platform/target= — target scheduling, lease coordination, target-state dispatch;
+- =platform/cpu= — bounded CPU-heavy normalization/transforms;
+- =platform/research= — resumable research-job coordination.
+
+The list is closed in the first implementation. Unknown classes fail validation. Adding a class requires an explicit contract and tests rather than accepting arbitrary symbols from configuration.
+
+A logical class may map to another class's executor only when the compiled topology explicitly says that isolation is shared. This prevents “seven labels means seven pools” from becoming another thread-multiplication bug.
+
+* Dispatcher Identity Rules
+
+=:pinned= is reserved by Sento and MUST NOT be registered as a custom shared-dispatcher identifier.
+
+Canonical StarIntel shared-dispatcher IDs use explicit names such as:
+
+#+begin_example
+:platform/control
+:platform/ingest
+:platform/storage
+:platform/target
+:platform/cpu
+:platform/research
+#+end_example
+
+=:platform/rabbit= may represent a coordination class without creating an ordinary shared dispatcher when Rabbit connection/channel ownership requires a dedicated owner/reactor thread. The topology records that owner as an executor kind rather than lying that all classes are Sento shared dispatchers.
+
+* Executor Kinds
+
+The first topology IR supports these closed executor kinds:
+
+- =shared-dispatcher= — Sento shared dispatcher whose worker count comes from an explicit thread grant;
+- =pinned-owner= — dedicated owner thread only for a component whose semantics require thread affinity;
+- =existing-owner= — component-owned executor already created under another approved runtime adapter, referenced but not duplicated;
+- =inline-control= — no additional pool; executes only on the explicitly designated control owner where safe.
+
+No executor kind may create threads before topology + budget + component-graph validation succeeds.
+
+* Thread-Budget Contract
+
+For every realized executor:
+
+#+begin_example
+executor-id
+workload-class
+component-owner-id
+thread-grant-id
+workers-realized
+reserved-classification
+#+end_example
+
+Invariants:
+
+1. =workers-realized <= granted workers=.
+2. Data-plane executors cannot consume =platform/control= reserved grants.
+3. A dispatcher may not read =*ingest-workers*= or another local sizing knob to increase its worker count independently.
+4. A topology requiring more workers than granted fails before actor/thread/network startup.
+5. Existing pinned owner threads are accounted as demand rather than hidden overhead.
+
+* Pool Contract
+
+A managed pool is runtime metadata plus a routee set and routing policy. It is not a second actor system.
+
+Pool metadata:
+
+- stable pool ID;
+- component owner ID + generation;
+- workload class/executor ID;
+- accepted operation/message contract;
+- stateless-or-keyed classification;
+- routee IDs/generations;
+- routing policy;
+- readiness/health state;
+- pressure snapshot;
+- lifecycle state;
+- declared minimum/maximum membership where applicable.
+
+The first bounded implementation does not require dynamic resizing.
+
+* Stateless Pools
+
+Use Sento round-robin only for genuinely equivalent stateless routees.
+
+Initial valid candidate: document validation/codec. Other candidates include immutable normalization/extraction and read-only search/query operations after their adapter boundaries are proven.
+
+Random routing is not selected as a default StarIntel policy because deterministic round-robin is easier to test/replay and sufficient for equivalent stateless routees.
+
+* Keyed/Stateful Pools
+
+Raw current Sento router selection is insufficient for target/dataset/job affinity because its custom strategy receives routee count but not the message/key.
+
+Therefore a pool marked =keyed= MUST declare a separate affinity owner/adapter capable of resolving:
+
+#+begin_example
+(pool-id, generation, key) -> routee-id/generation
+#+end_example
+
+The first #35 implementation MUST NOT fake keyed support by using random or round-robin. If no approved affinity adapter exists for the selected slice, keyed pools remain validation-only/unsupported and the implementation stops before target/research migration.
+
+Candidate future strategy: deterministic rendezvous hashing over healthy routee identities and generation, or a coordinator-owned explicit key map where state migration/recovery requires stronger ownership. The exact strategy remains implementation/design follow-up; this design only forbids unsupported claims.
+
+* Rabbit Boundary
+
+RabbitMQ channel/connection ownership semantics remain adapter authority. =platform/rabbit= isolates Rabbit coordination/control traffic, but adding routees MUST NOT allow multiple actors to concurrently touch a channel owned by one reactor/thread.
+
+Rabbit publication and consumption may delegate CPU/parsing/application work outward after broker-owner operations are complete, subject to #36 bounded in-flight/admission rules.
+
+* Storage Boundary
+
+Blocking CouchDB work must not execute on =platform/control= or other latency-sensitive control capacity.
+
+Storage concurrency remains bounded by both:
+
+- dispatcher/executor grant; and
+- CouchDB connection-pool/adapter limits.
+
+Increasing one cannot silently exceed the other. #36 later defines queue/admission behavior when storage capacity is exhausted.
+
+* Control Isolation
+
+Control capacity is used only for bounded lifecycle/health/registry/pool-management/lease-coordination actions that must remain responsive during saturation.
+
+Long-running storage, HTTP body processing, bulk transforms, provider calls, research work, or arbitrary application handlers are forbidden on control capacity.
+
+A saturation test is an architectural acceptance gate: a deliberately blocked storage workload must not prevent a control health/registry operation from completing within its deterministic test deadline.
+
+* Pressure and Observability
+
+The topology exposes a normalized read-only snapshot:
+
+- executor ID/workload class;
+- granted/realized workers;
+- pool membership + generation;
+- routee readiness/health;
+- mailbox/queue pressure when the underlying API can supply it;
+- accepted/completed/rejected counters when owned by the component;
+- current routing policy;
+- saturation/degraded flags.
+
+Do not reach into arbitrary internal Sento slots from product APIs. Where the current public runtime lacks a required metric, expose it through a narrow adapter or leave the field =unknown=. =unknown= must not become numeric zero.
+
+#36 remains authority for overload result shape and queue/drop/reject/block behavior.
+
+* StarLang Boundary
+
+No new StarLang syntax is needed for this P0 runtime slice.
+
+StarLang-defined actors/domain servers may later declare an abstract workload profile or logical execution requirement in a manifest. The compiled host runtime may map that profile onto this closed topology. StarLang source cannot choose raw thread counts, Sento dispatcher internals, or host function callbacks.
+
+This preserves the architecture order: StarLang declares domain behavior; Common Lisp runtime realizes bounded host execution effects.
+
+* Proposed Implementation Slices
+
+Every slice below remains =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — pure topology model + validator (P0 prerequisite)
+
+No Sento runtime mutation yet.
+
+Define closed values for workload class, executor kind, executor allocation, pool classification, and routing policy. Validate against explicit #177 thread grants and component owner IDs.
+
+Mandatory RED-first fixtures:
+
+- reserved custom dispatcher ID =:pinned= rejected;
+- unknown workload class rejected;
+- executor without thread-grant/component owner rejected;
+- requested workers greater than grant rejected;
+- data-plane executor consuming control-reserved grant rejected;
+- keyed pool with =random= rejected;
+- keyed pool with raw =round-robin= and no affinity adapter rejected;
+- duplicate executor/pool IDs rejected;
+- deterministic equivalent input -> byte/equal normalized topology.
+
+Untouched server code must fail because no topology model/validator exists.
+
+** Slice 2 — explicit named shared dispatchers
+
+Realize the first non-reserved named dispatchers from validated grants and remove the dead custom =:pinned= configuration.
+
+RED-first integration fixture: configure one explicit shared dispatcher and prove its worker count equals the grant, while =:pinned= actor creation retains dedicated-thread semantics and cannot resolve the named shared pool.
+
+** Slice 3 — control/storage isolation migration
+
+Move one blocking storage path off shared/control capacity and put control/health on explicit control capacity.
+
+RED-first saturation fixture: block all storage workers, then prove a bounded control probe completes; untouched baseline should fail/isolate incorrectly.
+
+** Slice 4 — first stateless managed routee pool
+
+Use deterministic round-robin for a stateless operation such as validation/codec. Register pool membership under the existing lifecycle/component owner and expose health/pressure snapshot.
+
+RED-first fixture proves two equivalent routees alternate deterministically, preserve per-actor serialized execution, and reject stale/removed generation metadata.
+
+** Slice 5 — Rabbit owner integration
+
+Represent existing Rabbit owner/reactor capacity in the topology and move delegable application work onto appropriate granted executors without violating channel ownership.
+
+** Slice 6 — keyed-affinity capability
+
+Only after a message-aware affinity adapter has its own RED contract. Migrate target/job stateful routing only after exact key/generation semantics are proven.
+
+** Slice 7 — #36 integration
+
+Expose executor/pool capacity and pressure inputs consumed by admission, prefetch, bounded mailbox, and structured overload policy. Do not implement #36 policy inside #35.
+
+* Adversarial Review
+
+** Reject: one giant shared dispatcher
+
+It preserves the existing failure mode: blocking storage or application work can starve lifecycle/health/lease coordination. A global thread ceiling without isolation is necessary but insufficient.
+
+** Reject: one dispatcher per label with independent worker counts
+
+This recreates the thread-multiplication defect #34/#177 is intended to eliminate. Logical workload classes must consume one global plan.
+
+** Reject: custom dispatcher named =:pinned=
+
+Current Sento source reserves that identifier before named dispatcher lookup. Keeping the name produces dead/misleading configuration.
+
+** Reject: use pinned actors everywhere for isolation
+
+Pinned actors create one thread per actor and destroy the ability to bound many equivalent stateless routees under a shared worker grant.
+
+** Reject: raw Sento random routing for stateful work
+
+Random selection has no affinity or ordering contract.
+
+** Reject: call round-robin “keyed”
+
+Round-robin is deterministic by call sequence, not by application key. Restart/concurrency/order changes break affinity.
+
+** Reject: routee-count custom strategy as keyed hashing
+
+The current custom strategy receives only routee count, not the message/key or routee identities. It cannot safely implement application-key affinity.
+
+** Reject: pool manager that becomes a second lifecycle authority
+
+Pool lifecycle, generation, stop/quiesce, and health must register with #183's component lifecycle rather than creating another control plane.
+
+** Reject: queue/admission policy embedded in dispatcher design
+
+That duplicates #36. This design surfaces capacity/pressure; #36 decides reject/block/drop/prefetch behavior.
+
+** Reject: StarLang raw dispatcher/thread controls
+
+Host thread/dispatcher internals are runtime effects. Exposing them directly in the language would bypass the global capacity authority.
+
+* Acceptance Criteria
+
+- no StarIntel custom shared dispatcher uses reserved =:pinned=;
+- every realized dispatcher/pinned owner maps to one component owner and one approved thread allocation;
+- impossible topology fails before long-lived side effects;
+- storage saturation cannot starve control/health/lease coordination;
+- stateless pools use deterministic equivalent-routee routing and preserve actor state serialization;
+- stateful pools cannot claim keyed affinity without a message-aware key/generation owner;
+- Rabbit ownership semantics remain intact;
+- pool/executor health and pressure are inspectable without leaking raw actors/threads to ordinary callers;
+- #36 can consume capacity/pressure without duplicating runtime topology;
+- #183 owns lifecycle; #177 owns thread capacity;
+- no new StarLang syntax, actor system, external supervisor, or Python controller is introduced;
+- implementation remains blocked until an exact slice receives operator authorization.
+
+* Decision / Handoff State
+
+This design is ready for operator review. It is not implementation-approved.
+
+Owning implementation issue: [[https://github.com/lost-rob0t/starintel-server/issues/35][starintel-server #35]]. The issue should be updated to reference this research/design and to carry the Slice 1 RED target as the first proposed realization transaction.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created design and adversarial review from ARDR #188, current server source, current Sento source, and existing thread/lifecycle authorities. | GPT-5.6 Sol | Auto-Research #188/#189; server master =8fb297d...=; cl-gserver master =bcd08c5...= |
+
+* Footnotes and Glossary
+
+- *Executor* :: Runtime mechanism that actually executes a class of work, such as a Sento shared dispatcher or a dedicated owner thread.
+- *Managed pool* :: Routee set whose membership, generation, lifecycle metadata, health, and routing policy are owned by the runtime component model.
+- *Stateless routee* :: Equivalent worker whose correctness does not depend on receiving all work for one application key.
+- *Keyed affinity* :: Stable key-to-state-owner routing for one active generation.
+- *Control reserve* :: Thread/capacity allocation that data-plane work cannot consume.

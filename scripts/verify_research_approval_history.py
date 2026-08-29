@@ -76,9 +76,13 @@ def _first_canonical_snapshot(
         try:
             if _is_adard_canonical(source_metadata):
                 return source
-        except MigrationError as error:
-            anchor = base_commit or "source"
-            raise MigrationError(f"{relative_path}@{anchor}: {error}") from error
+        except MigrationError:
+            # The exact, blob-verified base may itself be the malformed partial
+            # migration being repaired.  Treat only that anchored source as
+            # pre-canonical and require the first later snapshot to be fully
+            # canonical.  Malformed snapshots encountered after the base still
+            # fail closed below.
+            pass
 
     revision = "HEAD" if base_commit is None else f"{base_commit}..HEAD"
     commits = _git(

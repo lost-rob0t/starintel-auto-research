@@ -1,0 +1,254 @@
+:PROPERTIES:
+:ID:       star-lang-013-explicit-agents-prolog-rlm
+:END:
+#+title: STAR-LANG-013 Explicit Agents over Prolog-RLM
+#+description: Design a closed explicit StarLang agent declaration and typed versioned bridge to Prolog-RLM while keeping ordinary actors and expert systems model-free.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:star-lang:agent:prolog-rlm:design:operator-review:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Auto-Research | APPROVED | Canonical research ready for design | id:star-lang-research-029-explicit-agents-prolog-rlm |
+| Architecture/design | Project maintainer | PENDING | Explicit operator design review | starintel-auto-research issue #186 |
+| Implementation authorization | Repository maintainer | PENDING | Explicit operator approval for exact slice | NONE |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/exact-head evidence | NONE |
+
+* Design Goal
+
+Introduce one explicit StarLang agent construct whose V1 runtime backend is Prolog-RLM. Preserve a hard compiler/runtime distinction between deterministic actors/domain servers, deterministic expert systems, and agentic execution that may invoke a model.
+
+* Ownership
+
+** StarLang
+
+Owns parser syntax, static validation, closed agent IR, typed capability/message schema generation, explicit LLM/effect declaration, compatibility version, and lowering into the Prolog-RLM adapter artifact.
+
+** Prolog-RLM
+
+Owns planning, prompt/context compilation, provider/model calls, capability/tool selection, recursion, supervised subagents, memory/KB semantics, budgets, durable agent/graph execution, and structured traces/results.
+
+** StarIntel Common Lisp bridge
+
+Owns only typed dispatch between a validated Prolog-RLM action and the ordinary StarLang local/remote actor/domain-server lifecycle. It is not a planner, policy engine, memory layer, or agent scheduler.
+
+* Minimal Source Surface
+
+Final parser spelling follows current StarLang conventions. The semantic shape is equivalent to:
+
+#+begin_src lisp
+(agent researcher
+  (:input investigation-request)
+  (:output investigation-result)
+  (:goal investigate-target)
+  (:model reasoning)
+  (:capabilities osint.search osint.identity document.read)
+  (:authority researcher-policy)
+  (:effects llm)
+  (:budget (:time-ms 60000 :tokens 20000 :depth 2 :children 4))
+  (:memory project)
+  (:verify evidence-backed)
+  (:delegate bounded))
+#+end_src
+
+Every field lowers to typed checked data. Raw Prolog, raw Common Lisp, shell forms, credentials, and arbitrary provider options are invalid.
+
+* Closed Agent IR
+
+#+begin_example
+AgentIR {
+  agentId
+  inputType
+  outputType
+  entryGoal
+  modelProfile
+  capabilities[]
+  authorityPolicy
+  effects[]
+  budget
+  memoryPolicy
+  verificationPolicy
+  delegationPolicy
+  requiredPrologRlmAbi
+}
+#+end_example
+
+The IR is backend-targetable data but V1 has exactly one agent runtime target: Prolog-RLM.
+
+* Compile-Time Invariants
+
+1. ordinary actor/domain-server declarations cannot acquire =llm= implicitly;
+2. =llm= is legal only on explicit agent materialization paths;
+3. every capability exists in the compiled StarLang capability registry and its input/output schema is frozen into the generated bridge contract;
+4. authority/effects never default upward;
+5. all budgets are finite positive ceilings;
+6. delegation cannot exceed parent authority or budget;
+7. model profile names configuration, not credentials;
+8. raw executable Prolog/host forms are rejected;
+9. required Prolog-RLM ABI is explicit.
+
+* Generated Prolog-RLM Adapter Artifact
+
+The compiler emits a deterministic generated artifact containing only the validated agent identity/configuration and typed capability descriptors required by a versioned Prolog-RLM extension surface.
+
+The implementation must first inventory the exact current public predicates/modules and choose the narrowest supported loading mechanism. Generated arbitrary predicates or calls into source-tree-private modules are forbidden.
+
+Artifact requirements:
+
+- deterministic bytes for equal AgentIR;
+- explicit StarLang agent schema version;
+- explicit required Prolog-RLM ABI version;
+- capability IDs and typed schemas;
+- authority/effect/budget/memory/delegation/verifier data;
+- no secret values;
+- loadable outside either repository source checkout through supported packaging.
+
+* Runtime Bridge Contract
+
+Conceptual request from Prolog-RLM:
+
+#+begin_example
+AgentCapabilityCall {
+  agentId
+  capabilityId
+  input
+  authorityContext
+  correlationId
+  causeId
+  deadline
+  cancellationRef
+}
+#+end_example
+
+Bridge algorithm:
+
+1. verify artifact/runtime ABI;
+2. verify agent/capability identity;
+3. validate typed input against generated StarLang schema;
+4. validate execution authority/effect envelope;
+5. dispatch through normal StarLang local/remote capability path;
+6. preserve deadline/cancellation/correlation/cause;
+7. validate typed result/item/terminal event;
+8. return structured result/evidence to Prolog-RLM.
+
+The bridge cannot choose another capability when denied or failed.
+
+* Authority and Visibility
+
+Capability discovery/visibility is not execution authority. A capability may be visible to the model for planning and still fail execution with a typed authorization result.
+
+No model output can add capabilities, raise budget, alter authority policy, or enable =llm= for another actor.
+
+* Failure Semantics
+
+Domain outcomes such as =partial=, =blocked=, =unavailable=, =cancelled=, and =failed= remain explicit. They are returned to Prolog-RLM for its declared agent policy to reason about. The bridge and deterministic domain servers never convert them into hidden provider calls.
+
+* Expert-System Boundary
+
+Existing StarLang expert/logic execution remains a deterministic capability. An agent may invoke it. An expert conclusion may request evidence acquisition. Neither implies provider/model execution.
+
+SWI-Prolog as an expert backend and Prolog-RLM as an agent runtime are separate roles despite sharing a language/runtime family.
+
+* Supervised Subagents
+
+StarLang declares only policy/limits. Prolog-RLM owns child execution. Parent authority is attenuated into the child; child depth/concurrency/time/token ceilings are bounded by the parent; cancellation propagates; structured child evidence/result resumes the parent through the canonical Prolog-RLM path.
+
+No Common Lisp/StarLang recursive-agent scheduler is added.
+
+* Memory
+
+Agent declarations reference supported Prolog-RLM memory policies. StarLang does not implement another memory database or context compiler. Persistent writes require explicit authority. Generated/static configuration and learned/runtime state remain distinct.
+
+* Packaging
+
+- StarLang compiler output pins a supported Prolog-RLM ABI.
+- Prolog-RLM is consumed through its supported package/flake/library entrypoint.
+- Generated artifacts load from installed/package paths, not repository-relative paths.
+- ABI mismatch fails before agent execution.
+- no vendored Prolog-RLM copy in StarLang or starintel-server.
+
+* Dependency-Ordered Implementation Slices
+
+All slices are =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+1. *StarLang agent parser + closed AgentIR* — no Prolog-RLM execution yet.
+2. *LLM/effect and authority static validation* — prove non-agent actors cannot enter agentic execution.
+3. *Prolog-RLM public ABI inventory + deterministic artifact emitter/loader* — use only supported extension points.
+4. *Typed Common Lisp bridge with fake Prolog-RLM action source* — local StarLang capability first.
+5. *Remote/local equivalence + cancellation/deadline/correlation*.
+6. *Prolog-RLM supervised agent integration* — provider-free deterministic fixtures first.
+7. *Memory/delegation/verifier mapping*.
+8. *OSINT researcher proof* — explicit agent calls deterministic Source Acquisition/Identity/Search capabilities.
+
+* Mandatory RED-First Targets
+
+** Slice 1
+
+A minimal valid =agent= fixture must fail on untouched StarLang because no agent declaration exists. Invalid fixtures reject raw Prolog, raw credential values, unknown capability, missing finite budget, and agent output type mismatch.
+
+** Slice 2
+
+A normal =actor= fixture attempting =(:effects llm)= must fail. An agent with child authority broader than its own must fail.
+
+** Slice 3
+
+A generated artifact must fail to load against a deliberately incompatible Prolog-RLM ABI and must load outside a source checkout against the supported API. No private-module import is permitted.
+
+** Slice 4
+
+Visible capability + denied authority must produce typed denial and zero StarLang handler invocations. Authorized call must preserve exact typed request/result.
+
+** Slice 5
+
+The same capability invoked locally and remotely must produce equivalent lifecycle/result semantics. Cancellation/deadline must fence late completion.
+
+** Slice 6
+
+A deterministic supervised parent/child fixture must return structured child evidence and resume the parent without a provider credential.
+
+** Slice 8
+
+An explicit researcher agent may call =osint.search= through Prolog-RLM; the same Source Acquisition domain server must run independently with zero provider/model dependency.
+
+* Acceptance Criteria
+
+- StarLang has an explicit, typed agent construct distinct from ordinary actors;
+- ordinary actors/domain servers cannot implicitly acquire model/provider execution;
+- V1 lowering targets Prolog-RLM specifically through a versioned supported contract;
+- no arbitrary Prolog/host execution enters AgentIR or generated artifacts;
+- capability visibility remains separate from execution authority;
+- Common Lisp bridge remains policy/planning/memory-free;
+- local and remote capability calls share one contract;
+- cancellation/deadlines/correlation/provenance survive the bridge;
+- Prolog-RLM remains owner of V1 planning/context/memory/subagent/provider semantics;
+- deterministic expert systems remain usable without an LLM;
+- generated artifacts contain no credentials;
+- OSINT proof demonstrates explicit agent -> deterministic domain capability without model contamination of that domain.
+
+* Adversarial Review
+
+The design was attacked against issue #186's fourteen required failure modes. It rejects generic Prolog compilation, raw Prolog escapes, a Common Lisp RLM rewrite, model calls inside deterministic domains, visibility-as-authority, bridge-owned planning, duplicate subagent/memory systems, arbitrary predicates/host calls, secret leakage, silent model fallback, local/remote divergence, source-tree coupling, and actor/agent conflation.
+
+One implementation-time blocker remains intentionally explicit: the exact stable Prolog-RLM materialization predicates must be inventoried from current source/tests before Slice 3. No predicate signature is invented by this design.
+
+* Implementation Handoff State
+
+=AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=
+
+This design is ready for operator review but does not authorize implementation.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created design from STAR-LANG-RESEARCH-029 and issue #186; completed adversarial review and dependency-ordered RED-first slices | Auto-Research | id:star-lang-research-029-explicit-agents-prolog-rlm; issue #186 |
+
+* Footnotes and Glossary
+
+- *AgentIR* — Closed normalized representation of an explicit StarLang agent; contains validated data, never executable raw Prolog/host code.
+- *LLM effect* — Explicit compiler/runtime permission to enter model/provider execution.
+- *Prolog-RLM ABI* — Versioned public contract consumed by generated StarLang agent artifacts.
+- *Attenuation* — Restricting delegated child authority/budget so it cannot exceed its parent.

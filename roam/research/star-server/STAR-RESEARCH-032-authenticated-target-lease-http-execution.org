@@ -2,383 +2,150 @@
 :ID:       2cfb4ff2-7111-4f8e-869a-ec9423acb143
 :END:
 #+title: STAR-RESEARCH-032 Authenticated Target-Lease HTTP and Execution Enforcement
-#+description: Deep implementation research for authenticated lease HTTP endpoints, request deadlines, idempotency, authorization and disclosure policy, problem responses, shared embedded APIs, target dispatch enforcement, RabbitMQ propagation, and stale-fence rejection at side-effect boundaries.
-#+status: REVIEW
+#+description: Refreshed research for authenticated target-lease APIs and stale-fence enforcement against the current implemented lease-store stack.
+#+status: READY_FOR_DESIGN
 #+approval_schema: adard.research-approval.v1
-#+approval_state: PENDING
-#+approval_actor: research-approval-migration
-#+approval_evidence: migration: no explicit human research-conclusion decision; legacy lifecycle REVIEW is not research approval
+#+approval_state: APPROVED
+#+approval_actor: operator
+#+approval_evidence: https://github.com/lost-rob0t/starintel-auto-research/issues/157
 #+approval_base_commit: 5d01182e45a0cda1c4e062183469abd0be43e6af
 #+approval_base_blob: 54cbd08c3ed42a490778cd9678dffec9332e9571
-#+approval_decided_at: NONE
+#+approval_decided_at: 2026-08-27
 #+filetags: :starintel:star-server:http:authentication:authorization:leases:fencing:targets:research:org-roam:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | APPROVED | Explicit operator research decision | [[https://github.com/lost-rob0t/starintel-auto-research/issues/157][approval recovery #157]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of refreshed design | [[id:56b95ef4-b058-44e3-8a65-a038b7c46140][STAR-SERVER-032]] |
+| Implementation authorization | StarIntel operator | PENDING | Explicit authorization for bounded implementation slice | [[https://github.com/lost-rob0t/starintel-server/issues/32][server #32]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/exact-head evidence | |
 
 * Source Links
 
 - [[file:../../indexes/star-server/STAR-LEASE-INDEX-030-backend-neutral-kv-leases.org][STAR-LEASE-INDEX-030 Target Lease Stack]]
-- [[file:../../design/star-server/STAR-SERVER-032-authenticated-target-lease-http-execution.org][STAR-SERVER-032 Authenticated Target-Lease HTTP and Execution Enforcement]]
-- [[file:STAR-RESEARCH-029-distributed-target-lease-and-fencing.org][STAR-RESEARCH-029 Distributed Target Lease and Fencing Semantics]]
-- [[file:STAR-RESEARCH-030-backend-neutral-kv-lease-store.org][STAR-RESEARCH-030 Backend-Neutral KV Lease Store]]
-- [[https://github.com/lost-rob0t/starintel-server/issues/32][starintel-server issue 32]]
-- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-principal-capability-contract.org][HTTP principal and capability contract]]
-- [[https://github.com/lost-rob0t/starintel-server/blob/master/docs/http-auth-kv-lease-boundary.org][HTTP authentication threat model — KV lease boundary]]
-- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-auth.lisp][Current HTTP authentication middleware]]
-- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-boundary-core.lisp][Current HTTP boundary helpers]]
-- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-boundary-routes.lisp][Current versionless boundary routes]]
-- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/actors.lisp][Current target routing actor]]
+- [[id:56b95ef4-b058-44e3-8a65-a038b7c46140][STAR-SERVER-032 Authenticated Target-Lease HTTP and Execution Enforcement]]
+- [[id:7ee9b211-90e1-48c7-a99b-7807f04fc2e9][STAR-RESEARCH-029 Distributed Target Lease and Fencing Semantics]]
+- [[id:1930fee2-2dc1-43b2-9dc2-9fd17ebc6289][STAR-RESEARCH-030 Backend-Neutral KV Lease Store]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/32][starintel-server #32]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/156][older-research refresh #156]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/157][operator approval recovery #157]]
 
 * Research Question
 
-How should StarIntel[fn:starintel] expose authenticated target-lease operations through HTTP while ensuring that HTTP callers, embedded Common Lisp[fn:common-lisp] callers, local actors, RabbitMQ[fn:rabbitmq] workers, and persistence paths all use one authorization-aware lease service and one fencing contract?
+What remains to satisfy authenticated target-lease HTTP and execution enforcement now that the backend-neutral lease protocol and Valkey adapter are implemented and hardened?
 
-* Repository Findings
+* 2026-08-29 Current-State Refresh
 
-The current authentication middleware creates an immutable request security context containing a principal, correlation identifier, and deadline. This is the right input shape for a lease application service.
+The original research correctly separated HTTP/application authority from storage authority, but it predates substantial implementation in =starintel-server=. Current source still contains the backend-neutral lease protocol, Valkey adapter, contract tests, and real-Valkey integration tests. Recent lease-store history records cluster-safe listing, corrupt-record fail-closed behavior, and green contract/integration evidence. Issue 32 must not redesign lease storage or reimplement fencing-token allocation.
 
-The current deadline is derived from =X-Request-Timeout-Ms= and wall-clock universal time. Lease work needs an absolute monotonic deadline passed from middleware into the service so nested layers do not restart timeout budgets.
-
-The principal contract already defines =targets:lease= and scoped actor principals. The lease routes should extend that contract rather than invent a parallel permission model.
-
-The current HTTP error envelope is a custom =status/msg/code= object. New lease APIs need machine-readable errors with stable fields. RFC 9457 defines =application/problem+json= for this purpose.[fn:rfc9457]
-
-Current target routing dispatches directly to a local actor or RabbitMQ and schedules recurring targets in a process-local timer. Issue 32 cannot be satisfied by adding routes alone. The target dispatch path, result publication path, persistence path, and RabbitMQ settlement path must all accept execution authority and reject stale fencing generations.
-
-* Layering Finding
-
-The correct stack is:
+Repository search on the current server baseline finds the lease protocol/store implementation but no implemented =target-leases= HTTP route/application-service surface. The open server #32 therefore remains a real integration gap rather than stale bookkeeping.
 
 #+begin_example
-HTTP route or embedded caller
-  -> request/security context adapter
-  -> target lease application service
-  -> authorization decision
-  -> issue-29 semantic state machine
-  -> issue-30 backend-neutral lease store
-  -> issue-31 Valkey adapter
+HTTP or embedded caller
+  -> authenticated service-call context
+  -> target-lease application service
+  -> existing lease-store protocol
+  -> existing Valkey adapter
+
+Target dispatch
+  -> locking policy
+  -> lease authority validation/acquisition
+  -> immutable execution authority
+  -> local/Rabbit delivery
+  -> fenced side-effect boundary
 #+end_example
 
-Target execution uses the same application service:
+The storage protocol remains authoritative for acquire/renew/release/revoke/get/list outcomes. HTTP code translates those typed outcomes; it does not inspect Valkey keys or scripts.
 
-#+begin_example
-target submission
-  -> manifest locking policy
-  -> acquire or validate lease
-  -> create immutable execution envelope
-  -> dispatch local or RabbitMQ
-  -> actor work
-  -> fenced side-effect service
-  -> settlement and release
-#+end_example
+* Concrete Remaining Gaps
 
-HTTP routes MUST NOT call Valkey scripts or backend adapters directly. Embedded callers MUST NOT bypass authorization merely because they execute in-process.
+** Thin authenticated application service
 
-* HTTP Resource Model
+Issue #32 still needs one service layer shared by HTTP and embedded callers. Every mutating/inspection operation receives explicit principal, capability/scope, correlation identity, idempotency identity where applicable, and one propagated deadline. Process-local invocation does not bypass authorization.
 
-The issue lists operation-oriented endpoints. Preserve those paths for compatibility while treating the lease as a resource whose identity is the opaque lease identifier.
+** HTTP projection
 
-Recommended routes:
+Expose versioned lease operations as adapters over that service. Preserve stable distinctions for conflict, stale fence/precondition, hidden/not-found, authorization denial, overload, backend unavailable, known timeout, and uncertain mutation outcome. Problem responses must not leak backend keys, credentials, stack traces, or another owner's private metadata.
 
-| Method | Path | Purpose |
-|--------+------+---------|
-| POST | =/v1/target-leases/acquire= | Acquire one canonical target lease |
-| POST | =/v1/target-leases/:lease-id/renew= | Renew exact lease generation |
-| DELETE | =/v1/target-leases/:lease-id= | Release exact lease generation |
-| GET | =/v1/target-leases/:lease-id= | Inspect one lease when visible |
-| GET | =/v1/target-leases= | Bounded filtered listing |
-| POST | =/v1/target-leases/:lease-id/revoke= | Privileged revocation |
+** Dispatch authority
 
-An acquire success should return =201 Created= with a =Location= header pointing to the lease resource. Replayed acquisition may return the same =201= body and location because the original resource is the result of the same logical request.
+A target requiring locking must not reach local actor or Rabbit publication without an active authority matching the canonical target. User-supplied JSON cannot manufacture the authoritative lease envelope.
 
-Renew returns =200=. Release returns =204= when no response body is required or =200= when returning a structured terminal result. The API should choose one stable behavior and test it.
+** Stale-fence enforcement
 
-* Request Contracts
+The most important remaining proof is downstream, not HTTP routing: generation N may continue computing after lease loss, but once generation N+1 exists, N cannot make an authoritative side effect. Persistence/publication/settlement boundaries must consume the fenced execution authority rather than trusting actor liveness.
 
-** Acquire body
+** Recovery and races
 
-#+begin_src json
-{
-  "target": {
-    "tenant_id": "tenant-main",
-    "program_id": null,
-    "dataset_id": "dataset-a",
-    "actor_name": "collector",
-    "workflow_id": null,
-    "operation_class": "collect",
-    "target_id": "target_01"
-  },
-  "ttl_ms": 30000,
-  "maximum_lifetime_ms": 600000,
-  "execution_id": "run_01",
-  "trace_id": "trace_01",
-  "metadata": {}
-}
-#+end_src
+Server #33 remains the dedicated expiry/crash/race matrix. #32 should expose enough typed authority and integration seams for #33 to prove renew-vs-expiry, reacquire, stale completion, and restart behavior without duplicating the race harness inside HTTP tests.
 
-The server resolves and canonicalizes the target. Request fields do not create authority.
+* v0.9 / StarLang Reconciliation
 
-** Renew body
+This refresh does not introduce StarLang syntax. Lease acquisition and fencing are host service/runtime authority. StarLang-defined actors may receive typed execution authority and declare that a capability requires locking, but they cannot mint fencing tokens, bypass the lease service, or reinterpret backend state.
 
-#+begin_src json
-{
-  "fencing_token": 42,
-  "ttl_ms": 30000
-}
-#+end_src
+The StarIntel v0.9 document boundary remains unchanged: accepted documents/results still pass canonical validation/persistence rules. A lease token is execution authority metadata, not a replacement for document provenance, authorization, or schema validation.
 
-The route lease identifier, authenticated owner binding, and submitted token identify the expected generation. The server may also require an explicit opaque lease version when the application service exposes one.
+* Design Consequences
 
-** Release and revoke
+The existing STAR-SERVER-032 design remains directionally correct but must be narrowed around the implemented backend reality:
 
-Release SHOULD require the fencing token through a body or an explicit conditional request field. Revocation requires a reason and may accept an expected token to avoid deleting a replacement generation.
+1. reuse =source/leases/protocol.lisp= rather than designing another lease algebra;
+2. reuse the Valkey adapter and existing contract/integration tests;
+3. implement service-context authorization before route/backend access;
+4. make HTTP and embedded callers project the same service result;
+5. carry immutable execution authority into target delivery;
+6. enforce fencing at side-effect acceptance;
+7. leave exhaustive crash/race validation to #33 while providing the required seams.
 
-DELETE request bodies are supported inconsistently by intermediaries. A dedicated release action route or an =If-Match=-style opaque lease version can avoid that ambiguity. Issue 32 lists DELETE, so the simplest stable contract is to carry the token in a required =X-StarIntel-Fencing-Token= header and keep the body empty.
+* Adversarial Review
 
-* Idempotency Finding
+Rejected:
 
-Use the =Idempotency-Key= request header for acquire, renew, release, and revoke. The current IETF HTTPAPI draft defines it as a Structured Field string and states that the same key must not be reused with a different payload.[fn:idempotency-draft]
+- HTTP routes calling Valkey directly;
+- a second lease protocol because the existing backend contract is already implemented;
+- treating successful authentication as =targets:lease= authorization;
+- trusting lease/fence fields copied from caller-controlled target JSON;
+- checking a fence only at dispatch time and not again when effects become authoritative;
+- ACKing stale Rabbit work as successful output before fenced effects are rejected;
+- using actor/process liveness as proof that a lease is still current;
+- letting embedded Common Lisp callers bypass the same authorization contract;
+- folding #33's complete chaos/race matrix into the first HTTP implementation slice;
+- adding StarLang or Prolog authority for host-level lease mutation.
 
-The service must bind the key to:
+* Proposed Implementation Handoff
 
-- authenticated principal;
-- operation;
-- route lease identifier when present;
-- canonical request fingerprint;
-- authorization scope;
-- result receipt retention policy.
+Owning repository: =lost-rob0t/starintel-server=, issue #32.
 
-A matching replay returns the original result. A mismatched replay returns =422= or =409= with a stable =idempotency_key_reused= problem type. The design should select one; =422= is clearer because the request content and key combination is invalid independent of current lease ownership.
+Dependency order:
 
-GET requests do not require idempotency receipts.
+1. pure target-lease application-service result/context contract over a fake existing lease-store protocol;
+2. authorization/scope + idempotency/deadline behavior with zero HTTP dependency;
+3. versioned HTTP adapter and problem/success projection;
+4. target-dispatch authority envelope for required-lock targets;
+5. one fenced side-effect acceptance seam proving stale generation rejection;
+6. Rabbit/local equivalence fixtures;
+7. hand the expanded expiry/crash/race matrix to #33.
 
-* Deadline Finding
+Mandatory first RED: a fake lease store that records invocation plus an unauthorized service-call context. Untouched current server must fail because no target-lease application service exists; GREEN must return typed authorization denial and prove the store was invoked zero times. A sibling fixture must prove an authorized embedded caller and HTTP projection consume the same service result algebra rather than separate lease logic.
 
-Accept the existing bounded timeout header initially, but convert it at middleware entry to an absolute monotonic deadline. The service and adapter receive the same deadline.
+Implementation authorization remains =PENDING / AWAITING_OPERATOR_APPROVAL=.
 
-The API must distinguish:
+* Unresolved Questions
 
-- =deadline_exceeded=: the operation is known not to have committed;
-- =outcome_unknown=: the mutation may have committed and the caller must replay the same idempotency key.
-
-A generic =504= is misleading for an uncertain committed mutation. Map known upstream timeout to =504=. Map unknown mutation outcome to =503= with =Retry-After: 0= or a bounded retry hint and an explicit instruction to replay the same key.
-
-* Authorization Finding
-
-Every route requires authentication.
-
-Minimum capability:
-
-- acquire, renew, release, inspect: =targets:lease=;
-- listing: =targets:lease= plus explicit list permission or =targets:read= according to policy;
-- revoke: administrator or separate =targets:lease:revoke= capability.
-
-Authorization must bind:
-
-- principal and credential identifiers;
-- tenant and program;
-- dataset;
-- actor or workflow;
-- operation class;
-- canonical target;
-- requested operation;
-- lease owner for renew and release;
-- correlation and decision identifiers.
-
-An actor-scoped principal cannot inspect or mutate another actor's lease. An administrator is not exempt from tenant and reason requirements.
-
-* Disclosure and 404 Policy
-
-The API may return =404= instead of =403= when revealing lease existence would disclose another tenant, target, actor, or owner. This policy must be stable and applied after authentication.
-
-A caller with permission to know the lease exists but not mutate it may receive =403=. A caller outside the visibility scope receives the same =404= shape as an absent lease.
-
-Conflict responses must not expose another owner's private metadata. Safe fields may include:
-
-- conflict type;
-- canonical key fingerprint;
-- expiry or retry-after when policy allows;
-- owner class or caller-equality flag;
-- correlation identifier.
-
-* HTTP Status Findings
-
-RFC 9110 defines =409 Conflict= for a request conflicting with current resource state and =412 Precondition Failed= for false request preconditions.[fn:rfc9110]
-
-Recommended mapping:
-
-| Lease outcome | HTTP status |
-|---------------+-------------|
-| acquired | 201 |
-| replayed acquired | 201 |
-| renewed | 200 |
-| released | 204 or 200, selected consistently |
-| found/listed | 200 |
-| held by active owner | 409 |
-| stale fencing token or opaque lease version | 412 |
-| hidden or absent | 404 |
-| unauthenticated | 401 |
-| visible but unauthorized | 403 |
-| malformed JSON or header | 400 |
-| valid JSON with invalid lease fields | 422 |
-| idempotency key reused with different request | 422 |
-| rate or concurrency limit | 429 with =Retry-After= when known |
-| backend unavailable, degraded, or unsafe recovery | 503 |
-| known deadline expiration | 504 |
-| uncertain mutation outcome | 503 with explicit replay instruction |
-
-* Problem Details Finding
-
-Use RFC 9457 problem details with =application/problem+json=.[fn:rfc9457]
-
-Example:
-
-#+begin_src json
-{
-  "type": "https://starintel.actor/problems/lease-conflict",
-  "title": "Target lease is already held",
-  "status": 409,
-  "detail": "The canonical target operation currently has an active lease.",
-  "instance": "urn:starintel:correlation:01...",
-  "code": "lease_conflict",
-  "correlation_id": "01...",
-  "retry_after_ms": 8500
-}
-#+end_src
-
-Problem documents must never contain backend keys, Valkey errors, credentials, full target documents, stack traces, or another owner's private metadata.
-
-* Success Representation
-
-A safe lease response contains:
-
-#+begin_src json
-{
-  "schema": "starintel.target-lease-response/1",
-  "lease_id": "lease_01",
-  "canonical_target_key": "opaque-public-key-or-fingerprint",
-  "fencing_token": 42,
-  "state": "active",
-  "acquired_at": "2026-08-06T12:00:00Z",
-  "renewed_at": "2026-08-06T12:00:00Z",
-  "expires_at": "2026-08-06T12:00:30Z",
-  "renew_after": "2026-08-06T12:00:15Z",
-  "maximum_expires_at": "2026-08-06T12:10:00Z",
-  "owner": {
-    "principal_id": "principal_01",
-    "service_instance_id": "server_01",
-    "actor_instance_id": "actor_01"
-  },
-  "execution_id": "run_01",
-  "correlation_id": "01..."
-}
-#+end_src
-
-Owner fields are filtered by visibility policy. The public canonical target key may be an opaque stable encoding or fingerprint rather than the backend path.
-
-* Embedded API Finding
-
-The HTTP routes and embedded Common Lisp callers must invoke the same =target-lease-service= generic functions.
-
-Embedded callers provide a =service-call-context= containing principal identity, scopes, correlation identifier, and deadline. Missing context denies. Package name, call stack, localhost origin, or process membership never grants authority.
-
-The HTTP layer only:
-
-1. parses and bounds input;
-2. obtains the authenticated context;
-3. calls the application service;
-4. maps service results to HTTP;
-5. emits safe response data.
-
-* Target Dispatch Enforcement
-
-The target or actor manifest declares whether locking is =required=, =optional=, or =forbidden=.
-
-When required, target submission must either:
-
-- include an active lease owned by the authorized caller and matching the canonical target key; or
-- ask the target lease service to acquire one as part of a higher-level dispatch operation.
-
-A raw target document without execution authority is rejected before local actor delivery or RabbitMQ publication.
-
-The dispatch service creates the immutable execution envelope defined by issue 29. Actor code receives the envelope, not a mutable lease field copied from user JSON.
-
-* Side-Effect Enforcement
-
-Every result-producing path must go through a fenced service:
-
-- document persistence;
-- event persistence;
-- graph mutation;
-- attachment commit;
-- result publication;
-- RabbitMQ success acknowledgement;
-- external irreversible action.
-
-The fenced service atomically checks or advances the highest accepted token. A stale actor receives a structured =stale-fence= result and cannot publish accepted output.
-
-This is the core acceptance test for issue 32: an expired worker may continue computing, but its output cannot become authoritative after a newer lease exists.
-
-* RabbitMQ and Redelivery Finding
-
-The target execution envelope must be serialized as a versioned message. The RabbitMQ delivery properties should include bounded trace fields for routing and observability, while the authoritative lease data remains in the body.
-
-On redelivery:
-
-- identical execution and fencing token may resume idempotently;
-- lower fencing token is terminal stale work and should not be requeued forever;
-- backend unavailability may be requeued under bounded policy;
-- malformed authority is dead-lettered;
-- successful acknowledgement happens only after fenced effects commit.
-
-* Rate Limiting and Overload
-
-Rate-limit dimensions:
-
-- principal;
-- credential;
-- tenant;
-- actor;
-- canonical target key;
-- source address as a secondary abuse signal;
-- global in-flight lease operations.
-
-Rate-limit checks happen after cheap authentication parsing but before expensive backend work when possible. A denied request cannot become allowed because the rate limiter fails.
-
-Use =429= for caller-specific limits and =503= for global capacity or backend health failures. Include =Retry-After= only when meaningful.
-
-* Acceptance-Test Findings
-
-The implementation must prove:
-
-1. every route requires authentication;
-2. =targets:lease= and exact scope are checked before backend access;
-3. hidden resources return stable non-disclosing =404=;
-4. acquire, renew, release, and revoke replay safely by idempotency key;
-5. mismatched idempotency reuse is rejected;
-6. stale tokens map to =412=;
-7. held leases map to =409=;
-8. rate and backend failures map to structured =429= and =503=;
-9. HTTP and embedded calls return equivalent service results;
-10. required-lock targets cannot dispatch without authority;
-11. local and RabbitMQ execution carry immutable lease identity and token;
-12. every side-effect boundary rejects stale fencing generations;
-13. an expired actor cannot publish accepted output after reacquisition;
-14. problem responses contain no secrets or backend internals;
-15. deadline and uncertain-outcome behavior instruct safe replay.
-
-* Decision
-
-Implement versioned authenticated lease routes as thin adapters over one target lease application service. Use =Idempotency-Key=, one monotonic deadline, scoped =targets:lease= authorization, RFC 9457 problem responses, non-disclosing visibility policy, manifest-controlled dispatch enforcement, immutable target execution envelopes, and mandatory fencing at every side-effect boundary.
+- Select the exact stable HTTP path prefix during implementation against the current capability/API-version work (#58); do not create a second versioning convention.
+- Select the first concrete fenced side-effect seam based on current target/persistence code so the RED proves real stale-write rejection rather than a synthetic wrapper only.
+- Reconcile issue #32 implementation ordering with #33 if the current target path already exposes a smaller race fixture.
 
 * Footnotes and Glossary
 
-[fn:starintel] StarIntel: A local-first intelligence platform that collects, validates, connects, searches, analyzes, and exports structured documents through actor-based services.
+[fn:starintel] StarIntel is the actor-based intelligence platform owning the target execution and document service boundary.
+[fn:fence] A fencing token is a monotonically increasing generation used by side-effect receivers to reject stale workers.
+[fn:service-context] A service-call context is explicit caller authority, scope, correlation, and deadline data passed to an application service.
 
-[fn:common-lisp] Common Lisp: The standardized Lisp programming language used by the StarIntel server.
+* Changelog
 
-[fn:rabbitmq] RabbitMQ: The message broker used to deliver documents and target work between StarIntel processes.
-
-[fn:rfc9457] Internet Engineering Task Force, RFC 9457, “Problem Details for HTTP APIs.” Defines the =application/problem+json= error format. [[https://datatracker.ietf.org/doc/html/rfc9457][official RFC]].
-
-[fn:idempotency-draft] Internet Engineering Task Force HTTPAPI Working Group, “The Idempotency-Key HTTP Header Field,” revision 07. It defines a client-generated key for fault-tolerant retries and prohibits reuse with a different request. [[https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header-07][official draft]].
-
-[fn:rfc9110] Internet Engineering Task Force, RFC 9110, “HTTP Semantics.” Defines status-code meanings including 409, 412, 503, and 504. [[https://datatracker.ietf.org/doc/html/rfc9110][official RFC]].
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Refreshed against current implemented lease protocol/Valkey backend; recovered explicit operator research approval; narrowed remaining work to authenticated service/HTTP/dispatch/fenced-effect integration. | ARDR Auto-Research | server #32; Auto-Research #156/#157; current lease source/history |

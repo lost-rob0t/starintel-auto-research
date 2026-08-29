@@ -42,6 +42,22 @@ def _blob_sha(root: Path, text: str) -> str:
     return _git(root, ["hash-object", "--stdin"], input_text=text).strip()
 
 
+def _commit_exists(root: Path, commit: str) -> None:
+    _git(root, ["rev-parse", "--verify", f"{commit}^{{commit}}"])
+
+
+def _path_exists_at_commit(root: Path, commit: str, relative_path: Path) -> bool:
+    _commit_exists(root, commit)
+    result = subprocess.run(
+        ["git", "cat-file", "-e", f"{commit}:{relative_path.as_posix()}"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def _is_adard_canonical(metadata: dict[str, list[str]]) -> bool:
     values = _metadata_values(metadata)
     if values.get("approval_schema") != CANONICAL_SCHEMA:
@@ -51,17 +67,19 @@ def _is_adard_canonical(metadata: dict[str, list[str]]) -> bool:
 
 def _first_canonical_snapshot(
     root: Path,
-    base_commit: str,
+    base_commit: str | None,
     relative_path: Path,
-    source: str,
+    source: str | None,
 ) -> str:
-    _, _, _, source_metadata = _split_header(source)
-    if _is_adard_canonical(source_metadata):
-        return source
+    if source is not None:
+        _, _, _, source_metadata = _split_header(source)
+        if _is_adard_canonical(source_metadata):
+            return source
 
+    revision = "HEAD" if base_commit is None else f"{base_commit}..HEAD"
     commits = _git(
         root,
-        ["rev-list", "--reverse", f"{base_commit}..HEAD", "--", relative_path.as_posix()],
+        ["rev-list", "--reverse", revision, "--", relative_path.as_posix()],
     ).splitlines()
     for commit in commits:
         try:
@@ -72,9 +90,40 @@ def _first_canonical_snapshot(
         if _is_adard_canonical(metadata):
             return candidate
 
+    anchor = "repository history" if base_commit is None else f"after {base_commit}"
     raise MigrationError(
-        f"{relative_path}: cannot find first canonical approval snapshot after {base_commit}"
+        f"{relative_path}: cannot find first canonical approval snapshot in {anchor}"
     )
+
+
+def _verify_canonical_born(
+    root: Path,
+    relative_path: Path,
+    base_commit: str,
+    base_blob: str,
+) -> None:
+    if base_blob != "NONE":
+        raise MigrationError(
+            f"{relative_path}: approval base commit NONE requires approval base blob NONE"
+        )
+
+    anchor = None if base_commit == "NONE" else base_commit
+    if anchor is not None and _path_exists_at_commit(root, anchor, relative_path):
+        raise MigrationError(
+            f"{relative_path}: approval base blob is NONE but path exists at base {anchor}"
+        )
+
+    first = _first_canonical_snapshot(root, anchor, relative_path, None)
+    _, _, _, first_metadata_raw = _split_header(first)
+    first_metadata = _metadata_values(first_metadata_raw)
+    if first_metadata.get("approval_base_commit") != base_commit:
+        raise MigrationError(
+            f"{relative_path}: canonical-born approval base commit changed after creation"
+        )
+    if first_metadata.get("approval_base_blob") != "NONE":
+        raise MigrationError(
+            f"{relative_path}: canonical-born approval base blob changed after creation"
+        )
 
 
 def verify_file(root: Path, path: Path) -> None:
@@ -89,6 +138,10 @@ def verify_file(root: Path, path: Path) -> None:
     base_blob = current_metadata.get("approval_base_blob", "")
     if not base_commit or not base_blob:
         raise MigrationError(f"{relative_path}: approval base provenance is incomplete")
+
+    if base_commit == "NONE" or base_blob == "NONE":
+        _verify_canonical_born(root, relative_path, base_commit, base_blob)
+        return
 
     source = _show(root, base_commit, relative_path)
     if _blob_sha(root, source) != base_blob:

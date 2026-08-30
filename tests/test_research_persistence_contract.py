@@ -18,32 +18,26 @@ SAVE_RESEARCH = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(SAVE_RESEARCH)
 
 
-class ResearchPersistencePromptTests(unittest.TestCase):
-    def test_source_worker_requires_durable_org_artifact(self) -> None:
+class RetiredWorkerPromptTests(unittest.TestCase):
+    def test_source_worker_is_fail_closed_migration_tombstone(self) -> None:
         text = (
             ROOT
             / "agent-zero/usr/agents/starintel-source-enrichment/prompts/agent.system.main.specifics.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("Every research pass MUST persist", text)
-        self.assertIn(
-            "roam/research/ardr-issues/ARDR-ISSUE-<issue-number>-<slug>.org",
-            text,
-        )
-        self.assertIn("scripts/save-research.py", text)
-        self.assertIn("A pass is not complete until", text)
+        self.assertIn("RETIRED PROFILE — STOP", text)
+        self.assertIn("lost-rob0t/hackmode", text)
+        self.assertIn("cyber / BBP", text)
+        self.assertIn("Do **not** continue general StarIntel", text)
 
-    def test_coordinator_rejects_issue_only_research(self) -> None:
+    def test_coordinator_is_fail_closed_migration_tombstone(self) -> None:
         text = (
             ROOT
             / "agent-zero/usr/agents/starintel-adard-gated/prompts/agent.system.main.specifics.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("Research issue/file gate", text)
-        self.assertIn(
-            "After every research delegation, verify the worker reports exact research paths",
-            text,
-        )
-        self.assertIn("If findings exist only in issue prose/chat/task output", text)
-        self.assertIn("do not advance", text)
+        self.assertIn("RETIRED PROFILE — STOP", text)
+        self.assertIn("hackmode-rage-database", text)
+        self.assertIn("hackmode-rage-hackpert", text)
+        self.assertIn("Do **not** resume StarIntel product", text)
 
 
 class SaveResearchDocumentTests(unittest.TestCase):

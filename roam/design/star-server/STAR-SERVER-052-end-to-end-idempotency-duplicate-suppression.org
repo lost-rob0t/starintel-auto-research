@@ -1,0 +1,419 @@
+:PROPERTIES:
+:ID:       starintel-star-server-052-end-to-end-idempotency-duplicate-suppression
+:END:
+#+title: STAR-SERVER-052 End-to-End Idempotency and Duplicate Suppression
+#+description: Design-ready StarIntel Server application idempotency contract for HTTP retries, Rabbit redelivery, persistence/outbox effects, target executions, and lease composition.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:star-server:design:idempotency:rabbitmq:couchdb:targets:leases:outbox:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Explicit operator research decision | [[file:../../research/star-server/STAR-RESEARCH-053-end-to-end-idempotency-duplicate-suppression.org][STAR-RESEARCH-053]]; operator decision still pending |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator design approval | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main publication workflow succeeds | Pending |
+
+=DESIGN_READY_FOR_OPERATOR_REVIEW= is lifecycle readiness only. It is not architecture approval and cannot authorize RAGE implementation.
+
+* Research Basis
+
+Canonical research: [[file:../../research/star-server/STAR-RESEARCH-053-end-to-end-idempotency-duplicate-suppression.org][STAR-RESEARCH-053 End-to-End Idempotency and Duplicate Suppression]].
+
+Owning implementation seed: [[https://github.com/lost-rob0t/starintel-server/issues/47][starintel-server #47]].
+
+Audited implementation baseline: =lost-rob0t/starintel-server@8fb297d146e7332fae7e38170b5b49d49530ac53=.
+
+Current code already contains useful target-specific request identity/fingerprint and dispatch fingerprint semantics. This design promotes the invariant into an application contract; it does not delete stronger subsystem-specific identities or rewrite the lease backend.
+
+* Decision
+
+Introduce one runtime-owned, transport-neutral =IdempotencyRepository= port and one pure application-level idempotency coordinator. Every migrated mutating application operation binds a scoped logical operation identity to one deterministic semantic request fingerprint before authoritative effects.
+
+The state machine grants first-execution authority once, replays known outcomes without executing the mutation again, rejects same-key/different-request conflicts, and preserves =outcome-unknown= until authoritative reconciliation proves what happened.
+
+Idempotency is not authorization, transactionality, transport settlement, or fencing. Those remain separate authorities and compose explicitly.
+
+* Dependency Direction
+
+#+begin_example
+HTTP / Rabbit / embedded caller / scheduled retry
+                  |
+          typed application request
+                  |
+       authz + deadline + operation identity
+                  |
+        Idempotency Coordinator
+                  |
+          IdempotencyRepository
+                  |
+          execute exactly once
+           when authority granted
+                  |
+       application/domain operation
+          |        |        |
+      repository  outbox   lease/fence
+          |        |        |
+       concrete adapters / durable stores
+#+end_example
+
+Transport adapters parse/validate caller idempotency/message identity and project typed outcomes. They do not own duplicate semantics.
+
+* Core Value Model
+
+** IdempotencyOperation
+
+A closed immutable value contains:
+
+- =principalScope= — stable authenticated principal/account scope when relevant;
+- optional =tenantScope=;
+- =operationKind= — stable closed operation name;
+- =operationVersion= — version of fingerprint/result semantics;
+- optional =resourceScope=;
+- =callerKey= — bounded caller/message logical key.
+
+The repository uses a deterministic normalized key derived from the entire scoped identity. The raw caller key alone is never the persistence key.
+
+** RequestFingerprint
+
+The fingerprint is a digest of the canonical semantic request fields for that operation/version. Transport-only details such as HTTP header order, Rabbit delivery tag, correlation ID, trace ID, retry count, or connection identity are excluded unless they actually change operation semantics.
+
+Each operation owns a deterministic fingerprint constructor and fixtures. Reusing a key after a version change remains distinguishable through =operationVersion=.
+
+** ExecutionAttempt
+
+Attempt/delivery identity is separate from logical operation identity. It exists for diagnostics, deadlines, transport settlement, and retry accounting. It never creates new logical execute authority for a duplicate operation.
+
+* Idempotency Repository Protocol
+
+The first protocol is intentionally narrow.
+
+** claim-operation
+
+Inputs: operation identity, fingerprint, safe metadata, absolute deadline.
+
+Returns exactly one semantic result:
+
+- =execute-authority(claimToken)=;
+- =replay-known-success(resultRef/resultProjection)=;
+- =replay-known-terminal-failure(resultRef/resultProjection)=;
+- =in-progress(owner/expiry metadata as policy permits)=;
+- =reconciliation-required(effectIdentity)=;
+- =conflict(existingFingerprintRef)=;
+- =repository-unavailable=.
+
+The durable adapter must atomically bind one normalized operation key to one fingerprint. Concurrent first claims for the same key/fingerprint produce one =execute-authority= and duplicate/in-progress semantics for the rest.
+
+** record-known-outcome
+
+Requires the current claim token/expected record version and writes either known success or known terminal failure plus a bounded result projection/reference and authoritative effect identity. A stale claimant cannot overwrite a later reconciliation/result state.
+
+** mark-outcome-unknown
+
+Records that execution may have crossed an authoritative effect boundary but completion cannot be proven. It stores the deterministic effect/reconciliation identity required to resolve the ambiguity. It does not clear the claim or grant a fresh execution.
+
+** reconcile-operation
+
+The application operation supplies a typed reconciliation function/port appropriate to its effect. The coordinator queries authoritative state using the original deterministic effect identity and transitions to known success/failure only when evidence is sufficient. Otherwise it remains reconciliation-required.
+
+** retention-metadata
+
+Stores created/completed timestamps, operation class/version, and safe retention class. Physical retention is adapter/policy work; eviction cannot change downstream fencing/effect correctness.
+
+* State Machine
+
+#+begin_example
+ABSENT
+  | atomic claim + fingerprint
+  v
+IN_PROGRESS -------------------- same fingerprint duplicate ---> IN_PROGRESS result
+  | \
+  |  \ conflicting fingerprint -------------------------------> CONFLICT result
+  |
+  +-- effect definitely not attempted + terminal validation ---> KNOWN_TERMINAL_FAILURE
+  |
+  +-- authoritative effect + durable result known -------------> KNOWN_SUCCESS
+  |
+  +-- effect may have happened but completion unknown ---------> OUTCOME_UNKNOWN
+                                                               |
+                                                reconcile effect identity
+                                                     /          \
+                                                    v            v
+                                             KNOWN_SUCCESS   remain UNKNOWN
+#+end_example
+
+There is deliberately no =UNKNOWN -> ABSENT= transition caused by timeout or process restart.
+
+* Application Execution Contract
+
+For each migrated mutation:
+
+1. authenticate and construct the existing =service-call-context=;
+2. enforce authorization/disclosure prerequisites that must occur before result replay;
+3. validate and normalize the request;
+4. compute scoped =IdempotencyOperation= and =RequestFingerprint=;
+5. claim the operation under one propagated absolute deadline;
+6. only =execute-authority= may enter first execution;
+7. execute the typed application operation using deterministic downstream mutation/event identities;
+8. record known outcome after authoritative evidence exists;
+9. when the boundary becomes ambiguous, persist =outcome-unknown= and reconcile using the original effect identity;
+10. duplicate callers receive a typed replay/in-progress/reconciliation/conflict result without invoking first execution again.
+
+Replay must re-check current disclosure/authorization before returning protected result bodies. The stored record is not an authorization grant.
+
+* Operation-Specific Composition
+
+** Target creation and execution
+
+Preserve the current principal-scoped target request identity and semantic fingerprint behavior as compatibility evidence. Migrate it behind the shared coordinator rather than retaining route-owned ledger semantics.
+
+Schedule identity and occurrence identity remain distinct:
+
+- schedule submission operation ID identifies creation/update of the schedule;
+- each recurrence occurrence has a deterministic execution ID;
+- attempts of one occurrence share its logical execution ID;
+- later occurrences never deduplicate against earlier ones.
+
+Target dispatch/effect fencing remains mandatory. Idempotency cannot authorize an old generation.
+
+** Lease operations
+
+The existing lease-store request ID/digest and fencing generation remain authoritative. The coordinator binds the application call to the same logical lease request/result but may not cache/replay a response in a form that claims an expired/stale lease is currently authoritative.
+
+A replay can report the historical outcome; any operation requiring current authority must separately validate the current lease/fence state.
+
+** Canonical document ingest
+
+A migrated ingest operation uses stable operation identity plus deterministic document/mutation identity. If persistence committed but response/outbox completion is ambiguous, reconciliation inspects the authoritative document/mutation/outbox record before deciding whether another effect is required.
+
+** Rabbit ingress/redelivery
+
+The broker adapter maps stable envelope/message logical identity into the application idempotency operation. Rabbit delivery tag/redelivery count are attempt metadata only.
+
+Settlement rule:
+
+- ACK after the application result is durably known and the consumer contract considers that result terminal/accepted;
+- do not ACK merely because an =IN_PROGRESS= claim exists;
+- retry/requeue/park according to typed in-progress, unavailable, reconciliation, and poison/terminal results;
+- broker redelivery never creates a fresh logical operation key.
+
+** Outbox publication
+
+Logical event identity is derived from the authoritative mutation/event contract. Re-executing an application replay must not allocate a second logical outbox event. Publication retry is delivery retry of the same event identity, not a new application mutation.
+
+* Failure Semantics
+
+Closed application outcomes include at minimum:
+
+- =idempotency-conflict=;
+- =idempotency-in-progress=;
+- =idempotency-replay-success=;
+- =idempotency-replay-terminal-failure=;
+- =idempotency-reconciliation-required=;
+- =idempotency-repository-unavailable=;
+- operation-specific success/failure for the first executor.
+
+HTTP/Rabbit/CLI adapters project those values according to their own contract. No adapter invents a second meaning for duplicate or unknown outcome.
+
+Repository unavailable is fail-closed for mutations declared idempotency-required. A production caller cannot opt out because the idempotency backend is unhealthy.
+
+* Retention and Eviction
+
+Idempotency storage is bounded, but retention is not one global TTL.
+
+Each operation class declares:
+
+- minimum replay horizon;
+- whether known result data may be compacted to an authoritative result reference;
+- which durable mutation/event identity remains after receipt eviction;
+- stale-work/fencing guarantees independent of the receipt;
+- whether late external redelivery is possible beyond the replay horizon.
+
+No receipt may be evicted if doing so would make a realistically late duplicate execute an effect that no remaining deterministic identity/fence can reject. A lease fencing floor, deterministic document ID, immutable outbox event ID, or other durable effect identity may make older receipt compaction safe; this must be proven per operation class.
+
+* Security and Privacy
+
+- Hash/digest does not automatically make sensitive request data safe; stored fingerprints are opaque digests over canonical semantic input and records omit raw bearer credentials/secrets.
+- Public/client errors never expose another principal's fingerprint/result metadata.
+- Authorization/disclosure is checked on replay.
+- A caller cannot choose =operationKind= or tenant/principal scope independently of the authenticated application operation.
+- Collision-resistant digest choice is repository-defined and versioned; comparisons are deterministic.
+- Idempotency status/diagnostic endpoints, if exposed later, require operator/resource authorization.
+
+* StarLang-First Boundary
+
+This design does not add a second StarLang replay engine.
+
+- StarLang owns actor/program journal/replay/idempotency semantics when those are language/runtime semantics.
+- StarLang messages crossing server boundaries preserve stable typed logical message/operation identity.
+- If current final StarLang IR cannot carry a required stable identity, the smallest typed IR extension lands in StarLang first.
+- Common Lisp =starintel-server= owns application-level coordination across HTTP, Rabbit, CouchDB, target scheduling, leases, and outbox ports.
+- Concrete storage/broker adapters remain below the application protocol.
+
+No external process or separate dedupe service is required for the initial design.
+
+* Adversarial Review
+
+** Reject: one global =seen-id= set
+
+It cannot distinguish conflicting payloads, in-progress work, lost responses, terminal failure, or unknown mutation outcomes.
+
+** Reject: transport IDs as operation IDs
+
+Rabbit delivery tags and HTTP/correlation IDs are not stable logical operation identities across retries. Using them either misses duplicates or collapses unrelated work.
+
+** Reject: duplicate means success
+
+A duplicate may refer to work still in progress or to an unknown outcome. Returning success before authoritative evidence creates false acceptance semantics.
+
+** Reject: ACK because a claim exists
+
+A durable claim proves ownership, not completion. ACKing an unfinished Rabbit delivery can lose the only retry after owner failure.
+
+** Reject: retry =OUTCOME_UNKNOWN= as fresh execution
+
+This is the classic duplicate-mutation bug. Reconcile the original deterministic effect identity first.
+
+** Reject: generic idempotency replaces lease receipts/fencing
+
+Lease request replay and fencing generation are stronger domain invariants. The generic layer composes with them and cannot revive stale authority.
+
+** Reject: cache full response forever
+
+Unbounded response retention leaks/storage-amplifies data. Store bounded projections or result references and re-authorize retrieval.
+
+** Reject: one TTL makes duplicates safe
+
+TTL is resource policy, not stale-work correctness. Downstream deterministic identities/fencing must remain safe after compaction.
+
+** Reject: hide idempotency in HTTP middleware
+
+Rabbit, embedded callers, target execution, outbox recovery, and scheduled retries need the same semantics. The authority belongs at the application boundary.
+
+** Reject: make StarLang own server persistence orchestration
+
+StarLang should carry and enforce its runtime semantic identities; server-specific persistence/broker/lease application orchestration stays in Common Lisp ports.
+
+* Proposed Implementation Slices
+
+Every slice below is =PENDING / AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — pure idempotency state machine + fake repository
+
+No network, actors, CouchDB, Rabbit, Valkey, or product mutation.
+
+Mandatory RED-first target on untouched server:
+
+#+begin_example
+operation = (principal=p1, kind=fixture.mutate.v1, key=k1)
+fingerprint = F(request-A)
+
+first claim  -> execute-authority
+record success(result=R)
+second claim with same operation/fingerprint
+             -> replay-known-success(R)
+mutation callback invocation count == 1
+#+end_example
+
+Untouched server must fail because no shared =IdempotencyRepository=/coordinator exists. A target-specific helper is not valid GREEN.
+
+Sibling REDs:
+
+- same scoped key + different fingerprint -> =idempotency-conflict= and zero mutation calls;
+- two concurrent first claims -> exactly one execute authority;
+- duplicate while in progress -> no second mutation;
+- =outcome-unknown= -> reconciliation callback, never first-execution callback;
+- stale claim token cannot overwrite known/reconciled state;
+- repository unavailable -> fail closed for idempotency-required mutation;
+- principal/operation/version/resource scope prevents cross-operation collisions.
+
+** Slice 2 — first existing target vertical
+
+Migrate the current target-create idempotency ledger/fingerprint through the shared coordinator while preserving wire behavior and target dispatch fingerprint tests.
+
+RED: lost-response fixture records a committed target/result, retries the same request, and proves one accepted target/schedule with the original receipt identity; changed payload under the same key remains conflict.
+
+** Slice 3 — durable CouchDB adapter + reconciliation contract
+
+Implement the repository protocol through the existing explicit adapter boundary from #40/#41. Use CAS/revision semantics to prove one first executor. Add crash-point fixtures around claim, mutation, and outcome recording.
+
+Do not broad-retry ambiguous writes without deterministic reconciliation identity.
+
+** Slice 4 — canonical document ingest/outbox vertical
+
+One mutation request accepted twice must result in one logical document mutation and one logical outbox event. Crash after persistence but before caller response must reconcile to the original result/event identity.
+
+** Slice 5 — Rabbit ingress/redelivery
+
+Map one current Rabbit consumer envelope into the shared logical operation. RED: first delivery reaches durable mutation then connection/consumer fails before ACK; redelivery resolves/replays the same operation and produces no second mutation/event, then settles according to known terminal state.
+
+** Slice 6 — target occurrence/attempt identity
+
+Prove retries of occurrence =O1= dedupe while later recurrence =O2= remains a distinct execution. Combine with #32/#33 fencing so a stale attempt cannot commit even if an old idempotency receipt exists.
+
+** Slice 7 — lease composition
+
+Map application lease calls to the existing lease request/digest semantics. Replay historical acquire result must never be interpreted as proof the lease is currently valid. Current fence verification remains separate.
+
+** Slice 8 — retention/diagnostics/expansion
+
+Add per-operation retention classes, safe compaction proofs, #46 metrics/audit, and migrate remaining HTTP/Rabbit mutation families vertically rather than through a flag-day rewrite.
+
+* Acceptance Criteria
+
+- one shared application idempotency semantic contract across migrated transports;
+- same scoped operation + same fingerprint executes first mutation at most once;
+- same scoped operation + different fingerprint fails before mutation;
+- concurrent duplicates cannot both obtain execute authority;
+- ambiguous mutation outcome is reconciled, never blindly repeated;
+- target schedule/occurrence/attempt identities remain distinct;
+- Rabbit redelivery uses logical message identity and does not ACK unfinished work merely because a claim exists;
+- one logical mutation produces one logical outbox event;
+- existing lease request/digest/fencing authority remains intact;
+- replay cannot bypass current authorization or disclosure policy;
+- idempotency repository outage fails closed for required mutations;
+- retention is bounded without making stale work authoritative after receipt eviction;
+- fake-backed application tests need no concrete network/storage service;
+- no new generic workflow engine, second lease authority, second actor runtime, or external idempotency service;
+- implementation does not begin until explicit operator approval is recorded.
+
+* Proposed Handoff
+
+Owning repository: =lost-rob0t/starintel-server=.
+
+Owning issue: [[https://github.com/lost-rob0t/starintel-server/issues/47][#47]].
+
+Priority: P1-09 in the canonical server runtime roadmap.
+
+Dependencies for Slice 1: none beyond the existing test/package baseline; it is pure and fake-backed. Production integration slices should reuse realized #40/#41 application/adapter ports. Target/lease/fenced-effect slices compose with #32/#33. Observability follows #46.
+
+Implementation approval: =PENDING / AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+This handoff must not be exposed to executable RAGE until the canonical operator approval workflow records explicit implementation authorization.
+
+* Unresolved Realization Questions
+
+- Select the first concrete CouchDB CAS document shape only after inspecting the exact persistence API available on the implementation head.
+- Measure the practical maximum Rabbit redelivery horizon before fixing default retention classes.
+- Decide per endpoint whether replay stores a bounded result projection or only an authoritative result reference.
+- Verify which existing canonical ingest mutation/event IDs can serve directly as reconciliation identities before adding new IDs.
+
+These choices refine adapters/retention; they do not change the state-machine architecture.
+
+* Footnotes and Glossary
+
+- *Logical operation*: one semantic mutation independent of how many transport deliveries/attempts carry it.
+- *Execute authority*: the one claim result permitting first execution of a logical mutation.
+- *Result reference*: stable pointer/identity used to reconstruct a known result without retaining a full sensitive payload in the idempotency record.
+- *Reconciliation*: checking authoritative downstream state using the original deterministic effect identity after an ambiguous outcome.
+- *Fencing*: generation/token rule preventing stale workers from making authoritative effects.
+- *Outbox*: durable event-publication record tied to authoritative mutation state.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created design and adversarial review for server #47; defined scoped operation identity, atomic claim/outcome state machine, reconciliation, transport composition, RED-first slices, and approval fence. | ARDR Auto-Research | [[file:../../research/star-server/STAR-RESEARCH-053-end-to-end-idempotency-duplicate-suppression.org][STAR-RESEARCH-053]]; server #47; audited target source at =8fb297d146e7332fae7e38170b5b49d49530ac53= |

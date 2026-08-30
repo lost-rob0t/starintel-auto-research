@@ -1,0 +1,219 @@
+:PROPERTIES:
+:ID:       starintel-star-research-052-observability-correlation-audit-contract
+:END:
+#+title: STAR-RESEARCH-052 Observability Correlation, Metrics, and Audit Contract
+#+description: ARDR research for starintel-server issues 46, 121, and 128 plus StarLang issue 49, defining provider-neutral observability semantics before logging, OTLP, syslog, or OpenObserve adapters.
+#+status: READY_FOR_DESIGN
+#+filetags: :starintel:star-server:research:observability:metrics:tracing:audit:otel:starlang:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Explicit operator research decision | Pending |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of canonical design | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main publication workflow succeeds | Pending |
+
+Lifecycle readiness is not approval. Evidence is sufficient to mark this node =READY_FOR_DESIGN=, while every human-gated approval remains pending.
+
+* Issue Seeds and Selection
+
+Primary owning implementation seed: [[https://github.com/lost-rob0t/starintel-server/issues/46][starintel-server #46]].
+
+Related issue-backed seeds reconciled into the same program:
+
+- [[https://github.com/lost-rob0t/starintel-server/issues/121][starintel-server #121]] defines the structured logging/event contract surface.
+- [[https://github.com/lost-rob0t/starintel-server/issues/128][starintel-server #128]] requests optional OTLP/OpenObserve export.
+- [[https://github.com/lost-rob0t/star-lang/issues/49][StarLang #49]] requests optional runtime/actor OTLP observability hooks.
+- [[https://github.com/lost-rob0t/starintel-server/issues/122][starintel-server #122]] is the separate remote-syslog transport follow-up.
+
+The complete relevant open backlogs in =starintel-auto-research=, =starintel-server=, StarLang, and cl-gserver were enumerated before selection. The higher-priority server runtime/security topics already have current canonical research/design or are implementation-gated. Server #46 is the next uncovered P1 roadmap item and owns a concrete cross-runtime diagnostic defect rather than generic telemetry research.
+
+Issue #46, #121, and #128 currently have no discussion comments. No dedicated canonical observability research/design node was found, so this document establishes one canonical owner rather than allowing the four issue seeds to grow competing event and exporter contracts.
+
+An issue's execution wording is not approval. In particular, #121's =AUTO-RAGE= text is treated only as an implementation seed; it cannot authorize implementation under the canonical human approval workflow.
+
+* Evidence Inspected
+
+- [[https://github.com/lost-rob0t/starintel-server/issues/46][starintel-server #46]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/121][starintel-server #121]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/128][starintel-server #128]].
+- [[https://github.com/lost-rob0t/star-lang/issues/49][StarLang #49]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/8fb297d146e7332fae7e38170b5b49d49530ac53/source/auth/core.lisp][=source/auth/core.lisp= at audited server head]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/8fb297d146e7332fae7e38170b5b49d49530ac53/source/frontends/http-auth.lisp][=source/frontends/http-auth.lisp= at audited server head]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/8fb297d146e7332fae7e38170b5b49d49530ac53/source/frontends/http-target-v1.lisp][=source/frontends/http-target-v1.lisp= at audited server head]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/8fb297d146e7332fae7e38170b5b49d49530ac53/source/runtime-lifecycle.lisp][=source/runtime-lifecycle.lisp= at audited server head]].
+- [[file:../../design/star-server/STAR-SERVER-044-deployment-config-trusted-init.org][STAR-SERVER-044 Deployment Configuration and Trusted Init Boundary]].
+- [[file:../../design/star-server/STAR-SERVER-047-explicit-library-api-runtime-ports.org][STAR-SERVER-047 Explicit Library API and Runtime Ports]].
+- [[file:../../design/star-server/STAR-SERVER-049-component-handles-registry-readiness-health.org][STAR-SERVER-049 Component Handles, Registry, Readiness, and Health]].
+- [[https://www.w3.org/TR/trace-context/][W3C Trace Context]], retrieved 2026-08-29.
+- [[https://opentelemetry.io/docs/specs/otel/logs/data-model/][OpenTelemetry Logs Data Model]], retrieved 2026-08-29.
+- [[https://opentelemetry.io/docs/specs/otlp/][OpenTelemetry Protocol Specification]], retrieved 2026-08-29.
+- [[https://opentelemetry.io/docs/specs/semconv/otel/sdk-metrics/][OpenTelemetry SDK Metrics Semantic Conventions]], retrieved 2026-08-29.
+- [[https://openobserve.ai/docs/ingestion/logs/otlp/][OpenObserve OTLP ingestion documentation]], retrieved 2026-08-29.
+
+* Current-Source Findings
+
+** Correlation already exists, but only as a local request concept
+
+Current authentication source already defines immutable =request-security-context= and =service-call-context= values carrying principal identity, credential identity, scopes, =correlation-id=, and deadline. HTTP middleware accepts a bounded =X-Correlation-ID= or creates one and echoes it in responses. The target API also includes that correlation ID in its receipt.
+
+This is useful evidence, but it is not distributed trace context. Current source has no provider-neutral trace/span value propagated through HTTP, Rabbit, actor envelopes, persistence, retry, lease, or generated-document paths. A new observability design should extend the existing explicit call-context direction rather than invent another ambient request identity.
+
+** Current operational logging is free-form and boundary-local
+
+HTTP error handling emits =log:warn= and =log:error= strings containing the correlation ID. There is no dedicated observability module in the audited server source tree and no stable event schema that machine consumers can rely on across HTTP, Rabbit, actors, CouchDB, leases, lifecycle, and targets.
+
+The existing human-readable logs are therefore useful compatibility output, not a sufficient machine event contract.
+
+** Runtime ownership already supplies most metric authorities
+
+The runtime/lifecycle, thread-budget, mailbox/admission, component-generation, Rabbit, CouchDB, outbox, target, and lease work already establish authoritative owners for the state #46 wants to measure. Observability must read or receive measurements from those authorities; it must not create parallel counters that become a shadow scheduler, registry, lease table, or health authority.
+
+** The issue family currently mixes four different concerns
+
+#46 combines semantic events, metrics, traces, audit durability, and diagnostics. #121 narrows structured logging. #128 adds an exporter/configuration concern. StarLang #49 adds runtime/actor instrumentation. Treating each as independent would produce duplicate correlation types and competing event schemas.
+
+The provider-neutral semantic contract must come first. Structured local logs, syslog, OTLP/OpenObserve, and diagnostic APIs are downstream projections/adapters.
+
+** #128's executable init-file example is stale against the deployment-config design
+
+The #128 issue text proposes configuring observability directly through executable Common Lisp init code. The canonical deployment configuration design has since separated ordinary data-only deployment configuration from trusted executable init extensions. Observability settings therefore belong in that closed configuration normal form with secret references resolved at the consuming boundary. Executable Lisp may remain a trusted extension mechanism, but it is not the normal telemetry configuration authority.
+
+* External Evidence
+
+** W3C Trace Context is the interoperability boundary
+
+W3C Trace Context standardizes =traceparent= and optional =tracestate= propagation. It also warns that =tracestate= must not contain personally identifiable information and discusses restarting traces at security trust boundaries. StarIntel should therefore parse and validate transport trace context at adapters, then carry a typed internal trace context instead of passing raw HTTP headers through the core.
+
+** OpenTelemetry already separates semantic records from exporters
+
+The OpenTelemetry Logs Data Model defines top-level =TraceId=, =SpanId=, trace flags, severity, resource, attributes, and event name. OTLP separately defines transport/export success, partial success, retryable failures, non-retryable failures, and dropped-data accounting. That separation supports a StarIntel-native semantic layer followed by optional OTLP projection rather than making OTLP protobufs the internal application model.
+
+** Metric attributes must remain bounded-cardinality
+
+OpenTelemetry semantic-convention guidance explicitly calls for low-cardinality component/error attributes and warns against UUID-like values for metric identity. StarIntel target IDs, principal IDs, request/message IDs, document IDs, and trace IDs are therefore inappropriate metric dimensions. Those identifiers belong in traces/events/audit records; metrics use bounded component/type/outcome/reason classes.
+
+** OpenObserve is a destination, not an architecture
+
+OpenObserve documents OTLP ingestion for logs, metrics, and traces. That satisfies #128's destination requirement without justifying OpenObserve-specific semantics in StarIntel. Generic OTLP export keeps the core independent of one backend.
+
+* Requirements Derived from Evidence
+
+1. Define one provider-neutral =ObservationContext= that composes with the existing service/request context and carries validated trace identity, span identity, correlation ID, runtime/component identity, deadline, attempt, and safe optional target/job references. It must not contain raw transport headers or credentials.
+2. W3C =traceparent=/=tracestate= parsing and emission belong to transport adapters. Internal code receives typed normalized values. Crossing an explicitly configured trust boundary may restart a trace; this is a versioned policy decision, never an implicit string rewrite.
+3. Define distinct semantic types for operational events, metrics, spans, and audit records. They may share context but cannot be collapsed into one untyped map because durability, cardinality, retention, and failure semantics differ.
+4. Structured fields are closed or explicitly allowlisted by event kind. Authorization headers, cookies, API keys, OAuth/session secrets, passwords, raw request bodies, and restricted document contents are rejected before any sink invocation.
+5. Dynamic field values are bounded and control characters are normalized/rejected according to a deterministic serialization policy. Telemetry must not become an unbounded memory/log-amplification path.
+6. Metrics are sourced from existing owners and use bounded labels. Runtime thread budgets, mailbox pressure, component generations, Rabbit state, CouchDB/outbox backlog, target schedules, leases, and HTTP outcomes remain owned by their existing subsystems.
+7. Queue/admission instrumentation must expose capacity/pressure and rejection/drop outcomes before or at the authoritative admission decision. Observability cannot infer overload only after work disappears.
+8. StarLang owns actor/domain-runtime instrumentation semantics. The server may project those observations into the shared StarIntel contract, but Common Lisp must not recreate StarLang actor lifecycle/supervision semantics in a parallel registry.
+9. Ordinary operational/log/metric/span sinks are best-effort and failure-isolated. Their queue/export failure cannot change application results. Bounded drop/suppression counters are required.
+10. Durable security/audit semantics are separate. An =AuditSink= may provide append-only/tamper-evident durability. Whether a particular operation fails closed when mandatory audit persistence is unavailable must be an explicit operation/policy rule, not an accidental consequence of logging failure.
+11. Audit records identify safe principal reference, action, resource reference, outcome, policy/decision reference when available, correlation/trace context, and fencing generation when applicable. They do not embed the protected resource payload.
+12. Diagnostic snapshots are application-level read models built from existing component/health/queue/resource owners and exposed only through operator-authorized service/API boundaries. They must not scrape process globals directly from HTTP handlers.
+13. Structured logging (#121), remote syslog (#122), and OTLP/OpenObserve (#128) are projections/adapters over the canonical semantics, not competing canonical event models.
+14. OTLP/OpenObserve remains disabled by default. Disabled configuration creates no exporter, outbound connection, queue worker, or required startup dependency. Export is bounded, timed, retry-limited, and non-fatal.
+15. Observability configuration follows the canonical closed deployment configuration/secret-reference boundary from #38. Export credentials are secret references resolved only inside the exporter adapter.
+16. No product telemetry, installation identifier, StarIntel-owned reporting endpoint, or anonymous analytics is introduced by this work.
+
+* StarLang-First Boundary
+
+The semantic order is:
+
+1. actor/domain lifecycle, supervision, mailbox, dispatcher, and runtime-event semantics are defined in StarLang when they describe StarLang behavior;
+2. only the smallest StarLang extension required for versioned observation metadata/propagation is added;
+3. immutable StarLang semantics are compiled into RuntimePlan/runtime instrumentation points;
+4. Common Lisp adapters project server-owned HTTP, CouchDB, Rabbit, lease, outbox, and application observations into the shared contract;
+5. external collectors/exporters are optional sinks only when justified operationally.
+
+An OpenTelemetry Collector may be useful operationally later, but it is never required for the core semantic contract or for disabled observability.
+
+* Proposed Semantic Model
+
+** Observation context
+
+Minimum normalized context:
+
+- =traceId= and current/parent =spanId= when tracing is active;
+- trace flags and bounded, policy-filtered tracestate when retained;
+- existing =correlationId=;
+- runtime instance ID and component ID/generation where applicable;
+- request/message/mutation identity as event-only attributes, not metric labels;
+- safe principal reference, never credential/token material;
+- target/job/schedule/lease reference where applicable;
+- attempt number and absolute deadline.
+
+The context is passed explicitly through operation/message boundaries. Dynamic globals may exist only in compatibility adapters and cannot be the authoritative propagation mechanism.
+
+** Operational event
+
+A versioned closed event includes timestamp, severity/class, service, component, stable event name, outcome/reason class, duration where meaningful, =ObservationContext=, and an event-kind-specific allowlisted attribute record.
+
+** Metric observation
+
+A metric observation has stable metric name, instrument kind, numeric value, unit, timestamp, and bounded labels. High-cardinality identities are prohibited as labels by contract.
+
+** Span observation
+
+A span records operation identity, parent relation, start/end/duration, status, and bounded safe attributes. Transport adapters map W3C headers to/from the typed context.
+
+** Audit record
+
+An audit record is a security/governance fact, not just a severe log line. It contains actor/principal reference, action, resource class/reference, outcome, authorization/policy decision reference where available, fence/generation where meaningful, time, and observation context. Its sink/durability policy is explicit.
+
+* Failure and Privacy Model
+
+- Unknown or forbidden event attributes fail event construction before reaching any sink.
+- Serializers/exporters receive already-sanitized typed values and still apply output-size ceilings.
+- Best-effort sink saturation drops according to a configured bounded policy and increments a local dropped/suppressed counter.
+- Export retry obeys a bounded policy and distinguishes retryable from non-retryable responses; non-retryable bad telemetry is dropped/accounted rather than retried forever.
+- No exporter exception may escape into application execution unless the operation explicitly requires durable audit and that audit policy says failure is terminal.
+- Trace/baggage/tracestate data from untrusted callers is not assumed safe metadata. Values are validated, bounded, and filtered; StarIntel does not place PII in =tracestate=.
+
+* Adversarial Review
+
+Rejected alternatives:
+
+1. *Make OpenTelemetry objects the application model* — couples StarIntel correctness and tests to one telemetry SDK/export protocol and makes disabled observability harder to prove side-effect-free.
+2. *Let #121 define a standalone logging schema* — duplicates #46's event semantics and leaves metrics/traces/audit with incompatible correlation fields.
+3. *Use correlation ID as the trace ID* — conflates an existing request/debug identifier with W3C trace semantics and prevents proper parent/span relationships.
+4. *Put target/principal/document/request IDs into metric labels* — creates unbounded cardinality and potentially leaks sensitive identity into aggregate telemetry.
+5. *Treat audit as log level =AUDIT=* — gives best-effort logging accidental security-durability semantics and cannot prove append-only/tamper-evident behavior.
+6. *Export raw request/document bodies for debugging* — violates the security boundary and turns observability into a data-exfiltration path.
+7. *Instrument actor semantics only in Common Lisp* — creates a shadow model of StarLang/Sento lifecycle behavior. StarLang owns language/runtime actor semantics.
+8. *Directly inspect every process global in an operator diagnostics endpoint* — bypasses the component/runtime ownership model and makes snapshots race-prone and untestable.
+9. *Initialize OTLP eagerly even when disabled* — violates #128's zero-outbound/default-off requirement and adds unnecessary startup failure modes.
+10. *Use executable init Lisp as ordinary observability configuration* — conflicts with the canonical data-only deployment configuration boundary.
+11. *Allow exporter backpressure to stall request/actor execution* — a telemetry outage must not become a StarIntel availability outage.
+12. *Interpret #121 AUTO-RAGE wording as implementation authorization* — issue text and labels cannot cross the operator-only approval gate.
+
+* Lifecycle State
+
+Research evidence is sufficient for =READY_FOR_DESIGN=. Production implementation depends on the explicit runtime/port/config seams from #38-#42 and on the relevant StarLang runtime instrumentation work, but those dependencies do not block completing the architecture now.
+
+* Unresolved Questions
+
+- Which audit event classes, if any, must synchronously fail closed on durable audit-sink failure? This requires an explicit operator/security policy decision per operation class; research does not invent one.
+- Should StarIntel preserve inbound =tracestate= across every external boundary, or restart/filter it at selected OSINT acquisition/security boundaries? The trust-boundary policy needs concrete ingress classifications.
+- Which exact runtime counters from #34-#37/#42 are already exposed as stable read models versus requiring a new typed snapshot port when those designs are implemented?
+- Does the selected Common Lisp implementation use a native OTLP library or a small protocol adapter/Collector boundary? That is an implementation research question after the provider-neutral contract is approved; it cannot change the core semantics.
+
+* Footnotes and Glossary
+
+[fn:observation-context] The explicit provider-neutral correlation/trace/runtime identity passed across StarIntel operation and message boundaries.
+
+[fn:audit-record] A security/governance fact with explicit durability semantics; it is not equivalent to an ordinary structured log event.
+
+[fn:otlp] OpenTelemetry Protocol, the exporter/interchange protocol for traces, metrics, logs, and related telemetry signals.
+
+[fn:cardinality] The number of distinct label/attribute value combinations a metric produces; unbounded identity labels can make metric storage and aggregation operationally unsafe.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created issue-backed ARDR research; reconciled #46/#121/#128 and StarLang #49; audited current correlation/logging seams; added W3C/OTel/OpenObserve evidence, privacy/failure requirements, and adversarial review. | ARDR Auto-Research | starintel-server #46/#121/#128; StarLang #49; audited server source at 8fb297d; W3C Trace Context; OpenTelemetry specs; OpenObserve docs |

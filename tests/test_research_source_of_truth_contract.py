@@ -12,23 +12,24 @@ class ResearchSourceOfTruthContractTests(unittest.TestCase):
         self.assertIn("Ask the user to provide the correct path", text)
         self.assertIn("treat GitHub/Forgejo/remote contents as the source of truth", text)
 
-    def test_research_worker_requires_issue_transaction_file(self) -> None:
+    def test_research_worker_is_retired_in_favor_of_hackmode(self) -> None:
         text = (
             ROOT
             / "agent-zero/usr/agents/starintel-source-enrichment/prompts/agent.system.main.specifics.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("Research issue -> durable file invariant", text)
-        self.assertIn("roam/research/ardr-issues/ARDR-ISSUE-<issue-number>-<slug>.org", text)
-        self.assertIn("If a research issue already exists without that file", text)
+        self.assertIn("RETIRED PROFILE — STOP", text)
+        self.assertIn("lost-rob0t/hackmode", text)
+        self.assertIn("authorized cyber / BBP objective", text)
 
-    def test_coordinator_blocks_issue_only_research(self) -> None:
+    def test_coordinator_is_retired_in_favor_of_hackmode(self) -> None:
         text = (
             ROOT
             / "agent-zero/usr/agents/starintel-adard-gated/prompts/agent.system.main.specifics.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("research issue and its durable Org transaction are one unit", text)
-        self.assertIn("findings exist only in issue prose/chat/task output", text)
-        self.assertIn("do not advance", text)
+        self.assertIn("RETIRED PROFILE — STOP", text)
+        self.assertIn("hackmode-rage-database", text)
+        self.assertIn("hackmode-rage-hackpert", text)
+        self.assertIn("Ordinary StarIntel product work", text)
 
 
 if __name__ == "__main__":

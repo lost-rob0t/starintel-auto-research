@@ -2,70 +2,427 @@
 :ID:       star-manifest-001-document-contracts
 :END:
 #+title: STAR-MANIFEST-001 Actor and Dataset Manifest Document Contracts
-#+description: Separate camelCase wire contracts for executable actor declarations and dataset catalog, storage, lineage, and flow bindings.
-#+status: DRAFT
-#+filetags: :starintel:design:star-server:manifest:actor:dataset:org-roam:
+#+description: Design-ready composition contracts linking immutable StarLang actor/domain semantics to StarIntel deployment bindings, dataset manifests, and a pure pre-start RuntimePlan.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:design:star-server:manifest:actor:dataset:star-lang:runtime-plan:org-roam:
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | StarIntel operator | PENDING | Explicit operator research decision | [[id:starintel-star-research-043-manifest-runtime-plan-composition][STAR-RESEARCH-043]] plus prior approved capability research |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of this exact manifest/runtime-plan design | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization for a bounded slice | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main publication workflow succeeds | Pending |
+
+Lifecycle/design readiness is not approval. No implementation slice may enter RAGE until the canonical operator approval workflow explicitly authorizes it.
+
+* Canonical Inputs
+
+- [[id:starintel-star-research-043-manifest-runtime-plan-composition][STAR-RESEARCH-043 Actor and Dataset Manifest Runtime-Plan Composition]].
+- [[id:star-research-013-actor-capability-advertisement][STAR-RESEARCH-013 Actor Capability Advertisement]].
+- [[id:starintel-star-lang-research-006][STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/43][starintel-server #43]].
+- [[https://github.com/lost-rob0t/star-lang/blob/main/prototype/domain-server-core-prototype.lisp][Current StarLang domain-server manifest/compiler source]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/actors.lisp][Current imperative StarIntel actor composition]].
 
 * Decision
 
-Actor Manifest and Dataset Manifest are separate StarIntel document schemas. They must not share one generic manifest field map.
+Keep Actor Manifest and Dataset Manifest as separate StarIntel document contracts, but do not let the Actor Manifest become a second actor/domain language.
 
-All fields inside their wire-level =data= objects use camelCase. Existing v0.9 snake_case manifest fields are migration input, not the target contract.
+The architecture has three authorities:
 
-* Actor Manifest boundary
+1. *StarLang semantic program manifest* — compiler-produced typed actor/domain behavior and capabilities.
+2. *StarIntel Actor Deployment Manifest* — data-only runtime/composition binding to one immutable semantic artifact.
+3. *StarIntel Dataset Manifest* — data-only dataset/catalog/storage/governance and selected flow bindings.
 
-Actor Manifest describes executable behavior and deployment requirements. Its field groups are:
+Those inputs compile into one pure deterministic =RuntimePlan= before any actor, thread, listener, connection, timer, or external process starts.
 
-- identity: =actorId=, =label=, =description=, =actorVersion=, =protocolVersion=, =specCompatibility=
-- behavior: =roles=, =accepts=, =produces=, =inputPorts=, =outputPorts=, =routing=
-- implementation: =implementation= and =runtime=
-- dependencies and configuration: =dependencies=, =configuration=, =optionsSchema=
-- authority and limits: =capabilities=, =permissions=, =datasetRestrictions=, =resources=, =rateLimits=, =budgetLimits=
-- delivery and failure policy: =mailboxPolicy=, =retryPolicy=, =deadLetterPolicy=, =restartPolicy=, =loopDetection=, =errorPolicy=
-- lifecycle: =healthChecks=, =readiness=, =shutdown=, =checkpointing=
+All wire-level =data= fields in the new manifest version use lower camelCase. Historical v0.9 snake_case records remain explicit migration input; frozen historical artifacts are not mutated in place.
 
-=implementation= must contain at least one implementation locator: =inlineSource=, =entrypoint=, =package=, =uri=, =builtInId=, or =serviceUrl=.
+* Authority Boundary
+
+#+begin_example
+StarLang source/spec lock
+       |
+       v
+compiled semantic program manifest
+       |
+       +-------------------------+
+                                 |
+Actor Deployment Manifest ------+----> pure manifest linker/compiler
+                                 |              |
+Dataset Manifest ----------------+              v
+                                          RuntimePlan
+                                              |
+                          #34/#35/#36/#37 validation/grants
+                                              |
+                                              v
+                                        star.runtime realizes
+#+end_example
+
+A lower layer may narrow an upper-layer contract where explicitly allowed. It may never widen it.
+
+Examples:
+
+- a deployment may reduce mailbox capacity below a declared maximum;
+- a deployment may disable an optional capability;
+- a dataset may bind only a subset of compatible accepted document types;
+- a deployment may not add a capability absent from the semantic manifest;
+- a dataset may not route a message/document type to a component that does not accept it;
+- a manifest may request runtime capacity, but only #34/#35 can grant it.
+
+* StarLang Semantic Program Manifest
+
+This is not hand-authored by starintel-server. It is emitted by the closed StarLang compiler and bound to the exact compiled/specification identity.
+
+Minimum semantic content consumed by StarIntel includes, where applicable:
+
+- stable actor/domain-server semantic identity and version;
+- artifact digest and semantic/spec-lock digest;
+- keyed authority/key type and owned document/domain types;
+- accepted message/document types;
+- produced message/document types when declared by the language contract;
+- capabilities and declared tools;
+- semantic restart/failure constraints;
+- semantic mailbox constraints;
+- declared dispatcher/resource profile or class;
+- portable operation/port identities required for runtime binding.
+
+Current StarLang already emits domain-server manifest entries containing name, keyed authority/key type, owned document types, accepted messages, tools, restart, mailbox, dispatcher, and capabilities. This design consumes that authority rather than restating it.
+
+* Actor Deployment Manifest
+
+** Purpose
+
+The Actor Deployment Manifest binds one immutable semantic component artifact to one StarIntel runtime component instance.
+
+It is inert data. It cannot contain arbitrary executable Common Lisp, shell commands, reader forms, callbacks, environment interpolation that yields code, or caller-supplied host objects.
+
+** Identity and semantic reference
+
+Required shape:
+
+#+begin_example
+actorId
+actorVersion
+componentId
+semanticManifestRef
+semanticDigest
+adapterKind
+adapterRef
+#+end_example
+
+=componentId= is the stable runtime/lifecycle identity consumed by #37/#42. =semanticManifestRef= identifies a locally resolved immutable compiled StarLang artifact or an explicit legacy built-in compatibility artifact during migration. =semanticDigest= must match the resolved artifact before plan linking.
+
+The exact final field name may become =programManifestRef= if the final StarLang manifest format standardizes that term; the digest-bound semantics are normative.
+
+** Deployment-only fields
+
+The Actor Deployment Manifest may declare:
+
+- =dependencies= — runtime component IDs; graph validity is owned by #37;
+- =workloadClass= / dispatcher-profile reference — request into #34/#35 planning, not a worker grant;
+- =routeeBounds= — minimum/desired/maximum cardinality constraints where the semantic adapter supports a pool;
+- =mailboxProfile= — capacity/admission configuration constrained by #36 and semantic limits;
+- =ingressBindings= — local/Rabbit/remote binding references, never raw connections/channels/actor refs;
+- =authorizationPolicyRef=;
+- =leasePolicyRef=;
+- =idempotencyPolicyRef=;
+- =configurationRef= and versioned options schema;
+- =secretRefs= — opaque credential references only;
+- =healthAdapter= / =readinessAdapter= from a closed installed adapter vocabulary;
+- =labels= and operator-safe diagnostic metadata.
+
+** Fields that are not independently authoritative
+
+The deployment manifest must not independently redefine:
+
+- accepted/produced semantic types;
+- domain ownership/key semantics;
+- semantic capabilities/tools;
+- semantic protocol compatibility;
+- executable actor body;
+- arbitrary restart/failure meaning;
+- raw worker/thread grant.
+
+A duplicated compatibility field, if retained for migration/readability, is validated for exact equality or permitted narrowing against the referenced semantic manifest. It is never a second source of truth.
 
 ** Prohibited instance membership
 
-Actor Manifest must not contain =documentIds= or legacy =document_ids=. An actor declares accepted and produced document types through =accepts= and =produces=; it does not enumerate document instances.
+Actor Deployment Manifest must not contain =documentIds= or legacy =document_ids=. Actors declare compatible types/capabilities; they do not enumerate dataset instances.
 
-Concrete document membership belongs to Dataset Manifest. Per-run document references belong to execution requests, run records, or checkpoints.
+* Dataset Manifest
 
-Actor Manifest validation must reject =documentIds= and =document_ids= as unknown properties.
+** Purpose
 
-* Dataset Manifest boundary
+Dataset Manifest describes one dataset instance's catalog, storage, lineage, governance, materializations, and selected component/flow bindings.
 
-Dataset Manifest describes catalog and data-lake state. Its field groups are:
+It does not contain executable workflow code and it cannot grant actor/application authority.
 
-- identity: =datasetId=, =name=, =description=, =datasetVersion=, =specCompatibility=
-- membership and schema: =documentIds=, =documentTypes=, =schemaRefs=, =predicateRegistryRef=
-- storage: =storageBindings=, =storageLayers=
-- derived data: =indexes=, =materializations=, =embeddings=
-- execution bindings: =actorBindings=, =flowBindings=
-- graph references: =graphRefs=
-- governance: =lineage=, =validationPolicy=, =statistics=, =accessControl=, =retentionPolicy=, =publication=, =migrationHistory=
+** Identity and schema compatibility
 
-=flowBindings= declares ports, routes, mailbox keys, buffering, backpressure, retries, and dead-letter destinations. It does not embed an executable workflow.
+Core fields:
 
-=graphRefs= points to separate =star-graph= documents or records graph materializations. Executable workflow semantics belong to =star-graph=, not Dataset Manifest.
+- =datasetId=;
+- =name= and optional description;
+- =datasetVersion=;
+- =tenantRef= / =ownerRef=;
+- =specRefs= / =schemaRefs= with exact version/digest compatibility;
+- =documentTypes=;
+- optional explicit =documentIds= where the dataset model requires materialized membership;
+- =predicateRegistryRef= where graph semantics require it.
 
-* Compatibility
+** Storage and derived state
 
-Do not mutate frozen historical schema artifacts in place. Introduce the separate contracts in the next schema version, provide explicit migration from v0.9 shared manifest fields, and regenerate maintained language bindings and conformance fixtures from the same canonical schema.
+- =storageBindings= — logical adapter/binding references, not credentials;
+- =storageLayers=;
+- =indexes= / versioned view-registry refs;
+- =materializations=;
+- =embeddings=;
+- =graphRefs=.
 
-* Implementation gate
+** Governance and lifecycle policy
 
-Before implementation, freeze exact nested object shapes, required fields, enum values, and schema conditions in this node. Every maintained specification library must then receive the same positive and negative fixtures, including a negative Actor Manifest fixture containing =documentIds=.
+- =lineage= and provenance policy;
+- =validationPolicy= / normalization policy refs;
+- =accessControl=;
+- =retentionPolicy=;
+- =publication=;
+- =leasePolicyRef= where dataset mutation requires leasing;
+- =researchPolicyRef= / analysis policy where enabled;
+- =migrationHistory=;
+- =statistics= as descriptive materialization metadata, never authority for live counts.
 
-* Sources
+** Component and flow bindings
 
-- [[https://github.com/lost-rob0t/starintel-auto-research/blob/main/skills/actor-manifest/SKILL.md][Actor Manifest skill]]
-- [[https://github.com/lost-rob0t/starintel-auto-research/blob/main/skills/dataset-manifest/SKILL.md][Dataset Manifest skill]]
-- [[file:../STAR-00-Starintel-4th-generation-Ideas.org][Fourth-generation design backlog]]
+=actorBindings= and =flowBindings= select already-declared compatible components and typed ports.
 
-* Glossary
+A flow binding may contain:
 
-[fn:actor-manifest] A declarative description of an executable actor's interface, implementation, runtime, authority, and lifecycle policy.
-[fn:dataset-manifest] A declarative catalog of dataset membership, storage, derived representations, lineage, and execution bindings.
-[fn:star-graph] A separate executable workflow or graph contract referenced by manifests where needed.
+- source component/capability/port reference;
+- destination component/capability/port reference;
+- typed message/document contract reference;
+- routing key/partition/key-selector reference from a closed vocabulary;
+- buffering/admission policy reference;
+- retry/dead-letter policy reference;
+- explicit enabled/disabled state.
+
+It may not embed host-language callbacks, shell commands, arbitrary Rabbit routing supplied by untrusted documents, or a generic executable workflow. Rich orchestration belongs to StarLang playbook/domain declarations and compiles into a semantic artifact referenced by the deployment layer.
+
+* Pure RuntimePlan
+
+The manifest compiler is a pure normalization/linking phase.
+
+#+begin_example
+RuntimePlan {
+  planVersion
+  sourceManifestIds[]
+  semanticDigests[]
+  components[]
+  capabilityIndex
+  lifecycleGraph
+  routes[]
+  datasetBindings[]
+  threadDemand[]
+  sentoLaneDemand[]
+  mailboxAdmissionDemand[]
+  storageBindings[]
+  diagnostics[]
+  planDigest
+}
+#+end_example
+
+Equivalent canonical inputs produce the same normalized plan and plan digest.
+
+The compiler performs no network, file-secret resolution, actor creation, dispatcher creation, thread creation, Rabbit/CouchDB/Valkey connection, timer registration, HTTP listener startup, or arbitrary plugin execution. Artifact resolution and trusted plugin installation are separate bounded build/deployment effects; plan compilation consumes resolved identities.
+
+* Required Validation
+
+Before realization, reject at minimum:
+
+1. missing/mismatched semantic artifact or digest;
+2. duplicate actor/component IDs;
+3. unknown component dependencies;
+4. dependency cycles forbidden by #37;
+5. actor deployment capability/type widening;
+6. dataset route type incompatible with source/destination semantic manifests;
+7. unknown schema/spec/capability/port reference;
+8. ambiguous duplicate route without explicit arbitration;
+9. raw credential/secret value in a secret-reference field;
+10. arbitrary executable callback/function/process definition;
+11. invalid/unbounded mailbox demand under #36;
+12. unsatisfiable thread/Sento demand under #34/#35;
+13. dataset storage/visibility/governance policy incompatible with the selected binding;
+14. actor manifest containing =documentIds= / =document_ids=;
+15. dataset flow trying to change the semantic meaning of a referenced actor/domain declaration.
+
+Every failure is a typed diagnostic containing manifest identity, stable field/path, referenced artifact identity/digest where relevant, and a closed reason code.
+
+* Runtime Realization
+
+Only a fully validated plan enters =star.runtime= composition.
+
+Realization order is dependency-derived through #37. #34/#35 issue actual capacity grants. #36 supplies mailbox/admission semantics. #42 supplies component incarnation handles and readiness projection. #41 owns concrete adapters.
+
+The realization layer may map a semantic component to:
+
+- local Sento actor/domain-server adapter;
+- local router/pool ingress;
+- Rabbit/remote adapter;
+- in-process application service;
+- trusted installed external adapter explicitly declared by =adapterKind=/=adapterRef=.
+
+The manifest itself never carries the live actor ref, connection, channel, socket, thread, pool, process handle, or resolved secret.
+
+* Compatibility and Migration
+
+Do not mutate frozen historical schema artifacts in place.
+
+Migration order:
+
+1. define a new version of Actor Deployment Manifest and Dataset Manifest schemas;
+2. compile current legacy built-in actors into explicit compatibility semantic descriptors where no StarLang artifact exists yet;
+3. accept v0.9 snake_case/shared-manifest fields only through an explicit migration adapter;
+4. validate compatibility fields against semantic truth;
+5. migrate one actor/dataset vertical at a time;
+6. after equivalence tests, demote the matching global startup hook/actor-name route entry to a compatibility wrapper;
+7. remove the duplicate legacy authority only after no current consumer depends on it.
+
+No migration step silently rewrites historical persisted manifests or changes a semantic digest.
+
+* Security and Authority Rules
+
+- Capability advertisement/discovery never grants caller authority.
+- Dataset binding cannot escalate scopes, entitlements, lease authority, or actor capabilities.
+- Secret-bearing values remain opaque references until the consuming adapter boundary.
+- Public capability/manifests never expose private broker/database hosts, raw credential refs, internal ports, or live resource handles.
+- =adapterRef= resolves only through trusted installed/runtime configuration; a data manifest cannot load arbitrary package/path/URL code.
+- Plan compilation fails closed on unknown fields in authority-bearing sections.
+- A plan digest identifies normalized topology; it does not by itself authorize deployment.
+
+* Adversarial Review
+
+** Reject: actor semantics copied into the deployment document**
+
+StarLang already has a closed actor/domain declaration and manifest path. Copying accepted types, capabilities, restart/mailbox semantics into a second editable document creates drift and ambiguous authority.
+
+** Reject: one giant generic manifest**
+
+Actor deployment and dataset catalog/governance have different ownership and validation. Sharing one arbitrary field bag obscures what can affect execution.
+
+** Reject: manifests as executable Lisp/init replacement**
+
+Data manifests may select trusted adapters and policies by closed identifier. They cannot execute code. Trusted Lisp/plugin extension remains a separately authorized installation/configuration boundary.
+
+** Reject: route or worker counts become runtime grants**
+
+They are demand/constraints only. #34/#35/#36 remain capacity/admission authorities.
+
+** Reject: compile while realizing**
+
+Starting threads/connections while resolving topology turns validation into partial deployment. All semantic linking and resource-demand validation happens first.
+
+** Reject: flowBindings becomes a workflow DSL**
+
+Dataset manifests connect typed declared ports. Stateful branching/fan-out/agentic orchestration belongs to StarLang.
+
+** Reject: actor name strings/raw refs as stable routing authority**
+
+Runtime plan uses stable component IDs and #42 generation-bearing handles. Legacy actor-name lookup is compatibility input during migration.
+
+* Proposed Implementation Slices
+
+Every slice is =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — pure manifest linker + RuntimePlan model
+
+No runtime effects. Use fake semantic manifests and inert actor/dataset fixtures.
+
+Mandatory RED-first fixture:
+
+#+begin_example
+semantic component identity/email accepts EmailSeed
+actor binding identity/email references semantic digest A
+dataset flow routes PersonDocument -> identity/email
+
+compileRuntimePlan(...)
+=> incompatible-route
+=> actor/thread/network callback counts all zero
+#+end_example
+
+Untouched starintel-server must fail because no pure manifest linker/runtime-plan compiler exists.
+
+Sibling REDs:
+
+- resolved semantic digest B versus manifest-pinned digest A -> reject;
+- deployment adds undeclared capability -> reject;
+- duplicate component ID -> reject;
+- raw credential/callback field -> reject;
+- equivalent input order -> identical normalized plan.
+
+** Slice 2 — StarLang artifact import/link verification
+
+Consume one real compiler-produced StarLang semantic manifest through a narrow artifact reader. Verify exact digest/spec-lock identity and narrowing rules without loading StarLang executable source at server startup.
+
+** Slice 3 — Dataset Manifest schema and cross-link validation
+
+Add deterministic data-only schema/normalization and prove incompatible component/type/storage/governance bindings fail before effects.
+
+** Slice 4 — runtime authority integration
+
+Feed plan lifecycle graph into #37, thread/Sento demand into #34/#35, mailbox/admission demand into #36, and component IDs into #42. The manifest compiler does not reproduce those algorithms.
+
+** Slice 5 — first realized actor vertical
+
+Select one small existing actor with deterministic fixtures. Realize it from the validated plan and prove current compatibility entrypoint delegates to the same plan-owned component.
+
+** Slice 6 — first dataset-specific flow
+
+Run two fixture datasets with different valid component/flow bindings without source changes. Prove neither can route an undeclared type or widen capability.
+
+** Slice 7 — legacy authority retirement
+
+Remove/delegate corresponding =*actors-start-hook*=, raw actor-index, and hard-coded route/startup ownership only after equivalence and restart tests prove the plan-owned path.
+
+* Acceptance Criteria
+
+- Actor Deployment Manifest references, rather than duplicates, immutable StarLang semantics.
+- Dataset Manifest remains data/catalog/governance + typed binding, not executable workflow code.
+- invalid topology fails before long-lived side effects;
+- equivalent manifests compile deterministically;
+- runtime demands are validated/granted by #34-#37 rather than manifests self-authorizing resources;
+- #42 component IDs/handles are the runtime routing identity after realization;
+- raw secrets, host callbacks, live resources, and arbitrary code are impossible in data manifests;
+- two datasets can select different compatible flows without server source changes;
+- no route can deliver an undeclared semantic type;
+- legacy hooks/raw actor indexes become compatibility-only as migrated verticals land;
+- no new external controller or second actor/runtime framework is introduced;
+- implementation remains blocked until explicit operator authorization.
+
+* Unresolved Questions
+
+- Final field spelling for the semantic artifact reference must align with the final StarLang manifest/lock contract; =semanticManifestRef= is the design placeholder.
+- Some existing built-in actors are not yet StarLang-authored. Migration needs a closed compatibility semantic descriptor format, but that descriptor must be generated/maintained as a transitional artifact rather than reintroducing free-form semantic duplication.
+- The operational =actor-manifest= skill still describes a broader pre-StarLang manifest. It should be revised after this design receives operator review so operational guidance does not outrun the canonical contract.
+
+* Decision / Handoff State
+
+Design is complete and ready for operator review. It is **not** approved for implementation.
+
+Owning implementation handoff: [[https://github.com/lost-rob0t/starintel-server/issues/43][starintel-server #43]].
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Reframed the existing draft as a StarLang-first semantic/deployment/dataset composition contract; added pure RuntimePlan, validation, adversarial review, RED-first slices, approval table, and migration boundary. | ARDR Auto-Research | STAR-RESEARCH-043; starintel-server #43 and current actor source; current StarLang domain-server manifest compiler |
+
+* Footnotes and Glossary
+
+- *StarLang semantic program manifest* :: Compiler-produced immutable typed behavior/capability contract for an actor/domain server.
+- *Actor Deployment Manifest* :: Data-only StarIntel binding from one semantic artifact to one runtime component instance and deployment policy.
+- *Dataset Manifest* :: Data-only dataset catalog/storage/governance contract selecting compatible typed component and flow bindings.
+- *RuntimePlan* :: Pure deterministic normalized topology validated before any long-lived effect and consumed by existing runtime capacity/lifecycle authorities.
+- *Semantic widening* :: Deployment or dataset configuration adding types, capabilities, or authority that the referenced semantic artifact did not declare; always rejected.

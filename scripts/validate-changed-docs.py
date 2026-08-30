@@ -44,6 +44,12 @@ def in_changed_scope(
     document_class = str(getattr(problem, "document_class", ""))
     rule = str(getattr(problem, "rule", ""))
 
+    # Canonical identifier collisions are repository-wide integrity failures.
+    # A change to the validator or any colliding document must not be allowed to
+    # hide them merely because the other claimant predates the current PR.
+    if rule.startswith(("duplicate-canonical-id:", "canonical-id-title-mismatch:")):
+        return True
+
     # A carried-forward REVIEW design is explicitly not approved or implemented.
     # Do not fabricate a same-day material-change entry solely because the draft
     # crossed a replacement PR. All structural, approval, link, and UML rules

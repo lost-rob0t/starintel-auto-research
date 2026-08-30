@@ -161,6 +161,37 @@ class ResearchApprovalHistoryTests(unittest.TestCase):
             self.git(root, "commit", "-m", "migrate to adard approval namespace")
             self.assertEqual(verify_repository(root), 1)
 
+    def test_partial_canonical_base_can_be_repaired_when_exactly_anchored(self) -> None:
+        root, temporary = self.setup_repo()
+        with temporary:
+            path = root / "roam" / "research" / "test" / "record.org"
+            partial = LEGACY.replace(
+                "#+status: REVIEW\n",
+                "#+status: REVIEW\n"
+                "#+approval_schema: adard.research-approval.v1\n"
+                "#+approval_state: PENDING\n"
+                "#+approval_actor: legacy-partial-writer\n"
+                "#+approval_evidence: partial migration awaiting provenance\n",
+            )
+            path.write_text(partial, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "write partial canonical approval metadata")
+            base_commit = self.git(root, "rev-parse", "HEAD")
+            base_blob = self.git(root, "hash-object", str(path))
+
+            repaired = partial.replace(
+                "#+approval_evidence: partial migration awaiting provenance\n",
+                "#+approval_evidence: partial migration awaiting provenance\n"
+                f"#+approval_base_commit: {base_commit}\n"
+                f"#+approval_base_blob: {base_blob}\n"
+                "#+approval_decided_at: NONE\n",
+            )
+            path.write_text(repaired, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "repair partial approval provenance")
+
+            self.assertEqual(verify_repository(root), 1)
+
     def test_canonical_born_record_with_none_provenance_is_allowed(self) -> None:
         root, temporary = self.setup_empty_repo()
         with temporary:

@@ -67,6 +67,7 @@ SOURCE_BLOCK_RE = re.compile(
     re.MULTILINE | re.IGNORECASE | re.DOTALL,
 )
 TABLE_ROW_RE = re.compile(r"^\s*\|(.*)\|\s*$")
+CANONICAL_ID_RE = re.compile(r"^([A-Z][A-Z0-9-]*-\d{3}[A-Z]?)(?=-|$)")
 
 APPROVAL_TEMPLATE = """* Approval Table
 
@@ -162,6 +163,17 @@ def keyword_map(text: str) -> dict[str, str]:
     for match in KEYWORD_RE.finditer(text):
         result.setdefault(match.group(1).lower(), match.group(2).strip())
     return result
+
+
+def canonical_document_id(path: Path) -> str | None:
+    match = CANONICAL_ID_RE.match(path.stem)
+    return match.group(1) if match else None
+
+
+def canonical_title_id(text: str) -> str | None:
+    title = keyword_map(text).get("title", "").strip()
+    match = CANONICAL_ID_RE.match(title)
+    return match.group(1) if match else None
 
 
 def section_bounds(text: str, title: str) -> tuple[int, int] | None:
@@ -603,15 +615,43 @@ def audit(root: Path, since: str | None, audit_date: str) -> list[Problem]:
     changed = changed_files(root, since)
     metadata_only = approval_metadata_only_files(root, since)
     ids: dict[str, list[Path]] = {}
+    canonical_ids: dict[tuple[str, str], list[Path]] = {}
     problems: list[Problem] = []
     for path in files:
         problems.extend(audit_document(path, root, ids, changed, metadata_only, audit_date))
+        cls = document_class(path, root) or "unknown"
+        canonical = canonical_document_id(path)
+        if canonical is not None:
+            canonical_ids.setdefault((cls, canonical), []).append(path)
+            title_canonical = canonical_title_id(path.read_text(encoding="utf-8"))
+            if title_canonical is not None and title_canonical != canonical:
+                problems.append(
+                    Problem(
+                        path,
+                        f"canonical-id-title-mismatch:{canonical}:{title_canonical}",
+                        cls,
+                        f"make filename and #+title agree on one canonical ID; filename uses {canonical}, title uses {title_canonical}",
+                    )
+                )
     for identifier, paths in sorted(ids.items()):
         unique = sorted(set(paths))
         if len(unique) > 1:
             for path in unique:
                 other_paths = ", ".join(str(item.relative_to(root)) for item in unique if item != path)
                 problems.append(Problem(path, f"duplicate-id:{identifier}", document_class(path, root) or "unknown", f"preserve one canonical ID and repair duplicates; also used by {other_paths}"))
+    for (cls, identifier), paths in sorted(canonical_ids.items()):
+        unique = sorted(set(paths))
+        if len(unique) > 1:
+            for path in unique:
+                other_paths = ", ".join(str(item.relative_to(root)) for item in unique if item != path)
+                problems.append(
+                    Problem(
+                        path,
+                        f"duplicate-canonical-id:{identifier}",
+                        cls,
+                        f"preserve one canonical {identifier} owner and renumber the other document(s); also used by {other_paths}",
+                    )
+                )
     problems.extend(audit_links(root, files, ids))
     problems.extend(audit_repository_policy(root))
     problems.extend(audit_captcha_index(root, files))
@@ -676,7 +716,7 @@ def fix(root: Path, since: str | None, audit_date: str, actor: str) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Audit StarIntel Org metadata, approvals, changelogs, links, indexes, and publication policy")
+    parser = argparse.ArgumentParser(description="Audit StarIntel Org metadata, approvals, changelogs, links, indexes, canonical IDs, and publication policy")
     parser.add_argument("--root", type=Path)
     parser.add_argument("--changed-since", help="Git revision used to require current history and glossary for materially changed files")
     parser.add_argument("--audit-date", default=os.environ.get("STARINTEL_AUDIT_DATE", date.today().isoformat()))

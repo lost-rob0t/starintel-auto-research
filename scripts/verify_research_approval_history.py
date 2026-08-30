@@ -46,6 +46,17 @@ def _commit_exists(root: Path, commit: str) -> None:
     _git(root, ["rev-parse", "--verify", f"{commit}^{{commit}}"])
 
 
+def _commit_exists_bool(root: Path, commit: str) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{commit}^{{commit}}"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def _path_exists_at_commit(root: Path, commit: str, relative_path: Path) -> bool:
     _commit_exists(root, commit)
     result = subprocess.run(
@@ -63,6 +74,34 @@ def _is_adard_canonical(metadata: dict[str, list[str]]) -> bool:
     if values.get("approval_schema") != CANONICAL_SCHEMA:
         return False
     return _canonical_values(metadata) is not None
+
+
+def _first_canonical_history_snapshot(
+    root: Path,
+    base_commit: str | None,
+    relative_path: Path,
+) -> tuple[str, str]:
+    revision = "HEAD" if base_commit is None else f"{base_commit}..HEAD"
+    commits = _git(
+        root,
+        ["rev-list", "--reverse", revision, "--", relative_path.as_posix()],
+    ).splitlines()
+    for commit in commits:
+        try:
+            candidate = _show(root, commit, relative_path)
+        except MigrationError:
+            continue
+        _, _, _, metadata = _split_header(candidate)
+        try:
+            if _is_adard_canonical(metadata):
+                return commit, candidate
+        except MigrationError as error:
+            raise MigrationError(f"{relative_path}@{commit}: {error}") from error
+
+    anchor = "repository history" if base_commit is None else f"after {base_commit}"
+    raise MigrationError(
+        f"{relative_path}: cannot find first canonical approval snapshot in {anchor}"
+    )
 
 
 def _first_canonical_snapshot(
@@ -84,27 +123,8 @@ def _first_canonical_snapshot(
             # fail closed below.
             pass
 
-    revision = "HEAD" if base_commit is None else f"{base_commit}..HEAD"
-    commits = _git(
-        root,
-        ["rev-list", "--reverse", revision, "--", relative_path.as_posix()],
-    ).splitlines()
-    for commit in commits:
-        try:
-            candidate = _show(root, commit, relative_path)
-        except MigrationError:
-            continue
-        _, _, _, metadata = _split_header(candidate)
-        try:
-            if _is_adard_canonical(metadata):
-                return candidate
-        except MigrationError as error:
-            raise MigrationError(f"{relative_path}@{commit}: {error}") from error
-
-    anchor = "repository history" if base_commit is None else f"after {base_commit}"
-    raise MigrationError(
-        f"{relative_path}: cannot find first canonical approval snapshot in {anchor}"
-    )
+    _, candidate = _first_canonical_history_snapshot(root, base_commit, relative_path)
+    return candidate
 
 
 def _verify_canonical_born(
@@ -124,16 +144,39 @@ def _verify_canonical_born(
             f"{relative_path}: approval base blob is NONE but path exists at base {anchor}"
         )
 
-    first = _first_canonical_snapshot(root, anchor, relative_path, None)
+    first_commit, first = _first_canonical_history_snapshot(root, anchor, relative_path)
     _, _, _, first_metadata_raw = _split_header(first)
     first_metadata = _metadata_values(first_metadata_raw)
-    if first_metadata.get("approval_base_commit") != base_commit:
+    first_base_commit = first_metadata.get("approval_base_commit", "")
+    first_base_blob = first_metadata.get("approval_base_blob", "")
+
+    if first_base_blob != "NONE":
+        raise MigrationError(
+            f"{relative_path}: canonical-born approval base blob changed after creation"
+        )
+    if first_base_commit == base_commit:
+        return
+
+    # Legacy repair path: a small number of canonical-born records accidentally
+    # stored a commit SHA from the source repository they were researching as
+    # approval provenance.  Permit correcting that foreign SHA only when the
+    # replacement anchor is provably the parent of the first canonical commit
+    # and the path was absent there.  Existing in-repository anchors remain
+    # immutable and cannot use this escape hatch.
+    if base_commit == "NONE" or not first_base_commit:
         raise MigrationError(
             f"{relative_path}: canonical-born approval base commit changed after creation"
         )
-    if first_metadata.get("approval_base_blob") != "NONE":
+    if _commit_exists_bool(root, first_base_commit):
         raise MigrationError(
-            f"{relative_path}: canonical-born approval base blob changed after creation"
+            f"{relative_path}: canonical-born approval base commit changed after creation"
+        )
+
+    lineage = _git(root, ["rev-list", "--parents", "-n", "1", first_commit]).split()
+    parents = lineage[1:]
+    if base_commit not in parents:
+        raise MigrationError(
+            f"{relative_path}: corrected approval base must be a parent of first canonical commit"
         )
 
 

@@ -1,0 +1,208 @@
+:PROPERTIES:
+:ID:       star-zmq-research-rabbitmq-api-semantics-001
+:END:
+#+title: STAR-ZMQ-RESEARCH-001 RabbitMQ API Semantics over ZeroMQ
+#+description: Research which RabbitMQ API ergonomics and messaging semantics StarIntel should mirror over its ZeroMQ-first routing plane without pretending ZeroMQ is a durable broker.
+#+status: RESEARCHING
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: NONE
+#+approval_evidence: operator requested this research on 2026-08-29; no implementation approval implied
+#+approval_base_commit: 2d21852b7bc0289e489e6a1513ced23350a2c602
+#+approval_base_blob: 2a4c81c09faf24333ccf7a83dd2fd412d4a58908
+#+approval_decided_at: NONE
+#+implementation_state: BLOCKED_ON_RESEARCH
+#+filetags: :starintel:star-server:zeromq:rabbitmq:api:semantics:routing:research:pending:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Research Question
+
+Which parts of RabbitMQ's programming model are useful enough to expose through StarIntel's ZeroMQ-first routing stack, and which broker semantics would be misleading, expensive, or architecturally wrong to emulate?
+
+The target is ergonomic compatibility where it reduces actor/client churn, not a RabbitMQ clone implemented on top of ZeroMQ.
+
+* Context
+
+Related approved/active architecture:
+
+- [[file:../../design/titanic/STAR-TITANIC-001-titanic-v1-durable-job-protocol.org][STAR-TITANIC-001 Titanic v1 Durable Job Protocol]]
+- [[file:STAR-RESEARCH-037-titanic-polyglot-zmq-transport-correction.org][STAR-RESEARCH-037 Titanic Polyglot ZeroMQ Transport Correction]]
+- [[file:STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040 StarRouter ZeroMQ Transport and API Overhaul]]
+- [[file:../../design/cl-gserver/SENTO-ZMQ-000-zero-mq-transport-runtime.org][SENTO-ZMQ-000 ZeroMQ Transport Runtime]]
+
+Titanic and StarRouter implementation may proceed independently. This research MUST NOT silently modify =star.titanic/1= before a later explicit design/approval action.
+
+* Scope [0/12]
+
+- [ ] exchange-style routing API
+- [ ] direct/topic/fanout routing semantics
+- [ ] queue/consumer abstraction
+- [ ] competing consumers / consumer groups
+- [ ] request/reply mapping
+- [ ] publish/subscribe mapping
+- [ ] acknowledgement/settlement vocabulary
+- [ ] retry/requeue semantics
+- [ ] dead-letter-like failure handling
+- [ ] topology declaration/discovery API
+- [ ] backpressure/QoS/prefetch analogues
+- [ ] durability boundary and explicit do-not-emulate list
+
+* Core Comparison Model
+
+For each RabbitMQ concept, classify it as one of:
+
+1. =DIRECT-MAP= — ZeroMQ/StarRouter can provide equivalent observable semantics without a durable broker;
+2. =API-MIRROR= — preserve familiar caller ergonomics but document weaker/different internals;
+3. =TITANIC-SERVICE= — semantics require durable StarIntel service state and belong above ZeroMQ, likely Titanic or another coordinator;
+4. =RABBIT-ADAPTER= — keep RabbitMQ as the actual implementation when broker semantics are genuinely required;
+5. =DO-NOT-EMULATE= — compatibility would be misleading or recreate a broker badly.
+
+Every finding MUST state the failure-model difference, not merely whether happy-path calls look similar.
+
+* Candidate Mapping Questions
+
+** Exchanges
+
+Investigate whether caller-facing =publish(exchange, routing-key, payload)= ergonomics can map to StarRouter capability/topic routing.
+
+Compare:
+
+- direct exchange -> addressed/capability route;
+- topic exchange -> topic matcher/routing table;
+- fanout exchange -> PUB/SUB or explicit multicast;
+- headers exchange -> typed metadata predicate routing.
+
+Determine which mappings preserve predictable route-set semantics during membership churn.
+
+** Queues and consumers
+
+A Rabbit queue is durable broker state; a ZeroMQ socket is not.
+
+Research whether a StarIntel =consumer group= abstraction can provide useful competing-worker semantics through StarRouter/Titanic without claiming that a DEALER socket itself is a queue.
+
+Questions:
+
+- who owns pending work when no consumer exists?
+- can work survive router/service restart?
+- how are consumer identities/leases represented?
+- how is fair/bounded dispatch defined?
+- what happens during reconnect or duplicate worker identity?
+
+** ACK/NACK
+
+RabbitMQ delivery ACK/NACK is broker settlement. ZeroMQ has no equivalent built-in durable settlement.
+
+Research an application-level settlement API with explicit semantics such as:
+
+- =ack= -> logical work/result is durably settled by the owning service;
+- =retry= -> schedule another attempt under explicit policy;
+- =reject= -> permanent failure;
+- =dead-letter= -> durable audited failure artifact when a backing service provides it.
+
+Do not call a local socket receive an ACK guarantee.
+
+** QoS / prefetch
+
+Compare Rabbit =basic.qos/prefetch= with:
+
+- ROUTER/DEALER bounded in-flight dispatch;
+- ZeroMQ high-water marks;
+- capability-specific concurrency limits;
+- Sento mailbox/backpressure rules;
+- Titanic claim/lease counts.
+
+Research whether one transport-neutral =credit= or =max-in-flight= API can cover the useful behavior.
+
+** Request/reply
+
+Rabbit RPC conventions should be compared against native asynchronous correlation over DEALER/ROUTER.
+
+Likely research direction: preserve correlation/deadline/cancellation ergonomics, not temporary callback queues.
+
+** Pub/sub
+
+Compare Rabbit fanout/topic durability and subscriber lifecycle with ZeroMQ PUB/SUB's live-stream behavior.
+
+Explicitly separate:
+
+- ephemeral live events;
+- replayable event streams;
+- durable work queues.
+
+Do not conflate them behind one =subscribe= call unless the mode is explicit.
+
+** Dead letters
+
+Research whether dead-letter APIs should project to Titanic durable failure records when jobs are involved and remain a Rabbit adapter feature for broker-native events.
+
+A ZeroMQ transport alone MUST NOT claim durable dead-letter behavior.
+
+* Compatibility Layer
+
+Investigate a transport-neutral Common Lisp/StarLang actor API that can make common operations familiar without coupling callers to a specific transport.
+
+Candidate conceptual surface:
+
+#+begin_src lisp
+(publish router destination payload :mode :topic)
+(subscribe router topic handler)
+(request router capability payload :deadline deadline)
+(consume worker-group handler :max-in-flight 8)
+(settle delivery :ack)
+#+end_src
+
+This is research notation only, not an approved API.
+
+For each operation, determine whether the same caller surface can project to:
+
+- ZeroMQ-first StarRouter;
+- RabbitMQ adapter;
+- local/in-process Sento path;
+- Titanic durable job path where relevant.
+
+* Required Failure Tests in Research
+
+The research must reason through at least:
+
+- publisher dies before/after send;
+- router dies after receiving but before forwarding;
+- worker dies before/after side effect;
+- subscriber is disconnected during publication;
+- no consumers exist;
+- duplicate worker reconnect;
+- high-water mark/full downstream capacity;
+- retry during dependency outage;
+- topology changes while publishing;
+- Rabbit adapter and ZeroMQ projection produce intentionally different durability behavior.
+
+* Do-Not-Emulate Candidates
+
+Treat these as presumptive =DO-NOT-EMULATE= unless research proves a clean service-level design:
+
+- pretending ZeroMQ sockets are durable queues;
+- Rabbit delivery tags/channel settlement as public StarIntel protocol state;
+- broker transactions implemented in every client;
+- quorum queue replication inside StarRouter;
+- durable replay hidden behind ordinary PUB/SUB;
+- unbounded server-side message accumulation to mimic queues;
+- exactly-once delivery claims;
+- Rabbit-specific topology objects required by every actor.
+
+* Deliverable
+
+Produce a decision matrix with columns:
+
+| RabbitMQ concept | StarIntel need | ZMQ primitive | Required service state | Compatibility class | Failure-model delta | Recommended owner |
+
+Then recommend the smallest transport-neutral API worth designing.
+
+* Gate
+
+This node is research only. It is explicitly =PENDING= and MUST NOT receive an implementation slot until the operator separately approves its research conclusion and any derived design.
+
+* Changelog
+
+| Version | Date | Change | Approval |
+|---------+------+--------+----------|
+| 0.1.0 | 2026-08-29 | Open requested RabbitMQ-API-over-ZeroMQ compatibility research with explicit anti-broker-emulation boundary. | Research requested; not approved for implementation |

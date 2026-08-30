@@ -1,0 +1,200 @@
+:PROPERTIES:
+:ID:       star-ingest-server-protocol-001
+:END:
+#+title: STAR-INGEST-001 Star Ingest Server Protocol
+#+description: Canonical approved version-one contract for accepting documents and data into StarIntel independently of Quasar clients and Titanic durable job transport.
+#+status: APPROVED
+#+approval_state: APPROVED
+#+approval_actor: operator
+#+approval_evidence: explicit operator approval on 2026-08-29; scope corrected from the former QUASAR-003 graph/document protocol to the Star ingest server boundary
+#+approval_decided_at: [2026-08-29 Sat]
+#+implementation_state: READY
+#+filetags: :starintel:star-ingest:star-server:ingest:protocol:design:approved:implementation-ready:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Decision
+
+StarIntel owns one canonical versioned ingest protocol at the server boundary. Quasar, Emacs, Auto-Dig/research runners, scripts, domain servers, and other clients consume this protocol; none of those clients owns its semantics.
+
+The protocol is the acceptance/storage-facing contract. It is not a graph-editing protocol and it is not a durable worker transport.
+
+* Project Lane
+
+=star-ingest= is an independent implementation lane in the research control plane. This keeps its approved implementation work selectable without occupying or bypassing the existing =star-server= implementation slot.
+
+The implementation still targets StarIntel server-side ingest functionality; the project-lane split is scheduling/control-plane structure, not a new network service requirement.
+
+* Boundary
+
+- =STAR-INGEST-001= owns validation, identity, provenance, admission, ingest outcomes, and server-facing batch/stream behavior.
+- =star.titanic/1= owns durable distributed jobs and disconnected job/result lifecycle.
+- StarRouter/SENTO-ZMQ own routing and ZeroMQ transport mechanics.
+- Quasar is a client/consumer and MAY project ingest actions into its UI.
+
+* Protocol Identifier
+
+The initial wire contract is =star.ingest/1=.
+
+Every request MUST identify the protocol/schema version. Unknown major versions MUST fail explicitly rather than being interpreted as the current version.
+
+* Canonical Request Envelope
+
+A request MUST support the following logical fields, independent of concrete encoding:
+
+- request identifier;
+- protocol version;
+- operation: single ingest, batch ingest, or stream frame;
+- document or record identity when preallocated;
+- canonical =dtype=;
+- source/provenance references;
+- content schema/content type;
+- payload or payload reference;
+- idempotency key;
+- caller identity/security context reference;
+- correlation, causation, and trace identifiers;
+- optional deadline;
+- bounded metadata.
+
+Credentials MUST NOT be embedded in persisted provenance or document payloads.
+
+* Document Identity
+
+The server MUST return a stable canonical document identifier for every admitted document.
+
+Retries with the same idempotency scope and materially equivalent canonical input MUST converge on the same logical admission result. Reusing an idempotency key with materially different canonical input MUST return a conflict.
+
+The protocol MUST distinguish caller-supplied source identity from the StarIntel canonical document identity.
+
+* Dtype and Validation
+
+- =dtype= MUST be explicit or deterministically inferred by an approved server-side normalizer.
+- Unknown/unsupported dtypes MUST return a structured validation result.
+- Validation errors MUST identify stable error categories and field locations where practical.
+- Validation MUST occur before a request is reported as accepted.
+- Server normalization MUST be deterministic and covered by conformance fixtures.
+
+* Provenance
+
+Every admitted record MUST preserve enough provenance to answer where the data came from and how it entered StarIntel.
+
+At minimum support:
+
+- source URI/reference;
+- source kind;
+- acquisition/import actor or client identity;
+- observed/acquired timestamp when known;
+- ingest timestamp;
+- parent/derived-from references where applicable;
+- correlation/trace identifiers;
+- optional content hash.
+
+Provenance is data lineage, not an authorization token store.
+
+* Operations
+
+** Single ingest
+
+Accept one record and return one structured outcome.
+
+** Batch ingest
+
+Accept a bounded collection with per-record results. Batch transport success MUST NOT imply every record was accepted.
+
+The response MUST expose whether the batch was fully accepted, partially accepted, or rejected before processing.
+
+** Streaming ingest
+
+Streaming MAY be supported for high-volume producers. Stream framing MUST preserve per-record identity and outcomes and MUST define bounded backpressure. A dropped connection MUST NOT silently turn unknown admission into success.
+
+* Outcomes
+
+Top-level outcomes MUST include:
+
+- =accepted= — durable admission is known;
+- =duplicate= — equivalent logical input was already admitted and the canonical identity is returned;
+- =rejected= — validation, authorization, policy, or schema rejected the request;
+- =conflict= — identity/idempotency/revision conflict;
+- =overloaded= — bounded capacity rejected or deferred work;
+- =deadline-exceeded=;
+- =unknown-outcome= — the server cannot prove whether admission committed.
+
+Clients MUST be able to retry =unknown-outcome= using the same idempotency identity.
+
+* Durable Admission
+
+The server MUST NOT return =accepted= until the authoritative ingest state required by the configured persistence profile is durable enough to survive the admitting process crashing.
+
+If admission requires asynchronous processing after durable acceptance, the response MAY include a Titanic =job_id= or another explicit status reference. The ingest protocol MUST NOT duplicate Titanic lifecycle semantics.
+
+* Authentication and Authorization
+
+The protocol MUST support authenticated caller identity and operation/dtype/dataset-scoped authorization.
+
+Authorization is evaluated server-side. Clients MAY discover capabilities but MUST NOT be trusted to self-authorize.
+
+* Backpressure and Limits
+
+The server MUST define bounded:
+
+- record size;
+- batch size;
+- metadata size;
+- in-flight streams/requests;
+- queue/admission capacity.
+
+Overload MUST be explicit. Implementations MUST NOT hide unbounded queues behind an apparently successful ingest call.
+
+* Conformance Fixtures
+
+Implementation is gated on shared fixtures covering at least:
+
+1. valid single document admission;
+2. invalid dtype/schema rejection;
+3. stable canonical ID return;
+4. duplicate submission convergence;
+5. idempotency-key conflict;
+6. batch partial failure with per-record outcomes;
+7. provenance preservation;
+8. authorization denial;
+9. oversized request rejection;
+10. overload/backpressure result;
+11. unknown-outcome retry convergence;
+12. async admission returning a Titanic job/status reference without changing ingest semantics;
+13. equivalent normalized behavior across at least the Common Lisp server implementation and one independent client implementation.
+
+* Implementation Handoff
+
+This design is explicitly operator-approved and may enter implementation.
+
+Implementation MUST begin red-first with protocol fixtures. The implementation may choose HTTP, ZeroMQ/StarRouter, or other adapters, but adapters MUST project the same =star.ingest/1= semantics rather than inventing transport-specific ingest APIs.
+
+The first implementation slice should provide:
+
+1. schema/envelope types and validation;
+2. stable identity + idempotency behavior;
+3. single-ingest API;
+4. batch API with per-record outcomes;
+5. provenance persistence;
+6. deterministic fixture suite;
+7. one reference client;
+8. async/Titanic integration seam without requiring Titanic for ordinary synchronous ingestion.
+
+* Non-Goals
+
+- Quasar graph mutation or viewport commands.
+- General StarRouter routing semantics.
+- Reimplementing RabbitMQ or Titanic lifecycle semantics.
+- Client-specific UI behavior.
+- Claiming exactly-once execution for downstream processing.
+
+* Supersedes
+
+This document replaces the protocol ownership previously reserved by [[file:../star-server/QUASAR-003-graph-document-command-protocol.org][QUASAR-003 Graph Document and Command Protocol]]. The legacy node remains as a historical pointer and MUST NOT be used as implementation authority.
+
+* Changelog
+
+| Version | Date | Change | Approval |
+|---------+------+--------+----------|
+| 1.0.0 | 2026-08-29 | Re-scoped former QUASAR-003 protocol work into the canonical Star ingest server protocol and made the approved implementation boundary explicit. | Operator approved |
+| 1.0.1 | 2026-08-29 | Place approved ingest work in an independent =star-ingest= implementation lane so the one-active-design-per-project invariant remains valid. | Control-plane correction |

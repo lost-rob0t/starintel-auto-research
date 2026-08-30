@@ -1,0 +1,253 @@
+:PROPERTIES:
+:ID:       star-titanic-v1-durable-job-protocol-001
+:END:
+#+title: STAR-TITANIC-001 Titanic v1 Durable Job Protocol
+#+description: Canonical approved star.titanic/1 design for durable disconnected actor jobs above the ZeroMQ-first routing plane.
+#+status: APPROVED
+#+approval_state: APPROVED
+#+approval_actor: operator
+#+approval_evidence: explicit operator approval on 2026-08-29
+#+approval_decided_at: [2026-08-29 Sat]
+#+implementation_state: READY
+#+filetags: :starintel:titanic:star-server:zeromq:jobs:protocol:design:approved:implementation-ready:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Decision
+
+Implement =star.titanic/1= as StarIntel's durable disconnected actor-job protocol and execution journal.
+
+Titanic owns stable job identity, durable admission, lifecycle, result retrieval, retry/cancel/deadline semantics, attempts, fencing metadata, and retained job history. It sits above the routing/transport plane and MUST NOT redefine StarRouter or ZeroMQ itself.
+
+* Project Lane
+
+=titanic= is an independent implementation lane in the research control plane. This keeps Titanic selectable without occupying or bypassing the existing =star-server= implementation slot.
+
+The lane split is scheduling/control-plane structure. Titanic remains part of the StarIntel server/runtime architecture rather than implying an unnecessary standalone deployment.
+
+* Research Basis
+
+- [[file:../../research/star-server/STAR-RESEARCH-033-titanic-lineage-and-starintel-history.org][STAR-RESEARCH-033 Titanic Lineage and StarIntel History]]
+- [[file:../../research/star-server/STAR-RESEARCH-034-titanic-durable-actor-job-protocol.org][STAR-RESEARCH-034 Titanic Durable Actor Job Protocol]]
+- [[file:../../research/star-server/STAR-RESEARCH-035-titanic-backend-and-transport-comparison.org][STAR-RESEARCH-035 Titanic Backend and Transport Comparison]]
+- [[file:../../research/star-server/STAR-RESEARCH-036-titanic-failure-semantics-and-contract-tests.org][STAR-RESEARCH-036 Titanic Failure Semantics and Contract Tests]]
+- [[file:../../research/star-server/STAR-RESEARCH-037-titanic-polyglot-zmq-transport-correction.org][STAR-RESEARCH-037 Titanic Polyglot ZeroMQ Transport Correction]]
+- [[file:../../research/star-server/STAR-RESEARCH-040-starrouter-zeromq-transport-api-overhaul.org][STAR-RESEARCH-040 StarRouter ZeroMQ Transport and API Overhaul]]
+
+* Architecture Boundary
+
+#+begin_example
+caller / gserver / service
+        |
+        v
+  star.titanic/1 API
+        |
+        +--> durable job journal / result store
+        |
+        v
+ StarRouter / SENTO-ZMQ
+ ROUTER <-> DEALER workers
+#+end_example
+
+Optional RabbitMQ integration MAY project durable/event/broker behavior into or around Titanic, but RabbitMQ/AMQP details are not part of the worker protocol.
+
+* Canonical Entities
+
+- =job=: stable logical request;
+- =attempt=: one scheduled execution attempt;
+- =delivery=: one transport delivery/publication of an attempt;
+- =result=: durable terminal/intermediate outcome;
+- =journal=: revision-safe lifecycle record.
+
+Retries keep =job_id=. New execution attempts receive a new =attempt_id=. Transport delivery identity is separate.
+
+* Envelope
+
+Every cross-process job message MUST identify:
+
+- =protocol= =star.titanic/1=;
+- message kind;
+- =job_id=;
+- =attempt_id= when execution has been scheduled;
+- request/message ID;
+- correlation and causation IDs;
+- actor/capability and operation;
+- idempotency key;
+- attempt/max-attempt values;
+- submission time and optional deadline;
+- trace/provenance context;
+- lease/fencing metadata when authoritative side effects require it;
+- typed payload or payload reference.
+
+Transport-specific delivery tags, RabbitMQ channel state, or ZeroMQ socket objects MUST NOT leak into the canonical envelope.
+
+* Lifecycle
+
+Minimum durable lifecycle:
+
+#+begin_example
+SUBMITTING -> QUEUED -> DISPATCHED -> RUNNING -> SUCCEEDED
+                 |          |            |       FAILED
+                 |          |            |       RETRY_WAIT -> QUEUED
+                 |          |            `-----> CANCEL_REQUESTED
+                 `--------> CANCELLED             |
+                                               CANCELLED
+#+end_example
+
+Additional terminal/audit states MAY include =DEAD_LETTERED=, =DEADLINE_EXCEEDED=, =CLOSED=, and retention expiry.
+
+=accepted= never means =completed=.
+
+* API Surface
+
+Version one MUST provide the logical operations:
+
+- =submit=;
+- =status=;
+- =result=;
+- =cancel=;
+- =close= / retention acknowledgement;
+- worker capability registration/readiness;
+- worker result/failure settlement;
+- progress/heartbeat for long-running attempts.
+
+The exact language API may differ idiomatically, but observable protocol semantics MUST match fixtures.
+
+* Durable Admission
+
+Submit returns one of:
+
+- =accepted=;
+- =rejected=;
+- =unknown-outcome=.
+
+=accepted= requires durable evidence that the logical job survives the admitting process crashing. An uncertain cross-system write MUST remain =unknown-outcome= until reconciled.
+
+Retrying an uncertain submission with the same idempotency identity MUST converge on the same logical job.
+
+* Execution Guarantee
+
+Titanic is at-least-once execution with duplicate-safe actors. It MUST NOT claim exactly-once transport or execution.
+
+Correctness comes from:
+
+- stable logical identity;
+- idempotency;
+- explicit settlement;
+- durable terminal outcomes;
+- bounded retries;
+- fencing for protected side effects;
+- deterministic reconciliation of uncertain outcomes.
+
+* Retry and Failure Semantics
+
+- no infinite immediate requeue loops;
+- retries are bounded and preserve attempt lineage;
+- retry delay/backoff is explicit policy;
+- poison/permanent failures become durable terminal/dead-letter artifacts;
+- a worker crash after side effects but before outcome persistence is treated as an uncertainty requiring operation-specific idempotency/fencing recovery;
+- a redelivery after a terminal result MUST return/settle the stored result without repeating side effects;
+- stale fencing generations MUST NOT commit protected authoritative state.
+
+* Cancellation and Deadlines
+
+Cancellation is cooperative but durably recorded. Races between cancellation and committed terminal side effects MUST have deterministic resolution and audit history.
+
+Queued work past its deadline MUST not begin. Running work past deadline stops at defined safe boundaries and MUST NOT commit new protected side effects after authority expires unless the operation contract explicitly permits completion.
+
+* ZeroMQ Worker Transport
+
+The reference worker transport is ZeroMQ ROUTER/DEALER through the approved StarRouter/SENTO-ZMQ architecture.
+
+It MUST support:
+
+- polyglot workers;
+- explicit routing identity;
+- asynchronous correlation;
+- bounded in-flight work and high-water marks;
+- capability registration/readiness;
+- heartbeat/liveness;
+- reconnect without losing logical job identity;
+- binary-safe payload frames;
+- security profiles appropriate to IPC/TCP deployment.
+
+Titanic MUST remain transport-neutral above this projection so a future adapter can be tested against the same semantics.
+
+* Persistence Port
+
+The design requires a narrow persistence interface, not a public database dependency:
+
+- =put-job= / =get-job=;
+- compare-and-transition lifecycle state;
+- append/read attempts;
+- put/get result;
+- claim/renew/release dispatch authority;
+- idempotency outcome lookup/record;
+- dead-letter/audit record;
+- retention close/expire.
+
+Backend selection is implementation policy. The public protocol MUST NOT expose LMDB/CouchDB/RabbitMQ implementation objects.
+
+* Deterministic Fake Backend
+
+The first implementation MUST include an in-memory or fixture-backed deterministic fake implementing the persistence and worker seams.
+
+The fake is required so contract tests can force crashes, duplicates, timeouts, reconnects, stale fencing generations, cancellation races, and uncertain admission without depending on live infrastructure.
+
+* Conformance Gate
+
+Red tests MUST cover at least:
+
+1. accepted durable submit;
+2. duplicate submit convergence;
+3. idempotency conflict;
+4. unknown admission outcome + retry;
+5. status across disconnect/reconnect;
+6. success result retrieval;
+7. worker crash before side effect;
+8. crash after side effect/before outcome;
+9. terminal result followed by duplicate delivery;
+10. bounded retry exhaustion;
+11. poison/dead-letter path;
+12. cancellation before dispatch;
+13. cancel/success race;
+14. queued deadline expiry;
+15. stale fencing rejection;
+16. worker reconnect and capability re-registration;
+17. backpressure/overload behavior;
+18. equivalent normalized behavior through the reference ZeroMQ transport and deterministic fake.
+
+* Implementation Handoff
+
+This design is explicitly operator-approved and may move to implementation now.
+
+Implementation order:
+
+1. red protocol/state-machine fixtures;
+2. canonical envelope and typed result/error model;
+3. deterministic fake persistence + worker backend;
+4. durable job journal port;
+5. submit/status/result/cancel/close service;
+6. ROUTER/DEALER worker adapter;
+7. retry/deadline/fencing/reconciliation behavior;
+8. polyglot conformance peer;
+9. optional RabbitMQ adapter only after the core semantics are green.
+
+* Related Research Still Open
+
+A separate research node investigates which RabbitMQ API ergonomics/semantics are worth mirroring over ZeroMQ. That research does not block Titanic v1 and MUST NOT silently expand Titanic into a RabbitMQ clone.
+
+* Non-Goals
+
+- Replacing the StarRouter transport contract.
+- Recreating RabbitMQ as a broker in application code.
+- Exposing persistence backend APIs to workers.
+- Exactly-once execution claims.
+- Coupling external actors to AMQP-specific delivery state.
+
+* Changelog
+
+| Version | Date | Change | Approval |
+|---------+------+--------+----------|
+| 1.0.0 | 2026-08-29 | Freeze Titanic v1 from the 033–037/040 research chain with ZeroMQ-first polyglot worker transport and explicit durable-job semantics. | Operator approved |
+| 1.0.1 | 2026-08-29 | Place Titanic in an independent implementation lane so the one-active-design-per-project invariant remains valid. | Control-plane correction |

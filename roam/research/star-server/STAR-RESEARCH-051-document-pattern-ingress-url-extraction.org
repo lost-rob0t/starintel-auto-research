@@ -1,0 +1,156 @@
+:PROPERTIES:
+:ID:       starintel-star-research-051-document-pattern-ingress-url-extraction
+:END:
+#+title: STAR-RESEARCH-051 Document Pattern Ingress and URL Extraction
+#+description: ARDR research for starintel-server issue 44, replacing the dead global matcher/URL-extractor path with StarLang-first typed transforms, bounded runtime routing, and canonical ingest.
+#+status: READY_FOR_DESIGN
+#+filetags: :starintel:star-server:research:matcher:url:transform:ingest:star-lang:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Explicit operator research decision | Pending |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of canonical design | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main publication workflow succeeds | Pending |
+
+Lifecycle readiness is not approval. Evidence is sufficient to mark this node =READY_FOR_DESIGN=, while every human-gated approval remains pending.
+
+* Issue Seed and Selection
+
+Owning implementation seed: [[https://github.com/lost-rob0t/starintel-server/issues/44][starintel-server #44]].
+
+The complete relevant open backlogs in =starintel-auto-research=, =starintel-server=, StarLang, and cl-gserver were enumerated before selection. Server #32-#43 already have current canonical research/design or are explicitly implementation-gated; #45 is already owned by Identity/UserHunt research/design. Issue #44 is therefore the first uncovered P1 item in the canonical server order that exposes a concrete implementation gap rather than generic technology research.
+
+Issue #44 has no discussion comments. No dedicated canonical matcher/URL-extractor research or design node was found, so this document establishes the missing canonical research owner rather than duplicating an existing topic.
+
+* Evidence Inspected
+
+- [[https://github.com/lost-rob0t/starintel-server/issues/44][starintel-server #44]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/actor-systems/matcher-actor.lisp][=source/actor-systems/matcher-actor.lisp=]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/gserver-settings.lisp][=source/gserver-settings.lisp=]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/actors.lisp][=source/actors.lisp=]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/databases/outbox.lisp][=source/databases/outbox.lisp=]].
+- [[file:STAR-RESEARCH-050-manifest-runtime-plan-composition.org][STAR-RESEARCH-050 Manifest Runtime-Plan Composition]].
+- [[file:../../design/star-server/STAR-MANIFEST-001-document-contracts.org][STAR-MANIFEST-001 Actor and Dataset Manifest Document Contracts]].
+- [[file:../../design/star-server/STAR-SERVER-049-component-handles-registry-readiness-health.org][STAR-SERVER-049 Component Handles, Registry, Readiness, and Health]].
+- [[https://www.rfc-editor.org/rfc/rfc3986.html][RFC 3986 URI Generic Syntax]], retrieved 2026-08-29.
+
+* Current-Source Findings
+
+** The matcher subsystem is loaded but has no ingest consumer
+
+=starintel-gserver.asd= loads =actor-systems/matcher-actor=, and =start-url-extractor= registers a pattern in global =star:*document-patterns*=. Current source contains no component that consumes canonical incoming documents and iterates that registry. The URL extractor actor can therefore be created and registered while the pattern remains operationally dead.
+
+** Pattern definitions are executable global process state
+
+The current =pattern= object stores a Common Lisp =match-fn= function and raw actor subscriptions. =add-pattern= mutates process-global =*document-patterns*= under a lock. This prevents runtime/dataset isolation, bypasses the manifest/RuntimePlan direction from #43, and makes a data-plane registry an executable callback bag.
+
+** URL output bypasses canonical ingest
+
+The URL extractor constructs URL and relation documents, calls =as-json=, then publishes them directly to =documents.new.<dtype>= through the process-global producer agent. Current server persistence already has mutation IDs and durable outbox/event semantics. Generated documents should re-enter the canonical validated ingest/application boundary instead of pretending a Rabbit publication is equivalent to accepted persistence.
+
+** Existing URI extraction is not a safe URI contract
+
+The current PCRE scanner embeds an ad-hoc HTTP(S) URL grammar. RFC 3986 defines URI syntax as structured scheme, authority, path, query, and fragment components; a single handwritten domain/path regex is not a substitute for parsing and normalization. The server already depends on =quri=, so a separate external process or parser stack is not justified merely to validate URI candidates.
+
+For unstructured plain text, standards do not define where prose punctuation ends and a URI begins. Candidate discovery therefore needs a deliberately conservative bounded lexical step followed by an actual URI parser/normalizer. HTML/source acquisition should use structured link extraction at its source adapter when markup structure is available instead of flattening markup and regex-scanning it.
+
+* Requirements Derived from Evidence
+
+1. There must be one typed document-transform ingress boundary that receives already validated canonical documents; it must not be a second persistence or broker ingress authority.
+2. Transform definitions must be inert, versioned, and deterministic. They may reference closed StarLang transform/source semantics or trusted installed adapter IDs; they may not contain arbitrary Common Lisp callbacks, shell commands, or raw actor refs.
+3. Dataset/actor deployment manifests from #43 select compatible transform bindings. They cannot widen StarLang-declared input/output types or capabilities.
+4. Runtime execution resolves destinations through #42 component identities/handles, never long-lived raw actor references.
+5. Fan-out is bounded by input bytes, enabled transforms, outputs per transform, aggregate outputs, deadline, and mailbox/admission capacity. #34-#36 remain resource authorities.
+6. One transform failure is isolated and represented as a typed outcome; it cannot suppress unrelated transforms.
+7. Generated documents are validated and submitted through the canonical application/ingest mutation boundary, inheriting idempotency/outbox/persistence semantics. Direct =documents.new.*= publication is not authoritative acceptance.
+8. Every generated document carries provenance linking source document ID/revision or digest, transform ID/version, extraction location/field, and run/correlation identity.
+9. URL extraction uses bounded candidate discovery plus URI parsing/normalization. Initial policy should accept explicit =http= and =https= absolute URI candidates only; adding schemes is a versioned policy change.
+10. Duplicate URI candidates within one source document normalize before emission. Cross-request/retry duplicate suppression belongs to canonical idempotency (#47), not an in-memory set pretending to be durable authority.
+11. Matching/extraction itself is pure with respect to network and storage. Dereferencing URLs belongs to Source Acquisition, not this matcher.
+12. Compatibility code may delegate old =start-url-extractor=/pattern APIs during migration, but global =*document-patterns*= cannot remain a second authoritative registry after cutover.
+
+* StarLang-First Boundary
+
+The semantic order is:
+
+1. use existing StarLang typed actor/domain and transform/source semantics when sufficient;
+2. add the smallest closed StarLang extension only if the transform contract cannot be represented;
+3. compile immutable semantics into the #43 RuntimePlan;
+4. execute through Common Lisp runtime adapters;
+5. use external processes only for capabilities that actually require them.
+
+For the first URL-extraction vertical, no external process is justified. Common Lisp can perform bounded lexical candidate extraction and URI parsing through the existing dependency set.
+
+* Proposed Transform Contract
+
+A normalized transform binding needs at least:
+
+- stable =transformId= and version/digest;
+- accepted input dtype/schema range;
+- emitted dtype set;
+- closed matcher/extractor semantic reference;
+- selected source fields or typed selectors;
+- maximum candidate count and maximum emitted documents;
+- absolute execution deadline/budget reference;
+- provenance policy;
+- dataset/component binding;
+- failure policy limited to typed continue/fail-current-transform semantics.
+
+It must not contain live actor references, function objects, credentials, Rabbit routing keys, or host executable names.
+
+* URL Extraction Semantics
+
+The first bounded URL transform should:
+
+1. inspect only explicitly configured textual fields that are valid for the input document type;
+2. scan at most the configured input-byte/candidate ceiling;
+3. recognize explicit =http://= or =https://= candidate starts;
+4. conservatively trim surrounding prose delimiters without attempting to invent a universal natural-language URL grammar;
+5. parse the candidate as a URI and require a valid authority/host under the selected scheme;
+6. normalize scheme/host and other components according to the chosen versioned policy without deleting semantically meaningful path/query data;
+7. deduplicate normalized candidates within the source document;
+8. emit canonical URL plus source→URL relation documents through canonical ingest with extraction provenance.
+
+The extractor does not fetch the URL, resolve DNS, follow redirects, classify content, or infer identity.
+
+* Adversarial Review
+
+Rejected alternatives:
+
+1. *Wire the existing global list into a new actor* — revives dead code but preserves arbitrary callbacks, raw actor refs, global authority, and unbounded fan-out.
+2. *Publish generated documents directly to Rabbit* — bypasses validated persistence/outbox/idempotency and confuses event transport with canonical acceptance.
+3. *Use a larger URL regex* — increases complexity without establishing URI parsing or stable normalization semantics.
+4. *Make the matcher a generic workflow engine* — orchestration belongs to StarLang bounded playbook/domain semantics; this component is a transform executor.
+5. *Let dataset manifests contain Lisp callbacks/regex code* — makes inert configuration executable and creates a shadow language.
+6. *Fetch every extracted URL immediately* — couples pure extraction to Source Acquisition and creates unbounded SSRF/network effects.
+7. *Use raw actor names as subscriptions* — stale references survive component replacement; #42 generation-bearing handles own runtime identity.
+8. *Treat an extraction as evidence that the URL is reachable or owned by the source entity* — the result is only an observed textual reference until separately acquired/verified.
+
+* Lifecycle State
+
+Research evidence is sufficient for =READY_FOR_DESIGN=. The implementation dependency chain is not yet realized: #43 RuntimePlan, #42 component handles, canonical application/ingest ports from #40/#41, bounded admission #36, and durable idempotency #47 all constrain realization. That affects implementation readiness, not the ability to complete design now.
+
+* Unresolved Questions
+
+- Which exact canonical v0.9 field selector contract should the first message/text transform use after current top-level =content=/=bio= legacy assumptions are reconciled with actual schemas?
+- Which canonical relation predicate/name should represent textual URL extraction in the current document specification?
+- Does the current quri version preserve every normalization distinction needed by StarIntel fixtures, or is a small explicit normalizer required above it? This must be answered by RED/GREEN fixtures against the exact resolved dependency closure.
+
+* Footnotes and Glossary
+
+[fn:transform] A bounded pure-or-effect-controlled operation that consumes one typed document and returns typed candidate/generated results without owning transport or persistence authority.
+
+[fn:canonical-ingest] The server application boundary that validates and persists a canonical document and coordinates durable event/outbox behavior.
+
+[fn:uri] Uniform Resource Identifier as defined by RFC 3986; URL is used here for HTTP(S) URI observations emitted as StarIntel URL documents.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created issue-backed ARDR research, source audit, StarLang-first requirements, URL extraction semantics, adversarial review, and unresolved questions. | ARDR Auto-Research | starintel-server #44; current matcher/settings/actors/outbox source; RFC 3986 |

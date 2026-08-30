@@ -1,0 +1,475 @@
+:PROPERTIES:
+:ID:       starintel-star-server-051-observability-correlation-audit-contract
+:END:
+#+title: STAR-SERVER-051 Provider-Neutral Observability, Correlation, and Audit Boundary
+#+description: Design for starintel-server issue 46 and related logging/OTLP seeds: typed observation context, bounded metrics/events/traces, explicit audit durability, StarLang-first runtime instrumentation, and optional sink adapters.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:star-server:design:observability:metrics:tracing:audit:otel:starlang:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | StarIntel operator | PENDING | Explicit operator research decision | [[id:starintel-star-research-052-observability-correlation-audit-contract][STAR-RESEARCH-052]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit design review | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main publication workflow succeeds | Pending |
+
+=DESIGN_READY_FOR_OPERATOR_REVIEW= is a lifecycle state only. It does not authorize implementation or RAGE execution.
+
+* Research Basis
+
+- [[id:starintel-star-research-052-observability-correlation-audit-contract][STAR-RESEARCH-052 Observability Correlation, Metrics, and Audit Contract]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/46][starintel-server #46]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/121][starintel-server #121]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/128][starintel-server #128]].
+- [[https://github.com/lost-rob0t/star-lang/issues/49][StarLang #49]].
+- [[id:starintel-star-server-044-deployment-config-trusted-init][STAR-SERVER-044 Deployment Configuration and Trusted Init Boundary]].
+- [[id:starintel-star-server-047-explicit-library-api-runtime-ports][STAR-SERVER-047 Explicit Library API and Runtime Ports]].
+- [[id:starintel-star-server-049-component-handles-registry-readiness-health][STAR-SERVER-049 Component Handles, Registry, Readiness, and Health]].
+
+* Design Decision
+
+Create one provider-neutral observability semantic boundary before implementing any concrete logging or telemetry exporter.
+
+The application/runtime model owns typed =ObservationContext=, =OperationalEvent=, =MetricObservation=, =SpanObservation=, and =AuditRecord= values plus narrow sink/reader ports. Structured local logs, syslog, OTLP/OpenObserve, and operator diagnostics are adapters over those values.
+
+#+begin_example
+HTTP / Rabbit / StarLang ingress
+          |
+          v
+validated transport trace context
+          |
+          v
+ObservationContext
+  correlation + trace/span + runtime/component + safe refs
+          |
+          +-------------------------------+
+          |                               |
+          v                               v
+application/runtime operations      StarLang actor/runtime semantics
+          |                               |
+          +---------------+---------------+
+                          |
+                          v
+               typed observations
+        events / metrics / spans / audit
+          |          |          |
+          v          v          v
+       local log   snapshot    audit sink
+          |                     |
+          +----------+----------+
+                     |
+                     v
+          optional sink adapters
+          syslog / OTLP / OpenObserve
+#+end_example
+
+Observability cannot become a scheduler, actor registry, lease authority, persistence authority, or policy engine.
+
+* Core Value Model
+
+** ObservationContext
+
+=ObservationContext= is immutable and explicit. Minimum fields:
+
+- =correlation-id= from the existing request/service context;
+- optional W3C-compatible =trace-id=;
+- optional current =span-id= and parent span identity;
+- trace flags;
+- bounded policy-filtered =tracestate= when retained;
+- runtime instance ID;
+- component ID and generation when applicable;
+- optional safe principal reference;
+- optional request/message/mutation reference;
+- optional target/job/schedule/lease reference;
+- attempt number when applicable;
+- absolute deadline when applicable.
+
+Credentials, raw Authorization/cookie headers, request bodies, document bodies, secret values, database clients, actor refs, and transport objects are forbidden.
+
+The existing =service-call-context= remains the application security/deadline context. Observation context composes from it plus validated tracing/runtime information; it does not replace or duplicate authorization state.
+
+** OperationalEvent
+
+A versioned =OperationalEvent= contains:
+
+- event schema version;
+- event timestamp;
+- service and component identity;
+- stable event name/class;
+- severity;
+- outcome/reason class;
+- optional bounded duration;
+- =ObservationContext=;
+- an event-kind-specific closed attribute record.
+
+No general arbitrary string map is accepted at the public constructor boundary.
+
+** MetricObservation
+
+A metric observation contains stable metric name, instrument kind, numeric value, unit, timestamp, and bounded low-cardinality labels.
+
+Allowed labels are classes such as component type, operation type, outcome, rejection reason, dependency type, queue/lane class, and protocol. Target IDs, principal IDs, document IDs, request/message IDs, trace/span IDs, lease IDs, URLs, user names, arbitrary exception strings, and free-form error messages are prohibited metric dimensions.
+
+** SpanObservation
+
+A span has trace/span/parent identity, stable operation name, start/end or duration, status, component identity, and bounded safe attributes. It is an internal semantic value; OTLP span protobufs are an exporter representation.
+
+** AuditRecord
+
+An audit record contains:
+
+- audit schema version;
+- timestamp;
+- safe principal reference and principal class;
+- action;
+- resource class plus safe resource reference;
+- outcome and reason/policy-decision reference;
+- correlation/trace context;
+- runtime/component identity;
+- target lease/fencing generation when relevant;
+- bounded safe attributes.
+
+It never embeds the protected document/request payload or credential material.
+
+* Ports
+
+The design requires narrow interfaces rather than one global telemetry singleton.
+
+** Best-effort observation sink
+
+Conceptual operations:
+
+#+begin_example
+emit-event(sink, OperationalEvent) -> emitted | dropped | sink-unavailable
+emit-span(sink, SpanObservation) -> emitted | dropped | sink-unavailable
+record-metric(sink, MetricObservation) -> recorded | dropped | sink-unavailable
+#+end_example
+
+These operations are failure-isolated from application correctness. Implementations are bounded and may drop under configured saturation while incrementing local dropped/suppressed counters.
+
+** Durable audit sink
+
+#+begin_example
+append-audit(sink, AuditRecord) -> committed | rejected | outcome-unknown | unavailable
+#+end_example
+
+The audit sink has explicit durability semantics independent of ordinary logs. A policy/operation may later require =committed= before its authoritative effect; that requirement must be explicitly approved for that operation class. This design does not silently make every request fail closed when telemetry is unavailable.
+
+** Metrics/snapshot reader
+
+Existing runtime/component authorities expose typed snapshots/counters through narrow read ports. The observability layer aggregates them; it does not own the underlying state.
+
+* Trace Propagation
+
+** HTTP
+
+The HTTP adapter validates =traceparent= and optional =tracestate= using W3C Trace Context rules, applies configured trust-boundary policy, and constructs normalized trace context. Invalid inbound trace state cannot crash request processing; policy either starts a fresh local trace or continues without an inbound parent.
+
+Raw tracing headers do not leave the adapter.
+
+** Rabbit/messages
+
+Message envelopes carry normalized trace/correlation fields in a versioned metadata section. Producers serialize the current context; consumers validate it and create a child processing span/context. Payload schemas do not acquire ad-hoc telemetry fields independently.
+
+** StarLang actors/domain servers
+
+StarLang owns actor lifecycle, mailbox, dispatcher, supervision/restart, and semantic external-call instrumentation. If StarLang needs new propagation metadata, add the smallest versioned language/runtime extension and compile it into the runtime plan. Common Lisp consumes that compiled/runtime observation interface; it does not infer StarLang lifecycle events by scraping Sento internals.
+
+** Security boundaries
+
+Inbound =tracestate= is untrusted. It is bounded and policy-filtered, and StarIntel never injects PII/credentials into it. The configured policy may restart trace identity at designated external/untrusted acquisition boundaries while preserving StarIntel correlation IDs separately.
+
+* Metrics Ownership
+
+Metric sources remain the existing authorities:
+
+- thread ownership/allocation: #34;
+- Sento lanes/dispatchers: #35;
+- mailbox/admission pressure and drops: #36;
+- lifecycle/dependency state: #37;
+- component counts/generations/readiness: #42;
+- Rabbit connection/channel/settlement/retry/DLQ: Rabbit/consumer owners;
+- CouchDB pool/conflict/retry and outbox backlog: persistence owners;
+- target schedule/attempt/recovery: target owner;
+- lease conflict/renew/revoke/stale-fence results: lease owner;
+- HTTP rate/latency/status/authn/authz/rate-limit outcomes: HTTP/application boundary.
+
+Instrumentation is emitted at the authoritative decision point. For admission, the reject/drop metric is emitted alongside the actual admission result, not inferred later from missing work.
+
+* Structured Logging Projection
+
+Server #121 becomes the first human/machine logging projection over =OperationalEvent= and selected =AuditRecord= summaries.
+
+The formatter provides stable structured fields compatible with local JSON/syslog projections while preserving useful human-readable logs where desired. It never becomes the canonical event type itself.
+
+Remote syslog remains #122 and consumes the same already-sanitized semantic records.
+
+* OTLP / OpenObserve Adapter
+
+Server #128 is an optional adapter over the canonical semantic types.
+
+Configuration is part of the #38 closed data-only deployment configuration, conceptually:
+
+#+begin_example
+observability.enabled = false
+observability.signals = [logs, metrics, traces]
+observability.export.protocol = otlp-http
+observability.export.endpoint = ...
+observability.export.authorization = SecretRef(...)
+observability.queue.capacity = ...
+observability.batch.max_items = ...
+observability.timeout = ...
+observability.retry = bounded-policy
+#+end_example
+
+Exact syntax belongs to the configuration schema implementation. No secret value appears in the config document.
+
+When disabled:
+
+- no exporter object is initialized;
+- no export worker/thread is started;
+- no outbound connection is opened;
+- no OpenObserve/collector dependency is required for startup;
+- application results are unchanged.
+
+When enabled, export queues are bounded. OTLP retry handling distinguishes retryable server/transport failure from permanently bad telemetry and accounts for drops. Exporter outage cannot stall normal StarIntel work.
+
+OpenObserve is supported because it accepts OTLP; no OpenObserve-specific event model enters the core.
+
+* Audit Durability
+
+The design deliberately separates audit from ordinary telemetry.
+
+A durable audit implementation must state:
+
+- append/commit acknowledgment boundary;
+- ordering guarantee, if any;
+- idempotency identity;
+- outcome-unknown handling;
+- tamper-evidence/append-only mechanism;
+- retention/access policy;
+- fail-closed operation classes, if operator-approved;
+- redaction/allowlist policy.
+
+Until those semantics are explicitly selected for an operation, best-effort log export is not evidence that a durable audit fact exists.
+
+* Operator Diagnostic Snapshot
+
+The diagnostic snapshot is a typed application service requiring operator authorization. It aggregates stable read models from runtime components and may include:
+
+- runtime lifecycle/readiness state;
+- component IDs/types/generations and dependency health;
+- thread/lane allocations;
+- mailbox/dispatcher depth, capacity, saturation and recent rejection counts;
+- Rabbit/CouchDB/outbox health and bounded counters;
+- target/lease/recovery summary counts;
+- observability sink queue/drop/export state.
+
+It excludes credentials, secrets, raw request/document bodies, complete target values where policy forbids them, and arbitrary process memory. HTTP is only a projection over this service.
+
+* Failure Model
+
+Required typed outcomes include:
+
+- =invalid-observation-context=;
+- =forbidden-observation-field=;
+- =observation-value-too-large=;
+- =invalid-metric-label=;
+- =sink-saturated=;
+- =sink-unavailable=;
+- =export-retry-exhausted=;
+- =export-non-retryable=;
+- =audit-rejected=;
+- =audit-outcome-unknown=;
+- =audit-unavailable=.
+
+Ordinary sink errors do not escape into application control flow. Strict audit failure may affect an operation only when an explicit policy attached to that operation says so.
+
+* Privacy and Boundedness
+
+1. Field allowlists are semantic, not regex redaction after serialization.
+2. Unknown fields are rejected at construction or typed projection boundaries.
+3. Strings/collections have hard size/count ceilings.
+4. Sensitive values are absent, not merely hidden in the default renderer.
+5. Metric labels are low-cardinality by schema.
+6. Export queues/batches/retries/timeouts are bounded.
+7. Trace state is bounded/filterable at trust boundaries.
+8. Diagnostic snapshots have bounded collection counts and pagination/summary rules where needed.
+9. Telemetry payloads cannot trigger acquisition, DNS, network fetch, actor creation, or other hidden product effects.
+
+* Adversarial Review
+
+** Reject OTLP as the internal API
+
+OTLP is an interchange/export protocol. Making protobuf/export SDK types the application model couples disabled operation and core tests to an exporter stack.
+
+** Reject one universal telemetry map
+
+Events, metrics, spans, and durable audit have incompatible cardinality and failure semantics. A generic map makes privacy policy unenforceable and lets accidental fields become public contracts.
+
+** Reject correlation ID as trace ID
+
+The existing correlation ID remains useful. Trace identity adds parent/span semantics and W3C interoperability; the two are related but not interchangeable.
+
+** Reject high-cardinality metrics
+
+Per-user/target/document/request/trace labels turn metrics into an identity database and operational cardinality hazard. Use event/span/audit records for those references.
+
+** Reject log-level audit
+
+=AUDIT= severity without durable append semantics is still a log. Security-critical audit requires its own sink/acknowledgment contract.
+
+** Reject direct process-global diagnostic scraping
+
+It violates #40/#42 ownership, creates races, and makes tests depend on hidden globals. Snapshot inputs are explicit read ports.
+
+** Reject Common-Lisp-only actor instrumentation
+
+Actor/domain semantics remain StarLang-first. Server adapters should not create a second interpretation of actor lifecycle, supervision, or mailbox semantics.
+
+** Reject eager exporter initialization
+
+Default-off observability must have zero exporter/network/thread side effects.
+
+** Reject exporter backpressure as product backpressure
+
+A broken collector/OpenObserve endpoint cannot consume the server's authoritative worker budget or stall HTTP/actor execution indefinitely. Telemetry has its own bounded queue/resource allocation.
+
+** Reject executable init as normal configuration
+
+#38 already separates trusted executable extensions from data-only deployment configuration. #128 must use that boundary.
+
+** Reject issue execution text as approval
+
+#121's AUTO-RAGE wording does not satisfy the canonical operator approval record. This design stays pending.
+
+* Proposed Implementation Handoff
+
+Primary owning repository: =lost-rob0t/starintel-server=, existing issue #46.
+
+Sibling owning repositories/issues:
+
+- structured logging projection: =lost-rob0t/starintel-server#121=;
+- syslog adapter: =lost-rob0t/starintel-server#122=;
+- OTLP/OpenObserve adapter: =lost-rob0t/starintel-server#128=;
+- StarLang runtime/actor instrumentation: =lost-rob0t/star-lang#49=.
+
+Priority: P1-08 in the canonical server roadmap.
+
+Implementation approval: =PENDING / AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — pure semantic values and allowlist validation
+
+Owning repository: =starintel-server=.
+
+No HTTP, actor, Rabbit, CouchDB, network, exporter, file, or thread effects.
+
+Mandatory RED on untouched server:
+
+#+begin_example
+ctx = ObservationContext(
+  correlationId="c-1",
+  traceId="4bf92f3577b34da6a3ce929d0e0e4736",
+  spanId="00f067aa0ba902b7")
+
+makeOperationalEvent(
+  name="security.authentication.denied",
+  context=ctx,
+  attributes={
+    action="authenticate",
+    authorization="Bearer super-secret"
+  })
+
+=> forbidden-observation-field("authorization")
+=> fake sink call count = 0
+=> serialized/rendered outputs contain zero bytes of "super-secret"
+#+end_example
+
+RED is valid only if it targets the new typed constructor/contract. A test that redacts a free-form log string after the secret has entered the logging pipeline is not GREEN.
+
+Sibling REDs cover unknown attributes, oversize values, invalid trace/span IDs, forbidden metric identity labels, deterministic event schema/version, and copy/immutability of context values.
+
+** Slice 2 — explicit HTTP/service correlation and W3C trace context
+
+Depends on the explicit application-context direction from #40. Preserve existing =X-Correlation-ID= behavior while adding validated =traceparent=/=tracestate= adapter parsing. Fake downstream operation receives normalized context; malformed trace input cannot expose raw header data or crash the operation.
+
+RED target: one fake application operation receives exactly the correlation ID plus validated trace parent derived at the boundary; rebinding unrelated globals does not change the explicit context.
+
+** Slice 3 — one bounded metric vertical
+
+Instrument mailbox/admission or another realized authoritative queue owner after #36. RED proves saturation/rejection counter increments at the same decision that rejects work, uses only bounded labels, and does not invoke a second queue/state authority.
+
+** Slice 4 — structured event/log projection (#121)
+
+Render canonical =OperationalEvent= fixtures to stable structured local output. Secret/redaction tests are inherited from the canonical constructor. Human-readable compatibility logs may remain, but machines consume the structured contract.
+
+** Slice 5 — StarLang runtime/actor instrumentation (#49)
+
+Owning repository: =star-lang=. Emit actor lifecycle/mailbox/supervision/dispatch observations through the StarLang-owned semantic/runtime seam. Do not expose message bodies. Compatibility with the shared versioned StarIntel observation model is tested by fixtures/schema mapping.
+
+** Slice 6 — durable audit seam
+
+Implement =AuditSink= protocol and fake conformance suite before choosing a concrete durable sink. RED proves ordinary sink failure cannot masquerade as audit commit. Any fail-closed operation policy remains separately operator-approved.
+
+** Slice 7 — OTLP/OpenObserve adapter (#128)
+
+Depends on canonical event/span/metric semantics and #38 data-only config realization. RED: with observability absent/disabled, exporter constructor, network, worker/thread, and secret-resolution call counts are all zero. GREEN with a fake OTLP endpoint proves bounded batch/timeout/retry/drop semantics and trace-log correlation.
+
+** Slice 8 — operator diagnostic snapshot
+
+Compose existing typed component/runtime read models behind operator authorization. RED proves unauthorized calls reach zero snapshot-source callbacks and that returned fixtures contain no secret/body fields.
+
+* Acceptance Criteria
+
+- one end-to-end HTTP/message/application flow can preserve correlation plus W3C-compatible trace lineage without relying on ambient globals;
+- StarLang owns actor/runtime instrumentation semantics;
+- events, metrics, spans, and audits are typed and versioned rather than arbitrary maps;
+- forbidden secrets/sensitive bodies cannot reach sink inputs;
+- metric labels are bounded-cardinality by contract;
+- authoritative queue/resource owners expose pressure/rejection metrics without duplicated state;
+- best-effort exporter failure cannot change normal application results;
+- durable audit has explicit commit/outcome semantics and is never inferred from ordinary log success;
+- diagnostics are operator-authorized application read models, not global-memory scraping;
+- structured logging (#121), syslog (#122), and OTLP/OpenObserve (#128) consume canonical semantics;
+- disabled OTLP/OpenObserve causes zero exporter/network/thread initialization;
+- observability config uses the #38 data-only/secret-reference boundary;
+- no product telemetry or StarIntel-owned reporting endpoint is introduced.
+
+* Dependencies and Blockers
+
+Implementation dependency order:
+
+1. pure semantic values/validation can begin independently once operator-approved;
+2. production explicit context/snapshot ports should consume #39/#40/#42 realization rather than invent local substitutes;
+3. queue/lifecycle metrics consume #34-#37/#42 authorities as those implementations land;
+4. StarLang actor instrumentation is implemented in StarLang #49;
+5. OTLP config consumes #38's closed deployment configuration contract;
+6. concrete audit durability requires an explicitly selected sink and operation fail-closed policy.
+
+No dependency authorizes implementation automatically.
+
+* Unresolved Operator Decisions
+
+- Which specific audit-required operations must fail closed if durable audit cannot commit?
+- Which ingress/acquisition boundaries restart or filter untrusted =tracestate= rather than preserve it?
+- Which durable audit sink/retention mechanism is acceptable for the first production realization?
+
+These do not block the pure semantic/adapter design from operator review; they block the corresponding production policy slices.
+
+* Footnotes and Glossary
+
+[fn:projection] A formatter/transport-specific representation derived from the canonical typed semantic value without becoming a second source of truth.
+
+[fn:best-effort] An observability path allowed to drop/fail under its documented bounded policy without changing the authoritative application result.
+
+[fn:fail-closed-audit] An explicitly configured operation policy in which absence of a durable audit commit prevents or aborts the corresponding authoritative effect.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created provider-neutral observability design; separated correlation/events/metrics/spans/audit from logging/export adapters; reconciled #121/#128/StarLang #49; added RED-first handoff and adversarial review. | ARDR Auto-Research | STAR-RESEARCH-052; starintel-server #46/#121/#128; StarLang #49; W3C/OTel/OpenObserve evidence |

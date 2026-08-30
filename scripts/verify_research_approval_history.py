@@ -46,6 +46,28 @@ def _commit_exists(root: Path, commit: str) -> None:
     _git(root, ["rev-parse", "--verify", f"{commit}^{{commit}}"])
 
 
+def _commit_exists_bool(root: Path, commit: str) -> bool:
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{commit}^{{commit}}"],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def _is_ancestor(root: Path, commit: str, descendant: str = "HEAD") -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, descendant],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def _path_exists_at_commit(root: Path, commit: str, relative_path: Path) -> bool:
     _commit_exists(root, commit)
     result = subprocess.run(
@@ -58,11 +80,155 @@ def _path_exists_at_commit(root: Path, commit: str, relative_path: Path) -> bool
     return result.returncode == 0
 
 
+def _blob_paths_at_commit(root: Path, commit: str, blob_sha: str) -> list[Path]:
+    entries = _git(
+        root,
+        ["ls-tree", "-r", "--full-tree", commit, "--", "roam/research"],
+    ).splitlines()
+    matches: list[Path] = []
+    for entry in entries:
+        try:
+            metadata, path_text = entry.split("\t", 1)
+            _, object_type, object_sha = metadata.split()
+        except ValueError as error:
+            raise MigrationError(
+                f"cannot parse git tree entry while resolving approval base: {entry!r}"
+            ) from error
+        if object_type == "blob" and object_sha == blob_sha:
+            matches.append(Path(path_text))
+    return matches
+
+
+def _unique_blob_path_at_commit(root: Path, commit: str, blob_sha: str) -> Path:
+    matches = _blob_paths_at_commit(root, commit, blob_sha)
+    if not matches:
+        raise MigrationError(
+            f"approval base blob {blob_sha} is not present under roam/research at {commit}"
+        )
+    if len(matches) != 1:
+        rendered = ", ".join(path.as_posix() for path in matches)
+        raise MigrationError(
+            f"approval base blob {blob_sha} is ambiguous at {commit}: {rendered}"
+        )
+    return matches[0]
+
+
+def _recover_unreachable_base(
+    root: Path,
+    relative_path: Path,
+    base_blob: str,
+) -> tuple[str, Path, str]:
+    # GitHub can retain an object that later disappears from every fetched ref.
+    # Approval history must not depend on that orphan remaining fetchable.  Use
+    # the immutable recorded blob as the identity and recover only from a
+    # reachable HEAD ancestor where that exact blob is present.
+    events = _git(
+        root,
+        ["log", "--all", "--format=%H", f"--find-object={base_blob}", "--", "roam/research"],
+    ).splitlines()
+    candidates: dict[str, tuple[int, list[Path]]] = {}
+    for event in events:
+        lineage = _git(root, ["rev-list", "--parents", "-n", "1", event]).split()
+        for commit in lineage:
+            if commit in candidates or not _is_ancestor(root, commit):
+                continue
+            matches = _blob_paths_at_commit(root, commit, base_blob)
+            if not matches:
+                continue
+            distance = int(_git(root, ["rev-list", "--count", f"{commit}..HEAD"]).strip())
+            candidates[commit] = (distance, matches)
+
+    if not candidates:
+        raise MigrationError(
+            f"{relative_path}: unreachable approval base has no reachable snapshot for blob {base_blob}"
+        )
+
+    best_distance = min(distance for distance, _ in candidates.values())
+    best = [
+        (commit, matches)
+        for commit, (distance, matches) in candidates.items()
+        if distance == best_distance
+    ]
+    if len(best) != 1:
+        commits = ", ".join(commit for commit, _ in best)
+        raise MigrationError(
+            f"{relative_path}: unreachable approval base blob has ambiguous reachable anchors: {commits}"
+        )
+
+    anchor, matches = best[0]
+    if len(matches) != 1:
+        rendered = ", ".join(path.as_posix() for path in matches)
+        raise MigrationError(
+            f"{relative_path}: unreachable approval base blob is ambiguous at {anchor}: {rendered}"
+        )
+    source_path = matches[0]
+    source = _show(root, anchor, source_path)
+    if _blob_sha(root, source) != base_blob:
+        raise MigrationError(
+            f"{relative_path}: recovered approval base blob does not match source"
+        )
+    return anchor, source_path, source
+
+
+def _resolve_base_source(
+    root: Path,
+    base_commit: str,
+    relative_path: Path,
+    base_blob: str,
+) -> tuple[str, Path, str]:
+    if not _commit_exists_bool(root, base_commit):
+        return _recover_unreachable_base(root, relative_path, base_blob)
+
+    if _path_exists_at_commit(root, base_commit, relative_path):
+        source_path = relative_path
+    else:
+        # Canonical IDs may be repaired by renaming a document after approval
+        # migration. Provenance is content-addressed, so recover the historical
+        # source only when the recorded blob identifies exactly one research
+        # file in the recorded base commit.
+        source_path = _unique_blob_path_at_commit(root, base_commit, base_blob)
+
+    source = _show(root, base_commit, source_path)
+    if _blob_sha(root, source) != base_blob:
+        raise MigrationError(
+            f"{relative_path}: recorded approval base blob does not match source"
+        )
+    return base_commit, source_path, source
+
+
 def _is_adard_canonical(metadata: dict[str, list[str]]) -> bool:
     values = _metadata_values(metadata)
     if values.get("approval_schema") != CANONICAL_SCHEMA:
         return False
     return _canonical_values(metadata) is not None
+
+
+def _first_canonical_history_snapshot(
+    root: Path,
+    base_commit: str | None,
+    relative_path: Path,
+) -> tuple[str, str]:
+    revision = "HEAD" if base_commit is None else f"{base_commit}..HEAD"
+    commits = _git(
+        root,
+        ["rev-list", "--reverse", revision, "--", relative_path.as_posix()],
+    ).splitlines()
+    for commit in commits:
+        try:
+            candidate = _show(root, commit, relative_path)
+        except MigrationError:
+            continue
+        _, _, _, metadata = _split_header(candidate)
+        try:
+            if _is_adard_canonical(metadata):
+                return commit, candidate
+        except MigrationError as error:
+            raise MigrationError(f"{relative_path}@{commit}: {error}") from error
+
+    anchor = "repository history" if base_commit is None else f"after {base_commit}"
+    raise MigrationError(
+        f"{relative_path}: cannot find first canonical approval snapshot in {anchor}"
+    )
 
 
 def _first_canonical_snapshot(
@@ -78,33 +244,13 @@ def _first_canonical_snapshot(
                 return source
         except MigrationError:
             # The exact, blob-verified base may itself be the malformed partial
-            # migration being repaired.  Treat only that anchored source as
+            # migration being repaired. Treat only that anchored source as
             # pre-canonical and require the first later snapshot to be fully
-            # canonical.  Malformed snapshots encountered after the base still
-            # fail closed below.
+            # canonical.
             pass
 
-    revision = "HEAD" if base_commit is None else f"{base_commit}..HEAD"
-    commits = _git(
-        root,
-        ["rev-list", "--reverse", revision, "--", relative_path.as_posix()],
-    ).splitlines()
-    for commit in commits:
-        try:
-            candidate = _show(root, commit, relative_path)
-        except MigrationError:
-            continue
-        _, _, _, metadata = _split_header(candidate)
-        try:
-            if _is_adard_canonical(metadata):
-                return candidate
-        except MigrationError as error:
-            raise MigrationError(f"{relative_path}@{commit}: {error}") from error
-
-    anchor = "repository history" if base_commit is None else f"after {base_commit}"
-    raise MigrationError(
-        f"{relative_path}: cannot find first canonical approval snapshot in {anchor}"
-    )
+    _, candidate = _first_canonical_history_snapshot(root, base_commit, relative_path)
+    return candidate
 
 
 def _verify_canonical_born(
@@ -124,16 +270,38 @@ def _verify_canonical_born(
             f"{relative_path}: approval base blob is NONE but path exists at base {anchor}"
         )
 
-    first = _first_canonical_snapshot(root, anchor, relative_path, None)
+    first_commit, first = _first_canonical_history_snapshot(root, anchor, relative_path)
     _, _, _, first_metadata_raw = _split_header(first)
     first_metadata = _metadata_values(first_metadata_raw)
-    if first_metadata.get("approval_base_commit") != base_commit:
+    first_base_commit = first_metadata.get("approval_base_commit", "")
+    first_base_blob = first_metadata.get("approval_base_blob", "")
+
+    if first_base_blob != "NONE":
+        raise MigrationError(
+            f"{relative_path}: canonical-born approval base blob changed after creation"
+        )
+    if first_base_commit == base_commit:
+        return
+
+    # Legacy repair path: a small number of canonical-born records accidentally
+    # stored a commit SHA from the source repository they were researching as
+    # approval provenance. Permit correcting that foreign SHA only when the
+    # replacement anchor is provably the parent of the first canonical commit
+    # and the path was absent there.
+    if base_commit == "NONE" or not first_base_commit:
         raise MigrationError(
             f"{relative_path}: canonical-born approval base commit changed after creation"
         )
-    if first_metadata.get("approval_base_blob") != "NONE":
+    if _commit_exists_bool(root, first_base_commit):
         raise MigrationError(
-            f"{relative_path}: canonical-born approval base blob changed after creation"
+            f"{relative_path}: canonical-born approval base commit changed after creation"
+        )
+
+    lineage = _git(root, ["rev-list", "--parents", "-n", "1", first_commit]).split()
+    parents = lineage[1:]
+    if base_commit not in parents:
+        raise MigrationError(
+            f"{relative_path}: corrected approval base must be a parent of first canonical commit"
         )
 
 
@@ -158,13 +326,17 @@ def verify_file(root: Path, path: Path) -> None:
         _verify_canonical_born(root, relative_path, base_commit, base_blob)
         return
 
-    source = _show(root, base_commit, relative_path)
-    if _blob_sha(root, source) != base_blob:
-        raise MigrationError(
-            f"{relative_path}: recorded approval base blob does not match source"
-        )
+    effective_base, source_path, source = _resolve_base_source(
+        root,
+        base_commit,
+        relative_path,
+        base_blob,
+    )
 
-    migrated = _first_canonical_snapshot(root, base_commit, relative_path, source)
+    # Verify the migration on the path that actually held the recorded base
+    # blob. Later canonical-ID/path repairs and research edits are allowed only
+    # after that first canonical snapshot.
+    migrated = _first_canonical_snapshot(root, effective_base, source_path, source)
     _, _, source_body, source_metadata = _split_header(source)
     _, _, migrated_body, migrated_metadata = _split_header(migrated)
 
@@ -180,7 +352,10 @@ def verify_file(root: Path, path: Path) -> None:
 def verify_repository(root: Path) -> int:
     checked = 0
     for path in discover_research_files(root):
-        verify_file(root, path)
+        try:
+            verify_file(root, path)
+        except MigrationError as error:
+            raise MigrationError(f"{path.relative_to(root)}: {error}") from error
         checked += 1
     return checked
 

@@ -1,0 +1,180 @@
+:PROPERTIES:
+:ID:       adar-quasar-user-run-research-workspace-boundary-001a
+:END:
+#+title: ADAR-001A Quasar and User-Run Research Workspace Boundary
+#+description: Approved amendment making the Auto-Dig UX a reusable Quasar-facing interface over Auto-Dig, ADARD/RAGE, and user-run research repositories rather than logic owned by one Auto-Dig repository.
+#+status: APPROVED
+#+approval_state: APPROVED
+#+approval_actor: operator
+#+approval_evidence: explicit operator approval on 2026-08-29 with the condition that the UX is not tied to the Auto-Dig repository and instead covers Quasar Auto-Dig and user-run repositories
+#+approval_decided_at: [2026-08-29 Sat]
+#+implementation_state: READY
+#+filetags: :starintel:auto-dig:quasar:adar:design:workspace:protocol:user-repos:approved:implementation-ready:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Decision
+
+The approved Auto-Dig UX is a reusable research-workspace interface, not product logic owned by =starintel-gpt-auto-dig= or any single Auto-Dig repository.
+
+Canonical architecture:
+
+#+begin_example
+Quasar research UX
+       |
+       v
+common Auto-Dig / research workspace protocol
+       |
+       +--> Auto-Dig runner/repository
+       +--> ADARD / RAGE research repository
+       +--> user-run compatible research repository
+#+end_example
+
+This amendment supersedes the repository-coupling portions of [[file:ADAR-001-auto-dig-auto-research-dashboard-and-navigation.org][ADAR-001]] while preserving its useful dashboard, dataset-browser, progressive-disclosure, accessibility, and data-visualization requirements where the connected workspace exposes those capabilities.
+
+* UX Feature Contract
+
+Quasar SHOULD provide a unified research surface capable of:
+
+- discovering/configuring compatible research workspaces;
+- listing repositories/workspaces and their capabilities;
+- listing tasks/runs and current lifecycle state;
+- opening canonical Org research/design/implementation documents;
+- showing research -> review -> explicit human approval transitions;
+- inspecting run progress, evidence, errors, logs/references, and outputs;
+- retrying/resuming/cancelling when the backend declares those capabilities;
+- navigating across repositories/workspaces without pretending they share one filesystem;
+- rendering dashboard/dataset/chart projections when supplied;
+- deep-linking to published Auto-Research/Auto-Dig surfaces where available.
+
+* Common Workspace Protocol
+
+The UI MUST consume a versioned capability-oriented protocol rather than importing repository-internal Python/Lisp/JavaScript APIs.
+
+Minimum logical resources:
+
+- workspace descriptor;
+- capability descriptor;
+- task/research item;
+- run/execution;
+- canonical document reference;
+- approval record;
+- artifact/output reference;
+- structured error/status event.
+
+Minimum operations SHOULD include:
+
+- list/get workspaces;
+- discover capabilities/version;
+- list/get tasks;
+- list/get runs;
+- get canonical document/reference;
+- start/resume/retry/cancel when supported;
+- request review/approval state;
+- subscribe/poll status updates;
+- resolve published links/artifacts.
+
+The protocol MUST distinguish unsupported capability from failed operation.
+
+* Canonical Document Rule
+
+Org files are canonical for the research/design control plane where the workspace uses the StarIntel/RAGE conventions.
+
+The UI MUST link/render canonical documents without copying their approval semantics into UI-local state. Approval evidence stays in the canonical workspace/control plane.
+
+* Human Gate
+
+Research and design promotion remain explicitly human-gated where configured.
+
+A UI button may request or record an operator action through the workspace protocol, but the frontend MUST NOT infer approval because:
+
+- research completed;
+- a run is green;
+- an issue was closed;
+- a design exists;
+- an implementation branch exists.
+
+* Capability Discovery
+
+Different user-run repositories may implement different features. Quasar therefore MUST discover capabilities and versions before enabling actions.
+
+Examples:
+
+- =documents.org-roam=;
+- =runs.start=;
+- =runs.cancel=;
+- =runs.resume=;
+- =approval.human-gated=;
+- =datasets.catalog=;
+- =dashboard.metrics=;
+- =graph.projection=;
+- =publication.links=.
+
+Unknown optional capabilities degrade cleanly instead of breaking the workspace.
+
+* Repository Independence
+
+The core UX MUST NOT require a repository named:
+
+- =starintel-gpt-auto-dig=;
+- =starintel-auto-research=;
+- =auto-dig-quasar=;
+- =RAGE=.
+
+Those may be adapters/reference implementations, not hardcoded authority.
+
+Repository URLs, branches, document roots, and publication roots are workspace configuration/discovery data.
+
+* Quasar Boundary
+
+Quasar owns presentation, navigation, local view state, and interaction orchestration.
+
+Quasar does not own:
+
+- canonical research truth;
+- approval truth;
+- runner internals;
+- job durability;
+- repository-specific schema hidden behind an adapter;
+- Star ingest semantics.
+
+* Compatibility
+
+The protocol MUST version its workspace descriptor and operation/result envelopes.
+
+Clients MUST:
+
+- reject incompatible major versions clearly;
+- tolerate unknown optional capability fields;
+- avoid enabling actions not declared by the backend;
+- surface backend/source identity so analysts know which workspace is authoritative.
+
+* Implementation Handoff
+
+This amendment is explicitly operator-approved and may enter implementation.
+
+The implementation should begin with a Quasar-facing fake workspace adapter and fixtures, then wire one existing StarIntel research repository as the first real adapter. Only after the common contract is green should additional Auto-Dig/RAGE/user-run adapters be added.
+
+First slice:
+
+1. versioned workspace/capability types;
+2. fake workspace fixture;
+3. workspace selector/list;
+4. task/run list + status;
+5. canonical Org document open/link behavior;
+6. human-approval state display;
+7. capability-gated run controls;
+8. one real repository adapter;
+9. tests proving the UI does not depend on a hardcoded repository name.
+
+* Relationship to ADAR-001
+
+Keep ADAR-001's useful visual/dashboard requirements as optional capability-driven projections. Replace its fixed two-repository implementation map with this reusable workspace boundary.
+
+If the old design and this amendment disagree about repository ownership or implementation coupling, this amendment wins.
+
+* Changelog
+
+| Version | Date | Change | Approval |
+|---------+------+--------+----------|
+| 1.0.0 | 2026-08-29 | Decouple approved Auto-Dig UX from a specific Auto-Dig repository and make Quasar/user-run research workspaces the implementation boundary. | Operator approved |

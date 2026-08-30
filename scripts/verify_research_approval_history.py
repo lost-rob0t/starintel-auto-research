@@ -69,6 +69,59 @@ def _path_exists_at_commit(root: Path, commit: str, relative_path: Path) -> bool
     return result.returncode == 0
 
 
+def _unique_blob_path_at_commit(root: Path, commit: str, blob_sha: str) -> Path:
+    entries = _git(
+        root,
+        ["ls-tree", "-r", "--full-tree", commit, "--", "roam/research"],
+    ).splitlines()
+    matches: list[Path] = []
+    for entry in entries:
+        try:
+            metadata, path_text = entry.split("\t", 1)
+            _, object_type, object_sha = metadata.split()
+        except ValueError as error:
+            raise MigrationError(
+                f"cannot parse git tree entry while resolving approval base: {entry!r}"
+            ) from error
+        if object_type == "blob" and object_sha == blob_sha:
+            matches.append(Path(path_text))
+
+    if not matches:
+        raise MigrationError(
+            f"approval base blob {blob_sha} is not present under roam/research at {commit}"
+        )
+    if len(matches) != 1:
+        rendered = ", ".join(path.as_posix() for path in matches)
+        raise MigrationError(
+            f"approval base blob {blob_sha} is ambiguous at {commit}: {rendered}"
+        )
+    return matches[0]
+
+
+def _resolve_base_source(
+    root: Path,
+    base_commit: str,
+    relative_path: Path,
+    base_blob: str,
+) -> tuple[Path, str]:
+    if _path_exists_at_commit(root, base_commit, relative_path):
+        source_path = relative_path
+    else:
+        # Canonical IDs may be repaired by renaming a document after approval
+        # migration.  Provenance is content-addressed, so recover the historical
+        # source only when the recorded blob identifies exactly one research
+        # file in the recorded base commit.  This follows a rename without
+        # permitting fuzzy filename guesses or arbitrary path substitution.
+        source_path = _unique_blob_path_at_commit(root, base_commit, base_blob)
+
+    source = _show(root, base_commit, source_path)
+    if _blob_sha(root, source) != base_blob:
+        raise MigrationError(
+            f"{relative_path}: recorded approval base blob does not match source"
+        )
+    return source_path, source
+
+
 def _is_adard_canonical(metadata: dict[str, list[str]]) -> bool:
     values = _metadata_values(metadata)
     if values.get("approval_schema") != CANONICAL_SCHEMA:
@@ -201,13 +254,17 @@ def verify_file(root: Path, path: Path) -> None:
         _verify_canonical_born(root, relative_path, base_commit, base_blob)
         return
 
-    source = _show(root, base_commit, relative_path)
-    if _blob_sha(root, source) != base_blob:
-        raise MigrationError(
-            f"{relative_path}: recorded approval base blob does not match source"
-        )
+    source_path, source = _resolve_base_source(
+        root,
+        base_commit,
+        relative_path,
+        base_blob,
+    )
 
-    migrated = _first_canonical_snapshot(root, base_commit, relative_path, source)
+    # Verify the migration on the path that actually held the recorded base
+    # blob.  Later canonical-ID/path repairs are allowed after that first
+    # canonical snapshot, just like later research-body edits are allowed.
+    migrated = _first_canonical_snapshot(root, base_commit, source_path, source)
     _, _, source_body, source_metadata = _split_header(source)
     _, _, migrated_body, migrated_metadata = _split_header(migrated)
 

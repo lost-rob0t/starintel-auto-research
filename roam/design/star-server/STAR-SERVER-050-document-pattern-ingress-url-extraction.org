@@ -1,0 +1,346 @@
+:PROPERTIES:
+:ID:       starintel-star-server-050-document-pattern-ingress-url-extraction
+:END:
+#+title: STAR-SERVER-050 Bounded Document Transform Ingress and URL Extraction
+#+description: Design for starintel-server issue 44: a StarLang-first typed document-transform executor with RuntimePlan bindings, bounded failure-isolated fan-out, URI parsing, and canonical ingest output.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:star-server:design:matcher:url:transform:ingest:runtime-plan:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | StarIntel operator | PENDING | Explicit operator research decision | [[id:starintel-star-research-051-document-pattern-ingress-url-extraction][STAR-RESEARCH-051]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit design review | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main publication workflow succeeds | Pending |
+
+=DESIGN_READY_FOR_OPERATOR_REVIEW= is a lifecycle state only. It does not authorize implementation or RAGE execution.
+
+* Research Basis
+
+- [[id:starintel-star-research-051-document-pattern-ingress-url-extraction][STAR-RESEARCH-051 Document Pattern Ingress and URL Extraction]].
+- [[id:starintel-star-research-043-manifest-runtime-plan-composition][STAR-RESEARCH-050 Actor and Dataset Manifest Runtime-Plan Composition]].
+- [[id:starintel-star-server-049-component-handles-registry-readiness-health][STAR-SERVER-049 Component Handles, Registry, Readiness, and Health]].
+- [[https://github.com/lost-rob0t/starintel-server/issues/44][starintel-server #44]].
+
+* Design Decision
+
+Replace the legacy global =pattern= registry as authoritative runtime behavior with one manifest-linked, typed =DocumentTransform= execution boundary.
+
+The semantic definition is StarLang-first. The server receives immutable compiled transform semantics/bindings in the #43 =RuntimePlan= and realizes a Common Lisp transform executor under the existing =star.runtime= lifecycle. The executor never becomes a persistence, broker, authorization, or workflow authority.
+
+#+begin_example
+validated canonical document
+          |
+          v
+RuntimePlan transform routing
+          |
+          v
+bounded DocumentTransform executor
+  - typed input gate
+  - deadline/budget
+  - transform isolation
+  - pure candidate extraction
+  - typed generated docs
+          |
+          v
+canonical application/ingest port
+  - validation
+  - authorization/policy
+  - idempotency
+  - persistence + durable outbox
+          |
+          v
+documents.new.* event publication
+#+end_example
+
+Direct publication from the transform executor to =documents.new.*= is forbidden.
+
+* Component Model
+
+** Transform definition
+
+The immutable plan representation contains:
+
+- =transformId=;
+- semantic version/artifact digest;
+- accepted input dtype/schema constraints;
+- emitted dtype set;
+- closed StarLang semantic/adapter reference;
+- typed field selectors;
+- =maxInputBytes=;
+- =maxCandidates=;
+- =maxOutputs=;
+- deadline/budget reference;
+- provenance policy;
+- dataset/component applicability;
+- typed per-transform failure policy.
+
+No field may contain a host function object, raw Lisp symbol callback, shell command, raw actor reference, Rabbit routing key, database client, credential, or secret.
+
+** Runtime transform executor
+
+The Common Lisp executor is a runtime-owned component. It receives a validated document envelope plus a runtime/application call context and the precompiled transform plan for that document/dataset.
+
+It returns one typed aggregate result:
+
+- transforms attempted/completed/failed;
+- candidates observed;
+- generated documents accepted/rejected;
+- bounded diagnostics;
+- provenance references;
+- correlation/run identity.
+
+A failure in transform A does not prevent transform B unless the immutable policy explicitly makes the whole transform set terminal. The default is isolation plus typed partial outcome.
+
+** Runtime identity
+
+RuntimePlan component IDs and #42 component handles own destination identity. A retained raw actor ref/name is never stored in a transform definition. Replacement generation N+1 cannot be reached through a stale generation-N handle.
+
+* Routing and Manifest Binding
+
+Dataset manifests select transform bindings only when all of these are true:
+
+1. the source dtype/schema is compatible;
+2. the StarLang semantic artifact declares the transform/input/output contract;
+3. the destination canonical ingest capability is present;
+4. required authorization/policy references resolve;
+5. resource demands receive valid #34/#35/#36 grants;
+6. lifecycle dependencies are valid under #37;
+7. component identities resolve under #42.
+
+Manifest configuration may narrow fields/output ceilings or disable a transform. It cannot add undeclared dtypes, capabilities, or host callbacks.
+
+* Canonical Ingest Boundary
+
+For every generated document, the executor calls the same typed application-level ingest operation used by other trusted server callers. That operation owns:
+
+- canonical document/schema validation;
+- authorization and dataset policy;
+- deterministic mutation/idempotency identity;
+- persistence;
+- durable outbox/event generation;
+- typed accepted/rejected/unknown outcomes.
+
+The transform executor must distinguish:
+
+- candidate extracted;
+- generated canonical document constructed;
+- ingest accepted/persisted according to the application contract;
+- ingest rejected;
+- ingest outcome unknown.
+
+It may never report direct Rabbit publication as canonical document success.
+
+* URL Transform v1
+
+=extract.http-url.v1= is the first transform vertical.
+
+** Input
+
+- one validated source document;
+- explicit typed text selectors from the compiled plan;
+- source document ID plus revision/content digest;
+- dataset and correlation context.
+
+Legacy raw top-level =content=/=bio= probing is not the canonical contract. Compatibility selection must be isolated and removed once schema-specific selectors are proven.
+
+** Candidate discovery
+
+The transform scans no more than =maxInputBytes=. Candidate discovery recognizes explicit ASCII-case-insensitive =http://= and =https://= starts and copies only until a bounded lexical terminator. It then applies conservative surrounding-punctuation trimming.
+
+The scanner is not a URI validator and must not grow into a complete RFC grammar.
+
+** Parsing and normalization
+
+Each candidate is parsed through the in-process URI library already present in the server dependency closure. Acceptance requires:
+
+- scheme exactly HTTP or HTTPS for v1;
+- hierarchical authority present;
+- non-empty host;
+- parser success without leftover malformed structure;
+- normalized representation satisfying deterministic fixture rules.
+
+Normalization must at least canonicalize scheme and host case and apply explicitly tested safe normalization. It must not erase query/path distinctions merely to increase deduplication.
+
+A fixture corpus decides handling of trailing prose punctuation, balanced parentheses, percent encoding, Unicode/IDNA host forms, explicit/default ports, fragments, IPv4/IPv6 literals, userinfo, malformed escapes, and extremely long candidates. Ambiguous cases remain rejected or preserved according to a versioned rule; no heuristic is silently changed in place.
+
+** Output
+
+For each unique normalized URI within the source document:
+
+1. construct one canonical URL document;
+2. construct one canonical relation from source document to URL using the specification-approved extraction predicate;
+3. attach provenance containing source ID/revision or digest, field selector, character/byte span where available, transform ID/version/digest, and correlation/run ID;
+4. submit both through canonical ingest.
+
+The transform emits no network fetch. URL acquisition/dereference is a separate Source Acquisition action.
+
+* Boundedness
+
+The executor obeys all of:
+
+- =maxInputBytes= per selected text field/aggregate input;
+- =maxCandidates= per transform;
+- =maxOutputs= per transform;
+- aggregate output limit for the source document;
+- one absolute deadline propagated from the call context;
+- #36 mailbox/admission limits;
+- no hidden nested unbounded task pool;
+- cancellation fencing so late work cannot commit through a superseded execution context.
+
+When a limit is reached, the result is typed =truncated=/=over-limit= with counts; it is never silent partial success.
+
+* Failure Model
+
+Required typed classes include:
+
+- =incompatible-input=;
+- =invalid-transform-plan=;
+- =candidate-malformed=;
+- =output-limit-reached=;
+- =deadline-exceeded=;
+- =ingest-rejected=;
+- =ingest-outcome-unknown=;
+- =stale-component-handle=;
+- =component-unavailable=;
+- =transform-failed=.
+
+Malformed one-off URL candidates are ordinary per-candidate observations, not process failures. An invalid plan or semantic contract is a pre-start/runtime-plan failure and must not start the component.
+
+* Provenance and Evidence Semantics
+
+Extraction proves only that the source document text contained a candidate URI according to transform v1. It does not prove reachability, ownership, same-person identity, content truth, or corroboration.
+
+The relation/document provenance must preserve that distinction. Subsequent acquisition can append observations rather than rewriting the extraction claim into stronger evidence.
+
+* Compatibility and Migration
+
+Migration is vertical and reversible until equivalence is proven:
+
+1. introduce pure transform plan/value contracts and fixtures;
+2. implement =extract.http-url.v1= as a pure function/adapter over fixture documents;
+3. add fake canonical-ingest port and bounded executor tests;
+4. realize one RuntimePlan-bound transform component;
+5. route one fixture dataset/document flow through it;
+6. keep legacy =start-url-extractor= disabled/delegating during comparison;
+7. after equivalence and restart tests, remove =*document-patterns*= and raw callback/subscription authority for migrated flows.
+
+Do not run both old direct-publish extraction and new canonical-ingest extraction simultaneously for the same flow.
+
+* Adversarial Review
+
+** Reject a generic callback registry
+
+It reproduces the current defect under a new name and bypasses StarLang/compiler validation.
+
+** Reject a regex-only URL parser
+
+A lexical detector is useful for candidate boundaries; URI validation/normalization must use a real parser and deterministic fixtures.
+
+** Reject direct Rabbit output
+
+Rabbit is event transport. It cannot certify schema validation, persistence, idempotency, or authoritative acceptance.
+
+** Reject automatic URL fetching
+
+Extraction and acquisition have different security/resource semantics. Fetching introduces SSRF, redirects, network budgets, robots/provider policy, and content handling that belong to Source Acquisition.
+
+** Reject mutable runtime-global transform definitions
+
+Dataset/runtime isolation and deterministic replay require plan-owned immutable identity/versioning.
+
+** Reject raw actor subscriptions
+
+They go stale across lifecycle replacement and bypass generation fencing.
+
+** Reject broad implementation before dependency seams exist
+
+The pure transform/URI fixtures can be implemented independently when approved. Production RuntimePlan routing/canonical-ingest integration must wait for the explicit #40/#41/#43 seams rather than recreating local substitutes.
+
+* Proposed Implementation Handoff
+
+Owning repository: =lost-rob0t/starintel-server=, existing issue #44.
+
+Priority: P1-06 in the canonical server roadmap.
+
+Implementation approval: =PENDING / AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+** Slice 1 — pure transform contract + URL fixture corpus
+
+No actor/network/database/Rabbit effects.
+
+Mandatory RED on untouched server:
+
+#+begin_example
+source document contains:
+  "see https://Example.COM/a?x=1, then continue"
+
+run extract.http-url.v1 with maxCandidates=8 maxOutputs=8
+=> normalized candidate https://example.com/a?x=1
+=> exact source field/span provenance
+=> no publish/persist/network calls
+#+end_example
+
+RED must fail because no typed pure transform contract/normalizer exists. A test that merely invokes the legacy regex is not valid GREEN.
+
+Sibling REDs cover malformed percent escapes, punctuation, balanced parentheses, explicit ports, IPv6 literals, Unicode/IDNA policy, duplicate normalized candidates, oversized input, max-candidate/max-output truncation, and schemes outside HTTP(S).
+
+** Slice 2 — fake canonical-ingest executor
+
+Feed typed generated documents into a fake ingest port. A failing transform must not suppress a succeeding sibling; over-limit and deadline outcomes are explicit; zero direct Rabbit calls.
+
+** Slice 3 — RuntimePlan binding
+
+Depends on #43 realization. Invalid dtype/output/capability binding fails before component/thread/network realization.
+
+** Slice 4 — first real canonical-ingest vertical
+
+Depends on #40/#41 application port and relevant #47 idempotency boundary. Persist URL/relation through existing validated mutation/outbox path.
+
+** Slice 5 — component-handle/lifecycle integration
+
+Depends on #42/#37. Restarted transform component receives a new generation; stale handle cannot dispatch to the replacement.
+
+** Slice 6 — legacy retirement
+
+After equivalence evidence, remove/delegate =*document-patterns*=, raw function registry, raw actor subscriptions, and direct URL extractor publication.
+
+* Acceptance Criteria
+
+- matcher flow actually consumes configured validated documents;
+- transform semantics are immutable/typed and StarLang-first;
+- no arbitrary host callback or raw actor ref in manifests/registry;
+- URL transform uses bounded lexical discovery plus URI parsing/normalization;
+- fixture corpus defines edge-case behavior deterministically;
+- generated URL/relation docs enter canonical ingest with provenance;
+- direct transform-to-=documents.new.*= publication is absent for migrated flow;
+- per-transform and aggregate limits/deadline are enforced;
+- one transform failure is isolated;
+- duplicate local candidates are collapsed while durable retry dedupe remains canonical idempotency's job;
+- restart/stale-handle behavior uses #42 semantics;
+- extraction never implies reachability/ownership/corroboration;
+- no product implementation starts until operator approval is explicitly recorded.
+
+* Unresolved Questions
+
+- Confirm canonical v0.9 text field selectors for the first production dtype fixture.
+- Confirm the canonical relation predicate for textual URL extraction.
+- Validate exact =quri= parsing/normalization behavior against the RED corpus before implementation policy is frozen.
+
+* Footnotes and Glossary
+
+[fn:runtime-plan] The inert deterministic pre-start component/routing/resource plan defined by STAR-RESEARCH-050 and STAR-MANIFEST-001.
+
+[fn:transform] A bounded typed operation consuming one canonical document and producing typed observations/generated documents without owning persistence or transport authority.
+
+[fn:canonical-ingest] The application-level validated mutation path that owns persistence/idempotency/outbox semantics.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created design, adversarial review, RED-first slices, URL transform v1 contract, canonical-ingest boundary, and dependency order. | ARDR Auto-Research | [[id:starintel-star-research-051-document-pattern-ingress-url-extraction][STAR-RESEARCH-051]]; starintel-server #44/current source |

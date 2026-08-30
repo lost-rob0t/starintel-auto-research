@@ -1,0 +1,422 @@
+:PROPERTIES:
+:ID:       starintel-star-server-053-public-contract-package-api-doc-coherence
+:END:
+#+title: STAR-SERVER-053 Public Contract, Package, API, and Documentation Coherence
+#+description: Design-ready contract-coherence boundary for starintel-server issue 48, using one operation/release/public-package graph to drive HTTP discovery, OpenAPI, client manifests, compatibility aliases, export conformance, and documentation validation.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:star-server:design:api:packages:openapi:documentation:versioning:contracts:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Explicit operator research decision | [[file:../../research/star-server/STAR-RESEARCH-054-public-contract-package-api-doc-coherence.org][STAR-RESEARCH-054]]; operator decision still pending |
+| Architecture/design | StarIntel operator | PENDING | Explicit operator design approval | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main publication workflow succeeds | Pending |
+
+=DESIGN_READY_FOR_OPERATOR_REVIEW= is lifecycle readiness only. It is not architecture or implementation approval and does not expose this work to RAGE.
+
+* Research Basis
+
+Canonical research: [[file:../../research/star-server/STAR-RESEARCH-054-public-contract-package-api-doc-coherence.org][STAR-RESEARCH-054 Public Contract, Package, API, and Documentation Coherence]].
+
+Owning implementation seed: [[https://github.com/lost-rob0t/starintel-server/issues/48][starintel-server #48]].
+
+Audited server baseline: =lost-rob0t/starintel-server@8fb297d146e7332fae7e38170b5b49d49530ac53=.
+
+The old #48 issue mixed package cleanup, configuration, route versioning, OpenAPI, and prose. Current source and newer canonical designs make a smaller design possible: keep the existing =star.http.contract= operation graph, make it the authoritative public HTTP contract, add explicit public-package/release metadata, and derive/validate public artifacts from those sources. Configuration semantics remain owned by STAR-SERVER-044.
+
+* Decision
+
+Define one deterministic *Public Contract Model* composed of three independent but cross-validated authorities:
+
+1. =HttpContract= — the existing typed =star.http.contract:http-operation= registry, extended with canonical API revision and alias/lifecycle metadata;
+2. =LibraryContract= — explicit public ASDF system/package export inventories for supported embedding surfaces created by #39/#40;
+3. =ReleaseContract= — one StarIntel Server release identity source, with API contract revision and document-schema revision represented separately.
+
+OpenAPI, client manifest, capability-discovery endpoint metadata, route conformance reports, public Lisp API documentation, version matrices, and checked examples are projections of these authorities. They cannot independently declare support.
+
+#+begin_example
+                   ReleaseContract
+                  /       |        \
+                 /        |         \
+        LibraryContract  HttpContract  document schema identity
+             |              |
+             |        +-----+------------------+
+             |        |          |             |
+             v        v          v             v
+       Lisp API docs OpenAPI client manifest capabilities
+             |        |          |             |
+             +--------+---- conformance -------+
+                            |
+                            v
+                     mounted runtime routes
+                     + checked operator docs
+#+end_example
+
+* Ownership and Dependency Direction
+
+** HTTP contract authority
+
+Keep =star.http.contract= transport/application contract metadata in Common Lisp. It remains loadable without starting actors, connecting to CouchDB/RabbitMQ/Valkey, or binding an HTTP listener.
+
+Each =HttpOperation= has:
+
+- stable =operationId=;
+- canonical method and path;
+- explicit =apiContractRevision=;
+- public/internal lifecycle;
+- authority/scopes;
+- request schema where applicable;
+- closed response/status definitions;
+- path/query/header parameter metadata where applicable;
+- idempotency metadata where applicable;
+- zero or more =CompatibilityAlias= records.
+
+A compatibility alias has its own method/path, lifecycle (=supported= or =deprecated=), optional deprecation date/sunset/link metadata, and a pointer to the canonical operation ID. It never owns another handler or another application operation.
+
+** Library contract authority
+
+Do not create a giant manually curated list of today's =:starintel-gserver= exports. The public contract is attached to explicit supported ASDF systems/packages after #39/#40 establish those surfaces.
+
+The first expected public layers are:
+
+- the side-effect-free =starintel-server/core= system/package family;
+- the explicit application/runtime API from #40 once realized;
+- intentionally public value types, conditions, protocols, constructors, and operation functions.
+
+Concrete CouchDB/Rabbit/Sento/HTTP pool globals, process-global compatibility hooks, mutable implementation registries, and raw actor-system resources are internal unless separately approved as supported embedding API.
+
+A =LibraryExportContract= records package, external symbol, expected role (=function=, =macro=, =generic=, =class=, =condition=, =type=, =constant/value=), owning ASDF system, and lifecycle/deprecation metadata.
+
+** Release authority
+
+Exactly one build/release source provides =serverReleaseVersion=. The ASDF system and runtime/server-info/capability output consume that value or are validated against it during build/test; they do not independently hard-code contradictory server versions.
+
+The runtime metadata model is:
+
+#+begin_example
+ServerVersionInfo {
+  serverReleaseVersion
+  apiContractRevision
+  documentSchemaRevision
+}
+#+end_example
+
+Those values can change independently and are never compared as though they were one semantic version stream.
+
+** Configuration authority
+
+STAR-SERVER-044 remains the only configuration/secret precedence contract. This design consumes its normalized public field descriptors for documentation/conformance only. It does not add another environment/file/init parser or precedence layer.
+
+* HTTP Contract Normalization
+
+** Canonical paths and aliases
+
+No global route-prefix rewrite is authorized by this design.
+
+For every operation migrated into the public contract:
+
+- choose/retain one canonical path intentionally;
+- attach its API contract revision;
+- represent existing older paths as explicit aliases when compatibility is required;
+- route aliases to the *same* canonical handler/application operation;
+- emit deprecation headers only for aliases marked deprecated;
+- never infer alias status merely because a route is old.
+
+The currently existing =/api/v1/capabilities=, =/api/v1/search=, and =/api/v1/stats= demonstrate an established versioned namespace. Existing =/auth/*=, =/openapi.json=, =/client-manifest.json=, document, and target routes remain unchanged until individually classified. This design does not invent a flag-day =/v1= migration.
+
+** One discovery projection
+
+Replace the hand-maintained endpoint list inside =http-capabilities.lisp= with a projection over =HttpContract= plus runtime feature/health data.
+
+The capability response may combine:
+
+- static contracted operation metadata derived from =HttpContract=;
+- runtime availability/configuration state for optional capabilities;
+- limits from normalized runtime configuration;
+- version information from =ReleaseContract=.
+
+Static operation presence is not sufficient to report a runtime capability as healthy/available. #42's component health/readiness contract remains authoritative for live availability where applicable.
+
+** OpenAPI and client manifest
+
+Keep the current generators. Extend them to consume the complete normalized operation graph and alias/lifecycle metadata.
+
+OpenAPI generation must include:
+
+- every public canonical operation;
+- every intentionally supported/deprecated public alias that remains mounted;
+- every documented status shape;
+- authority/security metadata;
+- request/response schemas;
+- deprecation markers where representable;
+- stable operation IDs that do not change merely because a path alias changes.
+
+The client manifest is a compact generated projection of the same operations, not a second list.
+
+* Route Conformance
+
+Introduce a side-effect-free =HttpRouteManifest= projection used by mounting and tests.
+
+The strongest invariant is:
+
+#+begin_example
+public mounted route
+      <=>
+public HttpContract canonical operation or explicit compatibility alias
+#+end_example
+
+Exceptions must be a closed allowlist for intentionally non-API infrastructure routes and must carry a reason. A public product route outside the contract is a validation failure.
+
+For the first slice, do not attempt to instrument every Ningle route at once. Start with the already-contracted operation family and prove:
+
+- contract method/path -> mounted handler exists exactly once;
+- generated OpenAPI method/path matches contract;
+- client manifest method/path matches contract;
+- capability projection for that operation matches contract;
+- aliases, when present, resolve to the same handler identity/application operation.
+
+Then migrate legacy route families incrementally.
+
+* Public Common Lisp Package Contract
+
+** Export policy
+
+A public symbol is supported only when all of these hold:
+
+1. it is external in a declared public package;
+2. it belongs to a declared public ASDF system;
+3. its role matches =LibraryExportContract=;
+4. its documentation/example refers only to public dependencies;
+5. loading the documented system does not require undeclared runtime startup;
+6. its deprecation state is explicit.
+
+Do not publish adapter globals merely to avoid =package::internal-symbol= accesses. Internal callers/tests should instead be moved to appropriate internal packages or public protocols as #39–#41 land.
+
+** Clean-image export conformance
+
+A generated conformance test starts a clean Lisp image, loads only the declared public ASDF system, and checks every =LibraryExportContract= entry. Examples:
+
+- function/generic/macro entries resolve with the expected function binding/kind;
+- class/condition entries resolve through the expected class/type relationship;
+- value/constant entries are bound;
+- no documented symbol resolves only because the full executable/runtime system was accidentally loaded.
+
+The test also detects unexpected external symbols in strictly managed public packages unless they are explicitly documented as compatibility exports.
+
+** Compatibility symbols
+
+Historical misspellings such as =sumbit-target= may temporarily remain callable only if current compatibility requirements prove they are consumed. They are represented as deprecated aliases to the canonical symbol and omitted from new examples. Absence of such evidence means remove them from the public contract rather than canonizing them.
+
+* Release and Version Contract
+
+The current =0.2.0= ASDF versus =0.0.1= runtime drift becomes an explicit RED fixture.
+
+The production build/test contract requires:
+
+#+begin_example
+asdf-system-version == runtime serverReleaseVersion
+#+end_example
+
+for the exact built artifact, while also proving:
+
+#+begin_example
+serverReleaseVersion != semantic alias for apiContractRevision
+documentSchemaRevision remains starintel-doc owned
+#+end_example
+
+Implementation may generate a small build-time version file or inject the value from the ASDF/release build, but there must be one authority. Runtime code may not keep a second manually edited literal.
+
+* Documentation Contract
+
+Documentation is split into two classes.
+
+** Generated normative references
+
+Generate from contract sources:
+
+- OpenAPI;
+- client manifest;
+- public HTTP operation/alias table;
+- public Lisp package/export inventory;
+- server/API/document version matrix;
+- normalized public configuration-key reference from STAR-SERVER-044 descriptors once available.
+
+** Checked explanatory prose
+
+Keep hand-written README/deployment/embedding/security/migration prose, but validate references where practical:
+
+- referenced public routes exist in =HttpContract= or explicit alias inventory;
+- referenced public package symbols exist in =LibraryContract=;
+- referenced configuration keys exist in the canonical config contract;
+- examples use supported operation IDs/paths and public symbols;
+- security claims are reviewed against current auth/public-mode/CORS contract rather than copied from historic prose.
+
+The first docs correction must remove/rewrite the current README claim that StarIntel HTTP has no authentication/authorization. That claim contradicts current code and is not safe operator guidance.
+
+* Failure Semantics
+
+Contract validation produces typed deterministic failures rather than warnings. Minimum classes:
+
+- =duplicate-operation-id=;
+- =duplicate-canonical-route=;
+- =orphan-public-route=;
+- =missing-mounted-operation=;
+- =contract-handler-mismatch=;
+- =capability-contract-drift=;
+- =openapi-contract-drift=;
+- =client-manifest-contract-drift=;
+- =release-version-drift=;
+- =missing-public-export=;
+- =unexpected-public-export=;
+- =public-export-role-mismatch=;
+- =invalid-compatibility-alias=;
+- =stale-doc-reference=.
+
+Validation is fail-closed in CI/release verification. Runtime startup need not regenerate documentation.
+
+* RED-First Implementation Slices
+
+All slices remain proposed only until operator implementation approval is recorded.
+
+** Slice 1 — release identity coherence
+
+Owning repository: =lost-rob0t/starintel-server=.
+
+RED on untouched audited baseline:
+
+#+begin_example
+load starintel-gserver metadata
+asdf-system-version = "0.2.0"
+runtime serverReleaseVersion = "0.0.1"
+assert equal
+=> FAIL
+#+end_example
+
+GREEN:
+
+- establish one release identity source;
+- ASDF/build/runtime server-info/capabilities report the same server release identity;
+- API and document-schema revisions remain separately named;
+- no actor/network/database startup is required to inspect version metadata.
+
+This slice is dependency-light and can land independently of broad package migration.
+
+** Slice 2 — capability projection from HttpContract
+
+RED fixture chooses an already-contracted operation, mutates/removes it in a test contract graph, and proves hand-built capability metadata would not detect the mismatch today. GREEN derives operation endpoint metadata from =HttpContract= and has exactly one source for method/path/authority/scopes.
+
+No runtime availability flag is inferred from contract existence.
+
+** Slice 3 — contracted route/OpenAPI/client-manifest conformance
+
+RED requires one deliberately mismatched method/path/status projection to fail deterministic validation before HTTP startup. GREEN proves the already-contracted route family is equivalent across mounted routes, OpenAPI, and client manifest.
+
+** Slice 4 — compatibility alias lifecycle
+
+RED creates two handler paths for what should be one logical operation and proves current metadata cannot establish canonical identity/deprecation. GREEN adds typed alias records and mounts aliases to the same canonical handler/application operation, including tested deprecation headers for aliases explicitly marked deprecated.
+
+** Slice 5 — public package export contract
+
+Depends on realization of the #39 side-effect-free core package and the chosen #40 explicit application API slice.
+
+RED: a clean-image export conformance fixture detects at least one historical export that is missing, misspelled, wrong-role, or requires the executable runtime dependency closure. GREEN defines the first bounded public export inventory and proves clean-image load plus role checks.
+
+** Slice 6 — generated/checked documentation
+
+Generate normative route/export/version/config references and add reference checks to explanatory docs. Correct current README auth/security claims against the implemented contract. Do not rewrite architectural prose automatically.
+
+** Slice 7 — migrate remaining public legacy routes incrementally
+
+For each route family, classify public/internal/obsolete, add canonical operation/aliases, add RED contract fixtures, migrate mounting, then remove redundant hand-maintained metadata. No all-routes flag day.
+
+* Acceptance Criteria
+
+- One typed =HttpContract= graph owns every contracted public operation and compatibility alias.
+- OpenAPI, client manifest, and capability endpoint static operation metadata are projections from that graph.
+- Every contracted mounted route has matching method/path/authority/status semantics and no unexplained public product route exists outside the contract after its family is migrated.
+- One =serverReleaseVersion= source is reflected consistently by ASDF/build/runtime metadata.
+- API contract and document-schema revisions are explicit separate values.
+- Public Common Lisp packages have explicit export contracts and pass clean-image role/load checks.
+- Concrete adapter/runtime globals are not made public merely to silence internal access.
+- STAR-SERVER-044 remains the sole configuration precedence/secret authority; this design only consumes its descriptors for docs/conformance.
+- Compatibility aliases are explicit, tested, and route to the canonical operation; deprecated aliases emit documented behavior.
+- Generated contract artifacts require no secrets, actors, brokers, databases, listeners, or external processes.
+- README/operator docs no longer contain known current-source contradictions about authentication/authorization.
+- All implementation approval remains operator-recorded and independent of these checks.
+
+* Adversarial Review
+
+** Reject: replace the existing contract registry with a new OpenAPI framework
+
+The repository already has typed operation/request/response metadata and generators. A new framework creates another migration and another truth source. Extend and validate the existing graph.
+
+** Reject: make every currently exported symbol official API
+
+Current exports include mutable subsystem globals, raw actor state, historical compatibility names, and internals that newer architecture explicitly seeks to hide. Public API is intentional and capability-shaped.
+
+** Reject: “fix” double-colon access by exporting more internals
+
+That makes leakage permanent. Move internal callers to internal packages or stable typed protocols.
+
+** Reject: prepend =/v1= to every current route
+
+Current source already mixes versioned and stable unversioned operations. Compatibility must be operation-specific. Bulk renaming creates needless breakage and duplicate routing paths.
+
+** Reject: let capabilities, OpenAPI, and route mounting retain separate endpoint inventories
+
+That preserves the bug class. They must project from one contract graph plus separately owned runtime-health state.
+
+** Reject: make OpenAPI the internal application model
+
+OpenAPI is a generated transport projection. StarIntel's typed application/runtime operations remain transport-neutral under #40/#41.
+
+** Reject: move configuration ownership back into #48
+
+The deployment-config/trusted-init design already owns data model, precedence, secrets, and trusted init. Duplicate config schemas are forbidden.
+
+** Reject: generate all prose
+
+Normative inventories should be generated; architecture/security/deployment rationale still needs human-readable prose. Validate its references instead of replacing it with generated sludge.
+
+** Reject: infer support or approval from documentation generation
+
+A generated operation or package page describes a declared contract. Runtime availability, design approval, and implementation authorization remain separate facts.
+
+** Reject: documentation generation that loads the executable runtime
+
+A docs build must not connect to CouchDB/RabbitMQ, spawn Sento actors, bind ports, load secrets, or execute trusted init. Contract data must be side-effect-free.
+
+* Dependencies and Handoff
+
+Implementation ordering:
+
+1. Slice 1 release identity can proceed independently after operator approval.
+2. Slices 2–4 build on the existing =star.http.contract= implementation and can proceed without waiting for the entire #39–#41 program.
+3. Slice 5 public package stabilization depends on the relevant #39/#40 systems/API being implemented; do not freeze the old monolithic exports first.
+4. Configuration documentation consumes STAR-SERVER-044 when that configuration contract is realized.
+5. Legacy route migration follows operation-family readiness and should not block earlier conformance infrastructure.
+
+Owning implementation issue remains [[https://github.com/lost-rob0t/starintel-server/issues/48][server #48]]. No additional implementation issue is necessary unless one slice later proves independently ownable.
+
+Implementation state: =PENDING / AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL=.
+
+* Footnotes and Glossary
+
+- *Public Contract Model*: deterministic metadata describing intentionally supported server release, HTTP operations, compatibility aliases, and Common Lisp library surface.
+- *HttpContract*: the existing =star.http.contract= operation graph extended by this design.
+- *LibraryContract*: explicit inventory and role/lifecycle metadata for supported external Common Lisp symbols.
+- *Compatibility alias*: legacy method/path or symbol that forwards to one canonical operation/symbol under explicit lifecycle policy.
+- *Normative generated reference*: generated artifact whose facts are projections of machine-readable contract authorities.
+- *Checked prose*: hand-authored documentation whose references are validated against canonical contract metadata.
+- *Contract drift*: two public projections disagree about the same operation, symbol, version, or configuration field.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created design-ready #48 public-contract coherence design with release, HTTP, package, alias, docs, RED-first, and adversarial-review boundaries. | ARDR Auto-Research | [[file:../../research/star-server/STAR-RESEARCH-054-public-contract-package-api-doc-coherence.org][STAR-RESEARCH-054]]; server issue #48; audited server head =8fb297d146e7332fae7e38170b5b49d49530ac53= |

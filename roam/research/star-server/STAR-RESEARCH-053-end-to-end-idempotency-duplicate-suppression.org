@@ -1,0 +1,216 @@
+:PROPERTIES:
+:ID:       starintel-star-research-053-end-to-end-idempotency-duplicate-suppression
+:END:
+#+title: STAR-RESEARCH-053 End-to-End Idempotency and Duplicate Suppression
+#+description: ARDR research for starintel-server issue 47, reconciling existing target, lease, persistence, Rabbit, and outbox identity mechanisms into one application-level idempotency contract without weakening fencing.
+#+status: READY_FOR_DESIGN
+#+filetags: :starintel:star-server:research:idempotency:rabbitmq:couchdb:targets:leases:outbox:
+#+created: [2026-08-29 Sat]
+#+last_modified: [2026-08-29 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Explicit operator research decision | Pending |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of canonical design | Pending |
+| Implementation | StarIntel operator | PENDING | Explicit implementation authorization | Pending |
+| Publication | Auto-Research maintainer | PENDING | Exact-main publication workflow succeeds | Pending |
+
+Lifecycle readiness is not approval. This research is =READY_FOR_DESIGN= because the evidence is sufficient to design the missing boundary; no human approval is inferred from issue state, priority, prior implementation, publication, or this lifecycle transition.
+
+* Issue Seeds and Selection
+
+Primary owning implementation seed: [[https://github.com/lost-rob0t/starintel-server/issues/47][starintel-server #47]].
+
+The complete relevant open issue backlogs in =starintel-auto-research=, =starintel-server=, StarLang, cl-gserver, and the RAGE control repository were enumerated before selection. Higher-priority P0 server issues already have current canonical research/design and remain operator-gated for implementation. Server P1 issues #39 through #46 likewise have current canonical ARDR ownership. #47 is therefore the next dependency-ordered P1 roadmap gap with concrete current-source evidence and no server-specific canonical end-to-end idempotency research/design owner.
+
+Related issue-backed dependencies and consumers include:
+
+- [[https://github.com/lost-rob0t/starintel-server/issues/32][server #32]] authenticated target leases and fenced effects;
+- [[https://github.com/lost-rob0t/starintel-server/issues/33][server #33]] crash/recovery and unknown-outcome resolution;
+- [[https://github.com/lost-rob0t/starintel-server/issues/44][server #44]] document transforms, whose retry-safe canonical ingest depends on this boundary;
+- [[https://github.com/lost-rob0t/starintel-server/issues/59][server #59]] batch ingest/target lifecycle APIs;
+- [[https://github.com/lost-rob0t/starintel-server/issues/60][server #60]] Rabbit-backed browser stream delivery;
+- [[https://github.com/lost-rob0t/starintel-server/issues/108][server #108]] CLI mutation retry semantics;
+- [[https://github.com/lost-rob0t/starintel-server/issues/129][server #129]] durable webhook event delivery;
+- StarLang journal/dispatcher idempotency research, which owns StarLang runtime semantics rather than server-wide HTTP/storage/broker idempotency.
+
+No comments exist on server #47 at this audit point. The issue itself is a seed and implementation handoff candidate, not implementation authorization.
+
+* Evidence Inspected
+
+- [[https://github.com/lost-rob0t/starintel-server/issues/47][starintel-server #47]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/8fb297d146e7332fae7e38170b5b49d49530ac53/source/frontends/http-target-v1.lisp][=source/frontends/http-target-v1.lisp= at audited server head]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/8fb297d146e7332fae7e38170b5b49d49530ac53/source/frontends/http-target-v1-route.lisp][=source/frontends/http-target-v1-route.lisp= at audited server head]].
+- [[https://github.com/lost-rob0t/starintel-server/blob/8fb297d146e7332fae7e38170b5b49d49530ac53/source/target-dispatch-fixes.lisp][=source/target-dispatch-fixes.lisp= at audited server head]].
+- [[file:STAR-RESEARCH-032-authenticated-target-lease-http-execution.org][STAR-RESEARCH-032 Authenticated Target-Lease HTTP and Execution]].
+- [[file:STAR-RESEARCH-033-target-lease-recovery-race-matrix.org][STAR-RESEARCH-033 Target-Lease Recovery Race Matrix]].
+- [[file:STAR-RESEARCH-051-document-pattern-ingress-url-extraction.org][STAR-RESEARCH-051 Document Transform Ingress and URL Extraction]].
+- [[file:../../design/star-server/STAR-SERVER-047-explicit-library-api-runtime-ports.org][STAR-SERVER-047 Explicit Runtime/Application Ports]].
+- [[file:../../design/star-server/STAR-SERVER-048-concrete-adapter-extraction.org][STAR-SERVER-048 Concrete Adapter Extraction]].
+
+* Current-Source Findings
+
+** Idempotency exists today, but only in subsystem islands
+
+The v1 target HTTP path already requires an =idempotency_key=. It derives a principal-scoped request identity, builds a deterministic target/document/schedule identity from it, and computes a request fingerprint over actor, target, dataset, delay, recurrence, and options. Reusing one key with changed request semantics can therefore be detected by the target-specific path.
+
+Target dispatch separately computes a fingerprint over schedule identity, target revision and dispatch-affecting semantics. That is a useful local duplicate/conflict primitive, not an end-to-end application contract.
+
+The lease stack likewise already has request/digest replay semantics for lease acquisition. Lease request idempotency is deliberately coupled to monotonic fencing and backend-authoritative state; a generic server idempotency layer must compose with it rather than wrap it in a way that can replay stale lease authority.
+
+** The HTTP target request ledger is not a shared repository protocol
+
+The audited target route constructs a target-specific request ledger value, but the route immediately calls target acceptance and creates the receipt from that local outcome. There is no general application-level =IdempotencyRepository= protocol shared by document ingest, target mutation, leases, Rabbit ingress, outbox publication, or embedded callers.
+
+This matters because a retry after an ambiguous network/process failure needs to distinguish at least:
+
+- the operation never acquired durable ownership;
+- the same logical request is in progress;
+- the mutation committed and the original response was lost;
+- the request key was reused with a conflicting payload;
+- the mutation outcome is unknown and must be reconciled from authoritative state;
+- the request is terminally rejected and replay may return that stable result.
+
+A boolean =seen?= set cannot represent those states safely.
+
+** Transport delivery identity is not logical operation identity
+
+Rabbit delivery tags, HTTP connections, actor message instances, and retry attempt numbers are transport/execution identities. They can change while one logical operation remains the same. Conversely, recurring target executions must remain distinct logical executions even if they share one schedule.
+
+The canonical contract therefore needs a stable logical operation identity independent of transport delivery, plus a separate attempt/delivery identity for diagnostics and retry control.
+
+** Duplicate suppression cannot replace durable effect identity
+
+For operations already using deterministic document IDs, durable request receipts, outbox entries, or lease request IDs, those identities are part of the correctness proof. A generic idempotency repository should coordinate application execution and replay results; it should not replace downstream deterministic identities with an unrelated cache record.
+
+In particular, a crash after authoritative mutation but before marking the generic idempotency record complete cannot be made safe by simply rerunning the mutation. The application operation needs a deterministic mutation/effect identity or an authoritative reconciliation hook that can establish whether the original effect committed.
+
+** Fencing and idempotency solve different failure classes
+
+Idempotency answers whether two submissions represent one logical operation and whether an already-accepted result can be replayed. Fencing answers whether an old generation is still authorized to make an authoritative effect. A replayed idempotency record must never make an old fencing token current again, and retention/eviction must never create permission for stale fenced work.
+
+* Requirements Derived from Evidence
+
+1. Define one transport-neutral =IdempotencyOperation= identity at the application boundary. Its normalized scope contains authenticated principal/tenant where applicable, stable operation kind/version, resource or operation scope, caller idempotency key/logical message ID, and a deterministic request fingerprint.
+2. Reusing the same normalized operation identity with the same fingerprint returns or waits on the original durable outcome according to bounded policy. Reusing it with a different fingerprint returns a typed =idempotency-conflict= before any authoritative mutation.
+3. Separate logical operation ID from delivery/attempt IDs. HTTP retries and Rabbit redeliveries may share one operation ID while carrying different attempt/delivery identities.
+4. Recurring target schedule identity is not execution identity. Each scheduled occurrence gets a stable execution ID; retries of that occurrence share its operation identity, while later occurrences remain distinct.
+5. Define a narrow backend-neutral =IdempotencyRepository= protocol owned by the application/runtime boundary from #40/#41. The initial semantic operations are claim/bind, inspect, record-known-outcome, mark/reconcile-unknown, and bounded retention metadata. Do not expose raw CouchDB/Valkey handles through this port.
+6. Repository state is a small closed machine, not an untyped status string. Minimum semantic states are =claimed/in-progress=, =known-success=, =known-terminal-failure=, and =outcome-unknown/reconciliation-required=. A conflict is a comparison result, not a stored request state.
+7. The repository claim must atomically bind normalized operation identity to one fingerprint. Two concurrent claimants cannot both obtain execute authority for the same operation.
+8. A duplicate arriving while the owner is still in progress cannot execute the mutation concurrently. It receives a typed in-progress/retry-later result or waits only under an explicit bounded deadline policy.
+9. A lost response after a committed mutation is recovered from durable authoritative effect identity/result reference when possible. If commit status cannot be proven, mark outcome unknown and invoke a typed reconciliation path; never blindly issue a fresh logical mutation.
+10. Each mutating application operation declares its durable effect/reconciliation strategy. Existing deterministic document/request/outbox/lease identities are reused where they already provide stronger evidence.
+11. Rabbit redelivery uses stable message/logical-operation identity, not delivery tag, for duplicate suppression. Settlement remains transport-owned: ACK only after the logical operation reaches a durable accepted/known-terminal state permitted by that consumer contract; unfinished/unknown work is not ACKed merely because a dedupe row exists.
+12. Outbox publication deduplicates by stable event/outbox identity. A duplicate application retry must not allocate a second logical event for an already committed mutation.
+13. Lease acquisition keeps the existing lease-store request/digest and monotonic fencing semantics as authority. The application idempotency operation may bind to the lease request identity/result, but replay cannot synthesize, extend, or upgrade a fencing generation.
+14. Authorization occurs before exposing a stored result to a caller. An idempotency hit is not a capability token and cannot bypass current tenant/resource disclosure policy.
+15. Absolute deadlines propagate through claim, application work, reconciliation, and duplicate wait. Timeout is classified as known-not-executed, known outcome, or outcome-unknown where the evidence permits; generic =timeout= cannot erase ambiguity.
+16. Retention is explicit and bounded, but safe eviction depends on operation/effect semantics. Evicting a convenience replay receipt may be acceptable after the documented replay horizon only when stale external work remains fenced/deduplicated by durable effect identity. Retention cannot be the only stale-writer defense.
+17. Stored idempotency records contain fingerprints/result references and safe metadata, not raw secrets, bearer credentials, or protected request bodies.
+18. Idempotency repository failure is fail-closed for a mutation that requires retry safety. The system must not silently execute an unprotected mutation because the dedupe backend is unavailable.
+19. Read-only operations do not require idempotency merely because the framework exists. Apply the contract to mutations/messages with duplicate-effect risk.
+20. Metrics/audit from #46 observe operation state/conflict/reconciliation classes but do not become the source of truth.
+
+* StarLang-First Boundary
+
+StarLang already owns its actor/runtime journal, dispatcher and replay semantics. Do not move those semantics into a Common Lisp server-local shadow runtime.
+
+For StarIntel server operations:
+
+1. StarLang message/program definitions carry stable typed logical-operation/message identity when the StarLang semantic contract requires retry/replay identity.
+2. Any missing StarLang IR field required to preserve that identity across a compiled actor/domain boundary is added narrowly in StarLang first.
+3. The Common Lisp server application layer owns HTTP/Rabbit/persistence/target/lease orchestration and the =IdempotencyRepository= application port.
+4. Concrete persistence adapters implement durable claim/outcome storage.
+5. External brokers/transports carry identities; they never become the idempotency authority.
+
+No new external service is justified for the first contract slice. Existing durable storage can implement the production adapter after the pure protocol and conformance semantics are proven.
+
+* Proposed Semantic Model
+
+** Operation key
+
+A normalized operation identity should be conceptually equivalent to:
+
+#+begin_example
+IdempotencyOperation {
+  principalScope
+  tenantScope?
+  operationKind
+  operationVersion
+  resourceScope?
+  callerKey
+}
+requestFingerprint = digest(canonical semantic request)
+#+end_example
+
+The exact binary/string representation is implementation detail. The contract requires deterministic canonicalization and explicit operation/version scoping so the same caller key used for two different operations cannot collide.
+
+** Claim result
+
+A claim/inspect operation returns one of a closed set such as:
+
+- =execute-authority= — this caller owns first execution for the bound fingerprint;
+- =replay-known-success=;
+- =replay-known-terminal-failure=;
+- =in-progress=;
+- =reconciliation-required=;
+- =conflict=;
+- =repository-unavailable=.
+
+Only =execute-authority= permits first execution. Replay results do not invoke the application mutation again.
+
+** Outcome record
+
+A known outcome stores a typed result reference or bounded stable result projection sufficient to reproduce the application-visible result. Large/private bodies remain in their authoritative repository and are re-authorized before retrieval.
+
+An unknown outcome stores enough deterministic effect/request identity to perform reconciliation. It is not silently converted back to an unclaimed state.
+
+* Adversarial Review Inputs
+
+The design must reject these failure-prone alternatives:
+
+- global =seen message IDs= without fingerprints or scoped operation identity;
+- keying by Rabbit delivery tag or HTTP request/correlation ID;
+- treating any duplicate as success before durable mutation acceptance;
+- ACKing Rabbit redelivery because a claim row exists while the original owner is unfinished;
+- retrying outcome-unknown mutations as fresh work;
+- replacing lease request receipts/fencing with generic cache semantics;
+- allowing a stale idempotency replay to refresh lease/fence authority;
+- sharing stored successful responses across principals without current authorization;
+- unlimited dedupe state with no retention policy;
+- TTL eviction as the only protection against stale actors/workers;
+- burying server application semantics in StarLang when the operation is transport/persistence orchestration rather than language semantics.
+
+* Research Conclusion
+
+The server does not need a universal duplicate cache. It needs a small application-level idempotency state machine that binds one scoped logical operation to one semantic fingerprint, grants single execution authority, records/replays known outcomes, and forces explicit reconciliation for ambiguous outcomes. Existing target/lease/deterministic-effect identities should become conformance inputs to that contract rather than being replaced.
+
+Evidence is sufficient to proceed immediately to canonical design and adversarial review. This conclusion does not authorize implementation.
+
+* Unresolved Questions for Realization
+
+- Which existing durable CouchDB document/update primitive provides the cleanest atomic claim-and-bind CAS for the first production adapter?
+- Which mutation should become the first real vertical after the pure protocol: target creation, canonical document ingest, or another already-injected application operation?
+- Which application result shapes are safe to store inline versus requiring only an authoritative result reference?
+- What replay-retention horizons are operationally required per operation class, and which durable effect identities survive beyond those horizons?
+- Which current Rabbit envelopes already carry stable message IDs suitable for logical operation identity, and which need a versioned envelope extension?
+
+These are bounded implementation/conformance questions. None requires a second idempotency architecture.
+
+* Footnotes and Glossary
+
+- *Idempotency*: repeated execution of one logical operation produces no additional authoritative effect beyond the first accepted execution.
+- *Duplicate suppression*: recognizing repeated deliveries/submissions of the same logical operation and preventing duplicate execution/effects.
+- *Fingerprint*: deterministic digest of the semantic request fields bound to an idempotency operation identity.
+- *Outcome unknown*: the system cannot prove whether an authoritative mutation committed; safe recovery requires reconciliation rather than blind retry.
+- *Fencing*: rejecting effects from stale execution generations even when old work continues running.
+- *CAS*: compare-and-swap/update semantics used to atomically claim or transition durable state.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-29 | Created canonical #47 research after complete issue-seed reconciliation; documented existing target/lease idempotency islands, logical-operation identity, ambiguous-outcome requirements, and StarLang/server boundary. | ARDR Auto-Research | server #47; audited server head =8fb297d146e7332fae7e38170b5b49d49530ac53=; target HTTP/dispatch source links above |

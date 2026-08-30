@@ -57,6 +57,17 @@ def _commit_exists_bool(root: Path, commit: str) -> bool:
     return result.returncode == 0
 
 
+def _is_ancestor(root: Path, commit: str, descendant: str = "HEAD") -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, descendant],
+        cwd=root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def _path_exists_at_commit(root: Path, commit: str, relative_path: Path) -> bool:
     _commit_exists(root, commit)
     result = subprocess.run(
@@ -69,7 +80,7 @@ def _path_exists_at_commit(root: Path, commit: str, relative_path: Path) -> bool
     return result.returncode == 0
 
 
-def _unique_blob_path_at_commit(root: Path, commit: str, blob_sha: str) -> Path:
+def _blob_paths_at_commit(root: Path, commit: str, blob_sha: str) -> list[Path]:
     entries = _git(
         root,
         ["ls-tree", "-r", "--full-tree", commit, "--", "roam/research"],
@@ -85,7 +96,11 @@ def _unique_blob_path_at_commit(root: Path, commit: str, blob_sha: str) -> Path:
             ) from error
         if object_type == "blob" and object_sha == blob_sha:
             matches.append(Path(path_text))
+    return matches
 
+
+def _unique_blob_path_at_commit(root: Path, commit: str, blob_sha: str) -> Path:
+    matches = _blob_paths_at_commit(root, commit, blob_sha)
     if not matches:
         raise MigrationError(
             f"approval base blob {blob_sha} is not present under roam/research at {commit}"
@@ -98,20 +113,79 @@ def _unique_blob_path_at_commit(root: Path, commit: str, blob_sha: str) -> Path:
     return matches[0]
 
 
+def _recover_unreachable_base(
+    root: Path,
+    relative_path: Path,
+    base_blob: str,
+) -> tuple[str, Path, str]:
+    # GitHub can retain an object that later disappears from every fetched ref.
+    # Approval history must not depend on that orphan remaining fetchable.  Use
+    # the immutable recorded blob as the identity and recover only from a
+    # reachable HEAD ancestor where that exact blob is present.
+    events = _git(
+        root,
+        ["log", "--all", "--format=%H", f"--find-object={base_blob}", "--", "roam/research"],
+    ).splitlines()
+    candidates: dict[str, tuple[int, list[Path]]] = {}
+    for event in events:
+        lineage = _git(root, ["rev-list", "--parents", "-n", "1", event]).split()
+        for commit in lineage:
+            if commit in candidates or not _is_ancestor(root, commit):
+                continue
+            matches = _blob_paths_at_commit(root, commit, base_blob)
+            if not matches:
+                continue
+            distance = int(_git(root, ["rev-list", "--count", f"{commit}..HEAD"]).strip())
+            candidates[commit] = (distance, matches)
+
+    if not candidates:
+        raise MigrationError(
+            f"{relative_path}: unreachable approval base has no reachable snapshot for blob {base_blob}"
+        )
+
+    best_distance = min(distance for distance, _ in candidates.values())
+    best = [
+        (commit, matches)
+        for commit, (distance, matches) in candidates.items()
+        if distance == best_distance
+    ]
+    if len(best) != 1:
+        commits = ", ".join(commit for commit, _ in best)
+        raise MigrationError(
+            f"{relative_path}: unreachable approval base blob has ambiguous reachable anchors: {commits}"
+        )
+
+    anchor, matches = best[0]
+    if len(matches) != 1:
+        rendered = ", ".join(path.as_posix() for path in matches)
+        raise MigrationError(
+            f"{relative_path}: unreachable approval base blob is ambiguous at {anchor}: {rendered}"
+        )
+    source_path = matches[0]
+    source = _show(root, anchor, source_path)
+    if _blob_sha(root, source) != base_blob:
+        raise MigrationError(
+            f"{relative_path}: recovered approval base blob does not match source"
+        )
+    return anchor, source_path, source
+
+
 def _resolve_base_source(
     root: Path,
     base_commit: str,
     relative_path: Path,
     base_blob: str,
-) -> tuple[Path, str]:
+) -> tuple[str, Path, str]:
+    if not _commit_exists_bool(root, base_commit):
+        return _recover_unreachable_base(root, relative_path, base_blob)
+
     if _path_exists_at_commit(root, base_commit, relative_path):
         source_path = relative_path
     else:
         # Canonical IDs may be repaired by renaming a document after approval
-        # migration.  Provenance is content-addressed, so recover the historical
+        # migration. Provenance is content-addressed, so recover the historical
         # source only when the recorded blob identifies exactly one research
-        # file in the recorded base commit.  This follows a rename without
-        # permitting fuzzy filename guesses or arbitrary path substitution.
+        # file in the recorded base commit.
         source_path = _unique_blob_path_at_commit(root, base_commit, base_blob)
 
     source = _show(root, base_commit, source_path)
@@ -119,7 +193,7 @@ def _resolve_base_source(
         raise MigrationError(
             f"{relative_path}: recorded approval base blob does not match source"
         )
-    return source_path, source
+    return base_commit, source_path, source
 
 
 def _is_adard_canonical(metadata: dict[str, list[str]]) -> bool:
@@ -170,10 +244,9 @@ def _first_canonical_snapshot(
                 return source
         except MigrationError:
             # The exact, blob-verified base may itself be the malformed partial
-            # migration being repaired.  Treat only that anchored source as
+            # migration being repaired. Treat only that anchored source as
             # pre-canonical and require the first later snapshot to be fully
-            # canonical.  Malformed snapshots encountered after the base still
-            # fail closed below.
+            # canonical.
             pass
 
     _, candidate = _first_canonical_history_snapshot(root, base_commit, relative_path)
@@ -212,10 +285,9 @@ def _verify_canonical_born(
 
     # Legacy repair path: a small number of canonical-born records accidentally
     # stored a commit SHA from the source repository they were researching as
-    # approval provenance.  Permit correcting that foreign SHA only when the
+    # approval provenance. Permit correcting that foreign SHA only when the
     # replacement anchor is provably the parent of the first canonical commit
-    # and the path was absent there.  Existing in-repository anchors remain
-    # immutable and cannot use this escape hatch.
+    # and the path was absent there.
     if base_commit == "NONE" or not first_base_commit:
         raise MigrationError(
             f"{relative_path}: canonical-born approval base commit changed after creation"
@@ -254,7 +326,7 @@ def verify_file(root: Path, path: Path) -> None:
         _verify_canonical_born(root, relative_path, base_commit, base_blob)
         return
 
-    source_path, source = _resolve_base_source(
+    effective_base, source_path, source = _resolve_base_source(
         root,
         base_commit,
         relative_path,
@@ -262,9 +334,9 @@ def verify_file(root: Path, path: Path) -> None:
     )
 
     # Verify the migration on the path that actually held the recorded base
-    # blob.  Later canonical-ID/path repairs are allowed after that first
-    # canonical snapshot, just like later research-body edits are allowed.
-    migrated = _first_canonical_snapshot(root, base_commit, source_path, source)
+    # blob. Later canonical-ID/path repairs and research edits are allowed only
+    # after that first canonical snapshot.
+    migrated = _first_canonical_snapshot(root, effective_base, source_path, source)
     _, _, source_body, source_metadata = _split_header(source)
     _, _, migrated_body, migrated_metadata = _split_header(migrated)
 
@@ -280,7 +352,10 @@ def verify_file(root: Path, path: Path) -> None:
 def verify_repository(root: Path) -> int:
     checked = 0
     for path in discover_research_files(root):
-        verify_file(root, path)
+        try:
+            verify_file(root, path)
+        except MigrationError as error:
+            raise MigrationError(f"{path.relative_to(root)}: {error}") from error
         checked += 1
     return checked
 

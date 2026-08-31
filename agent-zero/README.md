@@ -1,14 +1,18 @@
-# Agent Zero Support
+# Agent Zero Support — worker profiles retired
 
-Run `scripts/install-agent-zero.sh /a0/usr`, select the desired StarIntel profile, and activate the repository project.
+The autonomous StarIntel product-worker chain in this repository is **retired**.
 
-## Human-gated ADARD worker chain
+Worker ownership moved to `lost-rob0t/hackmode` under Hackmode issue #30. The live Auto-RAGE development profiles are:
 
-Use `starintel-adard-gated` as the coordinator. It routes work through stage-specific workers and enforces human design/contract approval before implementation.
+- `hackmode-rage-database` — Hackmode database, execution graph and KB persistence.
+- `hackmode-rage-hackpert` — Hackpert expert/orchestration, active/passive engine, plans/playbooks and LISH integration.
 
-- `starintel-source-enrichment` — discover new data sources/providers and deepen existing canonical source research. Refine existing research first; create a new research node only for a genuinely new question. Never promotes research to design.
-- `starintel-contract-audit` — compare current code to an already-approved contract/version and produce an evidence-backed requirement matrix. Does not implement or approve design.
-- `starintel-implementation` — implement only the missing delta from an explicitly human-approved governing design/contract. Stops if approval or a design decision is missing.
-- `starintel-verification` — execute tests and verify current code against the approved contract. May record implementation/conformance approval when every scoped requirement is proven, including when the code was already implemented before the run.
+The old profile directories remain only as fail-closed migration tombstones so existing Agent Zero installations get an explicit stop/migration instruction instead of silently continuing StarIntel product work.
 
-The coordinator does not force a research stage for every task. Existing code is inspected first, research is conditional, and no worker may auto-promote research, architecture, design, security policy, or a new contract.
+## StarIntel boundary
+
+Migrated Hackmode workers must not use StarIntel repositories as a product backlog. They may touch StarIntel only for an explicitly authorized cyber / BBP purpose such as source-assisted security review, attack-surface/recon analysis, authorized security testing, security integration validation, or security finding/evidence projection.
+
+If cyber work discovers a StarIntel product defect, record/handoff the security finding. Do not implement the StarIntel product fix from the Hackmode RAGE worker.
+
+The research/design corpus and skills in this repository remain historical/useful artifacts; retiring the autonomous worker profiles does not invalidate prior approved research/design records.

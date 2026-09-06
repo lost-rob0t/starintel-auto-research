@@ -1,0 +1,128 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-060
+:END:
+#+title: STAR-RESEARCH-060 star-bbpd Runtime Modernization Against Current StarIntel
+#+description: ADARD research reconciling the Python star-bbpd external actor service with current starintel-server wire contracts (canonical target dispatch key, actorevent contract) and the approved RFC 3986 star:// identity model, without porting BBPD to StarLang.
+#+status: REVIEW
+#+approval_schema: prolog-rlm.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: research-approval-migration
+#+approval_evidence: migration: no explicit human research-conclusion decision; legacy lifecycle REVIEW is not research approval
+#+approval_base_commit: ad4f92ae7c4ebd0365c808e25d1288bb5a7fdc7e
+#+approval_base_blob: PENDING
+#+approval_decided_at: NONE
+#+filetags: :starintel:research:star-server:star-bbpd:bbpd:actors:rabbitmq:star-uri:star-lang:migration:
+#+created: [2026-09-06 Sun]
+#+last_modified: [2026-09-06 Sun]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research scope | StarIntel operator | PENDING | Explicit approval of the BBPD modernization scope and conclusions | This document |
+| BBPD wire-contract corrections | Repository maintainers | NOT STARTED | Approved research, TDD evidence, and green exact-head gates on the implementation branch | branch =modernize/starintel-runtime-adapter= |
+| Implementation (star-bbpd) | Repository maintainers | NOT STARTED | Approved research, TDD evidence, and green exact-head gates on the implementation branch | branch =modernize/starintel-runtime-adapter= |
+| StarLang migration authorization | StarIntel operator | NOT APPLICABLE | Explicitly out of scope; BBPD is not ported to StarLang by this research | [[file:../../research/star-lang/STAR-LANG-RESEARCH-014-bbp-tool-domain-remoting.org][STAR-LANG-RESEARCH-014]] lineage |
+| Publication | Auto-Research maintainer | PENDING | Main-branch publication workflow succeeds | Public site after deployment |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------|----------|
+| 2026-09-06 | Created ADARD-style research reconciling star-bbpd with current starintel-server wire contracts and the RFC 3986 STAR URI model. | opencode agent (GLM) | star-bbpd branch =modernize/starintel-runtime-adapter= verification log; starintel-server @8fb297d; starintel-doc @980f7a2 |
+
+* Purpose
+
+Reconcile the =star-bbpd= external actor service (Python/Pykka/pika) with the current StarIntel ecosystem so that:
+
+1. BBPD receives targets through both the canonical durable target dispatch key and the legacy compatibility key;
+2. BBPD events conform to the current starintel-server event contract instead of relying on lenient decode normalization;
+3. BBPD carries canonical RFC 3986 =star://= actor identity per [[file:../../research/star-server/STAR-RESEARCH-041-unified-star-uri-authority-routing-and-fediwatch-rabbitmq.org][STAR-RESEARCH-041]] and [[file:../../design/star-lang/STAR-LANG-004-star-service-uri-discovery.org][STAR-LANG-004]];
+4. the future BBPD domain actor to StarLang migration ([[file:../../research/star-lang/STAR-LANG-RESEARCH-014-bbp-tool-domain-remoting.org][STAR-LANG-RESEARCH-014]], [[file:../../research/star-lang/STAR-LANG-RESEARCH-016-bbp-recovery-idempotency.org][STAR-LANG-RESEARCH-016]], [[file:../../research/star-lang/STAR-LANG-RESEARCH-017-bbp-runtime-journal.org][STAR-LANG-RESEARCH-017]]) requires no further infrastructure rewrite;
+5. no premature StarLang rewrite happens.
+
+* Current Source Evidence
+
+starintel-server at =8fb297d146e7332fae7e38170b5b49d49530ac53= (2026-08-29):
+
+- =source/target-dispatch.lisp:69-73= defines the canonical remote target routing key =documents.target.dispatch.<actor>=; =actors.<actor>.new.target= is retained as a compatibility key (=target-dispatch.lisp:96-98=) and is still emitted by the legacy target actor (=source/actors.lisp:213=).
+- =source/actor-systems/event-actor.lisp:24-131= defines the event contract: =dtype= must be =actorevent=, =generation= is a non-negative integer, =actorName= or =component= is required; decode normalization silently defaults missing =dtype= and =generation= and mirrors =actorName= into =component=.
+- Ingest is strict StarIntel 0.9 (=source/rabbit.lisp:67-75=, =source/document-access.lisp:118=); CouchDB databases =starintel=, =starintel-gserver-auth=, =starintel-event-source= (=source/gserver-settings.lisp:45-48,153=).
+- No =star://= identity exists in starintel-server source yet; no per-actor AMQP credential provisioning exists.
+
+starintel-doc at =980f7a217a0d28f22508c2f05831ceb2fefe8bd0= is the tip of =master=; BBPD's pin is current, not stale.
+
+star-bbpd at =0a7a3ae= (2026-09-06): strict 0.9 document boundary, publisher settlement before ACK, centralized topology, configurable routing templates, TOML secrets kept out of the repository.
+
+* Findings
+
+** BBPD binds only the compatibility target key
+
+BBPD queues bind =actors.<actor>.new.target= (spec section 2). The durable target coordinator emits =documents.target.dispatch.<actor>=. A deployment using only the coordinator silently never delivers targets to BBPD.
+
+Correction: BBPD binds both keys to the same durable queue. The dispatch template stays optional TOML configuration (=routing.target_dispatch_key=) so legacy deployments keep working. This is a compatibility-preserving dual binding, not a protocol fork.
+
+** BBPD events rely on server-side normalization
+
+=bbp.events.create_event= omitted =dtype= and =generation=. The server's decode normalization masks this today, but the event contract is authoritative at validation time (=event-actor.lisp:94-114=) and any tightening would break BBPD intake events.
+
+Correction: emit =dtype: "actorevent"= and =generation: 0= from BBPD.
+
+** BBPD has no STAR identity
+
+The approved URI model ([[file:../../research/star-server/STAR-RESEARCH-041-unified-star-uri-authority-routing-and-fediwatch-rabbitmq.org][STAR-RESEARCH-041]]) is =star://<authority>/<resource-kind>/<resource-path>=. STAR-LANG-004 already uses BBPD as the worked example (=star://bbpd.starintel.actor/actor/nmap=).
+
+Correction: BBPD gains =service.star_authority= configuration, a canonicalization module that implements the RFC 3986 v1 rules (lowercase authority, no userinfo/port/dot-segments/query/fragment, pchar paths, reviewed resource kinds), and a startup actor manifest published as event details. The legacy =star://domain:address:actor-name= tuple is accepted only through an explicit compatibility parser and never emitted.
+
+** The BBPD domain invariants are already StarLang-shaped
+
+STAR-LANG-RESEARCH-016 run identity (=program-id + run-id + tool + target=, terminal =star.bbp.run-id-conflict=) and STAR-LANG-RESEARCH-017 reconnect semantics are the contracts the eventual StarLang actors must inherit. The Python actors do not need to change now; the seam is annotated in source with =TODO(starlang-migration)= markers so the migration points are greppable.
+
+** Transport stays RabbitMQ
+
+Per the STAR-RESEARCH-041 durable-dataflow rule, the publisher pool, connection management, and topology are settlement/transport adapters, not domain logic. They are explicitly not StarLang migration targets.
+
+* Migration Matrix
+
+| BBPD component | Current behavior | Modernization action | StarLang seam |
+|----------------+------------------+----------------------+---------------|
+| =bbp.topology= | binds compat target key only | bind canonical + compat via TOML templates | none (deployment material) |
+| =bbp.rabbit= | per-thread pika ownership, backoff reconnect | keep; add reconnect integration coverage | none (transport adapter) |
+| =bbp.consumer= | actor-name regex validation | bind through service-URI path segments | intake adapter |
+| =bbp.tool_actor= | run-id settlement before ACK | preserve behavior; record run-identity rules | becomes StarLang keyed program actor |
+| =bbp.publisher_pool= | confirm-delivery settlement | keep; document transport-adapter status | none (RabbitMQ stays) |
+| =bbp.dns_resolver= | update settlement | keep; align event contract | becomes StarLang domain actor |
+| =bbp.events= | legacy payload | emit =dtype= + =generation= | journal records later |
+| =bbp.document_boundary= | strict 0.9 projection | keep pin (current upstream tip) | StarLang typed contracts |
+| =bbp.config= | TOML + templates | add =star_authority= | deployment material |
+| deployment | Nix + CI | publish STAR manifest at startup | deployment material |
+
+* Verification Performed
+
+On star-bbpd branch =modernize/starintel-runtime-adapter=:
+
+- full pytest suite green (unit + settlement + boundary + provenance);
+- =ruff check bbp tests= clean;
+- RabbitMQ integration tests green against a disposable broker, including a new test proving both target dispatch generations deliver to the same queue;
+- live service smoke test: startup declares dual-key topology, publishes =service-ready= with =dtype: actorevent= and the canonical actor manifest =subfinder@star://bbpd.smoke.actor/actor/subfinder=, and shuts down on SIGTERM.
+
+* Boundary
+
+This research does not:
+
+- port any BBPD actor to StarLang;
+- define the production BBPD authority name (operator decision; =bbpd.starintel.actor= is the STAR-LANG-004 illustrative example);
+- change starintel-server behavior;
+- add per-actor AMQP authentication (none exists server-side);
+- implement the durable coordinator on the BBPD side (BBPD remains a queue consumer).
+
+* Sources
+
+- [[file:../../research/star-server/STAR-RESEARCH-041-unified-star-uri-authority-routing-and-fediwatch-rabbitmq.org][STAR-RESEARCH-041]]
+- [[file:../../design/star-lang/STAR-LANG-004-star-service-uri-discovery.org][STAR-LANG-004]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-014-bbp-tool-domain-remoting.org][STAR-LANG-RESEARCH-014]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-016-bbp-recovery-idempotency.org][STAR-LANG-RESEARCH-016]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-017-bbp-runtime-journal.org][STAR-LANG-RESEARCH-017]]
+- =lost-rob0t/starintel-server= =source/target-dispatch.lisp=, =source/actor-systems/event-actor.lisp=, =source/rabbit.lisp= at =8fb297d=
+- =lost-rob0t/starintel-doc= at =980f7a2= (Python 0.9 conformance adapter)
+- =nsaspy/star-bbpd= =specs/BBP_ACTOR_SERVICE.org= at =0a7a3ae=

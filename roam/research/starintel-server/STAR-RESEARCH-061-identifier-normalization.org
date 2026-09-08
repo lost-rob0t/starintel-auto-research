@@ -1,0 +1,94 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-061
+:END:
+#+title: STAR-RESEARCH-061 Canonical identifier normalization
+#+description: Platform-verified account-handle semantics and ingest normalization contract for canonical usernames, immutable provider identities, and provenance-preserving alias sets; feeds starintel-server#146 and ARDR-ISSUE-206.
+#+status: READY_FOR_DESIGN
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+approval_evidence: machine research completion is not operator approval; research conclusion pending operator review
+#+approval_base_commit: 3992b46
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+created: [2026-09-08 Mon]
+#+last_modified: [2026-09-08 Mon]
+#+filetags: :starintel:research:identity:normalization:ingest:aliases:provenance:org-roam:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Explicit review of platform-semantics findings and ingest implications | This document |
+| Research -> design readiness | Active ARDR policy | APPROVED | Current platform evidence sufficient for a bounded design without human validation | [[https://github.com/lost-rob0t/starintel-auto-research/issues/206][#206]] |
+| Architecture/design | StarIntel operator | PENDING | Canonical design artifact | Future design node |
+| Implementation authorization | StarIntel operator | PENDING | Explicit operator authorization for an exact implementation slice | [[https://github.com/lost-rob0t/starintel-server/issues/146][server #146]] |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression evidence at exact head | |
+
+Lifecycle readiness above does not turn the pending research conclusion, design, or implementation rows into operator approval.
+
+* Issue Authority
+
+- Research job: [[https://github.com/lost-rob0t/starintel-auto-research/issues/206][#206]]
+- Implementation target: [[https://github.com/lost-rob0t/starintel-server/issues/146][starintel-server#146]]
+- Campaign: [[https://github.com/lost-rob0t/starintel-auto-research/issues/207][#207]]
+- Issue transaction: [[file:../ardr-issues/ARDR-ISSUE-206-identifier-normalization.org][ARDR-ISSUE-206]]
+
+* Research Pass 1 (2026-09-08): platform identifier semantics
+
+** Method
+
+Primary provider documentation plus live empirical probes (2026-09-08, datacenter egress). Tags: [DOC] primary docs captured; [DOC-URL] doc URL live; [EMPIRICAL] live probe verified; [UNVERIFIED] not confirmed.
+
+** Platform findings (condensed)
+
+| Platform | Sigil | Immutable identity | Mutable handle | Case rule | Charset/length | Reuse risk |
+|---+---+---+---+---+---+---|
+| YouTube | @handle | channelId (UC+22 b64url) | yes, self-serve | case-insensitive resolution | [_-.] separators; length UNVERIFIED | UNVERIFIED |
+| Reddit | u/ r/ | base36 id (t2_) — username IS lifetime identity | never | casing fixed at signup; stored casing canonical | secondary charset only | none documented |
+| X/Twitter | @ | snowflake id | rename anytime | case-insensitive routing; ASCII fold-safe equality | A-Za-z0-9_ 5-15 [DOC] | highest: old handle immediately reusable [DOC] |
+| Bluesky | @handle | did:plc: (PLC registry) | yes, DNS alias | resolveHandle any casing; spec lowercase | hostname charset | migration possible |
+| Mastodon | @user@domain | actor URI + acct: URI; per-instance id is local | rename/migrate | lookup case-insensitive, returns stored casing | full Unicode per software | per-instance UNVERIFIED |
+| Instagram | @ | numeric id (Graph API) | rename allowed | URL routing case-insensitive | letters/numbers/periods/underscore 1-30 [DOC-URL] | holding-period reclaim UNVERIFIED |
+| Facebook | none | numeric profile/Page id | vanity rename | UNVERIFIED (blocked egress) | UNVERIFIED | release policy UNVERIFIED |
+| TikTok | @handle | uid/secUid | rename allowed | case-insensitive URL resolution | secondary 2-24 charset | UNVERIFIED |
+| Twitch | none in URL | Helix numeric user_id | rename w/ cooldown | soft-404 inconclusive; login lowercase convention; display_name preserves casing | letters/digits/underscore 4-25 | released after cooldown, timing UNVERIFIED |
+| GitHub | @login | numeric id + node_id | rename with redirects | case-insensitive; API returns canonical casing | letters/digits/hyphen <=39 | old login released after rename |
+| Telegram | @ | numeric user id | mutable, optional, detachable | docs: not case sensitive | Latin/digits/underscore 5-32 [DOC] | Fragment auction recycling |
+| Discord | @mention | immutable snowflake id | username mutable, unique case-insensitively | unique case-insensitively (new system) | username ASCII; display names Unicode | UNVERIFIED |
+
+** Hard empirical findings (probe-backed)
+
+1. *Soft-404 traps*: TikTok, Twitch, and t.me return HTTP 200 for nonexistent handles. HTTP status alone must never drive existence assertions; require embedded-ID/API corroboration.
+2. *YouTube oEmbed* rejects /@handle URLs (404 at all casings). Resolve handles via page rel=canonical to /channel/UC... or Data API channels.list?forHandle=. First channelId in page JSON may be a featured channel — use the canonical link element.
+3. *Unauthenticated resolution works (2026-09-08)*: GitHub /users/<login>, Mastodon /api/v1/accounts/lookup, Bluesky resolveHandle + plc.directory, YouTube page scrape. Requires credentials: Reddit (403 on datacenter IP), X (error 215 unauth), Twitch Helix, IG/FB Graph, TikTok Display API.
+4. *Case-insensitive resolution verified live*: YouTube, X, Instagram, TikTok, GitHub (canonical casing returned), Mastodon (canonical casing returned), Bluesky resolveHandle, t.me.
+
+** Ingest implications for starintel-server#146
+
+1. Key equality and IDs on provider-issued immutable identifiers, never handles. Reddit is the documented exception: username is lifetime identity; preserve original casing; never lowercase-fold Reddit usernames at storage.
+2. Alias sets: store (platform, canonical_id, raw_handle, canonical_handle_form, first_seen, last_seen, source) with provenance on every alias row. Handle drift/recycling on X/GitHub/Telegram/Bluesky makes historical alias retention mandatory.
+3. Layered normalization: (a) syntactic marker stripping (@, u/, r/) never enters canonical equality; (b) case folding only where verified case-insensitive AND ASCII; (c) NFC for Unicode display strings; ASCII-only username spaces make NFC a no-op there; Unicode rules for YouTube/Reddit/IG/TikTok remain UNVERIFIED — do not fold, key on IDs.
+4. Normalized-username equality must never auto-merge two accounts; auto-merge may bind only immutable provider IDs, with corroboration for recycled-handle platforms.
+5. Record normalization_profile and normalization_version per observation so policy changes never silently rewrite historical canonical IDs.
+
+** Contract split evaluation (draft position)
+
+- =starintel-doc/spec= owns the semantic contract: fields (platform, canonical_id, canonical_username, raw_username, normalization_profile, normalization_version), equality semantics, alias/provenance record shape.
+- =starintel-server ingest= applies normalization before canonical ID construction/dedupe/index/routing; pure function over (platform, raw, profile) -> {canonical_id, canonical_username, raw preserved, versions}.
+- =collectors= preserve raw provider spelling and stable provider IDs; no collector-local normalization logic.
+- Normalization actor (persistent, supervised) exposes the one reusable service; SWI-Prolog session only for declarative platform policy tables where useful — policy data first, Prolog rules second.
+
+* Open questions
+
+- YouTube handle length 3-30 and reuse-after-release: UNVERIFIED against primary.
+- Reddit username charset: secondary sources only (403 blocked live verification from this egress).
+- Instagram/Facebook/TikTok authenticated canonical-casing confirmation.
+- Discord username punctuation details (consecutive/marginal periods).
+- Whether starintel-doc v0.9 already carries account identity fields compatible with the alias-set shape (needs doc-spec pass).
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-08 | Pass 1: platform identifier semantics across 12 platforms (primary docs + live probes); draft ingest implications and authority split; canonical domain node created per operator placement correction. | Mara (Mara[bot] via A0 campaign run) | This node; issues #206, starintel-server#146 |

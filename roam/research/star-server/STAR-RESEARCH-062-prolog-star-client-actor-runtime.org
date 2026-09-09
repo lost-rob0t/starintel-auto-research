@@ -1,0 +1,117 @@
+:PROPERTIES:
+:ID:       starintel-star-server-research-062
+:END:
+#+title: STAR-RESEARCH-062 Prolog Star Client and Actor Runtime Prototype
+#+description: Platform-verified analysis of the operator's Prolog-facing StarIntel client and actor runtime prototype: versioned endpoint ontology, SWI-Prolog loadability, built-in namespace collisions, star:// actor registry projection, relation-to-edge facts, cycle-safe graph walks, and the RabbitMQ native adapter boundary; reconciles the prototype with STAR-RESEARCH-003, 004, 041, and 061.
+#+status: READY_FOR_DESIGN
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+approval_evidence: machine research completion is not operator approval; research conclusion pending operator review
+#+approval_base_commit: 5807365a02616441d4476d317baace5d42a5d2b4
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+created: [2026-09-08 Mon]
+#+last_modified: [2026-09-08 Mon]
+#+filetags: :starintel:research:prolog:swi-prolog:actors:star-uri:rabbitmq:client:org-roam:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator | PENDING | Explicit review of prototype analysis and module-boundary findings | This document |
+| Research -> design readiness | Active ARDR policy | PENDING | Operator decision on whether a bounded design pass is warranted | This document |
+| Architecture/design | StarIntel operator | PENDING | Canonical design artifact | Future design node |
+| Implementation authorization | StarIntel operator | PENDING | Explicit operator authorization for an exact implementation slice | |
+| Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression evidence at exact head | |
+
+Lifecycle readiness above does not turn the pending research conclusion, design, or implementation rows into operator approval.
+
+* Research Authority
+
+- Origin: operator-directed research pass over the operator's org-roam daily note =starintel-prolog-actor.org= (uploaded copy at =/a0/usr/uploads/starintel-prolog-actor.org=, 1699 lines, dated 2026-09-08).
+- No GitHub issue backs this pass; the operator's daily note is the work order. Per operator correction recorded for this repository, issue-linked transactions are not used for operator-placed domain research.
+- Scope: analysis of the prototype as written, loadability verification in SWI-Prolog, and reconciliation with existing canonical research nodes. This pass creates no design and authorizes no implementation.
+
+* Method
+
+1. Read the full daily note and extract all =#+begin_src prolog= blocks into a single loadable source file (1541 lines after extraction).
+2. Load the extracted source in the environment's SWI-Prolog build and execute representative goals through a test driver.
+3. Compare the prototype's structure and contracts against the existing canonical nodes listed below.
+4. Tag conclusions [VERIFIED] where the live SWI run produced the observed result, [STATIC] where analysis is source-only, and [UNVERIFIED] where a live Star server or broker is required.
+
+* Prototype Structure (as written)
+
+The note defines an initial Prolog-facing StarIntel client and actor runtime model with these layers:
+
+1. *Configuration*: =scheme/1=, =serverHost/1=, =serverPort/1=, =baseUrl/1=, =apiVersion/1= compose into =apiRoot/1= producing =https://HOST/v1=. Base URL and version are kept as data rather than duplicated per endpoint. [VERIFIED]
+2. *Endpoint ontology*: =starEndpoint(Service, Operation, Method, PathSegments)= declares the full v0.9 surface: system (capabilities, health, stats), documents, document events, search, targets, actors, relations, graph, research. Introspection predicates (=service/1=, =allServices/1=, =allServiceOperations/2=) derive over it. [VERIFIED]
+3. *URL primitives*: =trimSlashes/2=, =pathSegments/2=, =bindSegments/3=, =makeUrlFor/5=, =addQuery/3= with =uri_encoded(path, ...)= percent-encoding of path bindings. [VERIFIED]
+4. *HTTP layer*: =starHttp/5= over =library(http/http_open)= with bearer-token injection, internal-option filtering, JSON-or-empty response reading, and capability refresh into dynamic =serverCapability/6= facts.
+5. *Type ontology*: =starType(ClassType, Type)= facts covering the StarIntel v0.9 dtype landscape across ~20 ontology classes (orchestration, research, evidence, socmint, recon, identity, finance, public_record, and others). [VERIFIED]
+6. *Document projection*: =starDocument/2=, =starField/3=, =starRelation/4= as a rebuildable local symbolic projection; the canonical JSON object remains authoritative. This matches the fact-boundary principle established in STAR-AUTO-RESEARCH-005.
+7. *Actor registry*: =refreshActors/0= imports =GET /v1/actors= into =starActor/3=, =starUri/3=, =actorObject/3=, =actorFact/4=; =star://= URIs are constructed as =star://<domain>/actor/<encoded-name>= and parsed by =starUriParts/4=.
+8. *Relations*: relation documents read =data.subject=, =data.predicate=, =data.object= and project to edge facts; endpoint values may be scalars, lists, or endpoint dicts.
+9. *Graph walks*: =smartWalk/3=, =smartWalk/4=, =smartWalkAny/3= maintain an explicit visited set so cyclic relation sets terminate. [STATIC - see verification]
+10. *RabbitMQ*: native AMQP adapter boundary declared as multifile predicates (=rabbitPublish/3=, =rabbitConsume/3=, =rabbitAck/1=, =rabbitNack/2=, queue declaration and binding); actor and flow mailboxes are derived names over the =starintel.actors= exchange. No STOMP.
+11. *Actor flows*: =actorFlowDefinition/3= with definition-time validation against the server-derived registry, =runFlow/1= consuming a source mailbox and fan-out to validated outputs with ACK/NACK on failure.
+
+* Verified Loadability Evidence (2026-09-08, SWI-Prolog)
+
+Executed against the extracted source in one SWI session:
+
+| Goal | Result | Tag |
+|---+---+---|
+| =apiRoot(Url)= | =https://localhost/v1= | [VERIFIED] |
+| =makeUrl(document, create, [dtype=person], Url)= | =https://localhost/v1/documents/person= | [VERIFIED] |
+| =makeUrl(actor, submit, [name='user hunt'], Url)= | =https://localhost/v1/actors/user%20hunt/targets= | [VERIFIED] |
+| =makeUrl(graph, neighbors, [id='doc 1'], Url)= | =https://localhost/v1/graph/nodes/doc%201/neighbors= | [VERIFIED] |
+| =allServices(Services)= | =[actor,document,documentEvent,graph,relation,research,search,system,target]= | [VERIFIED] |
+| Loading the extracted source as-is into a module context | =ERROR: No permission to modify static procedure read/2= | [VERIFIED] |
+| =capabilityValue/4= compile | singleton-variable warning on =Default= in the fallthrough clause | [VERIFIED] |
+
+* Findings
+
+1. *Built-in namespace collision is a blocking defect for direct loading.* The document layer defines generic =read/2=, =read/3=, =create/2-3=, =update/2-3=, =destroy/1-2=, =search/2-3=. =read/2= collides with SWI's built-in =read/2= and the loader fails when the source is used as a module body or composed with other code. The prototype must be packaged as a module (=:- module(star_client, [exports...])=) with prefixed operations (for example =starRead/3=, =starCreate/3=) or a =star_/= naming convention for the document API surface. [VERIFIED]
+2. *Capability fallthrough clause bug.* =capabilityValue(_, _, Default, Default)= compiles with a singleton-variable warning; it is functionally the intended default-unification but should be written =capabilityValue(_, _, Default, Default) :- !.= or with an anonymous-style guard to silence the warning and make cut intent explicit. [VERIFIED]
+3. *Endpoint ontology and URL composition are sound.* Path binding, percent-encoding, query composition, and the versioned root all produced correct URLs under live evaluation, including spaces in path parameters. [VERIFIED]
+4. *Actor registry response-shape fallbacks are speculative.* =actorsFromResponse/2= accepts four envelope variants (bare list, =actors= key, =data= list, =data.actors=). Only the server's actual contract is authoritative; the unused variants should be pruned to the verified envelope or the variants should be justified by the server contract document. [UNVERIFIED against a live server]
+5. *star:// identity conflicts with STAR-RESEARCH-061 findings.* =makeStarUri/4= keys the URI on the mutable actor name, percent-encoded into the path. Research 061 established that identity should key on immutable provider-issued identifiers, never handles, because handles can be renamed or recycled. The =star://= scheme must either embed an immutable actor id as the identifier component or the reconciliation with the unified star:// authority model in STAR-RESEARCH-041 must state explicitly why actor names are a stable-enough identity class for a server-owned registry. [STATIC]
+6. *smartWalk visited-set discipline is correct in principle.* Paths carry =Visited= and membership is checked before recursion, so cycles terminate. This satisfies the note's stated requirement that local graph traversal ignores cycles. [STATIC]
+7. *RabbitMQ boundary follows STAR-RESEARCH-003/004 division of labor.* Semantic routing (flows, mailboxes, ACK/NACK policy) stays in Prolog; transport is delegated to a native adapter through multifile predicates, keeping the layer testable without a live broker. The adapter implementation is intentionally absent. [UNVERIFIED - adapter does not exist yet]
+8. *Actor-flow fan-out lacks type filtering at =runFlow/1= level.* =routeActorOutput/2= filters outputs by =actorAcceptsType/2=, but =runFlow/1= fans out unconditionally to all outputs. Whether flows should enforce input-type contracts is an open design question tied to actor capability advertisement (STAR-RESEARCH-013). [STATIC]
+9. *No error taxonomy.* =starHttp/5= surfaces raw =http_open= exceptions; there is no typed error layer mapping HTTP status classes, auth failures, or malformed envelopes into StarIntel typed errors. Repository correctness invariants require typed errors and terminal failure states. [STATIC]
+10. *Capability refresh is not concurrent-safe.* =refreshCapabilities/1= retracts and re-asserts =serverCapability/6= non-atomically; a concurrent reader can observe a partially populated registry. Same pattern applies to =refreshActors/1=. Single-threaded prototype use is fine; multi-session use needs a generation counter or swap-then-publish. [STATIC]
+
+* Related Nodes
+
+- [[file:STAR-RESEARCH-003-budgeted-supervised-prolog-inference-actors.org][STAR-RESEARCH-003 Budgeted Supervised Prolog Inference Actors]] — the CL-actor/Prolog-worker boundary this client complements
+- [[file:STAR-RESEARCH-004-internal-prolog-server-library-swi-nprolog.org][STAR-RESEARCH-004 Internal Prolog Server Library: SWI-Prolog and N-Prolog]] — the client in this note is the SWI consumer shape of that boundary
+- [[file:STAR-RESEARCH-041-unified-star-uri-authority-routing-and-fediwatch-rabbitmq.org][STAR-RESEARCH-041 Unified star:// Authority Routing]] — must reconcile the =starUri/3= projection with the unified authority model
+- [[file:STAR-RESEARCH-013-actor-capability-advertisement.org][STAR-RESEARCH-013 Actor Capability Advertisement]] — grounds =actorCapability/2= and input/output type derivations
+- [[file:../starintel-server/STAR-RESEARCH-061-identifier-normalization.org][STAR-RESEARCH-061 Canonical identifier normalization]] — governs whether actor names belong in =star://= identity paths
+- [[file:../auto-research/STAR-AUTO-RESEARCH-005-starintel-v09-prolog-expert-system.org][STAR-AUTO-RESEARCH-005 StarIntel v0.9 Prolog Projection]] — the disposable-fact-projection principle the document layer follows
+
+* Open Questions
+
+- Does the server's actor registry response use one canonical envelope, and which of the four =actorsFromResponse/2= variants is real? Needs the HTTP contract document or a live probe.
+- Should =star://<domain>/actor/<name>= carry an immutable actor id instead of the name, and how does that interact with the 041 authority split and 061 immutability findings?
+- Should =runFlow/1= enforce input-type contracts (per actor manifests) before fan-out, or is routing-side filtering in =routeActorOutput/2= sufficient?
+- Which native AMQP adapter will be implemented (SWI =library(http)=-adjacent bindings, a C adapter, or an external bridge process), and what is its concurrency and backpressure contract?
+- Is the =research= endpoint family (=research/nodes=, =research/passes=) part of the current v0.9 server contract, or aspirational? Not cross-checked against the server contract in this pass.
+- Can the document API names be renamed without breaking the operator's existing interactive usage patterns recorded in the note's example queries?
+
+* Footnotes and Glossary
+
+- *Endpoint ontology*: the =starEndpoint/4= fact table declaring every service operation as data, from which URLs, methods, and introspection are derived.
+- *Fact projection*: rebuildable Prolog facts (=starDocument/2=, =starField/3=, =starRelation/4=) mirroring canonical server documents; the JSON document remains authoritative and facts may be discarded at any time.
+- *star:// URI*: the platform's actor identity scheme, =star://<domain>/actor/<identifier>=, parsed by =starUriParts/4=.
+- *Native adapter boundary*: multifile predicates declaring AMQP transport operations that a broker client must implement, keeping semantic routing testable without a broker.
+- *Soft-404*: an HTTP 200 response for a nonexistent resource; documented as an existence-assertion trap in STAR-RESEARCH-061.
+- *Visited set*: the explicitly threaded list of already-expanded nodes in =smartWalk_= that makes cyclic graph traversal terminate.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------|----------|
+| 2026-09-08 | Pass 1: analyzed the operator's =starintel-prolog-actor.org= daily-note prototype (1699 lines, 1541 extracted source lines); verified SWI-Prolog loadability and URL composition live; documented the =read/2= built-in collision, capability-value warning, envelope speculation, star:// identity tension with 061, flow type-filtering gap, missing error taxonomy, and refresh concurrency risks; reconciled with 003, 004, 013, 041, 061, and STAR-AUTO-RESEARCH-005. | Mara (Mara[bot] via A0 operator-directed pass) | This node; SWI-Prolog session transcript 2026-09-08; uploaded note at =/a0/usr/uploads/starintel-prolog-actor.org= |

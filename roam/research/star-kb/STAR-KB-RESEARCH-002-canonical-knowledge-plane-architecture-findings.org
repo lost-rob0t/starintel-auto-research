@@ -1,0 +1,315 @@
+:PROPERTIES:
+:ID:       star-kb-design-001-canonical-knowledge-authoring-query-plane
+:END:
+#+title: STAR-KB-RESEARCH-002 Canonical Knowledge Plane Architecture Findings
+#+description: Reclassified ARADR research findings on how StarIntel should author, version, publish, query, and explain a shared Prolog knowledge corpus using the existing prolog-query-server runtime.
+#+status: REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: chatgpt-aradr-pass
+#+approval_evidence: Reclassified from the prior design slot at operator request on 2026-09-10; this document is research evidence, not implementation authorization.
+#+approval_base_commit: ff5726263c07738c64f4f06aa908c6f61d1c56ce
+#+approval_base_blob: c8e7ed9ebeef56ad0a40830ceb5ab58eebde2338
+#+approval_decided_at: NONE
+#+filetags: :starintel:star-kb:prolog:knowledge-base:query-server:couchdb:actors:starlang:research:aradr:approval:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+#+created: [2026-09-10 Thu]
+#+last_modified: [2026-09-10 Thu]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | nsaspy / repository owner | PENDING | Explicit approval of these findings as research conclusions | This document |
+| Downstream design | nsaspy / repository owner | NOT STARTED | Separate review of the implementation-ready design in =lost-rob0t/star-kb= | star-kb design PR |
+| Implementation authorization | nsaspy / repository owner | NOT STARTED | Explicit approval after design review | Not yet granted |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-10 | Reclassified the former STAR-KB-001 material from design to research after operator review determined that it described findings, alternatives, and architecture direction rather than an implementation-ready design. | ChatGPT ARADR pass | Operator instruction in ChatGPT; prior blob =c8e7ed9ebeef56ad0a40830ceb5ab58eebde2338= |
+| 2026-09-10 | Consolidated the second ARADR pass: existing PQS capabilities, safe source-authoring boundary, releases, proofs, bundle flattening, dialect evidence separation, and future probabilistic/model paths. | ChatGPT ARADR pass | Current =prolog-query-server= source and documentation |
+
+* Why This Is Research, Not Design
+
+The previous document chose a general direction, but it still spent most of its space answering questions such as:
+
+- what the existing query server already does;
+- which responsibilities should live in Git, CouchDB, StarIntel, and StarLang;
+- whether to use a second Prolog runtime;
+- whether SWI modules, Pengines, cplint, or tabling should be introduced;
+- how third-party dialect datasets should be treated;
+- which security boundaries are already present;
+- which unknowns still need measurement.
+
+Those are research findings and architecture constraints. They are inputs to design. They are not yet a file-by-file implementation contract.
+
+The implementation-ready design is therefore being written separately in the =lost-rob0t/star-kb= repository and must be approved separately before anything is promoted to =roam/implement/=.
+
+* Plain-English Research Conclusion
+
+The strongest current direction is:
+
+1. Maintain reusable world knowledge in a dedicated =star-kb= Git repository as readable, reviewable Prolog-shaped source.
+2. Do not run those source files directly in production.
+3. Parse and validate the source as data, then compile it into the safe JSON fact/rule representation already accepted by =prolog-query-server=.
+4. Let =prolog-query-server= and CouchDB remain the live knowledge runtime and durable executable store.
+5. Let StarIntel actors, prolog-rlm, command-line tools, and later StarLang all query the same service instead of carrying private copies of the knowledge base.
+6. Keep investigation observations and model outputs separate from canonical reusable knowledge unless they are deliberately promoted through a reviewed process.
+7. Use dialect enrichment as the first real consumer because it exercises facts, rules, provenance, uncertainty, geography, evidence categories, and explanation paths.
+
+* Verified Existing Runtime Capabilities
+
+The current =lost-rob0t/prolog-query-server= already provides the majority of the runtime machinery that a shared StarIntel knowledge plane would need.
+
+Verified capabilities include:
+
+- CouchDB-persisted =prolog_fact= and =prolog_rule= documents;
+- multiple named knowledge bases;
+- a safe JSON AST for variables, compounds, and goals rather than raw executable Prolog over HTTP;
+- bounded backward-chaining inference through a custom meta-interpreter;
+- query depth, solution-count, timeout, inference-step, proof-node, and proof-byte budgets;
+- synchronous =/v1/query= and =/v1/explain= endpoints;
+- asynchronous query jobs and cancellation for longer workloads;
+- query IDs and result metadata;
+- immutable knowledge releases selected by a per-KB manifest;
+- explicit release pinning for reproducible queries;
+- strict release analysis before activation;
+- revision-aware fact/rule writes and release activation;
+- proof/source information that can identify CouchDB documents used in a derivation;
+- incremental CouchDB =_changes= synchronization after initial load;
+- fail-closed behavior for unresolved knowledge conflicts;
+- separate read and write authorization capabilities;
+- a whitelist of safe builtins;
+- static release analysis for dependency/arity/recursion/negative-cycle problems.
+
+Research consequence: building another Prolog server would duplicate solved runtime concerns and create a second security and consistency boundary.
+
+* Source Authoring Finding
+
+Humans and agents should be able to maintain readable Prolog facts and rules, but production knowledge must still respect the query server's existing safe-execution boundary.
+
+The most promising compromise is a restricted source-Prolog profile:
+
+#+begin_src prolog
+located_in(columbus, ohio).
+
+located_in(X, Country) :-
+    located_in(X, State),
+    state_country(State, Country).
+#+end_src
+
+A build step reads clauses as data and accepts only the subset that can be represented by the query server's safe AST. It rejects directives, arbitrary module loading, meta-calls, dynamic database mutation, shell/filesystem/network/process access, term-expansion hooks, and any other capability that would turn knowledge source into general executable code.
+
+The source reader should reuse SWI-Prolog's parser in parse-only mode rather than invent a second Prolog parser. Parsing a term is different from consulting/executing it.
+
+* Git Versus CouchDB Finding
+
+Git and CouchDB solve different problems here.
+
+Git is a good authority for:
+
+- reviewed canonical facts/rules;
+- source citations and license records;
+- module/bundle manifests;
+- deterministic release inputs;
+- small fixtures and expected results;
+- human-readable diffs and history.
+
+CouchDB is a good authority for:
+
+- the executable fact/rule documents used by PQS;
+- active release manifests;
+- replication and revision/conflict state;
+- runtime synchronization through =_changes=.
+
+StarIntel's own document/artifact stores remain the authority for run-specific observations, scraped evidence, model scores, and other high-volume case data.
+
+Research consequence: do not turn Git into a database of every actor observation, and do not turn the runtime CouchDB representation into the only human authoring format.
+
+* Module and Bundle Finding
+
+The desired corpus will span domains such as geography, organizations, identity, social platforms, infrastructure, politics, language, and dialect.
+
+A reusable source *module* should group related facts/rules and declare what it provides and depends on. A consumer-facing *bundle* should name the complete set of modules required for one inference surface.
+
+The current query API selects one =(kb, release)= pair. Therefore the simplest V0.1 strategy is to resolve module dependencies at publication time and flatten the resulting closure into one immutable PQS KB release.
+
+This can duplicate shared facts between bundles. That is acceptable until measurements show that duplication is expensive enough to justify native cross-KB import/join semantics.
+
+* Release and Publication Finding
+
+PQS already has the right primitive for coherent knowledge changes: stage a new release, test it while pinned, then atomically switch the active-release manifest.
+
+A future =star-kb= publisher should therefore:
+
+#+begin_src text
+source commit
+   -> parse/validate
+   -> deterministic compile
+   -> fixture tests
+   -> stage PQS release
+   -> /v1/analyze
+   -> pinned /v1/query + /v1/explain
+   -> review release diff
+   -> activate with strict:true + current _rev
+#+end_src
+
+The normal publisher must never silently downgrade to non-strict activation.
+
+* Provenance Finding
+
+PQS already generates query IDs and returns the resolved KB/release plus query budgets, limit-hit state, proof usage, and refresh information. Explained queries can identify runtime source documents.
+
+Therefore StarIntel should preserve those real runtime identifiers instead of inventing a parallel query identity scheme.
+
+Generated runtime knowledge documents should also retain non-executable metadata mapping them back to source repository commit, source module/path, source clause identity, source-record IDs, and license metadata.
+
+This creates a trace such as:
+
+#+begin_src text
+StarIntel derived document
+  -> actor version
+  -> PQS query_id
+  -> PQS kb + release
+  -> proof source CouchDB _id/_rev
+  -> generated source metadata
+  -> star-kb module + clause + source citation
+#+end_src
+
+* Canonical Knowledge Versus Observation Finding
+
+Three categories must not be collapsed:
+
+| Category | Meaning | Example |
+|----------+---------+---------|
+| canonical fact/rule | reviewed reusable knowledge | =located_in(columbus, ohio)= |
+| observation | something seen in one run/document | post contains token =pop= |
+| derived/model evidence | output of an inference/model | dialect model score 0.71 for Inland North |
+
+There should be no automatic observation -> canonical-KB feedback loop. Otherwise one inference can be re-ingested as independent truth and amplify its own error.
+
+Promotion to canonical knowledge should be explicit, source-bearing, reviewable, and released in a later KB version.
+
+* Dialect Enrichment Finding
+
+Dialect enrichment is a useful first reference consumer, but it must distinguish evidence types.
+
+At minimum separate:
+
+- linguistic evidence: lexical, syntactic, orthographic, and later phonological features;
+- contextual geographic evidence: regional brands/institutions/transport vocabulary;
+- named geographic evidence: explicit cities, roads, businesses, states, teams, and other place entities;
+- learned-model evidence: versioned neural/model scores.
+
+A regional brand mention may support geography/context while not being a dialect feature itself.
+
+The actor should return candidate regions with evidence and uncertainty rather than claim that dialect proves a person's exact location.
+
+* Dialect Data Finding
+
+Third-party survey/corpus data are useful for benchmarks and research, but the long-term reusable production corpus should be self-sourced or otherwise clearly licensed for its intended use.
+
+The MyDialect/Harvard-derived material is especially useful as a methodological benchmark, but its stated CC BY-NC-SA licensing means it should not be silently copied into an unrestricted general-purpose corpus.
+
+A first-party dialect survey should distinguish current residence from dialect-acquisition history and should split evaluation by respondent/speaker rather than by individual post to avoid leakage.
+
+Raw survey responses are observations/training data, not automatically canonical facts. Reviewed aggregate conclusions may later be promoted with provenance.
+
+* Learned Models and Probabilistic Logic Finding
+
+Deep learning is best treated as an independent evidence producer for natural text/audio rather than the canonical truth source.
+
+A future model can produce versioned region scores/features that Prolog combines with symbolic rules and other evidence.
+
+=cplint= and SWI tabling remain legitimate future candidates, but neither is required to validate the shared authoring/release/proof architecture. Both expand execution/performance semantics and deserve focused research after baseline workloads exist.
+
+* StarLang Finding
+
+StarLang should remain runtime-neutral. The knowledge service should look like a generic HTTP/RPC capability rather than adding Prolog syntax or semantics to the language core.
+
+That gives Common Lisp actors and future StarLang actors the same service contract and keeps Prolog-specific implementation inside the knowledge subsystem.
+
+* Questions the Design Must Answer
+
+The downstream design must turn the findings above into exact implementation contracts, especially:
+
+- exact restricted source grammar and rejected constructs;
+- source/module/bundle manifest schemas;
+- deterministic clause and release identity algorithm;
+- compilation and publication commands;
+- file/directory layout;
+- exact PQS request/response mapping;
+- exact publication state machine and failure behavior;
+- exact provenance fields that survive into runtime documents;
+- test layers and acceptance gates;
+- what belongs in V0.1 versus later slices;
+- what the first =star.core.test= fixture proves;
+- how the first dialect bundle plugs in without changing the generic architecture.
+
+Until those are specified, this remains research rather than an implementation-ready design.
+
+* Sources
+
+- [[https://github.com/lost-rob0t/prolog-query-server][lost-rob0t/prolog-query-server]], =main= reviewed at =05c1a99f8642f9db591115fdd3184a2c89165386= on 2026-09-10.
+- [[https://github.com/lost-rob0t/starintel-server][lost-rob0t/starintel-server]], actor/runtime boundary reviewed on 2026-09-10.
+- [[https://github.com/lost-rob0t/star-lang][lost-rob0t/star-lang]], adapter/runtime direction reviewed on 2026-09-10.
+- [[https://github.com/lost-rob0t/prolog-rlm][lost-rob0t/prolog-rlm]], reasoning-client context reviewed on 2026-09-10.
+- [[https://www.swi-prolog.org/pldoc/man?section=termrw][SWI-Prolog term reading/writing]], parser facilities considered for parse-only source reading.
+- [[https://www.swi-prolog.org/pldoc/man?section=tabling][SWI-Prolog tabling]], deferred optimization candidate.
+- [[https://www.swi-prolog.org/pack/list?p=cplint][SWI-Prolog cplint]], deferred probabilistic-logic candidate.
+- [[https://docs.couchdb.org/en/latest/api/database/changes.html][Apache CouchDB _changes API]], synchronization semantics.
+- [[https://mydialect.us/quiz-full.html][MyDialect full survey]], benchmark/licensing context.
+
+* Footnotes and Glossary
+
+[fn:actor] *Actor*: a component that receives messages and performs one bounded behavior such as enrichment or persistence.
+
+[fn:ast] *AST (Abstract Syntax Tree)*: structured data representing parsed code. PQS accepts JSON structures representing terms/goals rather than arbitrary Prolog source strings.
+
+[fn:bundle] *Bundle*: the named dependency closure of reusable source modules that one consumer wants to query. V0.1 can compile a bundle into one PQS KB release.
+
+[fn:canonical] *Canonical knowledge*: reviewed reusable shared knowledge. It can later be revised; canonical means maintained source of truth for the system, not infallible truth.
+
+[fn:clause] *Clause*: one Prolog fact or rule.
+
+[fn:consult] *Consult*: load a Prolog file as executable program code. The proposed source compiler should parse clauses but not consult them.
+
+[fn:couchdb] *CouchDB*: document database used by PQS for executable fact/rule documents, manifests, revisions, replication, and change synchronization.
+
+[fn:dependency-closure] *Dependency closure*: recursively include every module required by the requested modules until no new dependencies remain.
+
+[fn:fact] *Fact*: a clause that states a relation directly, such as =located_in(columbus, ohio).=
+
+[fn:fail-closed] *Fail closed*: refuse to proceed when correctness/safety cannot be established rather than guessing a winner or weakening a gate.
+
+[fn:ground] *Ground*: containing no Prolog variables. PQS persisted facts are required to be ground.
+
+[fn:inference] *Inference*: proving a requested logical goal from facts and rules.
+
+[fn:kb] *KB*: knowledge base, a named collection of facts and rules.
+
+[fn:manifest] *Manifest*: small metadata record that describes composition/version state; PQS uses a manifest to select an active release.
+
+[fn:meta-interpreter] *Meta-interpreter*: a Prolog program that interprets a deliberately restricted rule representation instead of handing stored data to unrestricted Prolog execution.
+
+[fn:module] *Source module*: an organizational group of related reusable facts/rules. It is not necessarily a SWI runtime module.
+
+[fn:observation] *Observation*: evidence captured from one document/run. It is not automatically reusable shared knowledge.
+
+[fn:pqs] *PQS*: =prolog-query-server=, the existing CouchDB-backed expert-system service.
+
+[fn:proof] *Proof tree*: structured explanation showing the facts/rules/subgoals used to prove a result.
+
+[fn:provenance] *Provenance*: information that answers where a fact, rule, observation, or derived result came from and which exact versions participated.
+
+[fn:release] *Release*: one immutable version of a PQS knowledge base that can be staged, queried, and selected as active.
+
+[fn:rev] *=_rev=*: CouchDB revision token used for optimistic concurrency; stale writers conflict instead of silently overwriting newer state.
+
+[fn:rule] *Rule*: a clause whose conclusion follows when its body can be proven.
+
+[fn:strict] *Strict activation*: PQS release activation with =strict:true= so structural analyzer errors block cutover.
+
+[fn:tabling] *Tabling*: Prolog memoization of subgoals/answers, useful for some recursive workloads but deferred until benchmarks exist.

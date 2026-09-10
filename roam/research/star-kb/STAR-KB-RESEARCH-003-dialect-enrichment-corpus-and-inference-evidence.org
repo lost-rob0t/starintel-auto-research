@@ -1,0 +1,250 @@
+:PROPERTIES:
+:ID:       star-kb-research-003-dialect-enrichment-corpus-inference-evidence
+:END:
+#+title: STAR-KB-RESEARCH-003 Dialect Enrichment Corpus and Inference Evidence
+#+description: Research-only evidence pass on dialect and regional-language enrichment for StarIntel, including self-sourced corpus options, public reference datasets, deterministic and probabilistic Prolog approaches, learned models, label semantics, licensing, and the existing prolog-query-server runtime boundary.
+#+status: REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: research-worker
+#+approval_evidence: worker-authored research requires explicit human research-conclusion approval
+#+approval_base_commit: 37f95b28608404c0653084ab454612147b71889c
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+created: [2026-09-10 Thu]
+#+last_modified: [2026-09-10 Thu]
+#+filetags: :starintel:star-kb:dialect:linguistics:prolog:query-server:corpus:machine-learning:research:aradr:approval:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Dialect-enrichment research conclusion | StarIntel operator | PENDING | Explicit human approval of this research conclusion | |
+| Dialect actor / corpus design | StarIntel operator | NOT STARTED | Approved research plus explicit request to begin design | Operator explicitly requested research only on 2026-09-10 |
+| Dialect implementation | Relevant repository maintainers | NOT STARTED | Explicitly approved governing design plus implementation evidence | No implementation authorization in this pass |
+| Production corpus source licensing | Dataset/repository maintainer and StarIntel operator | PENDING | Per-source license, terms, provenance, and redistribution review | Source matrix below |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-10 | Created a research-only dialect-enrichment evidence pass; no design or implementation changes were made. | research-worker | Operator request in ChatGPT; sources retrieved 2026-09-10 |
+
+* Research Question
+
+What evidence is available for adding dialect and regional-language analysis as a StarIntel enrichment capability when reusable dialect knowledge will live in =lost-rob0t/star-kb= and logical inference can use the existing =lost-rob0t/prolog-query-server= (PQS)?
+
+This pass compares evidence relevant to three candidate families named by the operator: symbolic Prolog reasoning, StarLang integration, and learned/deep models. It also examines how StarIntel can self-source a higher-quality corpus instead of depending on one third-party dialect quiz dataset.
+
+This document is deliberately research only. It does not select a concrete actor contract, source grammar, scoring algorithm, repository layout, API shape, model architecture, or implementation sequence. Those are design decisions and are explicitly outside this pass.
+
+* Operator Constraints Recorded for This Pass
+
+- Reusable dialect knowledge is intended to live in =lost-rob0t/star-kb=.
+- The existing Prolog query server is preferred over embedding a separate SWI-Prolog process inside each Common Lisp actor.
+- StarLang and deep learning remain candidates worth researching rather than assumptions about the final implementation.
+- The desired long-term corpus is larger than dialect alone: reusable facts and rules should be capable of serving many StarIntel actors.
+
+* Verified Current Runtime Facts
+
+** prolog-query-server
+
+The current PQS repository describes CouchDB as the durable knowledge store and SWI-Prolog as the inference engine. Facts and rules are persisted as CouchDB documents, converted from a restricted JSON abstract syntax tree (AST), loaded into an isolated in-memory clause set for a named KB, and evaluated by a bounded meta-interpreter. The public expert-system surface includes query, explanation, reload, and knowledge inspection operations.
+
+The runtime deliberately rejects raw executable Prolog and arbitrary predicate calls over HTTP. Persisted facts must be ground, rules use structured head/body terms, and inference is limited to stored clauses plus an allowlisted builtin surface. This is relevant to =star-kb= because readable source material cannot simply be treated as arbitrary code if it is eventually published into PQS.
+
+PQS already supports immutable logical releases. Facts/rules may be associated with a named release, a single manifest selects the active release for a KB, staged releases can be queried explicitly before activation, and changing the manifest selects the new release atomically from the query runtime's perspective. Active non-legacy releases are immutable; rollback is performed by reactivating an earlier release.
+
+PQS also already enforces hard resource ceilings around loading, inference, proof generation, and HTTP request size. Current documented defaults include a 5-second query ceiling, maximum depth 32, maximum 100 solutions, one million inference steps, 10,000 loaded knowledge documents, and 16 MiB serialized KB size per loaded KB/release. These are current runtime facts, not claims that those limits are sufficient for a future dialect corpus; corpus scale must be measured against them.
+
+The current resource documentation also exposes asynchronous queries, cooperative cancellation, stable resource-exhaustion errors, query IDs, and bounded proof output. These capabilities make PQS suitable for empirical evaluation as a shared inference runtime, but throughput and corpus-size suitability remain open research questions.
+
+** star-kb
+
+The =lost-rob0t/star-kb= repository exists and currently carries the RAGE research/design/implementation control-plane skeleton. The current repository README describes the Org tree as its source of truth and separates research, design, implementation, indexes, scripts, and tests. A default-branch code search for =dialect= returned no current implementation result during this pass. Therefore this pass treats the dialect corpus as not yet implemented rather than inferring a hidden product contract.
+
+** StarLang
+
+The current =lost-rob0t/star-lang= repository is a Common-Lisp-only compiler and durable actor runtime. Its declared systems include generic HTTP and external-process adapter ports as well as actor protocol, mailbox, supervision, journal, capability, artifact, canonical JSON, and runtime components. The repository explicitly states that current implementation is not yet fully conformant with its approved research sequence. This supports researching StarLang as a future consumer/orchestration path, but does not prove a dialect-specific StarLang integration today.
+
+* Dialect Quiz and Survey Methodology Findings
+
+** MyDialect / Harvard-derived baseline
+
+The current MyDialect site offers 24-, 60-, 122-, and 148-question modes. Its full mode states that 122 questions come from the original Harvard Dialect Survey. The site describes its core state score as the average, across the user's answers, of the probability that a resident of a state gave that same answer. It then applies Gaussian kernel smoothing to state scores to produce the continuous map. This establishes that the visible product is fundamentally a survey-response similarity model plus map smoothing rather than evidence of a deep neural dialect classifier.
+
+MyDialect currently offers a downloadable state/question/answer percentage table covering 51 jurisdictions and 148 questions. The site attributes the Harvard-derived portion to Bert Vaux and Scott Golder under =CC BY-NC-SA 3.0=. The noncommercial/share-alike terms mean that this material should not be silently treated as an unrestricted StarIntel production corpus. Whether a particular deployment or derived artifact complies is a licensing question that requires explicit review or separate permission.
+
+The Harvard-style state aggregation is useful as a baseline but has an obvious resolution limit: a state is not a dialect. Regional speech may cross state boundaries, differ within states, and change through mobility and social contact. The map's smoothing improves display continuity but does not create more underlying geographic observations.
+
+** Geographic resolution evidence
+
+DialectGram research explicitly addresses dialectal variation at multiple geographic resolutions and argues against requiring a single predefined regional resolution. Its method learns dialect-sensitive word representations from geographically associated text and permits analysis at a chosen resolution after training. This is useful evidence that a future StarIntel corpus should preserve the finest defensible geographic labels available instead of collapsing everything permanently to states.
+
+Older social-media geolocation work by Han, Cook, and Baldwin shows that location-indicative lexical features can predict geographic location from text. That is evidence that natural text contains geographic lexical signal. It is not evidence that every geographic lexical signal is dialect, or that a person's current posting location is the same as their dialect-acquisition region.
+
+* Label Semantics and Mobility Findings
+
+The strongest recurring problem in the available data is label meaning.
+
+The Ohio State Geographic Mobility and Lexical Processing project records all places participants lived, how long they lived there, their age at residence, parents' and close contacts' origins, visits, self-identified dialect, and regional identification. Its published dialect-exposure scoring gives additional weight to residence before age 18 and also includes current residence and other exposure sources. This is direct evidence that serious dialect-exposure research treats linguistic experience as a history, not a single current-location field.
+
+Therefore at least four labels that may look superficially equivalent must be kept conceptually distinct during later design work:
+
+- where text/audio was produced or posted;
+- current residence;
+- childhood/adolescent residence and other acquisition-period exposure;
+- self-identified dialect or regional affiliation.
+
+A geotagged post is strong evidence for where that post was associated geographically under the source's collection method. It is only weak/indirect evidence for where the speaker learned their dialect unless additional history is available.
+
+Another distinction is between linguistic evidence and geographic context. A regional lexical form can be dialect evidence; a named local business, sports team, road, or place mention can instead be contextual geographic evidence. Both can be useful enrichment signals, but conflating them would make a claimed dialect explanation misleading.
+
+* Public and Research Corpus Findings
+
+| Source | Modality / label | Useful evidence | Important limitation for StarIntel |
+|--------+------------------+-----------------+------------------------------------|
+| MyDialect / Harvard Dialect Survey derivative | Survey answers aggregated by U.S. state | Direct lexical/usage-question baseline; interpretable answer distributions | =CC BY-NC-SA 3.0=; state aggregation; third-party derived dataset |
+| Geo-Twitter2019 | Geographically associated English tweets; U.S./U.K. and U.S. state research | Large natural-text evidence; repository reports 3,163,626 tweet IDs, including 2,075,394 U.S. tweets | Repository distributes tweet IDs rather than a stable full-text corpus; later hydration depends on platform availability/access and deletions; post geography is not acquisition history |
+| DialectGram / DialectSim research | Geographically associated text and learned dialect-sensitive senses | Evidence for multi-resolution learned representation | Research model/evaluation does not by itself provide a StarIntel-owned production corpus |
+| Mozilla Common Voice English 26.0 | Scripted speech with self-declared accent metadata | Current catalog reports 2,583,051 clips, 3,780.95 hours, 100,172 speakers; U.S. English metadata includes 573,393 clips from 10,970 speakers | Scripted/read speech differs from natural conversation; accent labels are self-declared and coarse; dataset terms/usage restrictions must be reviewed independently of copyright license |
+| CORAAL 2023.06 | Conversational Regional African American Language speech/transcripts | Valuable spontaneous regional sociolinguistic data and a check against reducing U.S. dialect modeling to one social variety | =CC BY-NC-SA 4.0= for research corpus; some components have additional licensing paths |
+| George Mason Speech Accent Archive | Common elicited paragraph plus speaker background | Matched speech content makes phonetic comparison convenient; native and non-native English examples | =CC BY-NC-SA 4.0=; elicited read passage rather than natural discourse |
+| First-party StarIntel survey/corpus | Whatever labels and consent StarIntel collects | Only path in this list that can be authored around StarIntel's desired label semantics and provenance from day one | Requires its own consent, retention, deletion, publication, quality-control, sampling, and licensing policy |
+
+The corpus comparison does not establish that every listed dataset may be copied into =star-kb=. A production-source decision must examine the exact license and terms of each source, what is redistributed, whether only derived statistics are stored, and whether a separate license is available.
+
+* Self-Sourcing Findings
+
+The available research strongly supports collecting more than a single state field if StarIntel builds a first-party corpus. Useful research dimensions include residential history with ages/durations, current residence, self-described regional/dialect background, and provenance for each response or recording. These dimensions would allow later research to test which history fields are predictive rather than baking one assumption into the labels.
+
+A first-party survey can separately collect structured dialect choices and optional free-form language/audio. Structured questions provide highly interpretable feature frequencies; free-form language provides training/evaluation material for models that operate on ordinary posts or transcripts. The research does not establish the exact question set, sampling strategy, consent wording, retention period, or publication policy; those remain design/policy work.
+
+Speaker-level separation matters for learned-model evaluation. If multiple samples from one participant are split across training and test data, a model can partially recognize speaker-specific patterns rather than demonstrating generalization to unseen speakers. A later benchmark should therefore investigate speaker-disjoint evaluation wherever speaker identity is available. This is an evaluation finding, not a final benchmark specification.
+
+* Symbolic Prolog Findings
+
+The dialect problem contains many pieces that map naturally to symbolic facts and rules: lexical variants, regional associations, source reliability, provenance, temporal validity, language variety, contradictions, and explanation of which observations supported a candidate region. PQS already returns proof/source information for deterministic inference, so an explainable symbolic baseline is technically plausible without adding another Prolog server.
+
+However, the central MyDialect-style task is probabilistic: observations have different geographic distributions and none of them should normally produce a categorical location claim. Current PQS is a bounded deterministic expert-system runtime; its documented safe AST and builtins do not themselves establish probabilistic logic programming semantics.
+
+There are mature Prolog-related probabilistic systems worth comparing in later research/design:
+
+- =cplint= is an SWI-Prolog pack providing inference and learning for probabilistic logic programs.
+- ProbLog is a probabilistic logic programming language/toolbox supporting probabilistic facts, inference, learning, and related tasks; it is a subset/logic representation language rather than ordinary unrestricted Prolog.
+- DeepProbLog extends ProbLog with neural predicates whose probabilities are parameterized by neural networks.
+
+None of those facts establish drop-in compatibility with PQS. PQS deliberately has its own safe stored-clause interpreter and restricted builtin surface. Using cplint, ProbLog, or DeepProbLog inside or beside PQS would require a separate compatibility/security/operational evaluation rather than assuming that sharing the word "Prolog" makes the runtimes interchangeable.
+
+* Learned-Model Findings
+
+Natural-language dialect enrichment is a different problem from answering a structured quiz. A learned text model can potentially exploit combinations of lexical, syntactic, semantic, and contextual features that were never manually encoded as survey questions. DialectGram demonstrates one research path for learning geographic lexical/sense variation from geotagged text; location-indicative-word work demonstrates another more explicit feature-selection path.
+
+Speech adds phonetic/phonological evidence unavailable from text. Common Voice, CORAAL, and the Speech Accent Archive demonstrate three very different speech regimes: large scripted crowdsourced speech, spontaneous sociolinguistic conversation, and a fixed elicitation passage. Their differences are evidence that a future speech benchmark must account for domain mismatch rather than treating all audio as equivalent.
+
+DeepProbLog is relevant to the operator's "deep learning" and Prolog candidates because it provides an existing neural-symbolic research framework instead of forcing a binary choice between rules and neural models. Its current project describes neural predicates as probabilistic facts parameterized by neural networks and depends on ProbLog/PyTorch. This makes it a candidate for later experimental comparison, not evidence that it should replace PQS or become the production runtime.
+
+* StarLang Findings
+
+StarLang already has generic HTTP and external-process adapter systems, while its normalized IR is intended to remain runtime-neutral. That means a later StarLang actor could in principle consume an external knowledge/inference service without embedding Prolog syntax into the StarLang language core. This is a compatibility observation only. No dialect-specific StarLang syntax or adapter contract was designed in this pass.
+
+Because StarLang currently reports that it is not yet fully conformant with its approved research sequence, a dialect project should not use current implementation details as justification for freezing a permanent dialect-specific language feature before the runtime boundary is stable.
+
+* Cross-Candidate Research Comparison
+
+| Candidate family | What existing evidence says it is good at | What the evidence does not settle |
+|------------------+-------------------------------------------+-----------------------------------|
+| PQS-backed symbolic Prolog | Reusable facts/rules, bounded inference, proof provenance, deterministic releases, interpretable rules | Probability calibration, large-corpus throughput, natural-text feature extraction, best scoring semantics |
+| Probabilistic / neural-symbolic logic | Explicit uncertainty; existing cplint, ProbLog, and DeepProbLog research/software | Safe integration with PQS, operational complexity, performance at StarIntel scale, whether it outperforms simpler calibrated models |
+| Learned text/speech models | Free-form text/audio, latent feature combinations, multi-resolution research precedents | Label quality, domain transfer, explainability, calibration, corpus rights, production serving cost |
+| StarLang | Runtime-neutral actor/orchestration path with HTTP/process adapters | Dialect-specific contract, timing, and whether any new language feature is needed at all |
+
+The evidence favors treating these as potentially complementary rather than mutually exclusive, but selecting how they compose would be design. This pass intentionally stops before that decision.
+
+* Contradictions and Risks
+
+- *Dialect versus geolocation*: many public corpora label where content was posted, while the requested capability concerns language variety. Treating the two labels as identical would overstate evidence.
+- *State-level data versus real dialect regions*: convenient administrative boundaries do not necessarily match linguistic boundaries or within-state variation.
+- *Reproducibility versus social-media hydration*: tweet-ID corpora can become less reproducible as posts are deleted, accounts disappear, or platform access rules change.
+- *Readable Prolog versus PQS safety*: human-friendly Prolog source is attractive for =star-kb=, while PQS correctly rejects arbitrary executable Prolog over its runtime API. Any future bridge needs explicit validation rather than direct consultation.
+- *Huge reusable corpus versus current PQS ceilings*: current default loaded-KB limits are 10,000 documents / 16 MiB; suitability for a large StarIntel corpus has not been benchmarked.
+- *Shared KB versus run observations*: continuously generated actor observations can dwarf reviewed reusable knowledge and can contain errors. Automatically promoting observations into canonical knowledge risks feedback loops and corpus contamination.
+- *Interpretability versus model capability*: symbolic rules provide clear proof paths; learned models may capture subtler patterns but require additional explanation/calibration evidence.
+- *License versus data usefulness*: several high-value dialect corpora use noncommercial/share-alike licenses. Research usefulness does not equal unrestricted redistribution or production use.
+- *Sampling bias*: web surveys, social media, scripted crowdsourcing, and sociolinguistic interview corpora all sample different populations and communication styles. Accuracy measured on one source may not transfer to StarIntel inputs.
+
+* Unresolved Questions for a Later Pass or Design Gate
+
+- What geographic ontology should dialect evidence ultimately use: states, linguistic regions, metro areas, coordinates, hierarchical regions, or multiple simultaneous resolutions?
+- What first-party survey/history fields provide enough acquisition/exposure signal without collecting unnecessary data?
+- What existing Harvard/Vaux/Golder respondent-level data can still be obtained under terms compatible with the intended use, as opposed to only state-aggregated derivatives?
+- What source licenses permit storing raw material, derived aggregate probabilities, embeddings, or only research results?
+- What is PQS throughput and memory behavior at 10^3, 10^4, and larger logical-clause counts for dialect-like workloads?
+- Is the current per-KB synchronization/query locking behavior a practical bottleneck under concurrent actor enrichment?
+- Does a simple calibrated symbolic/statistical baseline already perform well enough that probabilistic logic adds no useful value?
+- If probabilistic logic is useful, should experiments compare cplint, ProbLog, DeepProbLog, or an external calibrated scorer without modifying PQS?
+- How should uncertainty and abstention be evaluated so weak text never becomes a falsely precise origin claim?
+- How should linguistic evidence be kept distinct from named-entity/place/contextual geographic evidence in explanations?
+- What minimum amount of free-form text or speech is needed before any dialect inference is meaningfully calibrated?
+- What speaker-disjoint and geographic-holdout benchmark best measures generalization rather than memorization?
+- What consent, deletion, retention, and publication rules should govern a first-party survey and audio corpus?
+
+* Research Conclusion
+
+There is enough evidence to justify continued work on dialect enrichment, but not enough evidence to freeze a design in this pass.
+
+The strongest verified foundation already present in the StarIntel ecosystem is PQS for bounded, auditable reusable symbolic inference. MyDialect provides a useful interpretable survey baseline but its Harvard-derived data are license-constrained and state-aggregated. Geo-tagged social text demonstrates scalable geographic language signal but has weaker dialect-acquisition labels. Speech corpora provide additional phonetic evidence but differ substantially in style and licensing. Mobility research shows that residential/exposure history is materially richer than current location alone.
+
+The research also establishes credible alternatives beyond deterministic rules: cplint/ProbLog provide probabilistic-logic approaches, DeepProbLog supplies a neural-symbolic approach, and DialectGram provides a learned multi-resolution geographic-language precedent. None has yet been benchmarked against StarIntel's actual inputs or integrated with PQS.
+
+The next gate is *operator review of this research*. Per the operator's explicit instruction, dialect-specific design remains =NOT STARTED= in this pass. No design file was created or modified and no implementation in =lost-rob0t/star-kb=, =starintel-server=, =prolog-query-server=, or =star-lang= is authorized by this document.
+
+* Sources
+
+** StarIntel repositories reviewed 2026-09-10
+
+- [[https://github.com/lost-rob0t/star-kb][lost-rob0t/star-kb]]
+- [[https://github.com/lost-rob0t/prolog-query-server][lost-rob0t/prolog-query-server]]
+- [[https://github.com/lost-rob0t/prolog-query-server/blob/main/docs/knowledge-releases.md][PQS versioned knowledge-base releases]]
+- [[https://github.com/lost-rob0t/prolog-query-server/blob/main/docs/resource-limits.md][PQS query resource limits, deadlines, and cancellation]]
+- [[https://github.com/lost-rob0t/star-lang][lost-rob0t/star-lang]]
+- [[https://github.com/lost-rob0t/starintel-auto-research][lost-rob0t/starintel-auto-research]]
+
+** Linguistics and corpus sources retrieved 2026-09-10
+
+- [[https://mydialect.us/][MyDialect — How Do You Talk?]]
+- [[https://mydialect.us/quiz-full.html][MyDialect full language quiz]]
+- [[https://aclanthology.org/2020.scil-1.18/][Jiang et al. 2020 — DialectGram: Automatic Detection of Dialectal Changes with Multi-geographic Resolution Analysis]]
+- [[https://github.com/hjian42/Geo-Twitter2019][Geo-Twitter2019 research dataset repository]]
+- [[https://aclanthology.org/C12-1064/][Han, Cook, and Baldwin 2012 — Geolocation Prediction in Social Media Data by Finding Location Indicative Words]]
+- [[https://u.osu.edu/geomob/dialect-exposure/][Ohio State Geographic Mobility and Lexical Processing — Dialect exposure]]
+- [[https://u.osu.edu/geomob/][Ohio State Geographic Mobility and Lexical Processing Project]]
+- [[https://mozilladatacollective.com/datasets/cmqim2hn800ssnr07gvmpcnwu][Mozilla Common Voice Scripted Speech 26.0 — English]]
+- [[https://is-usslingtools.uoregon.edu/coraal/][Corpus of Regional African American Language (CORAAL)]]
+- [[https://accent.gmu.edu/][George Mason Speech Accent Archive]]
+
+** Probabilistic and neural-symbolic sources retrieved 2026-09-10
+
+- [[https://www.swi-prolog.org/pack/list?p=cplint][SWI-Prolog cplint pack]]
+- [[https://problog.readthedocs.io/en/latest/modeling_basic.html][ProbLog model documentation]]
+- [[https://github.com/ML-KULeuven/problog][ProbLog repository]]
+- [[https://github.com/ML-KULeuven/deepproblog][DeepProbLog repository]]
+
+* Footnotes and Glossary
+
+- *Dialect* :: A language variety associated with a community or population and characterized by patterns in vocabulary, grammar, pronunciation, discourse, or other linguistic features; it is not identical to an administrative region.
+- *Dialect acquisition / exposure* :: The history of places, people, and language varieties that shaped a speaker's linguistic experience; current residence is only one possible component.
+- *PQS* :: =prolog-query-server=, the existing CouchDB-backed SWI-Prolog expert-system runtime.
+- *KB* :: Knowledge base, a named collection of facts and rules.
+- *AST* :: Abstract syntax tree; here, the restricted structured JSON representation PQS accepts instead of arbitrary executable Prolog source.
+- *Ground fact* :: A fact containing no logical variables.
+- *Meta-interpreter* :: A Prolog program that interprets a restricted representation of facts/rules instead of directly executing arbitrary stored source code.
+- *Release* :: An immutable logical version of a PQS knowledge base selected by an active-release manifest or explicitly pinned by a query.
+- *Provenance* :: Evidence describing where a fact, rule, observation, model result, or proof came from and which source/version produced it.
+- *Calibration* :: Agreement between reported confidence/probability and empirical outcome frequency; a 0.8 prediction should mean something measurable rather than merely being a score.
+- *Abstention* :: Returning insufficient evidence instead of forcing a region prediction when the available signal is weak or conflicting.
+- *Geotagged corpus* :: Text or speech associated with a geographic label. The label describes the collection geography and does not automatically establish dialect-acquisition origin.
+- *Speaker-disjoint split* :: Evaluation where the same speaker cannot appear in both training and test sets.
+- *Neural-symbolic* :: A system combining learned neural components with explicit symbolic/probabilistic logic, such as DeepProbLog's neural predicates.
+- *Noncommercial/share-alike* :: License conditions that can restrict commercial use and require derivatives to be distributed under compatible terms; exact obligations depend on the source license and use.

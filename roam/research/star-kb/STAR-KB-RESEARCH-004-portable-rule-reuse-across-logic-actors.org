@@ -1,0 +1,210 @@
+:PROPERTIES:
+:ID:       star-kb-research-004-portable-rule-reuse-across-logic-actors
+:END:
+#+title: STAR-KB-RESEARCH-004 Portable Rule Reuse Across Logic Actors
+#+description: Research-only follow-up on making star-kb reusable by prolog-query-server, direct Prolog actors, and StarLang logic actors without making any one runtime the semantic authority.
+#+status: REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: research-worker
+#+approval_evidence: worker-authored research requires explicit human research-conclusion approval
+#+approval_base_commit: e98eeec79261fb00f20e8e6a234d9b26e380f663
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+created: [2026-09-10 Thu]
+#+last_modified: [2026-09-10 Thu]
+#+filetags: :starintel:star-kb:prolog:star-lang:logic:actors:rules:reuse:portable:research:aradr:approval:
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Portable rule-reuse research conclusion | StarIntel operator | PENDING | Explicit human approval of this research conclusion | |
+| Logic-package design | StarIntel operator | NOT STARTED | Approved research plus explicit request to begin design | Operator has not authorized a design in this follow-up |
+| Implementation | Relevant repository maintainers | NOT STARTED | Explicitly approved governing design plus implementation evidence | No implementation authorization in this pass |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-10 | Recorded the operator requirement that reusable star-kb rules must be consumable by direct Prolog actors and StarLang logic actors as well as prolog-query-server; reviewed current StarLang logic IR/protocol and SWI adapter evidence. | research-worker | Operator follow-up in ChatGPT; repository source reviewed 2026-09-10 |
+
+* Research Question
+
+Can =lost-rob0t/star-kb= serve as one reusable source of facts and rules for multiple execution styles rather than being coupled to =prolog-query-server=, specifically allowing direct Prolog actors and StarLang logic actors to reuse the same rule knowledge?
+
+This is a research-only follow-up to [[id:star-kb-research-003-dialect-enrichment-corpus-inference-evidence][STAR-KB-RESEARCH-003]]. It records the operator's portability requirement and checks whether the current StarLang and PQS source provide a credible foundation. It does not choose the final package schema, source grammar, compiler architecture, import syntax, or actor API.
+
+* Operator Requirement
+
+The reusable rule corpus in =star-kb= must not be defined as "knowledge only executable through PQS". The same reviewed logical knowledge should be reusable by at least these consumer classes:
+
+#+begin_src text
+star-kb reusable rules/facts
+        |
+        +--> prolog-query-server runtime
+        |
+        +--> direct/native Prolog actor
+        |
+        +--> StarLang logic actor
+#+end_src
+
+PQS remains an important shared service, but it is one execution target/consumer rather than the only path to the rules.
+
+* Verified StarLang Logic Facts
+
+Current =lost-rob0t/star-lang= source already contains a distinct logic subsystem rather than only generic HTTP/process adapters.
+
+The =star-logic-protocol= package defines stable backend identities for =lisa=, =swi-prolog=, and =n-prolog=. Backend descriptors declare semantic profiles, capabilities, isolation classes, hard limits, cooperative limits, build identity, and version. Backend selection is based on a requested semantic profile and required capabilities/limits rather than being hard-coded to one Prolog engine.
+
+The protocol also defines generic lifecycle/operation boundaries including:
+
+- =open-logic-session= with =package-id= and =package-digest=;
+- =apply-logic-fact-delta=;
+- =invoke-logic-operation=;
+- =next-logic-result=;
+- cancellation/status/health operations.
+
+This is strong evidence that StarLang already anticipates digest-identified reusable logic packages whose execution backend can vary.
+
+The current =star-logic-ir= makes that package identity more explicit. A logic-package identity contains a =package-id=, =package-version=, =package-digest=, =mapping-id=, and =mapping-digest=. Logic calls also carry a semantic profile, backend policy, named operation, answer/proof policy, required capabilities and limits, bindings, budget, and source span. Normalized logic IR explicitly rejects native objects/functions/engine handles in favor of portable values.
+
+This means the desired portability requirement is aligned with current StarLang concepts: a caller can identify one immutable logical package independently from the selected backend and separately identify the mapping that materializes that package for a backend.
+
+* Current SWI-Prolog Adapter Gap
+
+The current =star-logic-adapter-swi= is deliberately only a worker/transport trust foundation. Its README states that it implements exact SWI executable/build identity, embedded MQI startup, authenticated framing, version validation, a repository-owned bootstrap handshake, process-isolated sessions, health, and shutdown.
+
+It explicitly does *not* yet implement =star.logic.query/1=, portable query operations, fact mutation, tabling, constraints, proofs, cancellation escalation, or worker pooling/reset. The bootstrap also deliberately exposes no caller-controlled raw Prolog goal, predicate, consult, or file-loading API.
+
+Therefore direct StarLang-to-SWI rule reuse is not already complete. However, the package/session/IR abstractions needed to define it are present, so the operator requirement does not require inventing a second unrelated actor-logic framework.
+
+* Verified PQS Facts Relevant to Portability
+
+=prolog-query-server= persists facts and rules in CouchDB using its own safe JSON AST and executes them with a bounded meta-interpreter. It intentionally rejects arbitrary raw Prolog source and arbitrary predicate calls over HTTP. It also supplies releases, proof/source traces, resource limits, authentication, and deterministic runtime boundaries.
+
+That safety model remains valuable. But the PQS JSON AST is a *runtime representation*. If direct Prolog actors and StarLang logic actors must reuse the same logical knowledge, PQS's persistence shape cannot be the only semantic/source representation of =star-kb= without coupling every consumer to PQS.
+
+* Research Finding: Rule Knowledge Versus Runtime Materialization
+
+The evidence supports distinguishing reusable logical knowledge from its runtime materialization.
+
+#+begin_src text
+                   canonical reusable logic
+                         star-kb
+                            |
+             immutable package identity/version
+                            |
+          +-----------------+------------------+
+          |                 |                  |
+          v                 v                  v
+     PQS materialization  SWI/native        StarLang logic
+     safe JSON/CouchDB    Prolog material.   package mapping
+          |                 |                  |
+          v                 v                  v
+        PQS actor/service  Prolog actor       logic actor
+#+end_src
+
+The important reuse unit is therefore the *rule/fact package and its semantics*, not a particular server's serialized documents and not a cached query result.
+
+This research does not choose whether the canonical authoring form is restricted Prolog, a backend-neutral logical IR, or another representation. It establishes only the requirement that one canonical logical identity can be materialized to multiple supported runtimes without silently changing meaning.
+
+* Research Finding: StarLang Logic IR Is the Existing Cross-Backend Join Point
+
+StarLang already separates three things that matter for =star-kb= portability:
+
+1. logical package identity and digest;
+2. backend-independent logic-call semantics/profile;
+3. backend selection and backend-specific mapping identity.
+
+That separation is a much closer fit to the operator requirement than treating StarLang merely as an HTTP client of PQS. A future StarLang logic actor should be able to open a logic session for a =star-kb= package and use an eligible local or remote backend, while a direct Prolog actor may materialize the same package directly.
+
+PQS can remain another eligible execution route where its release/proof/security properties are desirable.
+
+* Rule Compatibility Findings
+
+Perfect portability across every Prolog/rule engine cannot be assumed. SWI-Prolog, N-Prolog, LISA, PQS's restricted meta-interpreter, and future logic backends do not necessarily share unrestricted language semantics or builtin surfaces.
+
+The current StarLang protocol already accounts for this problem by making =semantic-profiles= and =capabilities= explicit backend properties and by rejecting incompatible backend selection. This suggests that reusable =star-kb= packages should state the semantics/capabilities they require rather than assuming every rule is executable everywhere.
+
+Research implications:
+
+- a portable/core rule subset can be reusable across multiple backends;
+- backend-specific extensions may exist, but they must not masquerade as universally portable rules;
+- the same package identity should not silently mean different logical behavior on different backends;
+- backend mappings should remain independently identified/versioned so materialization changes are traceable;
+- parity/conformance fixtures are needed before claiming a package is portable across two runtimes.
+
+These are compatibility requirements, not a final schema or compiler design.
+
+* Actor-Reuse Findings
+
+There are at least three useful actor execution modes that satisfy the operator requirement without duplicating knowledge ownership:
+
+| Actor mode | Reuse behavior | Current evidence |
+|------------+----------------+------------------|
+| PQS-backed actor | Queries a named/released materialization of the shared package through PQS | PQS already supports safe facts/rules, releases, bounded query and explain |
+| Direct Prolog actor | Runs a local/native Prolog backend and materializes the same shared package into that backend | SWI-Prolog is already a modeled StarLang backend; exact package-loading/query path remains incomplete |
+| StarLang logic actor | Refers to a digest-locked logic package and lets the StarLang logic protocol select/materialize an eligible backend | =star-logic-ir= and =star-logic-protocol= already model package identity, mappings, semantic profiles and backend policy |
+
+A single actor may also choose between local/direct and PQS execution based on operational constraints, but backend choice must not change the intended rule semantics.
+
+* Relationship to Weighted/Salient Dialect Rules
+
+The weighted-salience findings in STAR-KB-RESEARCH-003 remain valid. The portability requirement changes where those reusable rules can execute, not the evidence model itself.
+
+For example, dialect association, salience, reliability, exposure relevance, and redundancy rules should be reusable logical knowledge. A PQS-backed dialect actor may query them remotely; a Prolog actor may evaluate them locally; a StarLang logic actor may invoke the same package through its selected backend. Learned feature values or observations remain inputs/evidence, not duplicated copies of the canonical rule logic.
+
+* Contradictions and Risks
+
+- *Portability versus full Prolog power*: unrestricted engine-specific Prolog features can prevent the same rules from executing under other logic backends.
+- *One package versus backend mappings*: materialization code can accidentally become a second source of semantics unless conformance checks prove that mappings preserve the package's intended behavior.
+- *Direct actor execution versus PQS safety*: direct Prolog execution loses PQS's server-side safe AST/meta-interpreter boundary unless the direct-actor path supplies an equivalent trust/validation boundary appropriate to its deployment.
+- *Reuse versus version drift*: two actors claiming to use "the same rules" can actually diverge unless package and mapping digests are recorded in actor outputs/provenance.
+- *Shared mutable state*: local actor fact deltas and run-specific observations must not silently mutate the reviewed canonical package.
+
+* Open Questions for a Later Design/Measurement Gate
+
+- What is the smallest semantic profile that can be executed consistently by PQS and direct SWI-Prolog actors while remaining useful for weighted/salient rules?
+- Which =star-kb= constructs are portable core versus backend-specific extensions?
+- How should one =star-kb= package map to StarLang's existing =package-id/package-digest/mapping-id/mapping-digest= model?
+- What conformance fixture format should prove the same package gives equivalent answers/proofs across PQS, SWI-Prolog, and any later backend?
+- What trust boundary should direct Prolog actors use so reuse does not mean arbitrary =consult/1= of unreviewed runtime input?
+- Which facts may be supplied as per-actor/session deltas without changing the immutable reusable package identity?
+- When should an actor prefer local logic execution versus the shared PQS service?
+- Whether LISA/N-Prolog should consume the same initial portable rule subset or remain later compatibility targets.
+
+* Research Conclusion
+
+The operator's rule-reuse requirement is compatible with the direction already present in StarLang, and it changes the framing of =star-kb= in an important way: =star-kb= should be treated as the authority for reusable logical packages, not as a PQS-only source tree.
+
+PQS remains a strong execution target because it adds durable releases, bounded inference, proof provenance, security controls, and centralized operation. It must not become the semantic ownership boundary for reusable rules.
+
+Current StarLang source already provides a portable logic protocol with SWI-Prolog/LISA/N-Prolog backend identities, semantic-profile/capability selection, digest-locked logic-package identity, backend mapping identity, and generic logic-session operations. The SWI adapter is not yet feature-complete, so direct StarLang rule execution remains future work rather than an implemented capability.
+
+The research-supported target property is therefore *author once, identify/version once, materialize to multiple logic runtimes, and prove semantic parity*. Exact authoring grammar, package schema, mapping format, compiler path, and actor API remain design questions.
+
+This research conclusion is =PENDING= operator review. It does not authorize changes in =lost-rob0t/star-kb=, =star-lang=, =prolog-query-server=, or StarIntel actors.
+
+* Sources
+
+** StarIntel repositories reviewed 2026-09-10
+
+- [[https://github.com/lost-rob0t/star-lang/blob/main/star-logic-protocol/src/protocol.lisp][StarLang star-logic-protocol backend/session protocol]]
+- [[https://github.com/lost-rob0t/star-lang/blob/main/star-logic-ir/src/logic-ir.lisp][StarLang star-logic-ir package identity and portable calls]]
+- [[https://github.com/lost-rob0t/star-lang/blob/main/star-logic-adapter-swi/README.md][StarLang SWI-Prolog adapter current boundary]]
+- [[https://github.com/lost-rob0t/prolog-query-server][prolog-query-server]]
+- [[https://github.com/lost-rob0t/star-kb][star-kb]]
+- [[id:star-kb-research-003-dialect-enrichment-corpus-inference-evidence][STAR-KB-RESEARCH-003 Dialect Enrichment Corpus and Inference Evidence]]
+
+* Footnotes and Glossary
+
+- *Logic package* :: A versioned/digest-identified reusable unit of logical facts, rules, named operations, or other logical semantics that can be materialized for an eligible backend.
+- *Materialization* :: Translating/loading one canonical logic package into the representation required by a concrete execution backend without changing its intended semantics.
+- *Semantic profile* :: A named behavioral contract a logic backend declares it can execute; StarLang uses this during backend compatibility/selection.
+- *Backend mapping* :: Versioned logic that maps a portable logical package/operation contract onto a concrete backend representation or operation surface.
+- *PQS* :: =prolog-query-server=, the existing CouchDB-backed bounded expert-system service.
+- *Direct Prolog actor* :: An actor whose logic executes against a local/native Prolog backend instead of requiring an HTTP query to PQS.
+- *StarLang logic actor* :: A StarLang actor using the StarLang logic protocol/IR to execute a digest-identified logic package through an eligible backend.
+- *Semantic parity* :: Evidence that the same portable logical package produces equivalent defined behavior across claimed compatible backend materializations.

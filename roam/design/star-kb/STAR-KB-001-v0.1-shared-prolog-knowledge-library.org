@@ -1,0 +1,910 @@
+:PROPERTIES:
+:ID:       star-kb-design-001-v0-1
+:END:
+#+title: STAR-KB-001 V0.1 Shared Prolog Knowledge Library
+#+description: Implementation-ready design for authoring restricted Prolog modules, composing bundles, deterministically compiling them to prolog-query-server documents, staging immutable releases, validating them, and exposing one stable runtime contract to StarIntel consumers.
+#+status: REVIEW
+#+filetags: :starintel:star-kb:prolog:pqs:couchdb:design:aradr:v0_1:approval:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| STAR-KB-001 V0.1 design | nsaspy / repository owner | PENDING | Explicit approval after reading this design | This document |
+| Promote into =roam/implement/star-kb/= | nsaspy / repository owner | PENDING | Explicit implementation authorization after design approval | Do not promote before approval |
+| Product implementation in =lost-rob0t/star-kb= | star-kb maintainer / nsaspy | NOT STARTED | Exact tests and verification gates in this design | Acceptance Criteria |
+| PQS production activation | runtime/operator authority | NOT STARTED | Staged release, strict analysis, pinned tests, expected manifest revision | Publication State Machine |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-10 | Move the deep design into the canonical =starintel-auto-research= design tree after operator correction. The research is approved; this design remains pending and no implementation slot is created. | ChatGPT ARADR pass | [[id:star-kb-design-001-canonical-knowledge-authoring-query-plane][STAR-KB-RESEARCH-002]] |
+| 2026-09-10 | Initial deep design slice created after architecture material was classified as research. | ChatGPT ARADR pass | Current PQS API/source and approved STAR-KB research |
+
+* Purpose
+
+This document specifies *how V0.1 will be built if and only if this design is approved*. Research approval is already recorded separately. Design approval is not.
+
+The ARADR authority lives in =lost-rob0t/starintel-auto-research=. The implementation repository is =lost-rob0t/star-kb=. This design must remain here under =roam/design/star-kb/= until the operator explicitly approves it; only then may the control-plane copy move into =roam/implement/star-kb/= and product changes begin in =star-kb=.
+
+V0.1 has one job:
+
+#+begin_quote
+Prove that a human or agent can write reusable Prolog facts and rules in =star-kb=, compose them into a named bundle, deterministically compile them into the existing safe =prolog-query-server= document format, stage and validate an immutable release, and query/explain that release without executing arbitrary source Prolog.
+#+end_quote
+
+V0.1 does *not* implement the production dialect corpus or the StarIntel dialect actor. Those become later slices after the generic knowledge pipeline works.
+
+* One-Sentence Architecture
+
+=starintel-auto-research= owns the approved research/design/implementation control plane; =star-kb= owns reviewed reusable knowledge source and compiler code after approval; SWI-Prolog parses source as data; a deterministic compiler emits PQS-compatible JSON documents; PQS+CouchDB remain the live inference runtime.
+
+#+begin_src text
+ARADR control plane
+starintel-auto-research
+  research -> design -> approved implement slot
+                         |
+                         v
+                product implementation
+                     star-kb
+ knowledge/*.pl + manifests + source records
+                |
+                v
+        star-kb compiler
+   parse -> validate -> normalize
+                |
+                v
+       deterministic build
+     release.json + docs.ndjson
+                |
+                v
+       PQS staged release
+   analyze -> pinned query/explain
+                |
+          explicit activate
+                |
+                v
+       PQS active release
+#+end_src
+
+* Repository Authority Boundary
+
+** =lost-rob0t/starintel-auto-research=
+
+This repository owns:
+
+- approved/pending ARADR research state;
+- this design and later design revisions;
+- the implementation slot after explicit design approval;
+- design changelog and approval evidence;
+- high-level acceptance criteria and links to product implementation evidence.
+
+It does *not* contain the production knowledge compiler or canonical fact corpus.
+
+** =lost-rob0t/star-kb=
+
+After design approval this repository owns:
+
+- readable canonical reusable Prolog source;
+- module and bundle manifests;
+- source/license records;
+- deterministic compiler/publisher code;
+- compiler/unit/integration tests;
+- generated build artifacts locally or in CI, but not as committed source by default.
+
+The existing RAGE-like scaffold in =star-kb= is not the authority for this ARADR decision. No research/design document from this slice should be copied there as a competing source of truth.
+
+** =lost-rob0t/prolog-query-server=
+
+Owns:
+
+- executable CouchDB knowledge documents;
+- named KBs and immutable releases;
+- active-release manifests;
+- safe query AST decoding;
+- bounded inference and proofs;
+- release analysis;
+- auth, resource limits, synchronization and conflict semantics.
+
+* Normative =star-kb= Product Layout
+
+After implementation approval, product files SHALL use this layout:
+
+#+begin_src text
+star-kb/
+  README.org
+  AGENTS.md
+
+  knowledge/
+    modules/
+      core/
+        test/
+          module.json
+          facts.pl
+          rules.pl
+      geography/
+      dialect/
+      organizations/
+      social/
+      infrastructure/
+
+    bundles/
+      star.core.test/
+        bundle.json
+
+    sources/
+      source-star-kb-owned.json
+
+  schema/
+    module-v1.schema.json
+    bundle-v1.schema.json
+    source-v1.schema.json
+    release-v1.schema.json
+
+  src/
+    star_kb_cli.pl
+    star_kb_reader.pl
+    star_kb_profile.pl
+    star_kb_normalize.pl
+    star_kb_manifest.pl
+    star_kb_compile.pl
+    star_kb_hash.pl
+    star_kb_build.pl
+    star_kb_pqs.pl
+    star_kb_verify.pl
+
+  tests/
+    prolog/
+      reader_tests.pl
+      profile_tests.pl
+      normalize_tests.pl
+      manifest_tests.pl
+      compile_tests.pl
+      build_tests.pl
+      pqs_contract_tests.pl
+      fixtures/
+
+  build/                 # generated; ignored by Git
+#+end_src
+
+The ARADR =roam/research=, =roam/design=, and =roam/implement= authority for this work remains in =starintel-auto-research=, not this product layout.
+
+* Source Module Contract
+
+A module is the smallest reusable source unit. One module directory contains one =module.json= plus one or more source files explicitly listed by the manifest.
+
+V0.1 module manifest schema:
+
+#+begin_src json
+{
+  "schema": "star-kb.module.v1",
+  "name": "core.test",
+  "version": "0.1.0",
+  "files": ["facts.pl", "rules.pl"],
+  "requires": [],
+  "provides": [
+    {"predicate": "human", "arity": 1},
+    {"predicate": "mortal", "arity": 1}
+  ],
+  "sources": ["source-star-kb-owned"]
+}
+#+end_src
+
+Normative rules:
+
+- =schema= MUST equal =star-kb.module.v1=.
+- =name= MUST be globally unique inside the repository.
+- Module names use lower-case ASCII components separated by dots; components may additionally contain hyphens where necessary for language/region identifiers.
+- =version= MUST be a SemVer-style version string for human review; it is metadata, not runtime release identity.
+- =files= MUST contain relative paths inside the module directory. Paths escaping the module directory are rejected.
+- File order is preserved for diagnostics, but clause identity does not depend on file order.
+- =requires= names source modules, not SWI runtime modules.
+- =provides= is an explicit public predicate inventory. Every listed predicate must be defined by the module.
+- Duplicate predicate ownership across unrelated modules is rejected unless a future design explicitly introduces extension points.
+- =sources= contains source-record IDs that apply to the module by default.
+
+* Bundle Contract
+
+A bundle is the thing a consumer wants to query. In V0.1 one bundle maps one-to-one to one PQS KB name.
+
+#+begin_src json
+{
+  "schema": "star-kb.bundle.v1",
+  "name": "star.core.test",
+  "version": "0.1.0",
+  "roots": ["core.test"],
+  "exports": [
+    {"predicate": "mortal", "arity": 1}
+  ],
+  "runtime": {
+    "kind": "prolog-query-server",
+    "kb": "star.core.test"
+  }
+}
+#+end_src
+
+Normative rules:
+
+- =schema= MUST equal =star-kb.bundle.v1=.
+- =roots= identifies direct source modules requested by the bundle.
+- The builder computes the complete transitive dependency closure.
+- Module dependency cycles are build errors. This does not prohibit logical recursion among Prolog predicates.
+- =exports= MUST resolve to predicates provided somewhere in the closure.
+- =runtime.kind= MUST be =prolog-query-server= in V0.1.
+- =runtime.kb= is the exact PQS =kb= value used for staged documents and queries.
+- V0.1 performs no runtime cross-KB imports. The entire resolved closure is materialized into one PQS release.
+
+* Source Record Contract
+
+A source record describes where reusable knowledge came from. It is metadata, not executable logic.
+
+#+begin_src json
+{
+  "schema": "star-kb.source.v1",
+  "id": "source-star-kb-owned",
+  "kind": "first-party",
+  "title": "Star KB authored fixture knowledge",
+  "canonical_url": "https://github.com/lost-rob0t/star-kb",
+  "retrieved_at": "2026-09-10",
+  "license": {
+    "id": "repository-license",
+    "url": null
+  },
+  "notes": "Synthetic fixture knowledge used to prove the compiler/runtime path."
+}
+#+end_src
+
+V0.1 validates presence, identifier uniqueness, and that every referenced source ID exists. More elaborate license-policy resolution is deferred, but V0.1 MUST preserve source/license metadata in generated provenance.
+
+* Restricted Prolog Source Profile V1
+
+The source profile exists so =star-kb= can use readable Prolog without turning arbitrary source into production code.
+
+** Allowed top-level forms
+
+Only facts and normal Horn-style rules are legal:
+
+#+begin_src prolog
+predicate_name(Arg1, Arg2, ...).
+
+predicate_name(Arg1, ...) :-
+    Goal1,
+    Goal2,
+    ... .
+#+end_src
+
+** Allowed term forms
+
+- atoms;
+- strings;
+- integers and finite numeric values supported by PQS JSON decoding;
+- lists;
+- compound terms;
+- variables in rules;
+- nested compound/list data representable by the PQS safe JSON AST.
+
+Persisted facts MUST be ground.
+
+** Allowed rule-body forms
+
+A rule body is a conjunction of:
+
+- user predicates defined inside the resolved bundle closure;
+- PQS safe builtins from the supported builtin contract;
+- explicit negation using =\+ Goal=, compiled to PQS's ={ "not": Goal }= representation.
+
+V0.1 source SHALL use PQS's explicit arithmetic builtin vocabulary rather than normal unrestricted Prolog arithmetic. Example:
+
+#+begin_src prolog
+adjusted_score(Input, Adjusted) :-
+    calc(Adjusted, add(Input, 10)),
+    gte(Adjusted, 80).
+#+end_src
+
+** Forbidden forms
+
+The validator rejects at least:
+
+- top-level directives =:- Directive.=;
+- interactive query forms =?- Goal.=;
+- DCGs using =-->=;
+- disjunction =;/2=;
+- if-then =->/2= and soft-cut variants;
+- cut =!/0=;
+- =call/N=, =once/1=, =apply/2=, or other meta-call surfaces;
+- =assert*=, =retract*=, =abolish*=, =dynamic/1=;
+- =consult/1=, =ensure_loaded/1=, =use_module/*= and include/load directives;
+- shell, process, filesystem, environment, socket, HTTP-client, foreign, or database calls;
+- term-expansion or goal-expansion hooks;
+- attributed-variable/coroutining constructs;
+- unapproved runtime module qualification =:/2=;
+- defining a predicate name reserved by PQS builtins;
+- body calls unresolved to either an allowed builtin or a predicate defined in the bundle closure;
+- any term that cannot be represented losslessly in the current PQS safe AST.
+
+The validator is fail-closed: unknown executable forms are rejected.
+
+* Parse-Only Reader Design
+
+=src/star_kb_reader.pl= SHALL parse each configured source file using SWI-Prolog's term reader. It SHALL NOT =consult=, =load_files=, or call parsed clauses.
+
+Conceptual reader loop:
+
+#+begin_src prolog
+read_term(Stream, Term,
+          [ variable_names(VariableNames),
+            term_position(Position),
+            syntax_errors(error)
+          ]).
+#+end_src
+
+For every top-level term the reader returns:
+
+#+begin_src text
+module_name
+relative_file
+term_index
+source_position
+original_term
+variable_names
+#+end_src
+
+The reader stops only at =end_of_file= or a hard parse/validation error. Directives are parsed as data and then rejected; they are never executed.
+
+* Normalization Design
+
+Normalization creates a canonical logical representation before hashing or JSON generation.
+
+1. Predicate/functor atoms are preserved after identifier validation.
+2. JSON strings remain distinct from Prolog atoms. A Prolog atom used as data becomes an explicit PQS atom object rather than a plain JSON string.
+3. Variables are alpha-normalized by first occurrence: source variable names remain diagnostic metadata, while canonical variables become =V0=, =V1=, =V2=, and so on.
+4. Body goal order is preserved.
+5. List element order is preserved.
+6. Source-record ID lists and dependency inventories are sorted only where order has no semantic meaning.
+7. Hash JSON uses deterministic key ordering and deterministic number/string encoding.
+
+Therefore =mortal(X) :- human(X).= and =mortal(Person) :- human(Person).= have the same logical clause identity.
+
+* Clause Identity
+
+V0.1 uses separate logical and runtime identities.
+
+** Logical clause ID
+
+#+begin_src text
+clause_id = sha256(
+  "star-kb-clause-v1" ||
+  module_name ||
+  canonical_clause_ast
+)
+#+end_src
+
+The clause ID deliberately excludes Git commit and runtime release. Variable-only renames or rebuilding unchanged knowledge from a later commit therefore retain logical identity.
+
+** Runtime document ID
+
+#+begin_src text
+runtime_document_id =
+  "skb-" + short(bundle_hash) +
+  "-" + short(release_hash) +
+  "-" + short(clause_id)
+#+end_src
+
+Full hashes remain in provenance/build metadata; shortening is only for CouchDB =_id= readability/size.
+
+* Bundle Content Hash and Release ID
+
+Release identity MUST NOT depend on timestamps or random UUIDs.
+
+Build algorithm:
+
+1. Resolve module dependency closure.
+2. Validate every manifest/source record.
+3. Parse, profile-check, and normalize every clause.
+4. Create an intermediate generated document for every clause without runtime =_id=, PQS =release=, Git commit, or build timestamp.
+5. Sort intermediate documents by full logical =clause_id=.
+6. Canonically serialize bundle semantic fields, resolved module semantic fields, referenced source-record content, and sorted generated documents.
+7. SHA-256 that byte stream into =content_hash=.
+8. Runtime release ID is =r-<first-24-hex-of-content-hash>=.
+9. Generate runtime document IDs from the release hash plus logical clause ID.
+10. Add non-semantic build provenance such as source Git commit and compiler version afterward.
+
+The source Git commit is recorded but does not force a different semantic release ID when actual knowledge/provenance content is identical.
+
+* Generated PQS Document Mapping
+
+** Fact
+
+#+begin_src prolog
+human(socrates).
+#+end_src
+
+maps conceptually to:
+
+#+begin_src json
+{
+  "_id": "skb-...",
+  "type": "prolog_fact",
+  "kb": "star.core.test",
+  "release": "r-...",
+  "enabled": true,
+  "predicate": "human",
+  "args": [{"atom": "socrates"}],
+  "provenance": {
+    "star_kb": {
+      "schema": "star-kb.provenance.v1",
+      "bundle": "star.core.test",
+      "bundle_version": "0.1.0",
+      "module": "core.test",
+      "module_version": "0.1.0",
+      "clause_id": "sha256:...",
+      "source_path": "knowledge/modules/core/test/facts.pl",
+      "term_index": 1,
+      "source_records": ["source-star-kb-owned"],
+      "content_hash": "sha256:...",
+      "source_commit": "...",
+      "compiler_version": "0.1.0"
+    }
+  }
+}
+#+end_src
+
+** Rule
+
+#+begin_src prolog
+mortal(X) :- human(X).
+#+end_src
+
+maps conceptually to:
+
+#+begin_src json
+{
+  "_id": "skb-...",
+  "type": "prolog_rule",
+  "kb": "star.core.test",
+  "release": "r-...",
+  "enabled": true,
+  "head": {
+    "predicate": "mortal",
+    "args": [{"var":"V0"}]
+  },
+  "body": [
+    {
+      "predicate": "human",
+      "args": [{"var":"V0"}]
+    }
+  ],
+  "provenance": {
+    "star_kb": {
+      "schema": "star-kb.provenance.v1",
+      "module": "core.test",
+      "clause_id": "sha256:..."
+    }
+  }
+}
+#+end_src
+
+Unknown metadata is non-executable. If current PQS validation proves stricter than expected, generated provenance MUST be adapted to fields the runtime permits rather than weakening PQS validation.
+
+* Generated Build Directory
+
+A successful build creates:
+
+#+begin_src text
+build/star.core.test/r-<hash>/
+  release.json
+  documents.ndjson
+  query-fixtures.json
+  build-report.json
+#+end_src
+
+=release.json= includes bundle identity, bundle version, PQS KB/release, full content hash, source commit, compiler version, modules, sources, document count, and serialized bytes.
+
+Generated output is reproducible but Git-ignored by default. CI rebuilds it from source.
+
+* CLI Contract
+
+The product CLI is implemented in SWI-Prolog. A tiny launcher may exist, but domain/build logic remains in =src/*.pl=.
+
+V0.1 commands:
+
+#+begin_src text
+star-kb validate
+star-kb build BUNDLE
+star-kb diff BUILD_A BUILD_B
+star-kb stage BUNDLE --pqs URL --token-file PATH
+star-kb check BUNDLE --pqs URL --token-file PATH
+star-kb activate BUNDLE --release RELEASE --expected-rev REV --pqs URL --token-file PATH
+#+end_src
+
+Semantics:
+
+- =validate= checks manifests, source records, dependency graph, source profile, exports, predicate ownership, and deterministic normalization without network writes.
+- =build= performs validation and writes deterministic artifacts.
+- =diff= reports module/source/clause additions, removals, and logical clause changes using stable IDs.
+- =stage= writes the exact generated fact/rule set to a non-active PQS release but never activates it.
+- =check= verifies staged document identity/content, invokes PQS static analysis, and runs pinned fixture query/explain calls against that release.
+- =activate= performs one explicit cutover. It ALWAYS sends =strict:true= plus the caller-supplied current manifest =_rev=. No option exists to disable strict activation.
+
+There is intentionally no one-shot V0.1 command that builds, stages, checks, and activates unattended.
+
+* Publication State Machine
+
+#+begin_src text
+SOURCE
+  |
+  v
+VALIDATED
+  |
+  v
+BUILT
+  |
+  v
+STAGING ----failure----> PARTIAL_STAGED
+  |                         |
+  |                         +-- replay same deterministic release
+  v
+STAGED
+  |
+  v
+CHECKED
+  |
+  +---- analysis/fixture/proof failure ---> REJECTED_FOR_ACTIVATION
+  |
+  v
+ACTIVATE(expected _rev, strict=true)
+  |
+  +---- stale _rev -------> ACTIVATION_CONFLICT
+  |
+  v
+ACTIVE
+  |
+  +---- rollback ---------> previous CHECKED release becomes ACTIVE
+#+end_src
+
+No transition from =PARTIAL_STAGED= or =BUILT= directly to =ACTIVE= is permitted by normal tooling.
+
+* Stage Idempotency and Partial Failure
+
+CouchDB bulk writes are not one transaction over the entire release. A failed stage may leave partial documents. This is acceptable because staged releases are not active.
+
+=stage= SHALL be replay-safe:
+
+1. Read currently stored documents for target =(kb, release)=.
+2. Index by deterministic runtime =_id=.
+3. For each expected document: missing -> create; equivalent -> already staged; different -> =release_collision= and fail.
+4. Upload missing documents in bounded batches.
+5. Re-read the release.
+6. Verify the exact expected ID set and normalized content.
+7. Report =staged= only on exact match.
+
+Unexpected extra documents are a hard error. The publisher MUST NOT silently delete or overwrite them.
+
+* PQS Check Contract
+
+=star-kb check= SHALL execute gates in this order:
+
+1. Local build artifact hash verification.
+2. Exact staged document-set verification.
+3. =POST /v1/analyze= for exact =kb= and =release=.
+4. Require =valid:true=.
+5. Run every fixture as a pinned =/v1/query= naming the release.
+6. Run explanation fixtures through =/v1/explain= and map proof sources to generated =star-kb= provenance.
+7. Fail if any fixture hits an inference/resource limit, even if it returned a partial answer.
+
+PQS warnings are recorded in the build/check report. Structural analyzer errors always fail.
+
+* Activation Contract
+
+Activation is a separate operator-visible action.
+
+#+begin_src json
+{
+  "kb": "star.core.test",
+  "release": "r-...",
+  "_rev": "CURRENT-MANIFEST-REV",
+  "strict": true
+}
+#+end_src
+
+Before activation the CLI SHALL verify a successful =check= for the exact build/release. A stale manifest revision aborts. The tool MUST NOT automatically fetch a new revision and retry because doing so could overwrite a concurrent operator decision.
+
+After activation the CLI queries release status and runs one smoke query against the default active release.
+
+* Rollback Contract
+
+Rollback means activating a previously checked immutable release using the *current* manifest revision and =strict:true=.
+
+V0.1 does not mutate old releases to roll back.
+
+* Test Bundle =star.core.test=
+
+Synthetic source:
+
+#+begin_src prolog
+human(socrates).
+human(plato).
+
+mortal(X) :- human(X).
+needs_coffee(X) :- mortal(X), \+ blocked(X).
+blocked(plato).
+#+end_src
+
+Required fixtures:
+
+- =mortal(socrates)= succeeds;
+- =mortal(plato)= succeeds;
+- =needs_coffee(socrates)= succeeds;
+- =needs_coffee(plato)= fails through negation-as-failure;
+- =mortal(Who)= returns exactly two answers;
+- explanation for =needs_coffee(socrates)= maps back to expected fact/rule clause IDs;
+- =:- initialization(...)= source is rejected and never executed;
+- facts containing variables are rejected;
+- =call/1= is rejected;
+- renaming a rule variable does not change =clause_id=;
+- changing =human(socrates)= to =human(aristotle)= changes clause identity and release content hash.
+
+* Test Boundaries
+
+** Reader tests
+
+Prove parse-only behavior, source positions, syntax errors, and that directives are returned as data then rejected rather than executed.
+
+** Profile tests
+
+Table-driven accepted/rejected cases. Every forbidden capability listed in this design receives a regression test.
+
+** Normalization tests
+
+Alpha-renaming, string/atom distinction, nested compounds/lists, body-order preservation, and canonical JSON byte stability.
+
+** Manifest tests
+
+Schema fields, path containment, duplicate modules, missing dependencies, dependency cycles, missing source IDs, missing exports, duplicate predicate ownership, deterministic closure order.
+
+** Compiler tests
+
+Exact source-to-PQS JSON fixtures for facts, rules, negation, compounds, atoms, strings, variables, and safe arithmetic builtins.
+
+** Build tests
+
+Identical source -> identical clause IDs/content hash/release ID/semantic documents. Semantic change -> changed identity. Git commit-only change with identical source -> same semantic release ID, different non-semantic build provenance.
+
+** PQS contract tests
+
+Use an isolated PQS/CouchDB stack to prove stage/check/activate semantics, strict-analysis blocking, pinned queries, explanations, partial-stage recovery, collision failure, stale-manifest conflict, and rollback.
+
+* CI Design
+
+Required product CI gates after implementation:
+
+#+begin_src text
+git diff --check
+SWI-Prolog unit tests
+star-kb validate
+star-kb build star.core.test
+repeat build and compare deterministic artifacts
+PQS integration test stack
+stage -> analyze -> pinned query/explain
+strict activation -> smoke query -> rollback
+#+end_src
+
+CI MUST use disposable local/test infrastructure and MUST NOT require production PQS/CouchDB credentials.
+
+ARADR document validation for this design remains the responsibility of =starintel-auto-research=.
+
+* Error Model
+
+Commands return non-zero on incomplete or ambiguous operations and emit one stable machine-readable error class plus a human message.
+
+#+begin_src text
+source_parse_error
+source_profile_error
+manifest_error
+dependency_cycle
+missing_source
+predicate_conflict
+unresolved_predicate
+build_mismatch
+pqs_unavailable
+pqs_unauthorized
+pqs_forbidden
+release_collision
+partial_stage
+analysis_rejected
+fixture_failed
+proof_mapping_failed
+resource_limit_hit
+manifest_revision_conflict
+activation_failed
+#+end_src
+
+=No solutions= is an inference result, not a network failure. Fixture definitions decide whether zero solutions are expected.
+
+* Logging and Secrets
+
+- Tokens come from an explicit token file or later approved secret provider; examples do not put tokens in argv.
+- Authorization headers are never logged.
+- Build logs may contain module names, source paths, predicate signatures, clause IDs, counts, hashes, and PQS query IDs.
+- Validation failures may print bounded excerpts from repository-owned source, but StarIntel runtime evidence is outside this repo.
+- =build/= contains provenance but no credentials and is ignored by Git.
+
+* Large-Corpus Scaling Rules
+
+- Source is split into modules rather than a giant single =knowledge.pl=.
+- Each clause has an independent stable logical identity.
+- Dependency closure comes from manifests, so consumers do not know file paths.
+- Build reports record document count and bytes.
+- Stage uploads bounded batches.
+- Publisher verifies exact staged sets before activation.
+- Large raw observations/training data stay outside Git.
+
+Known runtime constraint: current PQS same-KB queries may serialize behind a per-KB mutex. V0.1 does not redesign PQS concurrency. Benchmark realistic concurrent workloads before opening a separate PQS design.
+
+* Common Lisp Consumer Boundary — Later Slice
+
+V0.1 freezes the contract that a later =starintel-server= client will consume:
+
+- stable bundle runtime KB name;
+- =/v1/query= and =/v1/explain=;
+- active release omitted for normal live operation;
+- explicit release pinning for replay/audit;
+- preserve PQS query ID, resolved KB/release, budget/limit data, refresh data, and proof information;
+- actor code never loads =star-kb= source directly.
+
+The later Common Lisp client therefore needs transport/config/error handling, not an embedded Prolog runtime.
+
+* Dialect Consumer — Later Slice
+
+After V0.1 and the generic client are proven, create =star.dialect.en-us= through the same module/bundle/source mechanism.
+
+That slice must keep separate evidence namespaces for linguistic features, contextual geography, explicit named geography, and learned-model scores. Dialect evidence is not proof of exact current residence.
+
+* StarLang Boundary — Later Slice
+
+StarLang consumes a generic knowledge-query capability and remains unaware of Prolog source syntax. It sends the same PQS structured request contract used by other clients.
+
+* Files Authorized Only After Design Approval
+
+Design approval plus explicit promotion into the implementation slot authorizes the bounded V0.1 product work below in =lost-rob0t/star-kb=:
+
+#+begin_src text
+knowledge/modules/core/test/module.json
+knowledge/modules/core/test/facts.pl
+knowledge/modules/core/test/rules.pl
+knowledge/bundles/star.core.test/bundle.json
+knowledge/sources/source-star-kb-owned.json
+schema/module-v1.schema.json
+schema/bundle-v1.schema.json
+schema/source-v1.schema.json
+schema/release-v1.schema.json
+src/star_kb_cli.pl
+src/star_kb_reader.pl
+src/star_kb_profile.pl
+src/star_kb_normalize.pl
+src/star_kb_manifest.pl
+src/star_kb_compile.pl
+src/star_kb_hash.pl
+src/star_kb_build.pl
+src/star_kb_pqs.pl
+src/star_kb_verify.pl
+tests/prolog/*
+.github/workflows/validate.yml
+README.org
+.gitignore
+#+end_src
+
+The implementation agent may split a Prolog module further when useful, but may not add production dialect data, a second server, StarIntel actor code, or PQS capability expansion without another approved design.
+
+Separately, approval authorizes =starintel-auto-research= to promote this same design into its single active =roam/implement/star-kb/= slot using the repository's implementation workflow. That control-plane copy is not product source.
+
+* Implementation Gate
+
+This document remains under =lost-rob0t/starintel-auto-research/roam/design/star-kb/=. It MUST NOT be promoted to =roam/implement/star-kb/= until nsaspy explicitly approves the design after review.
+
+Research approval does not satisfy this gate.
+
+When design approval is received, the promotion occurs in =starintel-auto-research=; only then does implementation begin in =lost-rob0t/star-kb=.
+
+* Acceptance Criteria
+
+V0.1 implementation is complete only when all are observed on exact Git heads:
+
+1. =star-kb= product metadata accurately identifies the project.
+2. Source manifests and four V1 schemas exist and validate.
+3. The compiler is SWI-Prolog and never consults/executes knowledge source.
+4. Every forbidden source category has a rejecting regression test.
+5. =star.core.test= validates and builds successfully.
+6. Two unchanged builds produce byte-identical semantic artifacts, clause IDs, content hash, release ID, and PQS document semantics except explicitly non-semantic build provenance.
+7. Variable renaming does not change logical clause identity.
+8. A semantic/source-record change changes content hash/release ID.
+9. Generated fact/rule JSON is accepted by the current PQS contract.
+10. Stage is replay-safe and detects mismatched existing documents as a collision.
+11. Partial stage can resume without deletion or silent overwrite.
+12. =check= proves exact document set, valid analysis, pinned fixtures, explanation mapping, and no resource-limit hits.
+13. Normal tooling cannot activate with =strict:false=.
+14. Stale manifest =_rev= blocks activation and is not auto-retried.
+15. Successful activation is followed by status/smoke verification.
+16. A known-good earlier release can be reactivated.
+17. CI runs isolated PQS/CouchDB integration without production credentials.
+18. No product scope appears outside the bounded design without separate approval.
+19. README explains author -> build -> stage -> check -> activate -> query in plain English.
+20. ARADR implementation completion is recorded in =starintel-auto-research= only after the required product evidence is observed.
+
+* Open Decisions Intentionally Deferred
+
+- probabilistic logic/cplint integration;
+- safe tabling support;
+- native runtime imports across multiple PQS KBs;
+- automatic source ingestion from external datasets;
+- automatic observation-to-knowledge promotion;
+- production dialect scoring/calibration;
+- large training-data storage;
+- PQS same-KB concurrency redesign;
+- query-scoped temporary facts;
+- StarLang syntax/compiler changes;
+- production release signing/attestation beyond deterministic hashes;
+- remote artifact registry/distribution.
+
+These MUST NOT be invented by the implementation agent inside V0.1.
+
+* Review Checklist for Operator Approval
+
+Before approving, decide whether these choices are acceptable:
+
+- ARADR authority is =starintel-auto-research=; product implementation is =star-kb=;
+- source facts/rules are Prolog while manifests/source metadata are JSON;
+- product compiler/publisher is SWI-Prolog;
+- source is parsed but never consulted/executed;
+- V0.1 source language deliberately maps directly to current PQS capabilities;
+- modules compose at build time and one bundle becomes one PQS KB release;
+- logical clause IDs are separate from release-specific CouchDB IDs;
+- release IDs are content-derived rather than timestamp/random IDs;
+- =stage= and =activate= remain separate;
+- activation always uses =strict:true= and explicit CouchDB manifest revision;
+- observations/model outputs stay out of canonical knowledge unless explicitly promoted;
+- dialect and StarIntel actor work wait until the generic path passes.
+
+* Related Nodes
+
+- [[id:star-kb-design-001-canonical-knowledge-authoring-query-plane][STAR-KB-RESEARCH-002 Canonical Knowledge Plane Architecture Findings]]
+- [[id:star-kb-research-001-shared-prolog-knowledge-plane][STAR-KB-RESEARCH-001 Shared Prolog Knowledge Plane and Dialect Enrichment]]
+- [[id:star-kb-index-000-prolog-knowledge-system][STAR-KB-INDEX-000 Prolog Knowledge System]]
+
+* Footnotes and Jargon Glossary
+
+This section is intentionally plain. The design should be reviewable without already knowing all the Prolog/CouchDB/distributed-systems vocabulary.
+
+- *Alpha-normalization*: renaming variables into a canonical order. =rule(X,Y)= and the same rule written =rule(A,B)= get the same logical identity when only variable names changed.
+- *AST / Abstract Syntax Tree*: structured representation of parsed source. Instead of raw text =human(socrates).=, the compiler works with data saying predicate =human= has argument atom =socrates=.
+- *ARADR control plane*: the research/design/implementation-state documents that record what has been researched, what design is under review, what has been approved, and what implementation is active. For this work it lives in =starintel-auto-research=.
+- *Bundle*: named knowledge package a consumer wants. It includes root modules plus everything they depend on. V0.1 publishes one bundle as one PQS KB release.
+- *Canonical knowledge*: reviewed reusable facts/rules kept as shared knowledge. Canonical means maintained system source, not guaranteed eternal truth.
+- *Clause*: one Prolog fact or rule.
+- *Content hash*: SHA-256 fingerprint of canonical semantic build input/output. Meaningful knowledge/provenance changes change the hash.
+- *CouchDB =_id=*: unique document key.
+- *CouchDB =_rev=*: optimistic-concurrency revision token. A stale token prevents silently overwriting a concurrent change.
+- *Dependency closure*: start with requested modules and recursively include everything they require.
+- *Directive*: Prolog source beginning with =:-= that normally tells Prolog to do something while loading. Knowledge directives are rejected because source is being parsed as data, not run.
+- *Fail closed*: stop/reject when safety or correctness cannot be established instead of guessing.
+- *Fixture*: fixed test input and expected result checked into source control.
+- *Ground fact*: fact with no variables, e.g. =human(socrates).=; =human(X).= is not ground.
+- *Idempotent/replay-safe*: repeating the same operation produces the same correct state instead of duplicate/conflicting effects.
+- *Knowledge base / KB*: named set of facts and rules available to inference.
+- *Manifest*: metadata describing a module, bundle, source, or release rather than logical facts themselves.
+- *Meta-call*: dynamically executing a term as code, e.g. =call(X)=. The restricted source profile forbids it.
+- *Meta-interpreter*: restricted interpreter inside PQS that walks stored safe rules itself instead of handing stored content to arbitrary Prolog execution.
+- *Negation as failure*: Prolog's =\+ Goal=: succeed when =Goal= cannot be proven. It is not the same as explicit evidence that the goal is false.
+- *PQS*: =lost-rob0t/prolog-query-server=, the existing CouchDB-backed SWI-Prolog expert-system service.
+- *Predicate/arity*: predicate is a named logical relation; arity is its argument count. =human/1= takes one argument; =located_in/2= takes two.
+- *Proof/explanation*: machine-readable account of which rule/fact documents were used to derive a result.
+- *Provenance*: chain showing where knowledge/result came from: source record, module/file/clause, Git/build version, runtime document, KB release, query ID, actor, and related metadata.
+- *Release*: immutable version of one runtime knowledge base. Changes create new releases rather than editing the active release in place.
+- *Release collision*: deterministic release ID already exists but stored documents differ from the expected build. Treat as corruption/identity disagreement, not something to overwrite.
+- *Restricted Prolog profile*: intentionally small subset of Prolog accepted as reusable source; general code-execution features are rejected.
+- *Rollback*: switch the active KB manifest back to a previously checked immutable release.
+- *Semantic build artifact*: generated data determined by knowledge content. Timestamps/Git head can be recorded separately as build provenance.
+- *Stage*: upload a release into PQS/CouchDB without making it active.
+- *Strict activation*: activate with =strict:true= so PQS static-analysis errors block cutover.
+- *Transitive dependency*: dependency of a dependency. If A requires B and B requires C, A's closure includes C.

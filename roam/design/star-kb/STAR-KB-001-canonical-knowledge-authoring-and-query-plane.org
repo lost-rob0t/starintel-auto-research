@@ -1,0 +1,816 @@
+:PROPERTIES:
+:ID:       star-kb-design-001-canonical-knowledge-authoring-query-plane
+:END:
+#+title: STAR-KB-001 Canonical Knowledge Authoring and Query Plane
+#+description: Candidate architecture for a reusable source-controlled Prolog knowledge corpus compiled into immutable prolog-query-server CouchDB releases and consumed by StarIntel actors, prolog-rlm, and later StarLang adapters.
+#+status: REVIEW
+#+filetags: :starintel:star-kb:prolog:knowledge-base:query-server:couchdb:actors:starlang:design:aradr:approval:
+#+todo: TODO REVIEW BLOCKED | DONE REJECTED
+#+created: [2026-09-10 Thu]
+#+last_modified: [2026-09-10 Thu]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Overall STAR-KB-001 design | nsaspy / repository owner | PENDING | Explicit approval of this candidate architecture | [[id:star-kb-research-001-shared-prolog-knowledge-plane][STAR-KB-RESEARCH-001]] |
+| =prolog-query-server= as knowledge runtime | nsaspy / repository owner | PENDING | Explicit acceptance of existing runtime as the production query plane | Decision |
+| New =star-kb= repository | nsaspy / repository owner | PENDING | Explicit authorization to create and populate the repository | Repository Ownership |
+| Common Lisp actor integration | StarIntel maintainer / nsaspy | NOT STARTED | Approved API contract plus implementation tests | Actor Query Contract |
+| Dialect bundle and actor | StarIntel maintainer / nsaspy | NOT STARTED | Approved knowledge schema, corpus source policy, and actor tests | First Reference Consumer |
+| StarLang adapter | StarLang maintainer / nsaspy | NOT STARTED | Runtime adapter design and conformance evidence | StarLang Boundary |
+| Production publication | Runtime/operator authority | NOT STARTED | Release validation, activation, rollback, auth/TLS, and observability evidence | Publication Lifecycle |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-10 | Initial candidate design derived from the ARADR review of current Prolog query-server, StarIntel actor, StarLang, CouchDB, and dialect-research surfaces. | ChatGPT ARADR pass | [[id:star-kb-research-001-shared-prolog-knowledge-plane][STAR-KB-RESEARCH-001]] |
+
+* Decision
+
+Pending operator approval, adopt the existing =lost-rob0t/prolog-query-server= HTTP expert-system service as StarIntel's shared *knowledge execution plane* and create a separate =star-kb= repository as the *canonical knowledge authoring and release-input plane*.
+
+Do not create a second inference server and do not embed a private SWI-Prolog runtime inside each actor.
+
+The runtime database remains CouchDB. The authoring repository remains Git. StarIntel's ordinary evidence/documents remain in StarIntel stores. These are different authorities and must not be collapsed.
+
+#+begin_src text
+                       AUTHORING PLANE
+                  +---------------------+
+                  |       star-kb       |
+                  | restricted Prolog   |
+                  | modules + bundles   |
+                  | sources + fixtures  |
+                  +----------+----------+
+                             |
+                  deterministic compiler
+                    + release publisher
+                             |
+                             v
+                      KNOWLEDGE PLANE
+             +-------------------------------+
+             | prolog-query-server + CouchDB |
+             | safe JSON AST clauses         |
+             | immutable active releases     |
+             | bounded query/explain         |
+             +---------------+---------------+
+                             ^
+                             |
+        +--------------------+--------------------+
+        |                    |                    |
+   Lisp actors          prolog-rlm           StarLang
+        |
+        v
+                     EVIDENCE PLANE
+             StarIntel docs / artifacts
+             observations / model scores
+#+end_src
+
+This design intentionally reuses existing query-server release, synchronization, proof, authorization, resource-limit, conflict, and static-analysis mechanisms rather than duplicating them in =star-kb=.
+
+* Product and Repository Boundaries
+
+** =star-kb=
+
+Owns:
+
+- canonical source facts and rules;
+- the restricted source-Prolog profile;
+- source modules and actor-facing bundles;
+- bundle dependency manifests;
+- source/citation/license metadata;
+- deterministic source-clause identities;
+- fixtures and expected inference results;
+- the compiler from restricted source clauses to query-server safe JSON AST documents;
+- release build manifests and content hashes;
+- publication tooling that stages, validates, tests, and activates query-server releases.
+
+Does not own:
+
+- the SWI-Prolog HTTP server implementation;
+- CouchDB replication/synchronization logic;
+- StarIntel run/case observations;
+- actor orchestration;
+- model training datasets that are too large or too dynamic for source control;
+- raw secrets or private investigative evidence.
+
+** =prolog-query-server=
+
+Owns:
+
+- CouchDB-backed runtime knowledge documents;
+- active-release manifests;
+- JSON AST validation;
+- bounded expert-system execution;
+- proof/explanation generation;
+- runtime reload and =_changes= synchronization;
+- conflict fail-closed semantics;
+- safe builtin registry;
+- static release analysis;
+- runtime auth, resource limits, metrics, and operational behavior.
+
+The native CouchDB =language: "prolog"= map/reduce query server remains a separate indexing facility and is not the actor inference API.
+
+** =starintel-server=
+
+Owns:
+
+- Common Lisp actor lifecycle, supervision boundary, targets, message flow, ingest, persistence, and actor-produced StarIntel documents/events;
+- the first generic Common Lisp client adapter for the query-server API;
+- dialect enrichment actor behavior after the generic client exists.
+
+It must not copy the canonical corpus into actor source files.
+
+** =star-lang=
+
+Owns later actor/orchestration language integration. Core StarLang must not gain Prolog-specific syntax merely to use this service. Querying the knowledge plane should be expressed through an ordinary generic HTTP/process/RPC adapter capability.
+
+** =prolog-rlm=
+
+May consume the knowledge plane for reasoning tasks. It is not the canonical knowledge store and should not become a dependency of ordinary StarIntel actor inference.
+
+* Source Repository Layout
+
+Candidate v0.1 layout:
+
+#+begin_src text
+star-kb/
+  AGENTS.md
+  README.org
+  LICENSE
+
+  schema/
+    source-profile.org
+    module-manifest.schema.json
+    bundle-manifest.schema.json
+    source-record.schema.json
+    release-manifest.schema.json
+
+  modules/
+    core/
+      provenance.pl
+      confidence.pl
+      temporal.pl
+    geography/
+      core.pl
+      us.pl
+    dialect/
+      core.pl
+      en-us/
+        lexical.pl
+        syntax.pl
+        survey.pl
+        scoring.pl
+    organizations/
+      core.pl
+    social/
+      core.pl
+    infrastructure/
+      core.pl
+
+  bundles/
+    star.core/
+      bundle.json
+    star.dialect.en-us/
+      bundle.json
+
+  sources/
+    catalog/
+      *.json
+
+  fixtures/
+    core/
+    dialect/
+
+  tests/
+
+  tools/
+    compile-bundle
+    verify-bundle
+    publish-bundle
+    diff-release
+#+end_src
+
+The exact directory names may change during implementation, but module/bundle/source separation is normative.
+
+* Restricted Source-Prolog Profile
+
+The canonical source should remain recognizably Prolog while being intentionally smaller than general SWI-Prolog.
+
+** Allowed clause shapes
+
+#+begin_src prolog
+regional_term(pop, inland_north).
+
+supports_region(Features, Region, Score) :-
+    dialect_feature_score(Features, Region, Score),
+    gte(Score, 0.0).
+#+end_src
+
+Allowed source constructs are:
+
+- ground facts;
+- ordinary variables in rules;
+- compound terms and lists representable by the current safe query AST;
+- conjunction of user predicates from the resolved dependency closure;
+- safe builtins present in the query-server registry;
+- negation only where the runtime analyzer accepts the resulting dependency structure.
+
+** Rejected source constructs
+
+The compiler must fail closed on:
+
+- =:- initialization(...)= and other executable directives;
+- =use_module/1=, =consult/1=, runtime file includes, and network-loaded source;
+- =call/N= and constructed meta-calls;
+- =assert*=, =retract*=, =abolish*=, and dynamic runtime mutation;
+- filesystem, shell, process, environment, socket, HTTP-client, database-driver, and foreign calls;
+- term-expansion hooks and compile-time code execution;
+- unrecognized operators/functors used as executable goals;
+- source clauses that cannot be losslessly represented in the query-server safe AST.
+
+The compiler owns dependency resolution. Source =.pl= files do not import each other through executable Prolog directives.
+
+* Module Manifest
+
+Each module requires a machine-readable manifest independent of the clauses.
+
+Conceptual shape:
+
+#+begin_src json
+{
+  "name": "dialect.en-us.lexical",
+  "version": "0.1.0",
+  "provides": [
+    "dialect_lexical_evidence/4"
+  ],
+  "requires": [
+    "core.provenance",
+    "geography.us"
+  ],
+  "sources": [
+    "src-us-dialect-001"
+  ],
+  "licensePolicy": "mixed-source-reviewed"
+}
+#+end_src
+
+Predicate names in compiled output must satisfy query-server identifier restrictions. Use a deterministic namespace convention such as =dialect_lexical_evidence= rather than relying on runtime SWI module qualification.
+
+Circular module dependencies are rejected by the bundle builder even when the underlying logical rules contain valid recursion. *Build dependency cycles* and *predicate recursion* are different concepts.
+
+* Bundle Manifest
+
+A bundle is the unit an actor requests and the publisher releases.
+
+#+begin_src json
+{
+  "name": "star.dialect.en-us",
+  "version": "0.1.0",
+  "modules": [
+    "core.provenance",
+    "core.confidence",
+    "geography.core",
+    "geography.us",
+    "dialect.core",
+    "dialect.en-us.lexical",
+    "dialect.en-us.syntax",
+    "dialect.en-us.scoring"
+  ],
+  "exports": [
+    "dialect_candidate/3",
+    "dialect_evidence/4"
+  ]
+}
+#+end_src
+
+The builder computes transitive dependency closure, validates it, canonicalizes the clause set, and publishes one named query-server KB release for v1.
+
+* V1 Bundle Compilation Strategy
+
+The current query-server query API selects one =(kb, release)= pair. Do not change this solely to implement source modules.
+
+For v1:
+
+#+begin_src text
+source modules
+    |
+resolve dependency closure
+    |
+validate restricted Prolog
+    |
+normalize clauses
+    |
+attach origin/source metadata
+    |
+flatten into one bundle corpus
+    |
+compile -> safe JSON AST documents
+    |
+PQS KB = bundle name
+PQS release = immutable publication ID
+#+end_src
+
+This may duplicate a shared fact across several published bundles. Accept that cost initially. Runtime simplicity and coherent proof/release semantics are more valuable until measurements show that publication-time flattening is a real scale problem.
+
+A later ARADR pass may evaluate native multi-KB imports or shared runtime modules if corpus size justifies the complexity.
+
+* Clause Identity and Provenance
+
+Every source clause must compile to a stable identity. The exact hash algorithm is an implementation detail, but the identity input must include enough normalized information to prevent accidental collisions and make identical rebuilds deterministic.
+
+Recommended identity inputs:
+
+#+begin_src text
+source profile version
+module name
+normalized clause AST
+source record ID
+source repository commit
+#+end_src
+
+Generated query-server documents should include additional non-executable metadata such as:
+
+#+begin_src json
+{
+  "originModule": "dialect.en-us.lexical",
+  "originPath": "modules/dialect/en-us/lexical.pl",
+  "originClause": "sha256:...",
+  "sourceCommit": "...",
+  "sourceRecords": ["src-us-dialect-001"],
+  "licenseRefs": ["license-star-owned"],
+  "generatedBy": "star-kb-compiler/0.1.0"
+}
+#+end_src
+
+The query server may ignore these fields for execution; they remain valuable through CouchDB source documents, release inspection, proof source IDs, and audits.
+
+* Source Records
+
+Knowledge assertions must not reduce provenance to a free-form comment.
+
+A source catalog record should capture, where applicable:
+
+#+begin_src text
+sourceId
+kind
+canonicalURL
+retrievedAt
+authority/title
+license
+licenseURL
+allowedUses
+collectionMethod
+sourceVersion/contentHash
+notes
+#+end_src
+
+A fact/rule/module can cite multiple source records. StarIntel-owned first-party research can use an explicit internal source/license record rather than pretending it came from an external publication.
+
+* Publication Lifecycle
+
+No direct source edit becomes production inference knowledge merely because it lands in Git.
+
+#+begin_src text
+edit source modules
+       |
+       v
+compile bundle deterministically
+       |
+       v
+source-profile/schema validation
+       |
+       v
+fixture/unit inference tests
+       |
+       v
+stage immutable PQS release
+       |
+       v
+PQS static analysis
+       |
+       v
+pinned /v1/query + /v1/explain acceptance suite
+       |
+       v
+compare release diff
+       |
+       v
+activate with current manifest _rev
+       |
+       v
+observe health/metrics
+#+end_src
+
+Activation is revision checked. A stale manifest revision is a conflict, not permission to overwrite another publisher's decision.
+
+Rollback activates a prior immutable release with the current manifest revision. Historical released clauses remain available for pinned reproduction subject to retention policy.
+
+* Release Manifest
+
+The source-side build artifact should record at least:
+
+#+begin_src json
+{
+  "bundle": "star.dialect.en-us",
+  "bundleVersion": "0.1.0",
+  "sourceCommit": "...",
+  "sourceProfileVersion": 1,
+  "compilerVersion": "0.1.0",
+  "contentHash": "sha256:...",
+  "modules": [],
+  "sourceRecords": [],
+  "queryServerCompatibility": ">=0.x",
+  "pqsKb": "star.dialect.en-us",
+  "pqsRelease": "2026-09-10-a"
+}
+#+end_src
+
+A release is reproducible only when the source-side manifest and query-server release identity can be correlated.
+
+* Actor Query Contract
+
+StarIntel actors use the HTTP expert-system service. They do not connect directly to the query CouchDB for inference.
+
+** Generic Common Lisp client
+
+The first implementation should be generic, not dialect-specific. Conceptual Lisp API:
+
+#+begin_src lisp
+(query-kb client
+          :kb "star.dialect.en-us"
+          :release release
+          :goal goal
+          :max-depth 32
+          :max-solutions 20
+          :refresh t)
+
+(explain-kb client
+            :kb "star.dialect.en-us"
+            :release release
+            :goal goal)
+#+end_src
+
+The client owns:
+
+- endpoint and TLS configuration;
+- bearer-token handling from the existing secrets/config system;
+- JSON serialization/deserialization;
+- connect/read/request deadlines;
+- bounded retry policy only for demonstrably safe transport failures;
+- typed distinction between query failure, no solutions, authorization failure, release conflict, invalid goal, and runtime unavailability;
+- low-cardinality metrics and actor-event correlation;
+- redaction of credentials and private evidence from logs.
+
+The client does not implement Prolog inference, release selection, or CouchDB synchronization.
+
+** Structured goal requirement
+
+Do not add a normal raw-query string endpoint for actor convenience.
+
+Actors construct the existing safe JSON goal AST. Trusted research tooling that genuinely requires arbitrary SWI-Prolog is a separate capability and should not ride the production actor credential.
+
+* Query Provenance Contract
+
+A derived StarIntel document should be able to record enough metadata to explain and reproduce the inference without copying the whole KB.
+
+Recommended extension payload:
+
+#+begin_src json
+{
+  "knowledgeInference": {
+    "server": "prolog-query-server",
+    "kb": "star.dialect.en-us",
+    "release": "2026-09-10-a",
+    "bundleVersion": "0.1.0",
+    "sourceCommit": "...",
+    "queryId": "...",
+    "goalClass": "dialect_candidate",
+    "proofSourceIds": ["..."],
+    "actor": "dialect-enricher",
+    "actorVersion": "0.1.0"
+  }
+}
+#+end_src
+
+Do not store bearer tokens, raw authorization headers, or unnecessary private query arguments in provenance.
+
+When a result materially depends on proof detail, the actor should call =/v1/explain= or otherwise persist a durable reference to an explanation result. Merely recording a model-style score without its knowledge release is insufficient.
+
+* Canonical Knowledge Versus Observations
+
+Use three semantic classes throughout the stack:
+
+| Class | Authority | Example |
+|-------+-----------+---------|
+| Canonical fact/assertion | =star-kb= source -> PQS release | a documented region belongs to a geographic hierarchy |
+| Rule | =star-kb= source -> PQS release | linguistic features contribute evidence to candidate dialect regions |
+| Observation/evidence | StarIntel document/artifact store | actor observed token =pop= in document X during run Y |
+
+Actor observations do not become source facts through an automatic write-back loop.
+
+Promotion requires a separate validation/publication process that produces a source record and reviewed source clause in a future =star-kb= release.
+
+This avoids self-reinforcing contamination where an inference is later re-ingested as if it were independent ground truth.
+
+* Passing Case Evidence Into Queries
+
+The initial design avoids adding transient mutable facts to the query server.
+
+Actors pass a bounded evidence projection as goal arguments:
+
+#+begin_src json
+{
+  "predicate": "dialect_candidate",
+  "args": [
+    [
+      {"functor": "lexical", "args": ["pop"]},
+      {"functor": "lexical", "args": ["drinking_fountain"]}
+    ],
+    {"var": "Region"},
+    {"var": "Score"}
+  ]
+}
+#+end_src
+
+Rules recursively reason over this value using allowed predicates/builtins. This keeps query evidence isolated to a request and avoids persisting every observed token in the canonical runtime KB.
+
+If real workloads show that large evidence sets cannot be expressed efficiently as bounded goal arguments, research a query-scoped ephemeral context API separately. Do not preemptively add mutable temporary knowledge semantics.
+
+* First Reference Consumer: =star.dialect.en-us=
+
+The first production bundle should be narrow enough to validate architecture and broad enough to produce useful explanations.
+
+** Initial source modules
+
+#+begin_src text
+core.provenance
+core.confidence
+geography.core
+geography.us
+dialect.core
+dialect.en-us.lexical
+dialect.en-us.syntax
+dialect.en-us.scoring
+#+end_src
+
+Phonology/audio and neural-model fusion are later modules.
+
+** Initial exported predicates
+
+Names are illustrative; exact arities are fixed during implementation tests.
+
+#+begin_src text
+dialect_candidate/3
+dialect_evidence/4
+dialect_feature_known/2
+dialect_region_parent/2
+#+end_src
+
+=dialect_candidate(Features, Region, Score)= must accept request-local features and return ranked candidate evidence scores. The first release must document what =Score= mathematically means. Do not label it a probability without calibration evidence.
+
+** Evidence categories
+
+Represent separately:
+
+#+begin_src prolog
+linguistic_feature(lexical(pop)).
+contextual_geo_feature(regional_brand(meijer)).
+named_geo_feature(place(detroit)).
+model_evidence(ModelVersion, Region, Score).
+#+end_src
+
+The exact predicates may change, but the categories may not be collapsed into one unexplained location signal.
+
+** First-party corpus direction
+
+The canonical production corpus should progressively prefer StarIntel-controlled/licensed survey and research assertions. Third-party Harvard/MyDialect data may be used for research/benchmarking subject to its =CC BY-NC-SA 3.0= terms, but must not silently become unrestricted canonical knowledge.
+
+The first-party survey should collect dialect-acquisition history separately from current residence. Optional natural text and later audio create supervised evidence for learned models while preserving respondent-level splits.
+
+* Learned-Model Integration
+
+A deep-learning service is an evidence producer, not a replacement knowledge authority.
+
+#+begin_src text
+text/audio
+   |
+   +--> deterministic feature extractor --> observations --+
+   |                                                       |
+   +--> learned model --------------------> model scores ---+--> Prolog fusion/explanation
+                                                           |
+                                              canonical KB rules
+#+end_src
+
+Each model score includes at least model identity/version, input artifact/document reference, score semantics, and calibration/evaluation version.
+
+The Prolog layer may later fuse symbolic and learned evidence. Promotion of model outputs into canonical facts is forbidden by default.
+
+* Probabilistic Logic Boundary
+
+Do not add =cplint= to the production query server in the first implementation slice.
+
+If explicit weighted rules prove too awkward or statistically weak, open a focused research/design pass comparing:
+
+- dedicated safe scoring builtins inside the existing meta-interpreter;
+- an isolated probabilistic-logic execution service;
+- a narrowly exposed =cplint= adapter;
+- learned-model-only scoring with Prolog used for constraints/explanation.
+
+Any option must preserve bounded execution, deterministic serialization, versioned releases, explanation provenance, and current raw-code rejection guarantees.
+
+* StarLang Boundary
+
+StarLang remains runtime-neutral with respect to Prolog.
+
+A future actor declaration may identify an adapter/capability such as:
+
+#+begin_src text
+knowledge.query
+  transport: http
+  endpointCapability: star.prolog-query
+  requestContract: pqs.query.v1
+#+end_src
+
+The StarLang compiler/runtime should not parse =?-=/Prolog queries, consult =.pl= files, or implement Prolog semantics. It sends the same structured contract used by the Common Lisp adapter.
+
+This matches the current StarLang direction that a SWI-Prolog query port should first be an ordinary Common Lisp adapter behind a generic process/RPC boundary.
+
+* Runtime Consistency and Performance
+
+The query server already uses a persistent multi-threaded SWI HTTP process. Do not optimize by spawning SWI for each actor request.
+
+Normal production behavior:
+
+- query active release by default;
+- allow explicit release pinning for replay/audit;
+- leave =refresh: true= available so active manifest/release changes become visible through the server's normal synchronization policy;
+- rely on bounded =_changes= synchronization rather than a full scan after initial load;
+- preserve the query-server's loaded-KB/request/proof/resource limits;
+- benchmark before adding tabling, precompiled Prolog artifacts, or a second cache layer.
+
+A future optimization pass may evaluate safe tabled predicates where recursive workload data justify it. It must not allow stored knowledge documents to inject arbitrary =table/1= directives.
+
+* Failure Semantics
+
+Consumers must distinguish at least:
+
+#+begin_src text
+knowledge_not_found
+release_not_found
+invalid_goal
+invalid_release
+release_conflict
+knowledge_conflict
+analysis_rejected
+query_timeout
+resource_limit
+unauthorized
+forbidden
+server_unavailable
+no_solutions
+successful_solutions
+#+end_src
+
+=No solutions= is an ordinary inference result, not a transport/server failure.
+
+Actor retries must be bounded and idempotent. A timeout does not prove that a query had no solution.
+
+* Security Model
+
+1. Production actor credentials are read-only query credentials unless a publisher role explicitly requires writes.
+2. Knowledge publication credentials are separate from actor credentials.
+3. Query server runs behind TLS for non-loopback traffic.
+4. Source compiler emits only safe fact/rule AST accepted by the runtime.
+5. No =.pl= file from an actor target, message, scraped document, or model output is loaded as executable code.
+6. Query depth, solution count, payload size, loaded-KB size, proof size, and execution time remain bounded.
+7. Runtime conflicts fail closed.
+8. Release activation is revision checked.
+9. Logs/metrics never contain credentials and should avoid full private evidence payloads.
+10. Source licenses and provenance are validation data, not optional documentation.
+
+* Test and Conformance Plan
+
+Implementation should add tests at each authority boundary rather than one giant integration test.
+
+** =star-kb= tests
+
+- accept allowed facts/rules and reject every forbidden source construct;
+- deterministic parse/normalize/compile output;
+- deterministic document IDs;
+- module dependency closure and cycle rejection;
+- duplicate predicate/source identity checks;
+- source/license record validation;
+- bundle content hash stability;
+- fixture inference expectations;
+- identical source commit produces identical release payload;
+- source change produces reviewable release diff.
+
+** Query-server integration tests
+
+Reuse existing runtime tests, then add only gaps required by =star-kb= publication:
+
+- stage generated release;
+- static analysis gate;
+- pinned query and explain;
+- activate with =_rev=;
+- default query observes active release;
+- rollback to earlier release;
+- proof IDs correspond to generated source documents;
+- conflicting activation fails;
+- unresolved CouchDB knowledge conflicts still fail closed.
+
+** Common Lisp client tests
+
+- request/response contract fixtures;
+- auth/redaction;
+- deadline and typed error behavior;
+- no-solutions versus failure distinction;
+- release pinning;
+- explanation/provenance extraction;
+- live service integration against a test query-server+CouchDB stack.
+
+** Dialect actor tests
+
+- lexical and syntax features produce expected candidate ordering on synthetic fixtures;
+- contextual geographic evidence remains separately labeled;
+- unknown features do not fabricate support;
+- contradictory evidence returns alternatives rather than forced certainty;
+- actor output records exact KB release;
+- duplicate/redelivered source documents remain idempotent;
+- held-out first-party evaluation splits by respondent, not post.
+
+* Implementation Order
+
+After explicit approval, implementation should proceed in this order:
+
+1. Create =star-kb= and lock repository/instruction boundaries.
+2. Specify restricted source Prolog and source/bundle/release metadata.
+3. Build deterministic compiler and local fixtures without production writes.
+4. Publish a tiny =star.core.test= staged release into a test query-server deployment.
+5. Wire existing query-server analysis/query/explain/activation into =publish-bundle=.
+6. Prove activation, pinning, rollback, conflict handling, and proof provenance.
+7. Add generic Common Lisp client to StarIntel server.
+8. Build =star.dialect.en-us= source modules and bundle.
+9. Add dialect actor as first production consumer.
+10. Collect first-party corpus and establish benchmark/evaluation sets.
+11. Research model fusion, probabilistic logic, and performance optimizations from measured gaps.
+12. Add StarLang adapter only after the generic adapter contract is stable.
+
+Do not start at step 8 by hard-coding dialect facts into the actor. That would recreate the fragmentation this design exists to eliminate.
+
+* Explicit Non-Goals for V0.1
+
+- arbitrary remote Prolog execution;
+- replacing CouchDB with Git;
+- storing all StarIntel observations in =star-kb=;
+- automatic promotion of scraper/model output into canonical knowledge;
+- cross-KB runtime joins/imports;
+- cplint execution in the production request path;
+- custom tabling directives from knowledge documents;
+- Prolog syntax in core StarLang;
+- neural model training inside the query server;
+- precise-person geolocation claims from dialect evidence.
+
+* Acceptance Criteria for the Design Implementation
+
+The implementation is complete only when all of the following are demonstrated on exact repository heads:
+
+1. One =star-kb= source bundle compiles deterministically to safe query-server documents.
+2. The generated release can be staged, analyzed, queried, explained, activated, pinned, and rolled back using existing query-server semantics.
+3. No runtime path loads source =.pl= directly from untrusted messages/CouchDB documents.
+4. Source provenance and license metadata survive compilation into inspectable runtime documents.
+5. A generic Common Lisp client queries a live test query server with typed errors and bounded deadlines.
+6. The dialect actor consumes the generic client rather than implementing its own Prolog runtime.
+7. The dialect result distinguishes linguistic, contextual-geographic, named-entity, and model evidence classes.
+8. The result records exact bundle/query-server release provenance and can request a proof tree.
+9. Existing StarIntel and query-server conformance suites remain green.
+10. Documentation and release manifests make the system reproducible without relying on hidden operator state.
+
+* Related Nodes
+
+- [[id:star-kb-research-001-shared-prolog-knowledge-plane][STAR-KB-RESEARCH-001 Shared Prolog Knowledge Plane and Dialect Enrichment]]
+- [[id:star-kb-index-000-prolog-knowledge-system][STAR-KB-INDEX-000 Prolog Knowledge System]]
+
+* Publication Links
+
+Expected review links after this document lands on =main= and the Pages deployment succeeds:
+
+- https://auto-research.starintel.actor/notes/design/star-kb/STAR-KB-001-canonical-knowledge-authoring-and-query-plane.html
+- https://auto-research.starintel.actor/notes/research/star-kb/STAR-KB-RESEARCH-001-shared-prolog-knowledge-plane-and-dialect-enrichment.html
+- https://auto-research.starintel.actor/notes/indexes/star-kb/STAR-KB-INDEX-000-prolog-knowledge-system.html
+
+* Footnotes and Glossary
+
+[fn:authoring-plane] *Authoring plane*: the reviewed source representation and build inputs from which runtime knowledge releases are generated.
+
+[fn:knowledge-plane] *Knowledge plane*: the query-server+CouchDB runtime that executes bounded logical inference over immutable/revisioned knowledge releases.
+
+[fn:evidence-plane] *Evidence plane*: StarIntel's case/run-specific observations, documents, and artifacts; these are inputs to reasoning but are not automatically reusable canonical world knowledge.
+
+[fn:module] *Module*: a reusable source-level group of related facts/rules with an explicit dependency/provenance manifest.
+
+[fn:bundle] *Bundle*: an actor-facing dependency closure compiled in v1 into one query-server KB release.
+
+[fn:safe-ast] *Safe JSON AST*: the structured query-server representation of facts, rules, variables, compound terms, and goals that avoids accepting arbitrary Prolog source for execution.

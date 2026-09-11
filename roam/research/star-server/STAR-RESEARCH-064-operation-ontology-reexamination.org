@@ -1,0 +1,118 @@
+:PROPERTIES:
+:ID:       starintel-research-064
+:END:
+#+title: STAR-RESEARCH-064 Operation Ontology Re-examination
+#+description: First-pass research for the operation ontology re-examination gate: canonical 0.9.1 operation inventory, proposed JSON-LD term positions, PROV-O reuse matrix, constraint split from operation_spec.py, fourteen open questions, and the nine-predicate Prolog projection acceptance test.
+#+status: DRAFT
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: opencode agent
+#+approval_evidence: machine research completion is not operator approval; research conclusion pending operator review
+#+approval_base_commit: b8490fe8d9afa0138a08530f07b5e78094234575
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+created: [2026-09-11 Fri]
+#+last_modified: [2026-09-11 Fri]
+#+filetags: :starintel:star-server:ontology:operation:phase:json-ld:prolog:research:draft:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | StarIntel operator / active ARDR policy | PENDING | Explicit operator review of the inventory and proposed positions | [[https://github.com/lost-rob0t/starintel-auto-research/issues/219][#219]] |
+| Ontology mapping design | StarIntel operator / active ARDR policy | NOT STARTED | Research/design transition authority and canonical design evidence | |
+| Implementation | StarIntel operator | NOT STARTED | Explicit operator implementation approval | |
+
+* Scope
+
+Re-examine operation and phase semantics as canonical JSON-LD under the ontology foundation [[https://github.com/lost-rob0t/starintel-auto-research/issues/72][#72]] and its gate [[https://github.com/lost-rob0t/starintel-auto-research/issues/219][#219]], so that agent-executable operations, phases, dependencies, target scope, datasets, capabilities, assignments, completion, evidence, and post-actions carry the same semantics in every language without per-language source edits.
+
+This node records the first pass: the 0.9.1 inventory, proposed term positions, the constraint split, and open questions. It does not block StarIntel v0.9, does not make any programming language the ontology authority, does not collapse =target= and =investigation-target=, and does not confuse control-plane roles with real-world entity classes. Foundation positions come from [[file:STAR-RESEARCH-007-starintel-ontology-foundations.org][STAR-RESEARCH-007]] and [[file:../ardr-issues/ARDR-ISSUE-072-starintel-ontology-foundation.org][ARDR-ISSUE-072]]; gate transaction is [[file:../ardr-issues/ARDR-ISSUE-219-operation-ontology-reexamination.org][ARDR-ISSUE-219]].
+
+* Source Register
+
+| Source | Role in this pass |
+|---+---|
+| [[https://github.com/lost-rob0t/starintel-gpt-auto-dig/pull/2416][gpt-auto-dig#2416]] — canonical =dtype: operation=, release 0.9.1, commit 6479c0a9 | canonical schema: 12 data fields, 56 enum terms across 8 vocabularies |
+| =starintel_doc/operation_spec.py= lines 282-376 | semantic validators enforced Python-side; constraint-split source |
+| [[https://github.com/lost-rob0t/starintel-gpt-auto-dig/blob/main/docs/operation-object.md][gpt-auto-dig docs/operation-object.md]] lines 63-69 | the five canonical gate questions |
+| [[https://github.com/lost-rob0t/starintel-server/blob/main/doc/operation-object.org][starintel-server doc/operation-object.org]] lines 75-76 | lossless v0.9 to JSON-LD migration requirement |
+| [[https://github.com/lost-rob0t/starintel-server/pull/153][starintel-server#153]] | server-side consumption of =dtype: operation= (merged) |
+| [[https://github.com/lost-rob0t/starintel-server/pull/151][starintel-server#151]] | server operation-object gate work |
+| [[file:STAR-RESEARCH-007-starintel-ontology-foundations.org][STAR-RESEARCH-007]] + [[file:../ardr-issues/ARDR-ISSUE-072-starintel-ontology-foundation.org][ARDR-ISSUE-072]] | foundation: qualified assertion model, modules, registry, mapping strengths, version-pinned contexts |
+| [[https://github.com/lost-rob0t/starintel-auto-research/issues/219][#219]] | gate: twelve decisions, eight deliverables, nine-predicate acceptance test |
+
+* Findings
+
+** Operation 0.9.1 inventory
+
+The canonical operation dtype carries 12 data fields: =mission=, =objectives=, =status= (8 states), =in_scope=, =out_of_scope=, =target_policy=, =targets= (roles primary, supporting, derived, excluded), =phases= (at least one, forming a DAG), =datasets=, =capability_gaps=, =assignments=, and =post_actions=. Enum totals: 56 terms across 8 vocabularies — operation status (8), phase state (9), dataset role (6), dataset access (4), capability category (10), capability gap status (7), assignment status (6), post-action status (6). Phase subfields: =phase_id=, =title=, =objective=, =state= (9 states), =depends_on=, =entry_conditions=, =exit_conditions= (CONDITION), phase-local scope, =target_policy=, =target_ids=, =dataset_binding_ids=, =required_capability_ids=, =deliverable_ids=, =completion_evidence=. Dataset bindings carry =binding_id=, =dataset=, =role= (6), =access= (4), =phases=, =purpose=. Capability gaps carry =capability_id=, =category= (10), =description=, =blocking=, =status= (7), =required_by=, =capability_ref=, =resolution_ref=, =owner=. Assignments carry =assignment_id=, =agent_id=, =actor_id=, =phase_ids=, =role=, =status= (6). Post-actions carry =action_id=, =action_type= (free-form), =condition= (CONDITION), =target_ids=, =dataset_binding_ids=, =status= (6), =config=.
+
+** Proposed positions (Proposed, pending operator research approval)
+
+1. *Operation class.* Both ontology class and control-plane profile: a StarIntel-native control-plane Activity/Plan hybrid (star-investigation or star-runtime module; placement is a gate decision), with the schema.org =Action= mapping kept as a transitional drift-guarded =close= mapping and PROV-O =Activity=/=Plan= as structural mappings.
+2. *Link model.* Operation =has-phase= Phase (phase_id-keyed named nodes, not a separate dtype in the first slice); =binds= DatasetBinding (role + access); =requires= Capability with blocking gaps hooking the R&D loop via =resolution_ref=; =assigns= Agent/Actor control-plane pairs; =references= Target/InvestigationTarget through roles only, never Entity subclasses; deliverables and =completion_evidence= are Evidence/Document records; =post_actions= are condition-gated follow-up Plans.
+3. *PROV reuse matrix.* =prov:Plan=, =prov:Activity=, =prov:used=, =prov:wasGeneratedBy=, =prov:wasAssociatedWith=, and dependency edges are structural mappings; lifecycle states remain StarIntel-native SKOS-style versioned terms with close =schema:ActionStatus= mappings only where they exist. Mapping strengths are recorded per the foundation vocabulary (exact, close, broader, narrower, structural, lossy, unsupported).
+4. *Versioning.* Extend the additive expansion-registry pattern (immutable base + versioned expansion + content hash) to version-pinned JSON-LD contexts; 56 enum terms become versioned registry entries with deprecation and migration rules; custom operation ontologies refine via separate pinned contexts with zero per-language edits.
+5. *Constraint split.* JSON Schema keeps shapes, required fields, enum membership, and =additionalProperties: false=; cross-reference integrity, DAG acyclicity, scope precedence, and evidence-gated completion become shared Prolog-projectable semantic rules replacing per-language Python-only reimplementations.
+
+** Constraint-split inventory (from =operation_spec.py= lines 282-376)
+
+Every Python-enforced semantic rule recorded as a split candidate:
+
+| # | Enforced rule (Python, lines 282-376) | Proposed layer | Proposed home |
+|---+---+---+---|
+| 1 | unique identifiers across id-bearing collections | semantic (shared, Prolog-projectable) | registry rule package |
+| 2 | all cross-references resolve (target, binding, capability, deliverable, dependency, assignment, gap references) | semantic | registry rule package |
+| 3 | phase DAG acyclic; no self-dependencies | semantic | registry rule package |
+| 4 | operation =out_of_scope= overrides phase =in_scope= | semantic (scope precedence) | registry rule package |
+| 5 | completed phase requires =completion_evidence= | semantic (evidence-gated completion) | registry rule package |
+| 6 | operation =completed= implies every phase =completed= or =skipped= | semantic | registry rule package |
+| S1 | field shapes, required fields, identifier syntax | structural | JSON Schema |
+| S2 | enum membership (56 terms, 8 vocabularies) | structural | JSON Schema + versioned registry |
+| S3 | =additionalProperties: false= | structural | JSON Schema |
+| S4 | phases minimum cardinality (>= 1) | structural | JSON Schema |
+
+** Nine-predicate acceptance projection
+
+Acceptance test: =currentPhase=, =phaseRunnable=, =phaseBlockedBy=, =validTarget=, =allowedDataset=, =phaseComplete=, =nextPhase=, =operationComplete=, and =capabilityMissing= must project from canonical JSON-LD without bespoke per-language semantics. Rule sketches live in [[file:../ardr-issues/ARDR-ISSUE-219-operation-ontology-reexamination.org][ARDR-ISSUE-219]]; conformance fixtures are queued below.
+
+* Open Questions
+
+1. What is the canonical =starintel:= context namespace IRI and term-casing convention for the operation context?
+2. Does Phase stay an embedded =@id=-addressable node in the first slice or become an independent dtype document, and how does =phase_id= identity survive server revisions?
+3. Which of the 8 operation states and 9 phase states earn close =schema:ActionStatus= mappings, and which remain unsupported/native-only?
+4. Is =target_policy= a closed vocabulary term, free text, or a policy record, and how does it compose with =excluded= targets?
+5. How do assignment =agent_id= and =actor_id= separate control-plane actors from real-world agents (and from =prov:Agent=) without collapsing the classes?
+6. What is the authoritative semantics of each dataset role (6) by access (4) pair, and is access an authorization boundary or a provenance qualifier?
+7. What closes a capability gap: which evidence proves resolution through =resolution_ref=, and which gap status transitions are legal?
+8. Should post-action =action_type= remain free-form with registry-refused unknown types, or become an open enumeration with registered extensions?
+9. What shared CONDITION syntax do =entry_conditions=, =exit_conditions=, and post-action =condition= use so they project to Prolog without per-language parsers?
+10. Are deliverables and =completion_evidence= star-assertion Evidence records or plain Document references, and who asserts them?
+11. Where do version-pinned context content hashes live, and what is the verification procedure for the immutable-base + versioned-expansion pattern?
+12. Which of the twelve #219 decisions are ontology semantics versus control-plane profile, and which approval rows do they consume?
+13. Which representative operation+phase graph (DAG branches, blocked phase, scope override, gap-blocked completion, post-action) anchors the conformance fixtures?
+14. Should the server persist phases embedded in the operation document or as child phase documents, per CouchDB revision and replication behavior?
+
+* Next Passes
+
+- Draft the JSON-LD context: immutable base context plus versioned expansion with content hash, carrying the proposed =starintel:= operation terms and the 56 enum vocabulary schemes.
+- Build the representative operation+phase graph: multi-phase DAG with a blocked phase, a scope override, a gap-blocked completion, and one condition-gated post-action.
+- Write conformance fixtures: structural JSON Schema cases plus semantic Prolog cases proving each of the nine predicates against the fixtures, including negative cases.
+- Recommend phase persistence for the server: embedded versus child phase documents, reconciled with CouchDB revision and replication behavior and with the lossless v0.9 migration requirement.
+
+* Footnotes and Glossary
+
+- *Operation re-examination gate* :: The issue 219 acceptance test: the nine Prolog predicates must project from canonical JSON-LD without bespoke per-language semantics.
+- *Qualified assertion* :: A fact-like record carrying provenance, evidence, temporal context, confidence, and assertion status, per the #72 foundation.
+- *DatasetBinding* :: The role- and access-qualified binding of a dataset to an operation, referenced by phases and post-actions through =binding_id=.
+- *Capability gap* :: A recorded missing capability with a blocking flag and a =resolution_ref= that hooks the gap into the R&D loop.
+- *CONDITION* :: The canonical condition term used by =exit_conditions= and post-action =condition= fields; its shared projectable syntax is an open question.
+- *Expansion-registry pattern* :: The repository's pin-and-extend precedent: immutable base plus versioned expansion plus content hash, applied additively since v0.9.
+- *Constraint split* :: The division of validation labor: structural rules in JSON Schema, cross-document semantic rules in shared Prolog-projectable packages.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------|----------|
+| 2026-09-11 | Pass 1: inventoried the canonical 0.9.1 operation schema (12 fields, 56 enum terms, 8 vocabularies) at 6479c0a9, the =operation_spec.py= semantic validators, both operation-object gate documents, and server consumption; recorded proposed positions for the five gate questions, the constraint-split inventory, fourteen open questions, and the next passes. | opencode agent | [[https://github.com/lost-rob0t/starintel-gpt-auto-dig/pull/2416][gpt-auto-dig#2416]]; [[https://github.com/lost-rob0t/starintel-server/pull/153][starintel-server#153]]; [[https://github.com/lost-rob0t/starintel-auto-research/issues/219][#219]]; this node |

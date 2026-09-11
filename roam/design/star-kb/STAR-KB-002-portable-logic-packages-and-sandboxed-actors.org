@@ -1,0 +1,513 @@
+:PROPERTIES:
+:ID:       star-kb-design-002-portable-logic-packages-sandboxed-actors
+:END:
+#+title: STAR-KB-002 Portable Logic Packages and Sandboxed Actors
+#+description: Implementation-ready design for reusing one digest-identified star-kb logic package across PQS, direct SWI-Prolog actors, and StarLang logic actors while separating portability from execution trust and routing higher-risk native logic through a fail-closed sandbox.
+#+status: REVIEW
+#+filetags: :starintel:star-kb:prolog:pqs:star-lang:logic:actors:sandbox:portable:design:aradr:approval:
+#+created: [2026-09-10 Thu]
+#+last_modified: [2026-09-10 Thu]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| STAR-KB-002 design | StarIntel operator | PENDING | Explicit operator approval after review | This document |
+| Promote into =roam/implement/star-kb/= | StarIntel operator | PENDING | Approved design plus explicit implementation authorization | Do not promote before approval |
+| Product changes in =lost-rob0t/star-kb= | star-kb maintainer / operator | NOT STARTED | Exact tests and acceptance evidence from this design | Acceptance Criteria |
+| StarLang/SWI adapter changes | relevant repository maintainer / operator | NOT STARTED | Exact compatibility and sandbox tests on approved heads | Cross-Runtime Acceptance Criteria |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-10 | Created the portable rule-reuse design after explicit operator approval of STAR-KB-RESEARCH-004. The design keeps normal PQS safe, adds portable package/mapping identity, direct SWI and StarLang actor reuse, session-local fact overlays, and a separate sandbox-required execution class. | ChatGPT design pass | [[id:star-kb-research-004-portable-rule-reuse-across-logic-actors][STAR-KB-RESEARCH-004]]; operator approval in ChatGPT on 2026-09-10 |
+
+* Purpose
+
+This design turns the approved portability research into an implementation contract. It does not authorize implementation until the operator separately approves this design.
+
+STAR-KB-001 remains the bootstrap design for authoring, deterministic package construction, and the initial PQS publication path. STAR-KB-002 extends that foundation so the *canonical package* is no longer synonymous with one PQS serialization. One package may have several independently digest-identified runtime mappings.
+
+The required property is:
+
+#+begin_src text
+author rules once
+  -> normalize/version/digest once
+  -> classify semantic + trust requirements
+  -> materialize for eligible runtimes
+  -> run portable-safe logic in PQS or local safe SWI
+  -> run approved native-power logic only in a sandboxed worker
+  -> prove parity for every backend claiming the same semantic profile
+#+end_src
+
+* Design Invariants
+
+1. =star-kb= owns canonical reusable facts/rules and package identity.
+2. PQS is a safe runtime/materialization target, not the semantic owner of all packages.
+3. Package identity is independent from backend mapping identity.
+4. Portability and execution trust are separate dimensions.
+5. A manifest may declare intent, but static validation computes the minimum required trust/isolation class; authors cannot self-label unsafe logic as safe.
+6. Unknown executable constructs fail closed.
+7. Normal PQS never executes arbitrary native Prolog source or higher-risk capabilities.
+8. Direct actors never =consult/1= arbitrary user/runtime input.
+9. Session deltas are ephemeral ground data, never new executable semantics.
+10. Every result records package digest, mapping digest, backend build identity, and evidence/session identity.
+
+* Relationship to STAR-KB-001
+
+[[id:star-kb-design-001-v0-1][STAR-KB-001]] defines the generic source reader, restricted Prolog profile, deterministic clause identity, module/bundle composition, and PQS stage/check/activate path. This design reuses those mechanisms and adds a portable package IR plus multiple backend mappings.
+
+Where STAR-KB-001 describes one bundle as one PQS runtime release, STAR-KB-002 refines the model:
+
+#+begin_src text
+bundle/package semantic identity
+          |
+          +--> pqs mapping  -> PQS release
+          +--> swi mapping  -> isolated SWI package image
+          +--> StarLang mapping metadata -> selected eligible backend
+#+end_src
+
+The canonical package digest is computed before any backend-specific materialization. Backend mapping bytes are excluded from that package digest and receive their own mapping digest.
+
+* Package Contract
+
+A consumer-facing bundle SHALL also emit one backend-neutral package manifest:
+
+#+begin_src json
+{
+  "schema": "star-kb.logic-package.v1",
+  "package_id": "star.core.test",
+  "package_version": "0.2.0",
+  "package_digest": "sha256:<computed>",
+  "semantic_profile": "star.logic.portable-horn/1",
+  "roots": ["core.test"],
+  "exports": [{"predicate":"mortal","arity":1}],
+  "declared_capabilities": [],
+  "declared_execution_class": "safe",
+  "verified_execution_class": "safe"
+}
+#+end_src
+
+Normative rules:
+
+- =package_id= identifies the logical package namespace.
+- =package_version= is review/version metadata.
+- =package_digest= identifies the normalized semantic package content.
+- =semantic_profile= names the required backend-independent behavior.
+- =declared_capabilities= states the author's requested capability set.
+- =declared_execution_class= is author intent only.
+- =verified_execution_class= is compiler/validator output and cannot be overridden downward by the manifest.
+- A package whose verified class is stronger than its declared class fails validation until the manifest is corrected.
+
+* Portability Classification
+
+Every normalized package SHALL receive one portability class:
+
+| Class | Meaning |
+|-------+---------|
+| =portable-core= | Uses only the common semantic profile and may be mapped to every backend proven compatible with that profile. |
+| =backend-extension= | Uses an explicitly named capability/profile extension and may run only on backends that declare and pass that extension. |
+| =native-only= | Depends on semantics intentionally available only from a named native backend/profile. |
+
+Portability does not imply safety. A backend-specific indexing hint can be low risk; a portable-looking meta-call can be high risk.
+
+* Execution Trust Classification
+
+Every package SHALL also receive one execution class:
+
+| Class | Meaning | Normal PQS |
+|-------+---------+------------|
+| =safe= | Statistically validated to the bounded declarative profile and requires no native side effects. | Allowed if PQS mapping exists. |
+| =sandbox-required= | Uses an approved capability outside the normal safe profile and may execute only through an isolation class that satisfies all required controls. | Rejected by normal PQS. |
+| =prohibited= | Uses an unsupported capability or a capability forbidden by deployment policy. | Rejected everywhere under that policy. |
+
+The validator computes the minimum class required by all constructs. Unknown constructs become =prohibited= until a design explicitly adds semantics and classification for them.
+
+* Portable Semantic Profile V1
+
+The initial common profile is named =star.logic.portable-horn/1= and contains:
+
+- ground facts;
+- Horn-style rules;
+- variables and ordinary compound/list terms;
+- conjunction;
+- unification and disequality;
+- negation-as-failure only where the existing safe profile permits it;
+- deterministic bounded numeric calculation/comparison;
+- bounded recursion/inference;
+- named query operations with normalized answer semantics.
+
+The common profile excludes arbitrary meta-call, runtime source loading, directives with effects, filesystem/network/process access, foreign calls, uncontrolled global mutation, engine-specific cut/control effects, and any construct without a normalized semantic definition.
+
+Weighted/salient rules may use deterministic arithmetic in this profile. If aggregate summation needs a new primitive, that primitive requires its own bounded deterministic semantic contract and parity fixtures before joining the portable profile.
+
+* Capability Vocabulary V1
+
+The initial capability names SHALL be stable strings. V1 reserves at least:
+
+#+begin_src text
+logic.tabling
+logic.constraints
+logic.aggregate
+logic.meta-call
+io.filesystem.read
+io.filesystem.write
+net.outbound
+process.exec
+foreign.call
+runtime.load-code
+runtime.mutable-global
+#+end_src
+
+The first three may be backend extensions if separately designed and bounded. The latter capabilities require =sandbox-required= or =prohibited= according to deployment policy. V1 implementation does not need to support every reserved capability; unsupported means fail closed.
+
+* Static Classification
+
+The =star-kb= validator SHALL walk the normalized AST before any runtime mapping is emitted.
+
+For every construct it records:
+
+#+begin_src text
+construct
+semantic_profile_requirement
+capability_requirement
+minimum_execution_class
+source span
+classification rule id
+#+end_src
+
+Classification is monotonic: adding a stronger capability can only retain or increase the required execution class. A mapping cannot weaken the class computed for the canonical package.
+
+The build report SHALL include a human-readable classification section and a machine-readable list of every construct that caused an extension, sandbox, or prohibition decision.
+
+* Backend Mapping Contract
+
+Each materialization emits a mapping manifest independent from package identity:
+
+#+begin_src json
+{
+  "schema": "star-kb.mapping.v1",
+  "package_id": "star.core.test",
+  "package_digest": "sha256:<package>",
+  "mapping_id": "star-kb.pqs.safe-json/1",
+  "mapping_digest": "sha256:<mapping>",
+  "backend_id": "prolog-query-server",
+  "semantic_profile": "star.logic.portable-horn/1",
+  "required_execution_class": "safe",
+  "artifacts": ["documents.ndjson", "release.json"]
+}
+#+end_src
+
+A mapping digest covers the mapping implementation/version plus the exact generated backend materialization semantics. Changing the translator or backend representation changes the mapping digest without changing the canonical package digest unless package semantics also changed.
+
+* PQS Mapping
+
+The existing STAR-KB-001 safe JSON/CouchDB path becomes =star-kb.pqs.safe-json/1=.
+
+PQS mapping rules:
+
+- only packages verified =safe= may enter the normal PQS mapping;
+- every clause must remain losslessly representable by the PQS safe AST;
+- the mapping preserves clause IDs and package/source provenance;
+- normal PQS never gains =consult/1=, arbitrary =call/1=, filesystem, network, shell, foreign-code, or runtime-load capability merely because STAR-KB supports those capabilities elsewhere;
+- PQS resource limits remain hard runtime ceilings.
+
+A future sandbox-worker route for PQS is explicitly *not* part of the normal PQS process. If later implemented it must be a separate worker class and mapping.
+
+* Direct SWI-Prolog Mapping
+
+The initial native mapping is =star-kb.swi.isolated/1=.
+
+For =safe= packages, the trusted loader SHALL load only compiler-generated, digest-pinned materialization into a dedicated worker/module. It SHALL NOT consult arbitrary actor/user source paths. The loader verifies package digest, mapping digest, expected SWI executable/build identity, and semantic profile before opening the session.
+
+For =sandbox-required= packages, the native worker must be launched through the sandbox contract below before any package code is loaded. Runtime/user input may supply data through declared fact-delta predicates but never a file path, module name, raw goal, or consult target.
+
+* StarLang Logic Actor Mapping
+
+StarLang already separates package identity from backend mapping identity. STAR-KB SHALL map directly into that model:
+
+#+begin_src text
+STAR-KB package_id       -> StarLang package-id
+STAR-KB package_version  -> StarLang package-version
+STAR-KB package_digest   -> StarLang package-digest
+STAR-KB mapping_id       -> StarLang mapping-id
+STAR-KB mapping_digest   -> StarLang mapping-digest
+semantic_profile         -> logic-call semantic-profile
+execution class          -> required-isolation/capability policy
+#+end_src
+
+A StarLang logic actor asks for the package semantics, not a raw Prolog file. Backend selection may choose PQS or local SWI only if the backend descriptor satisfies semantic profile, required capabilities, hard limits, and isolation class.
+
+=auto= selection must fail on ambiguity rather than silently choosing a backend whose behavior differs. Actor output records the selected backend and selection evidence.
+
+* Sandboxed Native-Power Execution
+
+The sandbox is a runtime boundary around a native worker, not a claim that unsafe logic becomes trusted.
+
+The required isolation profile is named =star.logic.sandbox.native/1=. An implementation claiming this profile MUST provide all of:
+
+- fresh worker process identity for the session or bounded worker pool with proven reset semantics;
+- cleared environment except explicitly allowed variables;
+- no ambient credentials, SSH agent, cloud metadata credentials, or inherited secret-bearing file descriptors;
+- no network namespace access by default; network requires an explicit capability grant and policy-approved egress surface;
+- read-only package materialization and runtime binaries;
+- no host filesystem visibility except explicitly bound read-only inputs and a bounded private temporary directory;
+- bounded CPU time, wall time, resident memory, process count, output bytes, and open files;
+- =no_new_privs= or equivalent privilege-escalation prevention;
+- syscall filtering or equivalent host-kernel policy sufficient to block unsupported privilege/process/device surfaces;
+- deterministic cancellation, kill, and child-process reaping;
+- audit record containing package/mapping/backend digests, granted capabilities, isolation profile, limits, start/end state, and terminal outcome.
+
+On Linux/NixOS the initial implementation MAY use a dedicated namespace/container runner such as bubblewrap plus cgroup-v2/resource enforcement, but the implementation must test the observable isolation contract rather than treating a particular tool name as proof of safety.
+
+If any required isolation control is unavailable, a =sandbox-required= package fails closed with =required_isolation_unavailable=.
+
+* Sandbox Capability Grants
+
+Capabilities are deny-by-default. A package declaration describes what it requires; a runtime/operator policy separately decides what is granted.
+
+#+begin_src text
+package requires capability
+        AND
+backend advertises capability
+        AND
+runtime policy grants capability
+        AND
+required sandbox controls are active
+        => eligible
+otherwise => reject
+#+end_src
+
+A package cannot gain a capability from actor-supplied session data.
+
+* Session-Local Evidence / Fact Deltas
+
+The package defines which predicates accept ephemeral facts. Session deltas SHALL be ground data only and SHALL be validated against declared predicate/arity/type constraints.
+
+They may contain observations, extracted document features, model outputs, temporary relationships, or run-specific weights. They may not:
+
+- define rules;
+- introduce new predicate definitions;
+- override canonical rules or reserved predicates;
+- change package/mapping metadata;
+- contain executable directives or raw goals;
+- persist back into =star-kb= automatically.
+
+Each accepted delta set receives an =evidence_digest= computed over normalized facts plus source/provenance identifiers. Query/proof output distinguishes canonical clause provenance from ephemeral evidence provenance.
+
+Query-scoped overlays disappear after the operation. Session-scoped overlays disappear when the logic session closes or expires.
+
+* Runtime Selection Policy
+
+An actor may request =pqs=, =swi-prolog=, or =auto= through the existing StarLang-style backend policy.
+
+Prefer PQS for centralized active releases, shared durable knowledge, authorization, cross-actor consistency, and centralized proof/audit behavior. Prefer local SWI when low latency, high actor-local throughput, offline use, session-private evidence, or an approved native extension justifies it.
+
+A =sandbox-required= package is never routed to normal PQS. Initial implementation routes it only to an eligible native sandbox backend. =prohibited= packages have no eligible backend.
+
+Backend choice must not change canonical package identity.
+
+* Cross-Runtime Conformance Fixtures
+
+Every package claiming =portable-core= SHALL provide backend-neutral fixtures tied to the package digest. A fixture includes:
+
+#+begin_src json
+{
+  "operation": "ownership-path",
+  "bindings": {"from":"source-1","to":"?target"},
+  "fact_delta": [],
+  "expected_status": "completed",
+  "answers": [ ... ],
+  "answer_semantics": "set",
+  "proof_invariants": [ ... ]
+}
+#+end_src
+
+Parity compares normalized semantic results, not backend-specific byte output. Ordering is ignored unless explicitly part of the operation contract.
+
+Negative fixtures SHALL cover unsafe construct classification, unsupported capability, unavailable isolation, malformed delta, resource exhaustion, attempted package mutation, and unknown constructs.
+
+Initial parity targets are *PQS and native SWI-Prolog*. LISA and N-Prolog remain later targets behind the same profile/capability mechanism.
+
+* Result Provenance Contract
+
+Every successful or terminal logic result SHALL make these identities recoverable:
+
+#+begin_src text
+package_id
+package_version
+package_digest
+mapping_id
+mapping_digest
+backend_id
+backend_version/build_id
+semantic_profile
+verified_execution_class
+isolation_profile (or none)
+granted_capabilities
+evidence_digest (when session data exists)
+operation/query id
+resource budget + limit hits
+#+end_src
+
+For PQS results, existing KB/release/query/proof source identities are retained as backend-specific provenance beneath the package/mapping identity.
+
+* Build Artifacts
+
+STAR-KB-002 extends a package build directory to:
+
+#+begin_src text
+build/<package>/<package-digest>/
+  package.json
+  classification.json
+  fixtures.json
+  mappings/
+    pqs/
+      mapping.json
+      release.json
+      documents.ndjson
+    swi/
+      mapping.json
+      package-image.pl-or-ir
+  reports/
+    build-report.json
+    parity-report.json
+#+end_src
+
+Generated native materialization is never canonical source and is not accepted as runtime user input.
+
+* CLI Extension
+
+The later product CLI extends STAR-KB-001 with:
+
+#+begin_src text
+star-kb classify BUNDLE
+star-kb build BUNDLE --mapping pqs
+star-kb build BUNDLE --mapping swi
+star-kb parity BUNDLE --backends pqs,swi
+star-kb inspect-package BUNDLE
+#+end_src
+
+=classify= is local and fail-closed. =parity= runs the same package fixtures against explicit digest-pinned backend mappings and emits a parity report. Sandbox-required live probes are opt-in and never run in CI unless they use a hermetic local sandbox with no network or production credentials.
+
+* Error Model
+
+Add stable classes including:
+
+#+begin_src text
+unknown_logic_construct
+semantic_profile_incompatible
+capability_undeclared
+capability_unavailable
+execution_class_mismatch
+prohibited_logic
+required_isolation_unavailable
+sandbox_start_failed
+sandbox_limit_exhausted
+mapping_mismatch
+backend_build_mismatch
+fact_delta_rejected
+parity_mismatch
+#+end_src
+
+Zero logical solutions remains an inference result, not a runtime failure.
+
+* Implementation Sequence After Design Approval
+
+1. Extend STAR-KB package/build identity so canonical package digest is backend-neutral.
+2. Add semantic-profile/capability/trust classification and fail-closed regression fixtures.
+3. Refactor the existing PQS compiler output into the =pqs.safe-json/1= mapping without changing safe PQS semantics.
+4. Add the direct SWI isolated mapping and trusted digest-pinned loader for =safe= packages.
+5. Add PQS-vs-SWI parity runner for =star.core.test=.
+6. Add StarLang package/mapping metadata bridge and actor selection fixtures against the existing logic protocol/IR.
+7. Add session-local ground fact deltas plus separate evidence digest/provenance.
+8. Add the native sandbox runner and prove its isolation contract before enabling any =sandbox-required= package.
+9. Add one synthetic sandbox-required fixture that exercises a harmless capability probe and proves it cannot execute through normal PQS.
+10. Record exact product/runtime heads and tests in the ARADR implementation node.
+
+No production dialect corpus is required to prove this design. Dialect remains a later real consumer once the generic portable path passes.
+
+* Security Tests
+
+The implementation SHALL include tests proving:
+
+- a package self-declared =safe= but containing a sandbox-required construct is rejected or reclassified upward and cannot run in PQS;
+- unknown constructs fail closed;
+- raw runtime =consult/1= paths/goals/modules are not accepted by actor APIs;
+- normal PQS cannot execute filesystem/network/process/foreign/native effects;
+- sandbox-required execution fails if isolation controls are missing;
+- sandbox has no ambient network, secrets, host home directory, SSH agent, or unrestricted writable filesystem by default;
+- CPU/memory/PID/time/output limits terminate runaway workers deterministically;
+- session deltas cannot inject rules or redefine package predicates;
+- capability grants are deny-by-default and recorded in provenance;
+- worker teardown removes session-local data.
+
+* Cross-Runtime Acceptance Criteria
+
+STAR-KB-002 is complete only when all of these are observed on exact heads:
+
+1. One canonical =star.core.test= package produces one stable package digest independent of PQS/SWI mapping choice.
+2. PQS and SWI mappings have distinct stable mapping digests.
+3. Both safe backends pass the same normalized competency fixtures.
+4. A deliberate semantic divergence produces =parity_mismatch=.
+5. Package classification cannot be weakened by author metadata.
+6. A sandbox-required fixture is refused by normal PQS.
+7. The same fixture runs only through an eligible sandboxed native backend with the exact granted capability set.
+8. Actor/session fact deltas are ground, schema-constrained, separately digested, and removed on session close.
+9. StarLang logic calls carry the STAR-KB package/mapping identities and reject incompatible backend/isolation selection.
+10. Every result exposes enough provenance to reconstruct package, mapping, backend build, isolation, and evidence identities.
+11. No implementation path accepts arbitrary runtime/user Prolog source for direct consultation.
+12. CI proves the portable-safe path without production credentials or external network dependencies.
+
+* Deferred Decisions
+
+- LISA/N-Prolog parity beyond profile-compatible stubs;
+- production dialect package/scoring data;
+- cplint/ProbLog/DeepProbLog integration;
+- runtime multi-KB imports;
+- signing/attestation enforcement beyond content/mapping digests;
+- remote artifact registries;
+- network-enabled sandbox capability details beyond deny-by-default policy;
+- native extension semantics not required by an approved consumer.
+
+These require separate evidence/design or explicit scope expansion.
+
+* Review Checklist for Operator Approval
+
+Before approving this design, confirm:
+
+- =star-kb= package semantics are canonical and backend-neutral;
+- package and mapping digests are separate;
+- =portable-core/backend-extension/native-only= is separate from =safe/sandbox-required/prohibited=;
+- compiler classification, not author metadata, determines the minimum execution class;
+- normal PQS remains the restricted safe path;
+- first parity target is PQS + native SWI;
+- StarLang reuses its existing package/mapping/backend selection abstractions;
+- actor deltas are ephemeral ground data only;
+- sandbox-required logic has no fallback to unsandboxed native execution;
+- sandbox capabilities are deny-by-default and fail closed;
+- implementation remains blocked until this design is explicitly approved.
+
+* Related Nodes
+
+- [[id:star-kb-research-004-portable-rule-reuse-across-logic-actors][STAR-KB-RESEARCH-004 Portable Rule Reuse Across Logic Actors]]
+- [[id:star-kb-design-001-v0-1][STAR-KB-001 V0.1 Shared Prolog Knowledge Library]]
+- [[id:star-kb-design-001-canonical-knowledge-authoring-query-plane][STAR-KB-RESEARCH-002 Canonical Knowledge Plane Architecture Findings]]
+- [[id:star-kb-research-003-dialect-enrichment-corpus-inference-evidence][STAR-KB-RESEARCH-003 Dialect Enrichment Corpus and Inference Evidence]]
+- [[id:star-kb-index-000-prolog-knowledge-system][STAR-KB-INDEX-000 Prolog Knowledge System]]
+
+* Footnotes and Glossary
+
+- *Logic package* :: Backend-neutral, versioned/digest-identified unit of reusable rules/facts and named logical semantics.
+- *Package digest* :: Hash of normalized canonical package semantics, independent from a concrete backend representation.
+- *Mapping digest* :: Hash identifying one concrete backend materialization/translation of a package.
+- *Portability class* :: Whether a package uses the portable common subset, a named backend extension, or native-only semantics.
+- *Execution class* :: Minimum trust/isolation class required to execute a package: safe, sandbox-required, or prohibited.
+- *Semantic profile* :: Named behavioral contract implemented by one or more logic backends.
+- *Capability* :: Explicitly named logical or side-effect facility required by a package and separately granted by runtime policy.
+- *Sandbox* :: OS/runtime isolation boundary that reduces blast radius for approved native-power logic; it does not convert arbitrary code into trusted code.
+- *Fact delta* :: Ephemeral ground data attached to one query/session without changing canonical package semantics.
+- *Evidence digest* :: Identity of normalized ephemeral facts/provenance supplied to a query/session.
+- *Semantic parity* :: Evidence that the same package produces equivalent defined behavior across backends claiming the same semantic profile.
+- *Fail closed* :: Reject execution when classification, compatibility, identity, capability, or isolation requirements cannot be proven.

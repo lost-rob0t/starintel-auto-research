@@ -1,0 +1,204 @@
+#+title: STARINTEL-ANDROID-RESEARCH-001 — ABCL-hosted StarLang/Sento field runtime
+#+date: 2026-09-11
+#+status: RESEARCH
+#+issue: https://github.com/lost-rob0t/starintel-auto-research/issues/236
+
+* Scope
+
+Research whether StarIntel Android can be a first-class offline-capable field node that runs the canonical Common Lisp StarLang runtime locally under ABCL, uses Sento actors locally, exposes a native Android UI, and synchronizes with StarIntel services when connectivity exists.
+
+The intended product direction combines Quasar-style investigation/task/graph control, ATAK-style geospatial field operations, and WiGLE-backed wireless observations. This note is research evidence, not production design approval.
+
+* Fixed constraints
+
+- ABCL is the Android Common Lisp target for this research pass.
+- StarLang remains one Common Lisp implementation. Kotlin/Java must not reimplement the parser, compiler, actor semantics, or runtime.
+- The existing starintel-wearos phone app remains a Wear OS configuration companion; the field client is a separate starintel-android product/repository boundary.
+- Imported/observed wireless data must retain provenance distinct from investigator assertions.
+- Production implementation waits for explicit design approval.
+
+* Current upstream evidence
+
+** ABCL
+
+ABCL 1.9.2 is the current published stable binary on abcl.org as of this pass. ABCL is a full Common Lisp implementation on the JVM and exposes Java-to-Lisp integration APIs plus JSR-223 embedding. Its user documentation explicitly describes bidirectional Java/Lisp interoperability.
+
+Primary sources:
+- https://www.abcl.org/
+- https://www.abcl.org/doc/abcl-user.html
+- https://github.com/armedbear/abcl
+
+The ABCL packaging notes are especially relevant. The standard build produces abcl.jar containing the runtime and ASDF; additional ASDF systems can be packaged into jars with asdf-jar. The same notes explicitly mention porting/bootstrap concerns for non-OpenJDK JVM runtimes such as Dalvik. This is encouraging but is not proof that current ABCL 1.9.2 works unchanged on current Android ART.
+
+Primary source:
+- https://github.com/armedbear/abcl/blob/master/doc/packaging-abcl.org
+
+Research conclusion: embedding ABCL into an Android application is plausible enough to justify a proof, but current Android API/ART compatibility must be demonstrated experimentally. Do not mark Android support as established merely because ABCL runs on the JVM.
+
+** Sento / cl-gserver
+
+Sento explicitly lists ABCL as a supported implementation. Its upstream README states that support for SBCL, CCL, LispWorks, Allegro and ABCL was added after dependency cleanup, and its benchmark section includes ABCL 1.9, describing it as slower than the fastest implementations but robust.
+
+Relevant actor features include tell, synchronous/asynchronous ask, agents, routers, dispatchers, tasks/futures-style asynchronous work, FSM support and event streams.
+
+Primary source:
+- https://github.com/mdbergmann/cl-gserver
+
+Research conclusion: Sento itself is not presently a reason to reject ABCL. The Android proof must still validate its dispatcher/threading behavior on ART and under Android process lifecycle constraints.
+
+* Existing StarLang constraints
+
+The canonical star-lang repository states that Common Lisp is the sole parser/compiler/semantic-engine/dispatcher/runtime implementation language. Final systems currently include starlang-compiler, starlang-runtime, star-actor-protocol, star-mailbox, star-sento-compat, star-journal, star-lease, star-capability, star-artifact, star-adapter-sdk, star-http-port and star-process-port among others.
+
+The final starlang-runtime ASDF system has a relatively small immediate dependency surface: star-actor-protocol and star-mailbox. Several lower-level systems such as star-mailbox and star-lease have no external ASDF dependencies. This makes a narrow ABCL proof more realistic than attempting to boot the transitional starlang-prototype composition.
+
+However, the repository currently has strong SBCL coupling in its build/test harness. Examples include sb-ext:*runtime-pathname*, sb-ext:exit and sb-ext:quit references plus Nix/CI scripts centered on SBCL. These references must be classified as runtime blockers versus test/tooling-only coupling before claiming ABCL portability.
+
+Repository evidence:
+- https://github.com/lost-rob0t/star-lang
+
+Research conclusion: target final systems first. Do not use the transitional prototype CLI as the Android portability criterion.
+
+* Android/ART proof questions
+
+The research gate requires executable answers to all of the following:
+
+1. Can abcl.jar be dexed and loaded by a modern Android application targeting API 36?
+2. Does ABCL initialize successfully under ART without unsupported JVM APIs?
+3. Can packaged ASDF systems be loaded from application assets/jars without writable-classpath assumptions?
+4. Does ABCL compilation or runtime bytecode generation conflict with Android code-loading restrictions?
+5. What R8/ProGuard keep rules are required for reflection and ABCL Java interop?
+6. Can Kotlin invoke Lisp and Lisp invoke Android/Java objects reliably?
+7. What is cold-start cost, warm-start cost, Java heap usage, APK/AAB size and runtime memory footprint?
+8. How does the runtime react to Activity recreation, backgrounding, Doze, process death and restore?
+9. Can Sento shared dispatchers run correctly on ABCL/ART without an actor-per-thread design?
+10. Which Android APIs should be exposed as narrow StarLang adapter capabilities rather than arbitrary Java reflection?
+
+* Field-client research direction
+
+** Quasar-derived behavior
+
+Quasar currently separates presentation from canonical Common Lisp workspace authority. StarIntel Android should preserve that principle: native Android presentation should issue typed operations into the local Lisp runtime rather than owning intelligence semantics in Kotlin.
+
+Mobile-equivalent capability areas to research include:
+- target/investigation workspace
+- document/relation browsing and editing
+- actor/task execution and status
+- graph/query views
+- search
+- local operation journal
+- capability discovery
+- sync state and conflict state
+
+** ATAK-derived behavior
+
+ATAK-CIV is a mature Android moving-map / situational-awareness application. Its public source documents a plugin model, Android/JDK toolchain, and map-centric architecture. StarIntel should borrow field UX concepts and interoperability patterns rather than become an ATAK plugin by default.
+
+Relevant concepts:
+- moving map as the primary field surface
+- markers and overlays/layers
+- tracks and temporal/geospatial observations
+- offline geospatial operation
+- plugin/adapter boundaries for external sensors and transports
+- Cursor-on-Target interoperability as a later research question, not an assumed core data model
+
+Primary source:
+- https://github.com/TAK-Product-Center/atak-civ
+
+** WiGLE-derived behavior
+
+WiGLE support should be treated as an observation/import source. Network observations must retain source, collection/import time, location precision, identifiers permitted by the source, and transformation provenance. They must not silently become investigator assertions.
+
+The exact supported integration path still requires primary-source confirmation because wigle.net blocks automated retrieval in this research environment. This remains an explicit open item rather than a guessed API contract.
+
+* Runtime boundary hypothesis for later design
+
+This is a research hypothesis, not yet an approved design:
+
+#+begin_example
+Android UI / platform services (Kotlin/Java)
+        |
+        | narrow typed bridge
+        v
+ABCL
+  StarLang compiler/runtime
+  Sento actor system
+  local StarIntel actors
+        |
+        +--> Android adapter actors: GPS / BLE / Wi-Fi / notifications / keystore
+        +--> local durable document + journal adapter
+        +--> sync/remoting actor --> StarIntel server
+#+end_example
+
+The major architectural requirement is that Android framework integration is an adapter boundary, while StarLang semantics remain in Lisp.
+
+* Local data and offline authority
+
+Tek9/LMDB should not be assumed Android-compatible until its native dependencies and JNI packaging are tested. If direct Tek9/LMDB deployment is impractical, Android still needs the same canonical document/relation semantics through a storage adapter. The storage engine may vary; the intelligence model must not fork.
+
+Offline operation should cover at minimum:
+- documents and relations required for the active operation
+- targets/investigation targets
+- field notes
+- geo/wireless observations
+- actor journal/recovery metadata
+- queued local mutations
+- provenance
+- synchronization/revision metadata
+
+* Security research requirements
+
+The Android bridge must not simply expose arbitrary Java reflection to arbitrary StarLang code. Research/design should define capability-scoped adapters for Android platform functions.
+
+Required areas:
+- Android Keystore for StarIntel credentials and local encryption keys
+- capability-scoped local and remote actors
+- locked/signed StarLang imports consistent with canonical StarLang import rules
+- local database encryption and export/backup boundaries
+- replay/idempotency for queued/synchronized operations
+- provenance separation for imported observations
+- process-death recovery without silently replaying unsafe side effects
+
+* Minimum executable proof gate
+
+Before production implementation is approved, build one narrow proof that:
+
+1. boots ABCL inside an Android APK,
+2. loads a real final-system slice from star-lang,
+3. starts Sento under ABCL,
+4. performs tell plus async ask/reply across local actors,
+5. executes a tiny compiled StarLang actor,
+6. calls one Android API through a narrow JVM bridge,
+7. survives Activity recreation with runtime state owned outside the Activity,
+8. records cold/warm startup, memory, APK size and actor round-trip latency,
+9. verifies a release/R8 build, not only debug,
+10. records all unsupported behavior rather than hiding it behind mocks.
+
+Recommended first StarLang slice to test: star-actor-protocol + star-mailbox + starlang-runtime, adding star-sento-compat only after the deterministic local runtime loads successfully under ABCL.
+
+* Research findings so far
+
+- ABCL is a credible Android experiment target because it is JVM-hosted, embeddable, bidirectionally interoperable with Java, and can package ASDF systems into jars.
+- Current ABCL documentation does not establish modern Android ART/API 36 support. This is the largest immediate technical unknown.
+- Sento explicitly supports ABCL and has upstream ABCL benchmark evidence; Android lifecycle/thread behavior remains unproven.
+- StarLang's final runtime systems have a much smaller dependency surface than the transitional prototype, making a bounded proof realistic.
+- Existing StarLang SBCL coupling is visible primarily in build/test/tooling and must be audited before assuming it infects runtime code.
+- Native Android should own presentation and Android framework access; Lisp should own StarLang semantics and actor behavior.
+- StarIntel Android should be an offline-capable field node, not a thin REST client.
+
+* Open blockers / next research
+
+- Modern Android ART proof for ABCL 1.9.2 or current master.
+- Dynamic/compiled bytecode behavior under Android runtime restrictions.
+- Full star-lang implementation-specific dependency audit.
+- Sento dependency graph on ABCL/Android, including threading libraries.
+- Tek9/LMDB Android viability.
+- Primary-source WiGLE integration/API/license limits.
+- Android background location/BLE/Wi-Fi permission and execution constraints for the exact target SDK.
+- Benchmark thresholds that decide whether ABCL is acceptable for always-on versus on-demand actor execution.
+
+* Gate
+
+RESEARCH STATUS: promising, not proven.
+
+Do not begin production StarIntel Android implementation from this note alone. Complete the Android proof and portability audit, then produce the design slice for explicit review/approval.

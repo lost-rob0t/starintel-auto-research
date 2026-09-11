@@ -2,12 +2,12 @@
 :ID:       star-kb-design-001-canonical-knowledge-authoring-query-plane
 :END:
 #+title: STAR-KB-RESEARCH-002 Canonical Knowledge Plane Architecture Findings
-#+description: Reclassified ARADR research findings on how StarIntel should author, version, publish, query, and explain a shared Prolog knowledge corpus using the existing prolog-query-server runtime.
+#+description: Reclassified ARADR research findings on how StarIntel should author, version, publish, query, explain, scale, and attest a shared reusable logic corpus using PQS and portable actor runtimes.
 #+status: REVIEW
 #+approval_schema: adard.research-approval.v1
 #+approval_state: APPROVED
 #+approval_actor: nsaspy
-#+approval_evidence: Operator explicitly approved the STAR-KB research conclusions in ChatGPT on 2026-09-10 and separately required the deep design to remain pending review before implementation.
+#+approval_evidence: Operator explicitly approved the original STAR-KB research conclusions in ChatGPT on 2026-09-10; the 2026-09-10 operational follow-up answers below remain pending separate operator review.
 #+approval_base_commit: ff5726263c07738c64f4f06aa908c6f61d1c56ce
 #+approval_base_blob: NONE
 #+approval_decided_at: 2026-09-10
@@ -20,7 +20,8 @@
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research conclusion | nsaspy / repository owner | APPROVED | Explicit approval of these findings as research conclusions | Operator approval in ChatGPT on 2026-09-10 |
+| Original research conclusion | nsaspy / repository owner | APPROVED | Explicit approval of the original findings as research conclusions | Operator approval in ChatGPT on 2026-09-10 |
+| Operational follow-up answers | StarIntel operator | PENDING | Explicit review/approval of the seven resolved dispositions below | Operator requested answers in ChatGPT on 2026-09-10 |
 | Downstream design | nsaspy / repository owner | PENDING | Separate review of implementation-ready design in =lost-rob0t/starintel-auto-research= | [[id:star-kb-design-001-v0-1][STAR-KB-001 V0.1 design]] |
 | Implementation authorization | nsaspy / repository owner | NOT STARTED | Explicit approval after design review | Not granted |
 
@@ -28,6 +29,7 @@
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-09-10 | Answered the seven operational open questions covering PQS headroom, mutex throughput, ephemeral actor facts, probabilistic inference placement, multi-KB imports, first-party dialect corpus policy, and release signing/attestation. Original approved research remains approved; these follow-up dispositions remain pending operator review. | research-worker | Operator follow-up in ChatGPT; current PQS resource-limit source reviewed 2026-09-10 |
 | 2026-09-10 | Record explicit operator approval of the research conclusions and correct downstream design authority to =starintel-auto-research=. | ChatGPT ARADR pass | Operator approval in ChatGPT on 2026-09-10 |
 | 2026-09-10 | Correct canonical-born approval provenance after reclassification: this research path did not exist at the parent commit, so its approval base blob is =NONE=. | ChatGPT ARADR pass | Parent =ff5726263c07738c64f4f06aa908c6f61d1c56ce= |
 | 2026-09-10 | Reclassified the previous STAR-KB architecture material from design to research at operator request. | ChatGPT ARADR pass | Previous design blob =c8e7ed9ebeef56ad0a40830ceb5ab58eebde2338= |
@@ -38,21 +40,23 @@ The current =lost-rob0t/prolog-query-server= already provides CouchDB-persisted 
 
 Persisted facts are ground. Rules are represented as a structured =head= plus ordered =body=. Variables are JSON objects such as ={ "var":"X" }=; compounds use ={ "functor":"point", "args":[...] }=; explicit atoms can be distinguished from strings. The safe builtin surface includes equality/disequality, =calc/2=, numeric comparisons, type checks, and a restricted arithmetic-expression vocabulary.
 
-The current PQS query path holds a per-KB mutex across release resolution, refresh/sync, and query execution, so high-concurrency same-KB workloads may serialize.
+The current PQS query path holds a per-KB mutex across release resolution, refresh/sync, and query execution, so high-concurrency same-KB workloads serialize.
+
+Current documented PQS hard defaults include: 10,000 knowledge documents per loaded KB/release; 16 MiB serialized KB bytes; 256 KiB per knowledge document; 2 MiB per HTTP request; 256 goals per rule body; 5 seconds wall-clock query time; one million inference steps; 10,000 proof nodes; and 1 MiB proof bytes. Client limits can only tighten these server ceilings.
 
 The new =lost-rob0t/star-kb= repository exists and currently contains the RAGE research/design/implementation control-plane skeleton. Product knowledge/compiler code is not yet implemented.
 
 * Inference
 
-The verified runtime makes a second Prolog query server unnecessary. =star-kb= should own the reusable human/agent-authored knowledge source, source records, module/bundle composition, deterministic build identities, fixtures, and publication tooling, while PQS+CouchDB remain the executable runtime.
+The verified runtime makes a second Prolog query server unnecessary. =star-kb= should own the reusable human/agent-authored knowledge source, source records, module/bundle composition, deterministic build identities, fixtures, and publication tooling, while PQS+CouchDB remain one executable runtime. [[id:star-kb-research-004-portable-rule-reuse-across-logic-actors][STAR-KB-RESEARCH-004]] broadens this further: direct Prolog actors and StarLang logic actors must be able to reuse the same canonical package semantics through separate backend mappings.
 
-Readable Prolog should be accepted only through a restricted source profile. SWI-Prolog should parse terms as data; a validator then rejects executable/general-purpose constructs and compiles accepted clauses into the PQS safe JSON AST. Source files are not consulted or executed.
+Readable Prolog should be accepted only through a restricted source profile for the shared safe path. SWI-Prolog should parse terms as data; a validator then rejects executable/general-purpose constructs and compiles accepted clauses into the PQS safe JSON AST. Source files are not consulted or executed. Approved higher-power/native constructs, if later supported, belong behind the separate sandbox/isolation model researched in STAR-KB-RESEARCH-004 rather than weakening the trusted PQS process.
 
 Git should remain the authority for reviewed reusable source knowledge. CouchDB should remain the authority for executable PQS releases and active-release manifests. StarIntel document/artifact stores should remain the authority for run-specific observations, scraper evidence, and learned-model outputs. Promotion from observation to reusable knowledge is explicit rather than automatic.
 
 Because the existing runtime selects one =(kb, release)= pair, V0.1 should resolve source-module dependencies at build time and flatten one consumer-facing bundle into one immutable PQS release. Runtime multi-KB imports can wait for measurements showing that duplication is a real problem.
 
-PQS strict analysis should be mandatory during normal =star-kb= activation. Query and proof metadata should be preserved so derived StarIntel outputs can be traced through actor/version -> PQS query ID -> KB/release -> runtime source document -> =star-kb= clause/module/source record.
+PQS strict analysis should be mandatory during normal =star-kb= activation. Query and proof metadata should be preserved so derived StarIntel outputs can be traced through actor/version -> package/mapping digest -> PQS query ID -> KB/release -> runtime source document -> =star-kb= clause/module/source record.
 
 Dialect enrichment remains a strong first consumer after the generic pipeline. Its evidence model must keep linguistic features, contextual geographic clues, named-place clues, and learned-model evidence separate.
 
@@ -60,33 +64,139 @@ Dialect enrichment remains a strong first consumer after the generic pipeline. I
 
 No fatal contradiction was found, but the research identified design tensions:
 
-- Prolog is desired as the human knowledge language while PQS intentionally rejects raw executable Prolog at runtime. The design must bridge this with parse-only restricted source compilation.
+- Prolog is desired as the human knowledge language while PQS intentionally rejects raw executable Prolog at runtime. The design must bridge this with parse-only restricted source compilation for the safe path and a separate sandbox-required class for approved native-power logic.
 - A large shared corpus is desired while PQS queries one named KB/release. V0.1 can build bundles by dependency closure and accept duplicated shared facts until scale measurements justify runtime imports.
-- Reproducible semantic releases are desired while Git commits/timestamps change even when knowledge does not. Semantic content identity must be separated from non-semantic build provenance.
-- Large future actor throughput is desired while current same-KB PQS queries serialize under a per-KB lock. This needs benchmarking before production scale, not speculative runtime redesign in the bootstrap slice.
-- A continuously growing intelligence corpus is desired while raw observations can grow far faster than a reviewable Git KB. Observations must stay outside canonical source unless explicitly promoted.
+- Reproducible semantic releases are desired while Git commits/timestamps change even when knowledge does not. Semantic content identity must be separated from non-semantic build provenance and later signatures/attestations.
+- Large future actor throughput is desired while current same-KB PQS queries serialize under a per-KB lock. The bottleneck should be managed with measured utilization, local/direct actors, or parallel immutable workers before redesigning semantics.
+- A continuously growing intelligence corpus is desired while raw observations can grow far faster than a reviewable Git KB. Observations must stay outside canonical source unless explicitly promoted; large query-local evidence may eventually need an ephemeral fact plane.
 
-* Unresolved Questions
+* Resolved Operational Follow-up Questions
 
-- Practical bundle/document/byte ceilings against current PQS resource limits.
-- Same-KB throughput before the current mutex becomes a bottleneck.
-- Whether large actor evidence eventually requires query-scoped ephemeral facts rather than goal arguments.
-- Whether probabilistic dialect inference later belongs in safe PQS builtins, cplint, or a separate model/fusion service.
-- Whether native multi-KB runtime imports become worthwhile after corpus growth.
-- First-party dialect survey consent, retention, deletion, and publication policy.
-- Future release signing/attestation beyond deterministic content hashes.
+The following are research dispositions requested by the operator. They are specific enough to guide the pending design but remain pending explicit operator approval as follow-up conclusions.
+
+** 1. Practical bundle/document/byte ceilings against current PQS limits
+
+*Answer:* treat PQS's configured ceilings as hard compatibility limits, not as healthy operating targets. =star-kb= should read/record the actual runtime limits during =check= and apply a default *soft headroom budget* at roughly 75% of the active hard limit for production activation.
+
+With the current PQS defaults, that yields practical default soft thresholds of approximately:
+
+| Resource | PQS hard default | STAR-KB default soft threshold |
+|----------+------------------+--------------------------------|
+| loaded documents per KB/release | 10,000 | 7,500 |
+| serialized KB bytes | 16 MiB | 12 MiB |
+| individual knowledge document | 256 KiB | 192 KiB |
+| raw request body | 2 MiB | 1.5 MiB; staging batches should stay below this including JSON envelope overhead |
+| rule-body goals | 256 | 192 |
+
+The soft thresholds are operational headroom, not semantic limits. A build may exist above them, but normal production activation should require an explicit near-limit override plus measured evidence. The hard server limit always wins and is never bypassed by =star-kb=. Typical clause documents should remain far smaller than the per-document maximum; very large single facts/rules are a signal to remodel the knowledge representation.
+
+** 2. Same-KB throughput before the current mutex becomes a bottleneck
+
+*Answer:* there is no honest fixed QPS number without measuring the actual mutex-held query duration. The correct model is serialized service utilization:
+
+#+begin_src text
+rho = arrival_rate * average_mutex_held_query_time
+#+end_src
+
+A hot KB should be treated as approaching a practical bottleneck around sustained =rho >= 0.7=, with =rho >= 1.0= necessarily unstable because work arrives at least as fast as the serialized path can serve it. Examples: 50 ms average mutex-held work has a theoretical ceiling near 20 queries/s and a 70%-utilization operating point near 14/s; 200 ms implies roughly 5/s theoretical and 3.5/s at 70%.
+
+The benchmark should record average/p95 mutex-held time, end-to-end latency, queue wait, timeout rate, and CPU/RSS. If sustained queue wait becomes a material part of total latency, prefer local/direct actor execution for actor-private work or multiple immutable read workers/lanes before changing logical semantics. The portability work in STAR-KB-RESEARCH-004 gives StarIntel a pressure-release path that does not require every enrichment query to hit one shared mutex.
+
+** 3. Large actor evidence and query-scoped ephemeral facts
+
+*Answer:* yes, eventually, but not as part of the initial canonical-KB pipeline. Small bounded evidence should continue to travel as ordinary goal bindings/arguments. Query- or session-scoped ephemeral facts become the better representation when evidence is relational, reused by multiple operations in one actor session, needs recursive joins, needs stable proof references, or begins to consume an uncomfortable fraction of the request-size budget.
+
+The safe model is an *overlay*, not temporary mutation of the canonical release:
+
+- ephemeral inputs are ground data facts only;
+- predicates must be declared/allowed by the package semantic profile;
+- no new rules, directives, executable code, predicate redefinition, or package metadata are accepted;
+- the canonical package/release digest does not change;
+- the input/evidence set gets its own digest/provenance identity;
+- proofs identify ephemeral facts separately from canonical package clauses;
+- query-scoped facts disappear after the query; session-scoped actor deltas are bounded and destroyed when the logic session closes.
+
+StarLang already has an =apply-logic-fact-delta= protocol boundary that fits session-local data. PQS should add an equivalent ephemeral overlay only after measurements show that goal arguments are actually the limiting representation.
+
+** 4. Probabilistic dialect inference placement
+
+*Answer:* do *not* put a general probabilistic-programming engine into safe PQS builtins first. Keep the first production baseline as the deterministic weighted-salience package described in STAR-KB-RESEARCH-003. PQS can safely own pure deterministic feature combination, bounded arithmetic, rule inference, and proof provenance.
+
+If probability-like confidence is needed, the first escalation should be a separate calibrated model/fusion component that consumes PQS/native symbolic evidence and returns a calibrated score/probability with model/version provenance. This keeps statistical calibration/model serving independent from the trusted rule interpreter.
+
+=cplint= or ProbLog should be sandboxed experimental comparison targets only if held-out benchmarks show a concrete need for probabilistic logic semantics such as correlated/dependent evidence that the weighted baseline handles poorly. General cplint/ProbLog capability should not be smuggled into the safe PQS builtin surface. A future small *pure* probabilistic/calibration builtin may be acceptable only if its semantics are deterministic, bounded, auditable, backend-portable, and independently justified by measurements.
+
+** 5. Native multi-KB runtime imports after corpus growth
+
+*Answer:* keep build-time dependency closure/flattening until duplication is a measured operational problem. Native runtime imports become worthwhile when one or more of these are true: the same large shared module is duplicated across several hot bundles; duplicated bytes materially increase worker memory or reload time; independent module update cadence forces expensive rebuild/republication of many bundles; or deployment/activation churn becomes operationally significant.
+
+If implemented, imports must be *immutable and pinned*: package/release digest, not "current" or "latest". The resolved import graph must be acyclic, depth-bounded, visible in provenance, and included in query identity. A query must never change meaning because an imported KB's active release moved behind its back. Runtime imports are therefore an optimization of immutable package composition, not dynamic dependency lookup.
+
+** 6. First-party dialect survey consent, retention, deletion, and publication policy
+
+*Answer:* adopt a privacy-minimizing first-party corpus policy and separate the permissions instead of using one blanket consent checkbox. The recommended default product policy is:
+
+- collect age-banded residence/exposure history and coarse locality/region where useful; do not collect street addresses by default;
+- keep contact/account identifiers separate from pseudonymous corpus IDs;
+- make structured survey participation, model-training use, public redistribution of contributed text, public redistribution of audio, and optional re-contact separate opt-ins;
+- default raw free-form text/audio to *private research use*, not public release;
+- default public publication to aggregate frequencies, salience/association tables, benchmark statistics, and other reviewed derived knowledge that does not expose participant-level material;
+- raw audio: default retention 12 months after the latest validated derivation that still requires it, then delete unless the contributor separately opted into archival/public release;
+- raw free-form text: default retention 24 months, then delete or convert to a separately reviewed archival dataset if explicit permission exists;
+- pseudonymous structured survey responses/derived features: retain up to 5 years with annual review while still useful, subject to withdrawal while the participant mapping exists;
+- participant/contact mapping: retain only as long as needed to honor deletion/withdrawal and operational follow-up, default maximum 24 months unless a separately documented purpose requires longer;
+- controlled data must support deletion by participant/corpus ID and a tombstone preventing accidental re-import;
+- before any irreversible public release, clearly disclose that third-party copies cannot reliably be recalled after publication.
+
+These are engineering-policy defaults, not a substitute for jurisdiction-specific legal review. If applicable law or an institutional/research agreement requires shorter retention or additional rights, the stricter requirement wins.
+
+** 7. Future release signing/attestation beyond deterministic hashes
+
+*Answer:* keep deterministic content hashes as the *identity* of packages/releases and add signatures as detached trust evidence rather than mixing signatures into the content hash.
+
+The preferred future model is an in-toto/DSSE-style attestation over a canonical release statement containing at least:
+
+- =star-kb= package ID/version/content digest;
+- backend mapping ID/digest;
+- source Git commit/tree identity;
+- compiler/builder executable or build digest;
+- dependency/import digests;
+- source/provenance record digests;
+- generated PQS release ID or native materialization identity;
+- conformance/check report digest and fixture result digest;
+- builder identity and timestamp;
+- declared semantic profile, trust/isolation class, and applicable runtime limits.
+
+Start with a detached Ed25519 signature that can be verified offline and whose public verification key is versioned/configured independently from the package. Production activation can later require one authorized release signature; threshold/multi-party signatures and Sigstore-compatible transparency/keyless flows can be added without changing package identity. Key rotation/revocation changes trust policy, not the historical content digest.
+
+The activation rule should eventually be: content hash proves *what* the release is; attestation proves *who/what built and approved it under which evidence*. Unsigned development builds remain possible, while production policy may reject unsigned or untrusted attestations.
+
+* Remaining Measurement / Design Validation
+
+The seven questions above now have a preferred disposition. What remains is evidence needed to tune or justify the numeric/operational parts:
+
+- benchmark realistic PQS bundles at 1k, 5k, 7.5k, and near-hard-limit document/byte sizes;
+- measure same-KB mutex-held latency/queueing to determine actual throughput on deployment hardware;
+- test whether actor evidence size/reuse makes ephemeral overlays materially better than goal arguments;
+- benchmark weighted-salience + external calibration against cplint/ProbLog only if probabilistic semantics remain justified;
+- measure duplicated-module memory/reload cost before implementing runtime multi-KB imports;
+- review the first-party corpus policy against the actual collection jurisdiction/terms before launch;
+- prototype detached attestation verification before making signatures an activation requirement.
 
 * Research Conclusion
 
-The research conclusion is approved. The next artifact is a separate implementation-ready design in =lost-rob0t/starintel-auto-research= under =roam/design/star-kb/=. That design must specify exact source grammar, repository layout, manifest schemas, clause/release identity algorithms, compiler modules, CLI behavior, staging/activation state machine, provenance fields, test matrix, failure semantics, and bounded V0.1 scope.
+The original research conclusion remains approved. The follow-up dispositions now remove the seven conceptual ambiguities that were previously listed as unresolved: operate PQS with explicit headroom rather than at hard ceilings; treat the same-KB mutex as a measured serialized service and route work to local/direct actors when useful; add ephemeral fact overlays only for sufficiently large/relational actor evidence; keep probabilistic model/fusion outside the safe PQS interpreter by default; keep build-time bundle flattening until runtime-import duplication is measured; use purpose-separated first-party corpus consent with finite raw retention and derived-publication defaults; and add detached signed attestations without replacing deterministic content identity.
 
-The design remains pending operator review. No implementation authorization is implied by research approval. Only after explicit design approval should the design be promoted into =roam/implement/star-kb/= in =starintel-auto-research= and implementation work begin in =lost-rob0t/star-kb=.
+The next artifact remains the separate implementation-ready design in =lost-rob0t/starintel-auto-research= under =roam/design/star-kb/=. That design is still pending operator review and must be reconciled with STAR-KB-RESEARCH-003 and STAR-KB-RESEARCH-004 before implementation. No implementation authorization is implied by these follow-up answers.
 
 * Sources
 
 - [[https://github.com/lost-rob0t/prolog-query-server][lost-rob0t/prolog-query-server]], current runtime/API/source reviewed 2026-09-10.
+- [[https://github.com/lost-rob0t/prolog-query-server/blob/main/docs/resource-limits.md][PQS query/resource hard limits and cancellation]], reviewed 2026-09-10.
 - [[https://github.com/lost-rob0t/starintel-server][lost-rob0t/starintel-server]], actor/runtime boundary reviewed 2026-09-10.
 - [[https://github.com/lost-rob0t/star-lang][lost-rob0t/star-lang]], adapter/runtime direction reviewed 2026-09-10.
+- [[id:star-kb-research-003-dialect-enrichment-corpus-inference-evidence][STAR-KB-RESEARCH-003 Dialect Enrichment Corpus and Inference Evidence]].
+- [[id:star-kb-research-004-portable-rule-reuse-across-logic-actors][STAR-KB-RESEARCH-004 Portable Rule Reuse Across Logic Actors]].
 - [[https://www.swi-prolog.org/pldoc/man?section=termrw][SWI-Prolog term reading/writing]], parse-only source-reader basis.
 - [[https://docs.couchdb.org/en/latest/api/database/changes.html][Apache CouchDB _changes API]], runtime synchronization semantics.
 
@@ -97,10 +207,14 @@ The design remains pending operator review. No implementation authorization is i
 - *AST*: structured representation of parsed code. PQS consumes safe JSON AST data rather than raw executable source text.
 - *Ground fact*: a fact containing no variables.
 - *Meta-interpreter*: a Prolog program that interprets a restricted stored-rule representation rather than directly executing arbitrary stored Prolog.
-- *Bundle*: a consumer-facing package formed from a module dependency closure and, in V0.1, published as one PQS KB release.
+- *Bundle*: a consumer-facing package formed from a module dependency closure and, in V0.1, published as one PQS KB release/materialization.
 - *Release*: immutable version of one runtime KB selected by an active-release manifest.
 - *Manifest*: metadata record describing composition/version state rather than logical facts themselves.
 - *Provenance*: where knowledge/results came from and which exact versions participated.
 - *Observation*: case/run-specific evidence, not automatically reusable canonical knowledge.
+- *Ephemeral fact overlay*: bounded query/session-local ground data supplied to logic without mutating the immutable package/release.
 - *Strict activation*: release cutover with PQS static analysis required to succeed.
 - *Per-KB mutex*: a lock protecting one KB's runtime state; in the current path it also serializes same-KB query execution while held.
+- *Soft headroom budget*: an operational threshold below a hard runtime limit, intended to leave capacity for envelope/provenance growth and variance.
+- *Attestation*: signed evidence describing who/what built or approved an exact content digest and under which build/test/provenance conditions.
+- *DSSE*: Dead Simple Signing Envelope, a signing envelope format commonly used with supply-chain attestations.

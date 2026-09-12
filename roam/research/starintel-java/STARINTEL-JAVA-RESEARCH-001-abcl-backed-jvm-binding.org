@@ -1,0 +1,283 @@
+#+title: STARINTEL-JAVA-RESEARCH-001 — ABCL-backed JVM binding for canonical StarIntel
+#+date: 2026-09-11
+#+status: RESEARCH
+#+issue: https://github.com/lost-rob0t/starintel-auto-research/issues/244
+
+* Question
+
+Should Java/Kotlin applications consume StarIntel through a dedicated =starintel-java= library that embeds ABCL and loads canonical StarIntel Common Lisp/schema systems, instead of reimplementing StarIntel schema and document semantics in Java?
+
+* Short answer
+
+Yes. The research supports =starintel-java= as the preferred JVM boundary, with one important condition: it must remain a *binding and packaging layer*, not become a second StarIntel implementation.
+
+The intended shape is:
+
+#+begin_example
+Java / Kotlin application
+        |
+        v
+   starintel-java
+        |
+        v
+      ABCL
+        |
+        +--> canonical StarIntel Lisp systems
+        +--> canonical StarIntel document/schema rules
+        +--> canonical JSON/serialization
+        +--> optional StarLang runtime systems
+#+end_example
+
+Java/Kotlin code imports =starintel-java=. The library owns ABCL bootstrap, loads pinned StarIntel systems, invokes Lisp functions, converts results to stable JVM-native types, and translates Lisp conditions into stable Java exceptions/error values.
+
+* Evidence: ABCL is explicitly designed for Java embedding
+
+ABCL is a full Common Lisp implementation running on the JVM. Its current public site describes it as usable as a JSR-223 scripting engine in Java applications and also exposes Java-to-Lisp integration APIs.
+
+Primary source:
+- https://abcl.org/
+
+The ABCL user manual documents direct Java-to-Lisp invocation using =org.armedbear.lisp.Interpreter=, package/symbol lookup and function invocation. It also documents Lisp-to-Java calls through =JAVA:JCALL=, =JAVA:JSTATIC=, =JAVA:JNEW= and related primitives.
+
+Primary source:
+- https://abcl.org/releases/1.9.0/abcl.pdf
+
+The manual states that there is one Lisp interpreter per JVM process. This argues strongly for =starintel-java= owning interpreter lifecycle centrally rather than letting each feature or Android Activity instantiate ABCL independently.
+
+* Evidence: ABCL can package Lisp systems for distribution
+
+ABCL's packaging documentation states that the normal build produces =abcl.jar= containing the implementation runtime and ASDF. Its =asdf-jar= support can package ASDF systems into JAR artifacts. That maps well to distributing a JVM library that bundles or pins the Common Lisp systems it needs.
+
+Primary source:
+- https://github.com/armedbear/abcl/blob/master/doc/packaging-abcl.org
+
+An ABCL distribution discussion also demonstrates the intended Java bootstrap pattern using =Interpreter.createInstance()= and loading ASDF/contrib systems before adding packaged Lisp systems.
+
+Supporting source:
+- https://github.com/armedbear/abcl/issues/704
+
+* Existing StarIntel schema authority
+
+The current StarIntel server documentation treats the v0.9 document schema as an explicit versioned input, including =starintel-doc-v0.9.0.schema.json=. Server code constructs documents using the canonical schema version and validates HTTP-boundary documents rather than allowing clients to invent arbitrary shapes.
+
+Repository evidence:
+- https://github.com/lost-rob0t/starintel-server/blob/master/doc/document-spec.org
+- https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-target-v1.lisp
+- https://github.com/lost-rob0t/starintel-server/blob/master/source/frontends/http-boundary-core.lisp
+
+Research implication: =starintel-java= should consume that same versioned schema contract and canonical Lisp implementation. It should not create a competing Java schema definition.
+
+* What starintel-java should be
+
+=starintel-java= should provide three things:
+
+1. *Runtime bootstrap*: start/get the single ABCL interpreter, configure ASDF search paths/JAR systems, load the pinned StarIntel systems, and expose runtime/version/capability metadata.
+2. *Stable JVM facade*: Java/Kotlin methods for schema/document operations that return JVM-native values or generated DTO projections.
+3. *Distribution boundary*: one Maven/Gradle-consumable artifact family that pins compatible ABCL, StarIntel schema, StarIntel Lisp systems and optionally StarLang versions.
+
+It should not own canonical business semantics, schema evolution rules, actor semantics, or server policy.
+
+* Recommended Java-facing API shape
+
+This is an API research proposal, not implementation approval.
+
+#+begin_example
+StarIntelRuntime.start()
+StarIntelRuntime.version()
+StarIntelRuntime.capabilities()
+StarIntelRuntime.close()
+
+StarIntelSchema.version()
+StarIntelSchema.validate(json)
+StarIntelSchema.decode(json)
+StarIntelSchema.encode(document)
+
+StarIntelDocuments.create(type, fields)
+StarIntelDocuments.createTarget(fields)
+StarIntelDocuments.createRelation(fields)
+StarIntelDocuments.canonicalJson(document)
+#+end_example
+
+Optional later surfaces may expose actors/StarLang, but the schema/document API should not require applications to understand actor internals.
+
+* Do not leak LispObject into normal application code
+
+Direct ABCL APIs expose =LispObject=. That is appropriate inside =starintel-java= internals but is a bad public application boundary.
+
+The facade should convert to stable JVM-native structures:
+
+- =java.util.Map<String,Object>=
+- =java.util.List<Object>=
+- =String=
+- boxed numeric/boolean types
+- =byte[]=
+- generated immutable DTOs where they improve ergonomics
+
+This keeps Android/Java/Kotlin code insulated from ABCL internals and allows ABCL or Lisp-side implementation details to evolve without forcing UI/application rewrites.
+
+* Generated DTOs are acceptable but not authoritative
+
+Generated Java/Kotlin document classes can improve IDE completion and compile-time ergonomics. They should be generated from the canonical versioned schema and validated by the Lisp/schema authority at boundaries.
+
+The direction must remain:
+
+#+begin_example
+canonical StarIntel schema/Lisp semantics
+            |
+            +--> generated Java/Kotlin DTO projection
+            |
+            +--> ABCL validation/serialization authority
+#+end_example
+
+Not:
+
+#+begin_example
+Java DTO annotations --> new Java schema authority
+#+end_example
+
+* Direct ABCL API versus JSR-223
+
+ABCL supports both direct Java integration and JSR-223. For =starintel-java=, the direct ABCL API is the stronger internal choice because it gives explicit interpreter/package/function access and avoids treating the canonical Lisp runtime as generic text scripts.
+
+JSR-223 remains useful for experiments or a generic extension surface but should not define the main StarIntel binding API.
+
+* Canonical Lisp library boundary needs cleanup
+
+A key research finding is that =starintel-java= should not import the entire =starintel-server= application merely to get document semantics.
+
+The server currently contains schema/document HTTP-boundary behavior as part of the service source tree. Before the JVM binding matures, reusable canonical document operations should be available from a server-independent Common Lisp system/package.
+
+Research recommendation:
+
+#+begin_example
+starintel-core / starintel-document (Common Lisp reusable systems)
+  - schema version
+  - schema loading/validation
+  - document constructors
+  - relation/target constructors
+  - canonical serialization
+  - condition/error vocabulary
+
+starintel-server
+  -> depends on reusable core
+
+starintel-java
+  -> ABCL loads reusable core
+#+end_example
+
+The exact repository/system names require design approval. The important rule is dependency direction: the reusable schema/document library must not depend on the HTTP server.
+
+* Relationship with StarLang
+
+=starintel-java= should not require the full StarLang runtime for simple schema/document use. Keep capability layers separate:
+
+#+begin_example
+starintel-java-core
+  ABCL + StarIntel schema/document systems
+
+starintel-java-starlang (optional layer)
+  + star-actor-protocol
+  + star-mailbox
+  + starlang-runtime
+  + star-sento-compat when needed
+#+end_example
+
+This prevents every JVM consumer from paying actor/runtime startup and dependency cost merely to validate or construct a StarIntel document.
+
+On Android, the full field client can depend on both layers.
+
+* Packaging recommendation
+
+Research recommendation for later design:
+
+- =starintel-java-core=: standard JVM JAR, Maven/Gradle consumable.
+- =starintel-java-android=: optional Android AAR for Android lifecycle/platform adapters; depends on core rather than replacing it.
+- ABCL version pinned by the artifact/build, not discovered from the host.
+- Lisp systems packaged as resources/JAR-contained ASDF systems using an explicit version lock.
+- publish a runtime manifest containing at least:
+  - starintel-java version
+  - ABCL version
+  - StarIntel schema version
+  - StarIntel core commit/release
+  - StarLang version/commit when actor layer is present
+
+Nix should reproduce the Maven/AAR outputs and conformance fixtures.
+
+* Versioning rule
+
+=starintel-java= must fail explicitly when loaded schema/runtime versions are incompatible. Silent fallback to an older/newer schema is unacceptable.
+
+A JVM application should be able to inspect:
+
+#+begin_example
+StarIntelRuntime.manifest()
+#+end_example
+
+and receive all pinned versions/capabilities.
+
+* Conformance requirement
+
+The Java facade and Lisp-native consumers must run the exact same fixture corpus.
+
+Minimum cross-language gates:
+
+1. valid v0.9 documents accepted by both paths,
+2. invalid fixtures rejected with equivalent stable error codes,
+3. canonical serialization byte-for-byte identical,
+4. target/relation constructors produce equivalent canonical documents,
+5. schema version mismatch is explicit,
+6. concurrent Java callers do not corrupt ABCL dynamic/thread state,
+7. repeated runtime start calls return/use the single managed interpreter,
+8. desktop JVM smoke test,
+9. Android/ART smoke test after the ABCL Android proof gate.
+
+* Android implications
+
+This abstraction makes the Android application substantially cleaner:
+
+#+begin_example
+Android app modules
+      |
+      +--> implementation("actor.starintel:starintel-java-core:...")
+      +--> implementation("actor.starintel:starintel-java-starlang:...")
+      |
+      v
+Kotlin UI and Android adapters
+      |
+      v
+stable Java facade
+      |
+      v
+ABCL + canonical Lisp systems
+#+end_example
+
+The Android application can then use normal Java/Kotlin imports without embedding ABCL-specific package/symbol lookup throughout UI code.
+
+* Risks / unresolved questions
+
+- ABCL modern Android ART/API 36 remains a separate executable proof gate.
+- ABCL's current public stable site lists Java SE/OpenJDK environments, not Android ART as a supported platform; Android must therefore remain explicitly experimental until tested.
+- Need an exact audit of which StarIntel document/schema behavior should be extracted from =starintel-server= into reusable Common Lisp systems.
+- Need thread/concurrency tests around direct ABCL function calls from JVM executor/coroutine threads.
+- Need release artifact size/startup measurements for core-only versus StarLang/Sento layers.
+- Need to decide whether generated DTOs live in the same artifact or a generated-types artifact.
+
+* Recommendation
+
+Proceed with =starintel-java= as the single supported JVM binding concept.
+
+Its contract should be:
+
+#+begin_quote
+Java and Kotlin import StarIntel through =starintel-java=. =starintel-java= embeds ABCL and loads pinned canonical StarIntel Common Lisp/schema systems. It exposes a stable Java facade and optional generated type projections. It does not reimplement StarIntel semantics.
+#+end_quote
+
+Before implementation, the next design pass must lock:
+- the reusable Common Lisp core extraction boundary,
+- exact public Java API,
+- artifact/module split,
+- version manifest,
+- error vocabulary,
+- Android lifecycle integration.
+
+RESEARCH STATUS: recommended, design not yet approved.

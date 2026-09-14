@@ -1,0 +1,579 @@
+:PROPERTIES:
+:ID:       star-lang-design-010-expert-system-compiler-ir
+:END:
+#+title: STAR-LANG-010 Expert-System Compiler and Backend-Neutral IR
+#+description: Implementation-ready compiler design for the approved StarLang expert-system surface, including closed syntax, typed rules, StarIntel object reuse, normalized expert IR, diagnostics, proof identities, and lowering into the approved star.logic.api/1 boundary.
+#+status: REVIEW
+#+filetags: :starintel:design:star-lang:expert-systems:compiler:ir:logic:prolog:lisa:proofs:
+#+created: [2026-08-15 Sat]
+#+last_modified: [2026-08-15 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Expert language research | StarLang maintainer | APPROVED | Approve expert-system source semantics, StarIntel object reuse contract, rule/goal/question/proof surface | Maintainer approval on 2026-08-15; STAR-LANG-RESEARCH-023 |
+| Logic runtime API | StarLang maintainer | APPROVED | Freeze portable logic operations and profile-specific escape prevention | STAR-LANG-009 |
+| Backend directive syntax | StarLang maintainer | PENDING | Approve canonical =(pragma :backend ...)= source syntax and lexical precedence | STAR-LANG-RESEARCH-026 |
+| General pragma system | StarLang maintainer | PENDING | Approve typed pragma registry, scope model, and deployment authority floor | STAR-LANG-RESEARCH-027 |
+| Core compiler conformance | Repository maintainer | BLOCKED | Complete approved research 000–009 implementation ledger before widening the source language | lost-rob0t/star-lang issues #5 and #6 |
+| Architecture | StarLang maintainer | PENDING | Approve ownership and lowering contract in this design | This node |
+| Implementation | Repository maintainer | NOT STARTED | Implement only after blocking compiler and directive gates are closed | Implementation Order |
+
+* Related Nodes
+
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-023-expert-system-language-surface.org][STAR-LANG-RESEARCH-023 Expert-System Language Surface]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-026-explicit-logic-backend-selection.org][STAR-LANG-RESEARCH-026 Explicit Logic Backend Selection]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-027-lisp-native-pragma-compiler-directives.org][STAR-LANG-RESEARCH-027 Lisp-Native Pragma and Compiler Directives]]
+- [[file:STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
+- [[file:STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
+- [[file:STAR-LANG-011-prolog-expert-lowering.org][STAR-LANG-011 Prolog Expert-System Lowering]]
+- [[file:STAR-LANG-006-final-package-extraction.org][STAR-LANG-006 Dependency-Ordered Final Package Extraction]]
+
+* Decision
+
+StarLang SHALL implement =expert-system= as a compiler-owned declarative language surface that lowers completely into backend-neutral immutable IR before any inference backend is invoked.
+
+The compiler SHALL own:
+
+- expert syntax recognition;
+- fact/schema resolution;
+- lexical variable binding and type checking;
+- rule/goal/question semantic validation;
+- semantic-profile derivation;
+- source-object identity/provenance requirements;
+- normalized expert IR construction;
+- logic operation declarations compatible with =star.logic.api/1=;
+- source-aware diagnostics;
+- backend compatibility requirements.
+
+The compiler SHALL NOT own:
+
+- native LISA rule execution;
+- native Prolog term construction at source level;
+- SWI MQI lifecycle;
+- N-Prolog process lifecycle;
+- runtime question delivery;
+- mutable expert-session state;
+- backend-specific proof traces.
+
+Those belong to runtime/adapters after the compiler has produced checked artifacts.
+
+* Dependency Correction To STAR-LANG-007
+
+STAR-LANG-007 predates the dedicated backend-directive research and contains an obsolete candidate spelling using ordinary metadata lists such as =(:backend swi-prolog)=.
+
+This design does not preserve that spelling.
+
+The only source-level backend selector under consideration for implementation is:
+
+#+begin_src lisp
+(pragma :backend :auto)
+(pragma :backend :lisa)
+(pragma :backend :swi-prolog)
+(pragma :backend :n-prolog)
+#+end_src
+
+Final implementation remains blocked until STAR-LANG-RESEARCH-026 and STAR-LANG-RESEARCH-027 are approved. The compiler IR nevertheless models backend policy independently so source syntax cannot leak into runtime contracts.
+
+* Source Surface
+
+Canonical expert shape:
+
+#+begin_src lisp
+(expert-system transactionRisk
+  (pragma :backend :auto)
+  (pragma :explain :required)
+
+  (facts
+    (transaction
+      (id string :required)
+      (amount decimal :required)
+      (country string :required))
+    (risk
+      (transactionId string :required)
+      (level riskLevel :required)))
+
+  (rules
+    (rule highValueForeign
+      (when
+        (transaction
+          (:bind ?tx)
+          (id ?id)
+          (amount ?amount)
+          (country ?country))
+        (greaterThan ?amount 10000)
+        (member ?country highRiskCountries))
+      (then
+        (conclude
+          (risk
+            (transactionId ?id)
+            (level high))
+          (because highValueForeign
+            (:supports ?tx))))))
+
+  (goals
+    (goal classifyRisk
+      (risk
+        (transactionId targetTransaction)
+        (level ?level)))))
+#+end_src
+
+This is StarLang source data consumed by the closed StarLang reader. It is never passed to Common Lisp =READ= and never evaluated as Lisp.
+
+* Compiler Ownership
+
+Final systems:
+
+#+begin_example
+starlang-expert-ir
+starlang-expert-compiler
+starlang-expert-testing
+#+end_example
+
+=starlang-expert-ir= SHALL depend only on final portable schema/protocol systems and the portable =star-logic= types/API contracts.
+
+=starlang-expert-compiler= SHALL depend on the final compiler syntax/provenance layer and =starlang-expert-ir=.
+
+Neither system may depend on LISA, SWI-Prolog, N-Prolog, Sento, or =starlang-prototype=.
+
+* Compiler Pipeline
+
+The final pipeline SHALL be:
+
+#+begin_example
+READ
+  closed StarLang parser
+    -> syntax objects + exact source spans
+EXPAND
+  hygienic StarLang macros
+PRAGMA-RESOLVE
+  typed compiler directives and inherited policy
+EXPERT-PARSE
+  expert forms -> closed expert syntax nodes
+TYPE/BIND
+  schema resolution + lexical variable typing
+EXPERT-SEMANTIC
+  mutation/negation/question/proof/profile validation
+EXPERT-IR
+  immutable backend-neutral expert IR
+LOGIC-LOWER
+  declared named logic operations + fact-delta requirements
+MATERIALIZE
+  compatible backend/package selection
+EMIT
+  canonical manifests and adapter artifact requests
+#+end_example
+
+No backend executes during source compilation.
+
+* Fact Model
+
+Expert facts SHALL reuse StarLang schema/type contracts. No expert-only duplicate application type system is permitted.
+
+Fact roles:
+
+#+begin_example
+source
+session
+derived
+questionAnswer
+#+end_example
+
+** Source facts
+
+Source facts represent authoritative typed data supplied to the expert session. Rules cannot mutate them.
+
+A source fact may originate from:
+
+- a normal StarLang value;
+- a compiled record/document value;
+- an existing authoritative StarIntel object.
+
+** Session facts
+
+Session facts are explicitly mutable expert-session state. Their identity is stable and journaled.
+
+** Derived facts
+
+Derived facts are conclusions owned by inference and carry justification identity.
+
+** Question answers
+
+Question answers become typed, journaled session facts only after schema validation.
+
+* StarIntel Object Reuse
+
+The compiler SHALL represent source-object requirements explicitly instead of copying objects into an expert-specific application model.
+
+Normalized reference shape:
+
+#+begin_src lisp
+(defstruct expert-source-object-ref
+  object-id
+  schema-id
+  schema-version
+  provenance-ref
+  verification-ref
+  relationship-refs
+  projection-policy)
+#+end_src
+
+The exact runtime object is never serialized into IR.
+
+For an expert rule to depend on object identity/provenance, the IR SHALL mark those fields as required semantic inputs. A backend that cannot preserve them fails compatibility before execution.
+
+Compiler diagnostics:
+
+#+begin_example
+expertObjectIdentityUnavailable
+expertObjectProjectionLossy
+expertObjectSchemaMismatch
+expertObjectProvenanceUnavailable
+#+end_example
+
+* Variable Model
+
+Source variables use =?name= for readability but compile to stable binding IDs.
+
+Rules:
+
+1. every variable is introduced by a pattern, parameter, or explicit binder before use;
+2. one binding has one static type;
+3. nested shadowing is rejected in v1;
+4. rule-local bindings may escape only through checked output fields;
+5. bindings carry source span and macro-origin chain;
+6. backend lowering never uses source variable spelling as semantic identity.
+
+Normalized binding:
+
+#+begin_src lisp
+(defstruct expert-binding-ir
+  id
+  source-name
+  type-id
+  origin-condition-id
+  source-span)
+#+end_src
+
+* Condition Model
+
+Initial closed condition kinds:
+
+#+begin_example
+factPattern
+all
+any
+exists
+absent
+notProvable
+equals
+different
+lessThan
+lessOrEqual
+greaterThan
+greaterOrEqual
+member
+namedPredicate
+#+end_example
+
+The compiler SHALL preserve semantic differences between:
+
+- working-memory absence;
+- negation as failure;
+- inequality;
+- contradiction.
+
+A bare generic =not= form is rejected.
+
+=namedPredicate= may refer only to compiler-declared pure operations in digest-locked packages. It is not an arbitrary callable predicate name.
+
+* Action Model
+
+Initial action kinds:
+
+#+begin_example
+conclude
+assertSessionFact
+retractSessionFact
+#+end_example
+
+Actions SHALL NOT perform:
+
+- HTTP;
+- filesystem I/O;
+- database mutation;
+- process launch;
+- arbitrary actor sends;
+- arbitrary Common Lisp calls;
+- arbitrary Prolog goals.
+
+Effects occur after inference through normal typed StarLang actor/tool boundaries.
+
+* Rule IR
+
+#+begin_src lisp
+(defstruct expert-rule-ir
+  id
+  source-span
+  condition-root-id
+  binding-ids
+  action-ids
+  salience
+  group
+  explanation-policy
+  uncertainty-contribution
+  required-profile)
+#+end_src
+
+Rule IDs are stable package-local identities.
+
+=salience= is legal only when the derived semantic profile includes production agenda semantics. The compiler must not reinterpret salience as Prolog clause order.
+
+* Goal IR
+
+#+begin_src lisp
+(defstruct expert-goal-ir
+  id
+  pattern
+  binding-ids
+  answer-cardinality
+  required-p
+  explanation-policy
+  budget-policy)
+#+end_src
+
+A goal compiles into a declared named logic operation. Runtime callers never supply a raw native goal string.
+
+* Question IR
+
+#+begin_src lisp
+(defstruct expert-question-ir
+  id
+  trigger-condition-id
+  parameter-binding-ids
+  answer-type-id
+  prompt-resource-id
+  cache-policy
+  retry-policy
+  timeout-policy
+  redaction-policy)
+#+end_src
+
+The compiler emits question declarations only. =ExpertSessionActor= owns request/answer state at runtime.
+
+Question identity SHALL include:
+
+#+begin_example
+(sessionId questionId normalizedParameters factGeneration)
+#+end_example
+
+This prevents accidental unbounded re-asking.
+
+* Conclusion and Proof Identity
+
+#+begin_src lisp
+(defstruct expert-conclusion-ir
+  id
+  schema-id
+  field-expressions
+  rule-id
+  support-binding-ids
+  reason-code
+  explanation-policy)
+#+end_src
+
+Human-readable reason text is presentation metadata. Logical identity uses stable rule, support, code, schema, and value identities.
+
+The compiler SHALL request normalized proof output using the approved logic derivation contract rather than depending on native backend traces.
+
+* Expert-System IR
+
+#+begin_src lisp
+(defstruct expert-system-ir
+  id
+  version
+  source-span
+  backend-policy
+  semantic-profile
+  fact-type-ids
+  source-object-requirements
+  bindings
+  conditions
+  actions
+  rules
+  goals
+  questions
+  uncertainty-policy
+  explanation-policy
+  mutation-policy
+  budget-policy
+  required-capabilities
+  required-logic-operations)
+#+end_src
+
+The IR is immutable after compilation.
+
+Canonical JSON SHALL contain only strings, integers, finite approved numeric values, booleans, lists, and closed records. No CLOS instance, engine handle, socket, native Prolog term, or source syntax object may cross the boundary.
+
+* Semantic Profile Derivation
+
+The compiler derives required profiles from actual semantics rather than trusting user labels.
+
+Examples:
+
+| Source feature | Required semantic capability |
+|----------------+------------------------------|
+| pure relational joins/goals | =star.expert.relational/1= |
+| =notProvable= | closed-world/query-negation profile |
+| =absent= over mutable working memory | production absence semantics |
+| =salience= | production agenda semantics |
+| assert/retract session facts | mutable expert session profile |
+| required proof | normalized proof capability |
+| tabled recursion requirement | SWI tabled profile |
+
+A source pragma may narrow backend choice; it cannot erase inferred semantic requirements.
+
+* Static Diagnostics
+
+Required error families:
+
+#+begin_example
+expertUnknownFactType
+expertUnboundVariable
+expertBindingTypeMismatch
+expertDuplicateBinding
+expertIllegalSourceMutation
+expertUnsupportedNegation
+expertSalienceRequiresProductionProfile
+expertQuestionTypeInvalid
+expertQuestionCycleUnbounded
+expertUncertaintyUnsupported
+expertExplanationUnavailable
+expertBackendIncompatible
+expertRuleActionEffectDenied
+expertPortableSubsetViolation
+expertObjectIdentityUnavailable
+expertObjectProjectionLossy
+#+end_example
+
+All diagnostics carry source span and macro-origin chain.
+
+* Security Invariants
+
+1. Expert syntax is parsed only by the closed StarLang reader.
+2. No expert source is evaluated by Common Lisp.
+3. No raw Prolog or LISA source enters normalized IR.
+4. No arbitrary engine predicate/function identifier may be caller-selected at runtime.
+5. Expert rules cannot grant deployment capabilities.
+6. Source pragmas cannot weaken deployment restrictions.
+7. Source facts remain immutable.
+8. Question answers are checked before insertion.
+9. Proof/output/question/result sizes are bounded.
+10. Backend artifacts are compiler-generated and digest-locked.
+
+* Canonical Fixtures
+
+Minimum compiler fixtures:
+
+#+begin_example
+fixtures/expert/animal-relational.star
+fixtures/expert/transaction-risk.star
+fixtures/expert/troubleshooting-questions.star
+fixtures/expert/recursive-ownership.star
+fixtures/expert/streaming-alert-production.star
+fixtures/expert/starintel-object-reuse.star
+fixtures/expert/invalid-unbound-variable.star
+fixtures/expert/invalid-source-mutation.star
+fixtures/expert/invalid-bare-not.star
+fixtures/expert/invalid-lossy-object-projection.star
+#+end_example
+
+Each valid fixture SHALL freeze:
+
+- parsed/source-span identity;
+- expanded expert syntax;
+- normalized expert IR;
+- required semantic profiles/capabilities;
+- canonical JSON bytes/digest.
+
+* Test Strategy
+
+** Parser/grammar
+
+- exact source spans;
+- malformed forms fail closed;
+- unknown expert forms fail closed;
+- no host-reader path.
+
+** Binding/type
+
+- introduction-before-use;
+- join typing;
+- incompatible comparison types;
+- no shadowing;
+- typed action outputs.
+
+** Semantics
+
+- absence and negation-as-failure remain distinct;
+- salience derives production requirements;
+- source facts cannot be mutated;
+- object identity/provenance requirements survive lowering;
+- unsupported projections fail before runtime.
+
+** Determinism
+
+Identical source + imports + pragma policy SHALL produce byte-identical normalized IR and manifest output.
+
+* Implementation Order
+
+Implementation SHALL NOT begin with native Prolog generation.
+
+After the blocking core conformance work is complete:
+
+1. land/verify the portable =star.logic.api/1= types and fake adapter in final systems;
+2. add =starlang-expert-ir= records and validators;
+3. add closed expert syntax nodes to the final compiler;
+4. add binding/type analysis;
+5. add semantic-profile derivation and diagnostics;
+6. freeze expert IR canonical fixtures;
+7. add fake expert execution against named logic operations;
+8. only then implement STAR-LANG-011 backend lowering.
+
+* Blocking Gates Before Implementation
+
+Implementation is blocked until all of the following are true:
+
+1. =lost-rob0t/star-lang= research 000–009 ledger is conformant;
+2. issue #5 finite binary64/RFC8785 float work is complete;
+3. issue #6 full SHA-256, =destination= relation migration, lock-graph fixture, and permanent conformance CI are complete;
+4. STAR-LANG-RESEARCH-026 is approved or superseded by an explicit maintainer decision;
+5. STAR-LANG-RESEARCH-027 is approved or narrowed to the exact pragma subset needed by expert compilation;
+6. STAR-LANG-007 is amended so it no longer advertises the obsolete =(:backend ...)= spelling;
+7. final portable logic systems can load without =starlang-prototype=.
+
+* Acceptance Gate
+
+This design is implementation-ready when:
+
+1. all blocking gates above are green;
+2. expert source has one canonical grammar;
+3. backend policy has one canonical source representation;
+4. normalized IR is engine-neutral and deterministic;
+5. StarIntel object identity/provenance requirements are explicit and fixture-backed;
+6. fake backend tests can exercise complete compiler output without installing a real inference engine;
+7. unsupported semantic combinations fail before backend execution.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-15 | Promote approved STAR-LANG-RESEARCH-023 into a compiler/IR child design, correct STAR-LANG-007 backend syntax drift, freeze StarIntel object identity/provenance requirements, and make implementation blockers explicit | ChatGPT agent | Maintainer approval of STAR-LANG-RESEARCH-023; STAR-LANG-009; research 026/027; star-lang issues #5/#6 |
+
+* Footnotes and Glossary
+
+- *Expert IR* — Backend-neutral immutable compiler representation of typed facts, rules, goals, questions, conclusions, proofs, policies, and required capabilities.
+- *Source-object requirement* — Explicit semantic requirement to preserve authoritative StarIntel object identity/provenance through inference lowering.
+- *Named logic operation* — Compiler-declared operation identity invoked through =star.logic.api/1= rather than a caller-provided native predicate/goal.
+- *Profile derivation* — Compiler calculation of required backend semantics from the actual expert constructs used by source code.

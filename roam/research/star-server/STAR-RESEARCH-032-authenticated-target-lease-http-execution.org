@@ -2,150 +2,494 @@
 :ID:       2cfb4ff2-7111-4f8e-869a-ec9423acb143
 :END:
 #+title: STAR-RESEARCH-032 Authenticated Target-Lease HTTP and Execution Enforcement
-#+description: Refreshed research for authenticated target-lease APIs and stale-fence enforcement against the current implemented lease-store stack.
-#+status: READY_FOR_DESIGN
+#+description: Current-source research for authenticated target-lease operations, durable execution-authority handoff through CouchDB/Rabbit target ingress, timer-wheel scheduling, and stale-fence enforcement in StarIntel Server.
+#+status: REVIEW
 #+approval_schema: adard.research-approval.v1
-#+approval_state: APPROVED
-#+approval_actor: operator
-#+approval_evidence: https://github.com/lost-rob0t/starintel-auto-research/issues/157
-#+approval_base_commit: 5d01182e45a0cda1c4e062183469abd0be43e6af
-#+approval_base_blob: 54cbd08c3ed42a490778cd9678dffec9332e9571
-#+approval_decided_at: 2026-08-27
-#+filetags: :starintel:star-server:http:authentication:authorization:leases:fencing:targets:research:org-roam:
+#+approval_state: PENDING
+#+approval_actor: research-worker
+#+approval_evidence: substantive current-source rewrite on 2026-09-14 supersedes the previously approved research blob; explicit operator research-conclusion approval is required again; Auto-Research #157 remains historical approval evidence for the prior version only
+#+approval_base_commit: NONE
+#+approval_base_blob: NONE
+#+approval_decided_at: PENDING
+#+filetags: :starintel:star-server:http:authentication:authorization:leases:fencing:targets:scheduling:outbox:rabbitmq:research:org-roam:
+#+last_modified: [2026-09-14 Mon]
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
-| Research conclusion | StarIntel operator | APPROVED | Explicit operator research decision | [[https://github.com/lost-rob0t/starintel-auto-research/issues/157][approval recovery #157]] |
-| Architecture/design | StarIntel operator | PENDING | Explicit review of refreshed design | [[id:56b95ef4-b058-44e3-8a65-a038b7c46140][STAR-SERVER-032]] |
+| Research conclusion | StarIntel operator | PENDING | Explicit operator decision on this current document/blob | Prior approval [[https://github.com/lost-rob0t/starintel-auto-research/issues/157][#157]] applies only to the superseded version |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of the corresponding current design | [[id:56b95ef4-b058-44e3-8a65-a038b7c46140][STAR-SERVER-032]] |
 | Implementation authorization | StarIntel operator | PENDING | Explicit authorization for bounded implementation slice | [[https://github.com/lost-rob0t/starintel-server/issues/32][server #32]] |
 | Implementation completion | Repository maintainer | NOT STARTED | RED/GREEN/regression/exact-head evidence | |
 
 * Source Links
 
+- [[https://github.com/lost-rob0t/starintel-server/issues/32][starintel-server #32 — authenticated target leases and execution enforcement]]
+- [[https://github.com/lost-rob0t/starintel-server/pull/101][starintel-server PR #101 — WIP target-lease API/fencing branch; evidence only, not current authority]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/33][starintel-server #33 — expiry/crash/reacquire/stale-writer proof matrix]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/59][starintel-server #59 — target lifecycle and durable scheduling semantics]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/47][starintel-server #47 — shared end-to-end idempotency]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/58][starintel-server #58 — canonical =/v1= HTTP contract]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/41][starintel-server #41 — runtime-owned concrete adapters including scheduler/timer effects]]
 - [[file:../../indexes/star-server/STAR-LEASE-INDEX-030-backend-neutral-kv-leases.org][STAR-LEASE-INDEX-030 Target Lease Stack]]
-- [[id:56b95ef4-b058-44e3-8a65-a038b7c46140][STAR-SERVER-032 Authenticated Target-Lease HTTP and Execution Enforcement]]
 - [[id:7ee9b211-90e1-48c7-a99b-7807f04fc2e9][STAR-RESEARCH-029 Distributed Target Lease and Fencing Semantics]]
 - [[id:1930fee2-2dc1-43b2-9dc2-9fd17ebc6289][STAR-RESEARCH-030 Backend-Neutral KV Lease Store]]
-- [[https://github.com/lost-rob0t/starintel-server/issues/32][starintel-server #32]]
-- [[https://github.com/lost-rob0t/starintel-auto-research/issues/156][older-research refresh #156]]
-- [[https://github.com/lost-rob0t/starintel-auto-research/issues/157][operator approval recovery #157]]
 
 * Research Question
 
-What remains to satisfy authenticated target-lease HTTP and execution enforcement now that the backend-neutral lease protocol and Valkey adapter are implemented and hardened?
+Given the current =starintel-server= implementation, what exact boundaries are still required so an authenticated target can be durably accepted, scheduled, recovered, and executed only while a current Valkey-backed lease/fencing authority permits the effect, without creating a second scheduler or lease system?
 
-* 2026-08-29 Current-State Refresh
+* Current System
 
-The original research correctly separated HTTP/application authority from storage authority, but it predates substantial implementation in =starintel-server=. Current source still contains the backend-neutral lease protocol, Valkey adapter, contract tests, and real-Valkey integration tests. Recent lease-store history records cluster-safe listing, corrupt-record fail-closed behavior, and green contract/integration evidence. Issue 32 must not redesign lease storage or reimplement fencing-token allocation.
-
-Repository search on the current server baseline finds the lease protocol/store implementation but no implemented =target-leases= HTTP route/application-service surface. The open server #32 therefore remains a real integration gap rather than stale bookkeeping.
+The current server already contains the major primitives that older versions of this research treated as future work. The remaining problem is their composition.
 
 #+begin_example
-HTTP or embedded caller
-  -> authenticated service-call context
-  -> target-lease application service
-  -> existing lease-store protocol
-  -> existing Valkey adapter
-
-Target dispatch
-  -> locking policy
-  -> lease authority validation/acquisition
-  -> immutable execution authority
-  -> local/Rabbit delivery
-  -> fenced side-effect boundary
+client / embedded caller
+        |
+        v
+authenticated target ingress
+        |
+        +--> target-lease application authority   [partially WIP in PR #101]
+        |          |
+        |          v
+        |      lease-store protocol
+        |          |
+        |          v
+        |      memory / Valkey backend
+        |
+        v
+CouchDB document + durable outbox
+        |
+        v
+outbox replay/publication
+        |
+        v
+Rabbit documents.new.target.*
+        |
+        v
+handle-target / accept-target-delivery
+        |
+        v
+persist target acceptance
+        |
+        v
+Common Lisp timer-wheel schedule
+        |
+        v
+due local actor / Rabbit effect
 #+end_example
 
-The storage protocol remains authoritative for acquire/renew/release/revoke/get/list outcomes. HTTP code translates those typed outcomes; it does not inspect Valkey keys or scripts.
+The architectural roles are now clear:
 
-* Concrete Remaining Gaps
+- **Common Lisp timer-wheel** is the target scheduler for one-shot and recurring delivery.
+- **CouchDB** owns durable target, acceptance, mutation, and outbox state required for restart/recovery.
+- **Valkey** is the distributed lease/fencing authority. It is not a scheduler.
+- **RabbitMQ** transports target/document events and remote target work.
+- **The application/service layer** must authenticate, authorize, create immutable execution intent, and project typed outcomes without exposing backend internals.
 
-** Thin authenticated application service
+No new scheduling database, Redis/Valkey sorted-set scheduler, cron service, delayed-message scheduler, or second actor scheduler is justified by this issue.
 
-Issue #32 still needs one service layer shared by HTTP and embedded callers. Every mutating/inspection operation receives explicit principal, capability/scope, correlation identity, idempotency identity where applicable, and one propagated deadline. Process-local invocation does not bypass authorization.
+* Implemented Authority and Scheduling Primitives
 
-** HTTP projection
+** Lease store
 
-Expose versioned lease operations as adapters over that service. Preserve stable distinctions for conflict, stale fence/precondition, hidden/not-found, authorization denial, overload, backend unavailable, known timeout, and uncertain mutation outcome. Problem responses must not leak backend keys, credentials, stack traces, or another owner's private metadata.
+The server already has a backend-neutral =star.leases= protocol with memory and Valkey implementations. The Valkey backend already uses atomic scripts, backend-authoritative time, TTL/expiry handling, monotonic fencing generations, idempotent request/digest behavior, revoke/release semantics, corrupt-state fail-closed handling, and real-Valkey integration coverage.
 
-** Dispatch authority
+The runtime now owns lease-store composition through =initialize-lease-store= / shutdown lifecycle. The default memory backend preserves local behavior; =STAR_LEASE_STORE_BACKEND=valkey= selects the durable distributed adapter. Therefore issue #32 must not redesign lease storage or invent another KV abstraction.
 
-A target requiring locking must not reach local actor or Rabbit publication without an active authority matching the canonical target. User-supplied JSON cannot manufacture the authoritative lease envelope.
+** Target scheduler and acceptance
 
-** Stale-fence enforcement
+Current =source/target-dispatch.lisp= already provides:
 
-The most important remaining proof is downstream, not HTTP routing: generation N may continue computing after lease loss, but once generation N+1 exists, N cannot make an authoritative side effect. Persistence/publication/settlement boundaries must consume the fenced execution authority rather than trusting actor liveness.
+- =register-target-schedule=;
+- one-shot and recurring wheel scheduling;
+- =process-target-dispatch-envelope=;
+- =accept-target-delivery=;
+- local/Rabbit destination resolution;
+- schedule identity and target acceptance documents;
+- explicit delay/deadline/recurrence validation;
+- an in-process active-schedule registry.
 
-** Recovery and races
+Issue #18 already repaired the basic recurrence, routing, and destination semantics. The remaining problem is not whether a timer can be registered; it is whether that timer represents valid current execution authority.
 
-Server #33 remains the dedicated expiry/crash/race matrix. #32 should expose enough typed authority and integration seams for #33 to prove renew-vs-expiry, reacquire, stale completion, and restart behavior without duplicating the race harness inside HTTP tests.
+** Durable outbox
 
-* v0.9 / StarLang Reconciliation
+Current =source/databases/outbox.lisp= atomically records document mutation state plus pending outbox state, assigns stable mutation/event identity, republishes pending entries after restart, and marks publication afterward.
 
-This refresh does not introduce StarLang syntax. Lease acquisition and fencing are host service/runtime authority. StarLang-defined actors may receive typed execution authority and declare that a capability requires locking, but they cannot mint fencing tokens, bypass the lease service, or reinterpret backend state.
+The generic outbox currently builds a public-document event payload and later calls the publisher with:
 
-The StarIntel v0.9 document boundary remains unchanged: accepted documents/results still pass canonical validation/persistence rules. A lease token is execution authority metadata, not a replacement for document provenance, authorization, or schema validation.
+#+begin_src lisp
+(routing-key payload event-id)
+#+end_src
 
-* Design Consequences
+That interface preserves logical event identity but has no separate trusted server-private execution-authority sidecar. A process restart can recover the document event, but the authenticated service context that originally authorized target creation is not thereby recovered.
 
-The existing STAR-SERVER-032 design remains directionally correct but must be narrowed around the implemented backend reality:
+** Rabbit target ingress
 
-1. reuse =source/leases/protocol.lisp= rather than designing another lease algebra;
-2. reuse the Valkey adapter and existing contract/integration tests;
-3. implement service-context authorization before route/backend access;
-4. make HTTP and embedded callers project the same service result;
-5. carry immutable execution authority into target delivery;
-6. enforce fencing at side-effect acceptance;
-7. leave exhaustive crash/race validation to #33 while providing the required seams.
+Current =source/rabbit.lisp= routes target deliveries through =handle-target= and then =star.actors:accept-target-delivery=. This is the correct place to re-enter application execution policy, but the generic durable publication path currently provides document payload/event identity rather than a proved current lease authority.
 
-* Adversarial Review
+** Current dispatch-envelope defect
 
-Rejected:
+Current =make-target-dispatch-envelope= accepts optional lease metadata but, when it is absent, generates a new ULID as =lease-id= and defaults =fencing-token= to =1=. The resulting target acceptance document persists those values.
 
-- HTTP routes calling Valkey directly;
-- a second lease protocol because the existing backend contract is already implemented;
-- treating successful authentication as =targets:lease= authorization;
-- trusting lease/fence fields copied from caller-controlled target JSON;
-- checking a fence only at dispatch time and not again when effects become authoritative;
-- ACKing stale Rabbit work as successful output before fenced effects are rejected;
-- using actor/process liveness as proof that a lease is still current;
-- letting embedded Common Lisp callers bypass the same authorization contract;
-- folding #33's complete chaos/race matrix into the first HTTP implementation slice;
-- adding StarLang or Prolog authority for host-level lease mutation.
+Those defaults are useful historical placeholders, but they are not valid distributed execution authority. A random lease identifier plus constant fence cannot prove ownership of the current Valkey lease. Required-lock target execution must stop fabricating authority at this boundary.
 
-* Proposed Implementation Handoff
+* WIP Branch Reality
+
+PR #101 contains substantial useful work toward #32, including an application-service direction, target-lease HTTP operations, server-side lease resolution, fenced-intent/receipt concepts, and stale-fence tests. It also records the same durable-ingress problem identified here: trusted principal/service context is lost across the CouchDB outbox -> Rabbit target-consumer path.
+
+PR #101 is not the source of truth:
+
+- it remains open/WIP;
+- current =master= has continued changing after the branch diverged;
+- its HTTP surface uses the older =/api/v1= convention, while #58 now owns the canonical =/v1= direction;
+- useful code must be reconciled into current contracts rather than merged blindly.
+
+The branch should be mined for tested implementation pieces, especially immutable fenced-intent/receipt behavior, but the implementation decision must be made against current =master=.
+
+* Core Finding
+
+The remaining safety gap is **durable execution-authority handoff and revalidation**, not scheduling and not lease storage.
+
+An authenticated caller can create a target whose document and outbox event survive restart. Separately, the runtime can maintain a current Valkey lease. Separately, the timer wheel can schedule target work. What is not yet proven on current =master= is one continuous invariant connecting those systems:
+
+#+begin_quote
+A target may become durably accepted, scheduled, and authoritatively effective only when the server can prove that the exact immutable target intent is authorized by the current lease/fencing generation at each authority-changing boundary.
+#+end_quote
+
+The target document, Rabbit payload, actor process, timer handle, historical acceptance row, lease id string, or fencing-token number is not authority by itself.
+
+* Required Execution-Authority Model
+
+The server should create an immutable **target execution intent/receipt** only after authenticated authorization and current lease validation. The durable target pipeline may carry an opaque locator for that receipt, but every consumer must treat the locator as untrusted input until server-side resolution and current-lease comparison succeed.
+
+The immutable receipt must bind enough data to prevent cross-scope/confused-deputy reuse. At minimum it should bind directly or by deterministic digest:
+
+- canonical target identity;
+- schedule/logical-operation identity;
+- tenant and dataset;
+- applicable program/namespace scope;
+- actor/destination identity;
+- lease identity;
+- lease owner/service-instance identity where the lease contract requires it;
+- fencing generation/token;
+- immutable target/request fingerprint;
+- relevant deadline/expiry;
+- receipt schema/version.
+
+It must not contain reusable credentials, Authorization headers, API keys, OAuth material, raw secret references, or another principal's private lease metadata.
+
+The target execution receipt is historical proof of what the server authorized at ingress. It is **not** proof that the lease remains current later.
+
+* Durable Outbox Composition
+
+The durable outbox should preserve the same logical execution-authority locator across retry and restart without turning the public target document into the authority store.
+
+Recommended shape:
+
+#+begin_example
+authenticated target mutation
+  -> create immutable server-owned execution receipt R
+  -> persist target mutation + pending outbox entry + server-private locator(R)
+  -> crash is allowed here
+  -> recovery republishes the same event identity + same locator(R)
+  -> target consumer resolves R and current lease
+#+end_example
+
+Important properties:
+
+1. outbox replay must not mint a fresh receipt or fresh lease merely because the first publication result was lost;
+2. client-controlled =extensions= cannot inject or overwrite server-private receipt state;
+3. =public-document-copy= and normal document reads must not expose server-private authority records;
+4. normal non-target outbox behavior must remain generic and unchanged;
+5. the added transport projection should be the narrowest trusted sidecar/envelope needed by target consumers;
+6. same mutation/event identity must map to the same durable execution intent.
+
+A Rabbit header can transport an opaque locator if and only if it is emitted by trusted server outbox code and the consumer still resolves/revalidates it. Arbitrary inbound headers are not authority.
+
+* Consumer Gate Before Scheduling
+
+Before =accept-target-delivery= persists authoritative target acceptance or calls =register-target-schedule=, the server must prove current execution authority.
+
+The required sequence is:
+
+1. strict-schema decode/validate the canonical target document;
+2. obtain the trusted durable authority locator from the server-owned delivery envelope;
+3. resolve the immutable receipt from server-owned storage;
+4. verify the receipt binds to this exact target/schedule/scope/actor intent;
+5. resolve the current lease through the configured lease-store/application authority;
+6. require exact current lease-id/owner/service-instance/fencing-generation compatibility;
+7. require backend-authoritative time/deadline policy to still permit execution;
+8. only then persist authoritative acceptance and register the timer-wheel schedule.
+
+Any missing, forged, cross-scope, stale, revoked, expired, corrupt, unavailable, or outcome-unknown authority must fail closed before schedule registration.
+
+Backend unavailable/timeout/unknown mutation outcomes must remain typed and settle through the existing retry/quarantine policy; they must never be normalized to accepted work.
+
+* Timer-Wheel Scheduling and Delayed Authority
+
+Registering a timer while a lease is current is insufficient. A target may wait long enough for its lease to expire, be revoked, or be superseded by generation N+1.
+
+Every delayed authoritative effect must therefore re-enter current lease/fencing validation immediately before the effect.
+
+#+begin_example
+schedule registered under receipt R / fence N
+        |
+        | time passes
+        v
+timer fires
+        |
+        v
+resolve R + current lease
+        |
+        +-- current fence still N --> fenced effect boundary
+        |
+        +-- current fence N+1 / expired / revoked / unavailable --> reject/fail closed
+#+end_example
+
+Recurring schedules make this especially important: registration is not perpetual authority. Every due occurrence must validate current authority before producing an authoritative local/Rabbit effect.
+
+This issue should not collapse identity boundaries that belong to #47/#59:
+
+#+begin_example
+schedule id != recurring occurrence id != retry attempt id
+#+end_example
+
+The receipt/fence must attach to the correct execution/occurrence semantics without turning one historical lease receipt into permanent authority for all future recurrences.
+
+* Fenced Effect Acceptance
+
+A separate Valkey preflight followed by an unconditional CouchDB mutation, Rabbit publish, or terminal settlement is a TOCTOU race and does not satisfy #32.
+
+The authoritative effect boundary itself must reject stale generations. The smallest production seam should be chosen from current persistence/publication code; PR #101's fenced-intent work is useful evidence but must be reconciled against current =master=.
+
+Mandatory proof:
+
+#+begin_example
+A owns generation N and reaches a barrier before authoritative effect
+A stalls
+A loses authority
+B acquires generation N+1
+B effect is accepted
+A resumes with N
+A effect is rejected
+final authoritative state contains no post-N+1 effect from A
+#+end_example
+
+The barrier must be deterministic. Sleep-based timing is not sufficient evidence.
+
+A test showing stale =renew= or =release= rejection is necessary lease-store coverage but does not prove stale target work cannot mutate/publish.
+
+* Local and Rabbit Equivalence
+
+Local actor delivery and Rabbit remote delivery must consume the same immutable execution-authority semantics.
+
+Transport can differ in mechanics, but not in authority:
+
+- same target/scope/receipt binding rules;
+- same current-lease/fence validation;
+- same stale-generation classification;
+- same deadline policy;
+- same fail-closed backend-unavailable behavior;
+- same requirement for fenced authoritative effects.
+
+A local actor reference or in-process call must not bypass lease validation merely because it avoids Rabbit.
+
+* HTTP and Embedded Application Boundary
+
+Current =master= has runtime lease-store composition, but the full merged target-lease application-service/HTTP surface described by #32 is still not present as one canonical production contract. PR #101 contains WIP implementation evidence.
+
+The desired application boundary remains:
+
+#+begin_example
+explicit star.runtime
++ existing service-call-context
++ typed target-lease request
+        |
+        v
+target-lease application service
+        |
+        v
+existing star.leases protocol
+#+end_example
+
+Requirements:
+
+- HTTP and embedded Common Lisp callers use the same service result algebra;
+- authentication is not equivalent to =targets:lease= authorization;
+- target/program/dataset/actor scopes are checked before lease-store mutation/disclosure;
+- one absolute deadline propagates through the operation;
+- idempotency request/digest mismatches fail before mutation;
+- unknown mutation outcome is distinguishable from known timeout/failure;
+- current authorization still applies when replaying a previous result;
+- backend keys/scripts/private owner metadata never leak through client errors.
+
+HTTP route spelling must follow #58. Canonical new-client operations are under =/v1=; older =/api/v1= forms are compatibility only where explicitly retained.
+
+* Recovery Boundary with #33
+
+#32 must create the production authority seams; #33 owns the exhaustive recovery/race matrix around those seams.
+
+#32 should prove:
+
+- current authority is required before schedule activation;
+- delayed effects are fenced;
+- durable replay preserves the same authority locator;
+- local/Rabbit behavior is equivalent.
+
+#33 then proves:
+
+- expiry and renew races;
+- process/actor crash while lease active;
+- reacquire after orphaned work;
+- stale generation classification;
+- unknown-outcome reconciliation using original request identity;
+- revoke while old work continues;
+- backend restart/failover and fencing-floor safety;
+- startup reconciliation of persisted running/scheduled state against the current lease store.
+
+Persisted =running=, actor liveness, timer presence, or historical target acceptance must never grant authority during recovery.
+
+* Relationship to #59 Target Lifecycle
+
+#59 remains the product-level target lifecycle authority:
+
+- =queued=;
+- =scheduled=;
+- =running=;
+- =completed=;
+- =failed=;
+- =cancelled=;
+- one-shot/recurring lifecycle semantics;
+- occurrence identity;
+- client create/read/control/cancel/recovery API.
+
+#59 should consume #32/#33's execution authority. It must not build another lease store or another scheduler to compensate for missing fencing integration.
+
+* Security and Data-Boundary Conclusions
+
+- Caller-supplied target JSON cannot mint lease authority.
+- A lease id and fencing token are locators/claims until resolved against server-owned state.
+- A signed or opaque receipt can prove server issuance but still cannot prove the lease remains current; current-state validation is required.
+- Principal/tenant fields copied into document payloads are data, not authenticated context.
+- Rabbit headers from an arbitrary producer are not trusted merely because they use expected names.
+- Durable outbox recovery must preserve logical authority identity rather than silently authorizing new work.
+- Server-private receipt data must not leak into canonical StarIntel documents.
+- Lease backend failure must fail closed for required-lock work.
+- Actor/process liveness is not lease authority.
+- Timer registration is not execution authority.
+
+* Alternatives Rejected
+
+** Use Valkey as the scheduler
+
+Rejected. Valkey owns lease/fencing state. Replacing the existing timer-wheel with sorted sets/key expiry would create a second scheduling architecture and does not solve the authority handoff problem.
+
+** Put lease/fence/principal fields in the target document
+
+Rejected. The document is caller-influenced application data and can survive longer than the lease. Copying claims into a durable document does not make them authoritative.
+
+** Trust Rabbit headers
+
+Rejected as an authority source. Trusted server code may transport an opaque locator in transport metadata, but the consumer must still resolve server-owned receipt state and the current lease.
+
+** HMAC/sign the old lease tuple and skip Valkey on execution
+
+Rejected. Authenticity of an old tuple does not establish current lease authority after expiry/revoke/reacquire.
+
+** Validate only when registering the timer
+
+Rejected. The lease can change before the delayed effect runs.
+
+** Fresh acquire on outbox replay
+
+Rejected. Replay of one accepted logical mutation must reconcile to its original authority identity; silently acquiring fresh authority can resurrect stale work and allocate a new generation.
+
+** CouchDB acceptance row as execution authority
+
+Rejected. Acceptance state is durable history/recovery input, not proof of the current fencing generation.
+
+** Valkey preflight followed by unconditional effect
+
+Rejected. This is a TOCTOU race. The effect boundary must enforce fencing.
+
+** Merge PR #101 wholesale
+
+Rejected. It is valuable implementation evidence but diverged from current =master= and the canonical API direction.
+
+* Research Conclusion
+
+The server does not need a new scheduler and does not need a new lease backend.
+
+The required design is a narrow composition of systems that already exist:
+
+1. authenticate/authorize the target operation;
+2. resolve current lease authority;
+3. create one immutable server-owned execution intent/receipt;
+4. durably bind its opaque locator to the target outbox event without exposing it as public document authority;
+5. recover/replay the same locator after crash;
+6. resolve receipt + current lease before durable schedule activation;
+7. keep the existing Common Lisp timer-wheel for one-shot/recurring scheduling;
+8. revalidate current lease/fence when delayed work becomes due;
+9. enforce fencing at the authoritative local/Rabbit effect boundary;
+10. hand full crash/reacquire/failover proof to #33;
+11. let #59 consume the resulting authority for target lifecycle rather than duplicating it.
+
+This is the smallest architecture that preserves crash-safe target persistence, distributed single-writer authority, and the existing scheduler while closing the current stale-worker and durable-provenance gaps.
+
+* Implementation Handoff
 
 Owning repository: =lost-rob0t/starintel-server=, issue #32.
 
-Dependency order:
+Recommended bounded order after explicit operator authorization:
 
-1. pure target-lease application-service result/context contract over a fake existing lease-store protocol;
-2. authorization/scope + idempotency/deadline behavior with zero HTTP dependency;
-3. versioned HTTP adapter and problem/success projection;
-4. target-dispatch authority envelope for required-lock targets;
-5. one fenced side-effect acceptance seam proving stale generation rejection;
-6. Rabbit/local equivalence fixtures;
-7. hand the expanded expiry/crash/race matrix to #33.
+1. **RED: durable authority-loss fixture** — authenticated target accepted far enough to persist document/outbox state, crash before publication, recover the outbox, and prove current =master= cannot carry/re-establish trusted execution authority into the target consumer.
+2. **Immutable execution receipt** — reconcile/salvage PR #101 concepts against current lease protocol and current =master=; caller-controlled fields cannot create it.
+3. **Outbox sidecar/envelope** — persist and replay the same opaque receipt locator without changing generic document semantics.
+4. **Consumer gate** — no target acceptance/schedule registration until receipt + current lease exact-match succeeds.
+5. **Delayed revalidation** — timer callbacks revalidate before authoritative effect.
+6. **Fenced effect RED/GREEN** — deterministic N vs N+1 stale-writer rejection at one real production effect seam.
+7. **Local/Rabbit parity** — same authority semantics across both destinations.
+8. **#33 handoff** — exercise expiry/crash/reacquire/revoke/restore matrix through the production seams.
 
-Mandatory first RED: a fake lease store that records invocation plus an unauthorized service-call context. Untouched current server must fail because no target-lease application service exists; GREEN must return typed authorization denial and prove the store was invoked zero times. A sibling fixture must prove an authorized embedded caller and HTTP projection consume the same service result algebra rather than separate lease logic.
+Required RED cases before claiming completion:
+
+- target document supplies fake lease id/fence -> rejected;
+- no receipt -> no schedule;
+- forged receipt -> no schedule;
+- receipt for another tenant/dataset/target/actor -> no schedule;
+- receipt generation N while current lease is N+1 -> no schedule/effect;
+- lease backend unavailable/unknown -> fail closed with typed retryability;
+- outbox crash/recovery -> same event id + same receipt locator, no fresh authority minted;
+- recurring later occurrence after lease loss -> effect rejected;
+- local/Rabbit paths -> equivalent authority classification;
+- stale N resumes after B/N+1 commit -> no A authoritative effect;
+- server-private authority/credentials -> absent from client document/Rabbit payload/log disclosure.
 
 Implementation authorization remains =PENDING / AWAITING_OPERATOR_APPROVAL=.
 
-* Unresolved Questions
+* Open Design Questions
 
-- Select the exact stable HTTP path prefix during implementation against the current capability/API-version work (#58); do not create a second versioning convention.
-- Select the first concrete fenced side-effect seam based on current target/persistence code so the RED proves real stale-write rejection rather than a synthetic wrapper only.
-- Reconcile issue #32 implementation ordering with #33 if the current target path already exposes a smaller race fixture.
+These are bounded implementation choices, not open architectural questions:
+
+1. What exact current persistence location should hold immutable execution receipts: reuse/salvage PR #101's fenced-intent store, a server-private CouchDB structure, or another already-owned lease-protocol seam?
+2. Should the opaque locator travel as trusted Rabbit metadata, a server-private internal event envelope, or another existing transport metadata structure? It must not become a caller-controlled canonical document field.
+3. Which current production side-effect boundary is the smallest useful first fenced sink: acceptance-state update, durable outbox mutation, remote target publication, or another existing authoritative sink?
+4. How should recurring occurrence identity bind to receipts while preserving #47/#59's distinction between schedule, occurrence, and retry attempt?
+5. Which exact HTTP operations survive after #58's =/v1= contract reconciliation? Route naming must not drive the lease/application design.
 
 * Footnotes and Glossary
 
 [fn:starintel] StarIntel is the actor-based intelligence platform owning the target execution and document service boundary.
 [fn:fence] A fencing token is a monotonically increasing generation used by side-effect receivers to reject stale workers.
+[fn:receipt] A server-created immutable record binding an authorized target execution intent to a specific lease/fencing generation and scope. Its locator is not current authority by itself.
 [fn:service-context] A service-call context is explicit caller authority, scope, correlation, and deadline data passed to an application service.
+[fn:outbox] The durable CouchDB mutation/publication mechanism that preserves logical event identity across crash/restart.
 
 * Changelog
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-08-29 | Refreshed against current implemented lease protocol/Valkey backend; recovered explicit operator research approval; narrowed remaining work to authenticated service/HTTP/dispatch/fenced-effect integration. | ARDR Auto-Research | server #32; Auto-Research #156/#157; current lease source/history |
+| 2026-09-14 | Reconciled the document with current =starintel-server= master: runtime Valkey composition and timer-wheel scheduling already exist; documented fabricated dispatch lease defaults, generic outbox authority-loss seam, PR #101 WIP status, canonical =/v1= direction, durable receipt handoff, delayed revalidation, and #32/#33/#59 ownership. Material rewrite returned research approval to PENDING for operator review. | research-worker | server master; #32; PR #101; #33; #47; #58; #59 |
+| 2026-08-29 | Reconciled the then-current lease protocol/Valkey backend and narrowed the older blank-slate design toward authenticated service/HTTP/dispatch/fenced-effect integration. | ARDR Auto-Research | server #32; Auto-Research #156/#157 |

@@ -1,141 +1,129 @@
 :PROPERTIES:
 :ID:       starintel-star-research-043-manifest-runtime-plan-composition
 :END:
-#+title: STAR-RESEARCH-050 StarLang Registry Consumption and StarIntel Runtime-Plan Composition
-#+description: ARDR research for starintel-server issue 43. StarLang owns canonical actor/service identity, semantic manifests, the actor/service registry, and runtime-directory semantics; StarIntel consumes those resources and adds deployment, dataset, authorization, ingest, persistence, and RuntimePlan application policy without creating a second registry.
+#+title: STAR-RESEARCH-050 Actor and Dataset Manifest Runtime-Plan Composition
+#+description: ARDR research for starintel-server issue 43, reconciling StarLang-owned actor/domain semantics and routing, the StarIntel-owned actor registry, StarIntel dataset manifests, and pre-start runtime planning without duplicating language or transport authority.
 #+status: READY_FOR_DESIGN
 #+approval_schema: adard.research-approval.v1
 #+approval_state: APPROVED
 #+approval_actor: StarIntel operator
-#+approval_evidence: starintel-server#43 and starintel-auto-research#199 operator decisions through 2026-09-14, including explicit registry-ownership correction
+#+approval_evidence: operator corrections and approved routing/domain-server research through 2026-09-14
 #+approval_decided_at: [2026-09-14 Mon]
-#+filetags: :starintel:star-server:research:manifest:actor:dataset:star-lang:registry:runtime-plan:
+#+filetags: :starintel:star-server:research:manifest:actor:registry:dataset:star-lang:routing:runtime-plan:
 #+created: [2026-08-29 Sat]
 #+last_modified: [2026-09-14 Mon]
 
-* Approval Table
+* Corrected Ownership Invariant
 
-| Approval area | Required authority | State | Evidence reference |
-|---------------+--------------------+-------+--------------------|
-| Research conclusion | StarIntel operator | APPROVED | starintel-auto-research #199; starintel-server #43 |
-| Architecture/design direction | StarIntel operator | APPROVED | STAR-SERVER-041; STAR-LANG-004; ownership correction recorded 2026-09-14 |
-| Implementation handoff | StarIntel operator | APPROVED | star-lang #72 first, then starintel-server #43 consumer slices |
-| Publication | Auto-Research maintainer | current repository state | this document |
+The architecture separates actor discovery from actor/domain routing.
 
-* Non-Negotiable Ownership Invariant
+**StarIntel Server owns the actor/service registry and discovery plane.** It consumes actor-emitted manifests, tracks the actors/services available to the deployment, joins static manifest data with deployment/runtime availability, and exposes safe discovery to callers.
 
-The actor/service registry lives in *StarLang*.
+**StarLang owns actor/domain-server semantics and routing/dispatch semantics.** Actor declarations freeze typed contracts and routing metadata. Domain-server declarations define keyed logical addresses, accepted commands, routing behavior, lifecycle, indexes, capabilities, and the semantics for dispatching typed commands to the correct domain authority. The runtime resolves those logical destinations to a current local or remote incarnation through the appropriate runtime boundary.
 
-StarLang is the sole semantic authority for:
+**StarRouter owns cross-authority route resolution and transport-profile selection.** It does not replace StarLang domain routing semantics and it does not become the StarIntel actor registry.
 
-- canonical =star://<authority>/<resource-kind>/<resource-path>= identity;
-- actor/service semantic manifests;
-- deterministic actor/service registry construction and lookup;
-- accepted/produced types, capabilities, domain ownership, and semantic digests;
-- runtime-directory semantics that resolve a declared StarLang resource to a live runtime incarnation;
-- the semantic distinction between declared, missing, unavailable, and live resources.
+**Pro Actors, BBPD, and similar actor packages define actors and emit their manifests.** They do not own the global registry, routing control plane, or transport architecture merely because an actor happens to run in a particular process/runtime.
 
-StarIntel Server is a *consumer* of that registry. It owns only application/deployment concerns around StarLang resources:
+#+begin_example
+Pro Actors / BBPD / actor packages
+        |
+        +--> actors
+        `--> emitted actor/service manifests
+                    |
+                    v
+            StarIntel Server
+            actor/service registry
+            discovery + deployment availability
+                    |
+                    +-----------------------+
+                    |                       |
+                    v                       v
+              StarLang semantics       StarIntel policy
+              actor/domain routing     auth/ingest/persist
+              typed dispatch           target lifecycle
+                    |
+                    v
+             runtime resolution
+                    |
+                    v
+              StarRouter only when
+              cross-authority routing
+              is required
+#+end_example
 
-- deployment/component bindings;
-- dataset bindings;
-- authentication and authorization;
-- target lifecycle and lease/fencing composition;
-- canonical ingest and persistence;
-- trusted transport/adapter selection;
-- RuntimePlan application/deployment policy;
-- safe HTTP projections that join StarLang semantic data with deployment/runtime state.
+* Canonical Research Basis
 
-A StarIntel route index keyed by =resourceUri= is a derived deployment/application projection. It is never a semantic actor/service registry and never becomes the source of truth for actor existence.
+- =STAR-LANG-RESEARCH-006 Specification Libraries and Domain Servers= establishes that actor declarations freeze contract, capabilities, **routing metadata**, and observable result type; domain servers have stable keyed logical addresses; mutations requiring domain invariants route through the keyed server; normalized IR includes =actor-command=, =domain-address=, and =domain-command=.
+- =STAR-LANG-RESEARCH-014 BBP Tool Domain Remoting= provides historical concrete evidence for StarLang command routing through a domain gateway/dispatcher. Its transport/registration mechanics are not automatically current, but its domain-routing responsibility belongs to StarLang.
+- =STAR-LANG-004 STAR Service URI Discovery and Dispatch= keeps deterministic actor/service dispatch and local runtime-directory resolution in StarLang while delegating cross-process authority routing to StarRouter.
+- =STAR-RESEARCH-041 Unified STAR URI Authority Routing and FediWatch RabbitMQ= establishes RFC3986 =star://= identity, authority-first StarRouter resolution for cross-authority traffic, and RabbitMQ for FediWatch durable target/finding dataflow.
+- =STAR-RESEARCH-013 Actor Capability Advertisement= provides the StarIntel registry/discovery precedent: actors emit machine-readable capability descriptions and the StarIntel discovery plane registers/searches those actor services.
 
-* Current-Source Findings
+* StarLang Actor and Domain-Server Authority
 
-** StarIntel server composition is still largely imperative
+StarLang is authoritative for the semantics compiled from actor/domain-server definitions, including where applicable:
 
-Current server source retains process-global composition state such as =*actors-start-hook*=, =*document-patterns*=, =*ingest-workers*=, =*sys*=, =*actor-index-agent*=, producer/CouchDB/target globals, and hard-coded startup order.
-
-That confirms the server problem: deployment/application topology is not yet compiled from one validated deterministic plan before effects.
-
-It does *not* justify moving semantic actor registration into the server.
-
-** StarLang already owns actor/domain semantics
-
-StarLang compiler/runtime work already owns actor/domain declarations, accepted/produced contracts, capabilities/tools, restart/mailbox semantics, and runtime-directory behavior. The canonical =star://= work in StarLang #72 extends that ownership into explicit actor/service registry semantics.
-
-Any server-local document that independently defines those semantics would create a second authority and is rejected.
-
-** Dataset manifests are a different authority
-
-A Dataset Manifest describes data/catalog/storage/governance and bindings to already-declared StarLang resources. It may select/narrow compatible resources and flows but may not define actor capabilities, create semantic actor identities, or become a workflow language.
-
-* Research Decision
-
-Use four explicit layers.
-
-** Layer 1 — StarLang actor/service registry
-
-StarLang compiler/runtime output is authoritative for:
-
-- =resourceUri= and =resourceKind=;
-- semantic name/version/digest/spec-lock identity;
-- accepted/produced message/document types;
-- owned/keyed domain semantics;
+- actor/domain-server semantic identity;
+- typed accepted and produced messages/documents;
 - capabilities/tools;
-- semantic restart/failure/mailbox constraints;
-- declared ports/runtime requirements.
+- routing metadata;
+- keyed domain address semantics;
+- domain ownership and indexes;
+- domain-command dispatch behavior;
+- mailbox/backpressure constraints;
+- lifecycle/restart semantics;
+- manifest generation;
+- canonical STAR resource references used by the language/runtime;
+- runtime-neutral dispatch semantics.
 
-The StarLang registry is keyed by canonical STAR URI and provides deterministic exact lookup plus bounded lookup by kind/capability/type where the language/runtime contract permits it.
+A domain server is a keyed supervised authority over bounded domain state. Its logical address is stable even when the current activation/process changes. StarLang decides what typed command is being routed and which logical domain address it targets.
 
-StarIntel does not construct a second registry from these manifests.
+This does not mean StarLang owns the global StarIntel actor registry.
 
-** Layer 2 — StarIntel deployment binding
+* StarIntel Actor/Service Registry
 
-A StarIntel deployment binding references one exact StarLang registry resource/digest and may add only deployment/runtime facts such as:
+StarIntel Server owns the deployment-facing actor/service registry.
 
-- stable =componentId= and deployment version;
-- exact =resourceUri= / semantic digest reference;
-- trusted adapter kind/reference;
-- component dependencies;
-- workload/dispatcher demand and routee bounds;
-- mailbox/admission narrowing;
-- local/Rabbit/remote adapter binding references;
-- authorization/lease/idempotency policy references;
-- configuration/options schema and opaque secret refs;
-- health/readiness adapter refs;
-- operator-safe labels.
+Registry entries are built from actor-emitted manifests plus server-owned deployment/runtime observations. The registry answers questions such as:
 
-It must not redefine accepted/produced types, capabilities, domain ownership, semantic identity, or executable actor behavior.
+- what actors/services are available to this StarIntel deployment;
+- which canonical resource identity and semantic manifest describes each actor;
+- what capabilities and accepted/produced contracts are advertised;
+- what deployment binding is configured;
+- whether a registered actor/service is currently available/ready;
+- which registered destination may be selected by application policy.
 
-** Layer 3 — StarIntel Dataset Manifest
+The registry must not rewrite StarLang semantic contracts. It records/validates them and combines them with deployment facts.
 
-Dataset Manifest remains data-only:
+Manifest registration/discovery is not authorization. An actor appearing in the registry does not grant a caller permission to invoke it.
 
-- dataset/tenant/owner identity;
-- schema/spec compatibility;
-- storage/index/materialization/graph refs;
-- normalization/validation/governance refs;
-- selected compatible StarLang =resourceUri= values;
-- typed =flowBindings=;
-- provenance/retention/publication/lease/research policy refs.
+* Actor Packages
 
-Bindings may narrow compatible resources. They cannot widen StarLang semantics.
+Actor repositories such as Pro Actors and BBPD have a deliberately narrow architectural responsibility:
 
-** Layer 4 — StarIntel RuntimePlan
+1. define actors;
+2. emit the manifests describing those actors.
 
-RuntimePlan is a pure deterministic *deployment/application plan referencing StarLang registry resources*.
+Their package contract is not to implement the StarIntel registry, define a competing routing grammar, or own the system-wide transport/control plane.
 
-It is explicitly not an actor/service registry.
+Concrete runtime libraries used internally by an actor implementation do not change this architectural ownership.
+
+* RuntimePlan Composition
+
+StarIntel Server compiles deployment and dataset configuration against registered actor/service manifests into a pure deterministic =RuntimePlan= before long-lived side effects.
+
+The plan may contain deployment/application routing indexes, but those are not a replacement for StarLang domain routing semantics. They answer deployment questions: which registered actor/domain endpoint is selected, which adapter/runtime binding is available, and what server policy applies.
 
 Conceptual form:
 
 #+begin_example
 RuntimePlan
   planVersion
-  sourceManifestIds[]
-  starRegistryRefs[]
+  registryEntries[]
   semanticDigests[]
   deploymentBindings[]
-  typedRoutes[]
+  typedApplicationRoutes[]
   lifecycleGraph
   datasetBindings[]
   threadDemand[]
@@ -146,140 +134,88 @@ RuntimePlan
   planDigest
 #+end_example
 
-Equivalent inputs produce an equivalent plan/digest. Compilation has zero actor/thread/network/database/timer/listener/plugin side effects.
+No actor, thread, listener, broker/database connection, timer, or arbitrary plugin is started during plan compilation.
 
-* Composition Boundary
+* Routing Layers
 
-#+begin_example
-StarLang source/compiler/runtime
-          |
-          +--> semantic actor/service manifests
-          +--> StarLang actor/service registry
-          +--> StarLang runtime directory
-          |
-          v
-StarIntel deployment bindings + Dataset Manifest + policy/config
-          |
-          v
-pure validate / normalize / link
-          |
-          v
-RuntimePlan referencing StarLang resourceUri values
-          |
-          v
-#34/#35/#36/#37/#42 server runtime validation / realization
-#+end_example
+The word "routing" must not collapse distinct layers.
 
-No server compiler stage is allowed to reinterpret actor/service semantics or manufacture registry entries missing from StarLang.
-
-* Routing Boundary
+** StarLang logical/domain routing
 
 #+begin_example
-validated inbound operation/document/target
-        |
-        v
-canonical StarLang destination URI
-        |
-        v
-StarLang actor/service registry lookup
-        |
-        v
-verify semantic type/capability compatibility
-        |
-        v
-StarIntel auth/dataset/target/deployment policy (#43 RuntimePlan)
-        |
-        v
-StarLang runtime-directory resolution or trusted remote adapter
-        |
-        +--> local actor/service
-        `--> remote actor/service transport
+typed command
+   -> actor/domain contract validation
+   -> actor or keyed domain logical destination
+   -> domain routing / dispatch semantics
+   -> runtime-neutral dispatch operation
 #+end_example
 
-Rabbit routing keys, HTTP endpoints, Sento refs, Pykka refs, queues, process names, sockets, and host ports are adapter/runtime details and never canonical actor identity.
+This is part of StarLang.
 
-* Cross-Authority Validation Rules
-
-The server linker must reject at minimum:
-
-1. deployment binding to an unknown StarLang registry URI;
-2. semantic digest mismatch;
-3. wrong resource kind;
-4. duplicate =componentId=;
-5. deployment widening of StarLang capabilities/types/authority;
-6. dataset binding to incompatible StarLang type/capability;
-7. route whose payload contract is not accepted by the StarLang resource;
-8. forbidden lifecycle dependency cycle;
-9. unknown dependency/schema/policy reference;
-10. raw secret/credential literals where a secret reference is required;
-11. unsatisfiable thread/Sento/mailbox demand;
-12. ambiguous deployment route ownership without explicit deterministic arbitration;
-13. any field that attempts to construct a second semantic registry or URI parser.
-
-* Relationship to Runtime Work
-
-- StarLang #72 owns actor/service registry + canonical URI + runtime-directory semantics.
-- Server #34 owns total process-thread budget.
-- Server #35 owns aggregate Sento execution-lane accounting.
-- Server #36 owns bounded mailbox/admission semantics.
-- Server #37 owns server component lifecycle.
-- Server #40/#41 own application ports and concrete adapters.
-- Server #42 owns StarIntel component incarnation handles/generation/readiness, never semantic registry truth.
-- Server #43 consumes StarLang registry resources and compiles server deployment/application policy.
-
-* Rejected Architectures
-
-1. *StarIntel-owned actor/service registry* — duplicates StarLang and is forbidden.
-2. *RuntimePlan contains/projects the semantic registry* — wrong ownership; it may contain only references and derived deployment indexes.
-3. *Server-local Actor Manifest restates accepted types/capabilities* — semantic drift.
-4. *Dataset Manifest embeds actor semantics or workflow code* — crosses authority boundaries.
-5. *Raw Rabbit/Sento/Pykka/HTTP endpoints become actor identity* — transport is not identity.
-6. *Legacy global actor-name index remains authoritative* — compatibility aliases may delegate only.
-7. *Manifest capability declaration grants authorization* — discovery is not auth.
-8. *Compile while realizing components* — invalid topology must fail before effects.
-
-* Proposed Implementation Handoff
-
-Dependency order is mandatory:
-
-1. =lost-rob0t/star-lang#72= implements canonical URI, StarLang manifest registry, deterministic lookup, and runtime-directory migration.
-2. =lost-rob0t/starintel-server#43= consumes StarLang registry fixtures/artifacts and implements pure deployment/Dataset/RuntimePlan linking.
-3. Pro Actors and star-bbpd publish/consume compatible StarLang semantic manifests while their Rabbit/Pykka/Sento details remain adapters.
-4. StarIntel HTTP discovery may expose a safe joined projection without claiming registry ownership.
-
-First server RED:
+** StarIntel application routing
 
 #+begin_example
-StarLang registry resource:
-  resourceUri = star://gserver.starintel.actor/actor/identity/email
-  accepts = EmailSeed
-  semanticDigest = A
-
-server deployment binding:
-  componentId = identity/email
-  semanticDigest = A
-
-dataset route:
-  PersonDocument -> resourceUri
-
-compileRuntimePlan(...)
-=> incompatible-route
-=> zero actor/thread/network callbacks
+validated target/document/application operation
+   -> auth / tenant / dataset / target policy
+   -> StarIntel actor-registry lookup / capability selection
+   -> select registered actor/service destination
+   -> invoke the StarLang-defined actor/domain operation
 #+end_example
 
-Sibling REDs include unknown StarLang URI, semantic digest mismatch, kind mismatch, widening, duplicate component ID, lifecycle cycle, raw credential/callback fields, and deterministic equivalent-input plan digest.
+This is StarIntel Server application policy and registry composition.
 
-* Changelog
+** Cross-authority routing
 
-| Date | Change | Author or actor | Evidence |
-|------+--------+-----------------+----------|
-| 2026-08-29 | Initial #43 manifest/runtime-plan research. | ARDR Auto-Research | starintel-server #43 |
-| 2026-09-14 | Corrected ownership: StarLang is the sole actor/service registry authority; StarIntel Server consumes registry resources and RuntimePlan is deployment/application policy only. | StarIntel operator / ChatGPT | star-lang #72; starintel-server #43; auto-research #199 |
+#+begin_example
+canonical star:// destination outside local authority
+   -> StarRouter authority registration / resolution
+   -> eligible authority instance
+   -> compatible transport profile
+   -> forward canonical operation
+#+end_example
 
-* Glossary
+This is StarRouter.
 
-- *StarLang actor/service registry* :: Canonical semantic registry keyed by STAR URI. Sole actor/service registry authority.
-- *Deployment binding* :: StarIntel data-only binding from a StarLang registry resource to concrete server/runtime adapter policy.
-- *Dataset manifest* :: StarIntel data-only dataset/catalog/governance and compatible-resource binding contract.
-- *RuntimePlan* :: Pure deterministic StarIntel deployment/application plan containing StarLang registry references, not a semantic registry.
-- *Runtime directory* :: StarLang runtime semantics for resolving declared resources to live incarnations.
+** Durable distributed dataflow
+
+For workloads such as FediWatch targets/findings, RabbitMQ may carry durable work/results. Queue/routing-key mechanics are transport/dataflow details, not actor identity and not actor-package ownership.
+
+* FediWatch Consequence
+
+A Lisp FediWatch port in Pro Actors should be modeled as actors that emit manifests. Its actor/domain control flow should use StarLang actor/domain-server semantics, including routing when a domain server is declared. StarIntel Server registers/discovers the emitted actors and selects them through application policy. Durable target/finding delivery may use the approved RabbitMQ boundary without making Pro Actors the transport owner.
+
+* Validation Rules
+
+At minimum reject:
+
+1. duplicate actor/service registry identity in the StarIntel registry without an explicit version/instance rule;
+2. a registered manifest whose semantic digest/contract conflicts with the actor-emitted manifest;
+3. deployment/application routing that sends a message/document type not accepted by the actor/domain contract;
+4. server configuration that attempts to redefine StarLang domain routing semantics;
+5. actor packages that attempt to become the global registry or define a competing canonical URI grammar;
+6. caller-controlled transport routes used as logical actor identity;
+7. capability discovery treated as authorization;
+8. unbounded or invalid runtime demand before realization.
+
+* Implementation Boundary
+
+The implementation order should preserve these authorities:
+
+1. finish the required StarLang actor/domain-server and shared STAR identity/runtime semantics;
+2. have actor packages emit conforming manifests;
+3. build/consume those manifests in the StarIntel Server actor registry;
+4. compile StarIntel deployment/dataset/application policy against that registry;
+5. dispatch typed actor/domain operations through StarLang semantics;
+6. use StarRouter only for cross-authority resolution and the selected transport/dataflow adapter for delivery guarantees.
+
+* Acceptance
+
+- StarIntel Server is the canonical actor/service registry/discovery owner;
+- Pro Actors / BBPD define actors and emit manifests only;
+- StarLang owns actor/domain-server semantics and logical routing/dispatch semantics;
+- domain-server keyed routing is not reimplemented in StarIntel Server;
+- StarRouter owns cross-authority route resolution/transport-profile selection rather than StarLang application semantics;
+- RabbitMQ durable FediWatch dataflow remains transport/dataflow infrastructure rather than actor-package ownership;
+- manifests advertise semantic contracts but do not grant authorization;
+- server application routing selects only registered compatible actors/services;
+- no second actor registry, second domain-routing language, or competing STAR URI grammar is introduced.

@@ -10,26 +10,37 @@ APPROVAL = ROOT / "roam" / "research" / "auto-dig" / "ADAR-APPROVAL-001-dashboar
 
 
 class AdarShellTests(unittest.TestCase):
-    def test_research_shell_links_back_to_auto_dig(self) -> None:
+    def test_research_shell_is_rendered_without_javascript(self) -> None:
+        pages = (ROOT / "lisp" / "starintel" / "pages.el").read_text(encoding="utf-8")
+        self.assertIn("https://auto-dig.starintel.actor/", pages)
+        self.assertIn("si-skip-link", pages)
+        self.assertIn("si-topbar__nav", pages)
+        self.assertIn("starintel-pages--footer-html", pages)
+
+    def test_site_runtime_only_loads_page_behavior(self) -> None:
         shell = (STATIC / "site.js").read_text(encoding="utf-8")
-        self.assertIn("https://auto-dig.starintel.actor/", shell)
-        self.assertIn("Auto-Dig ↗", shell)
         self.assertIn("site-core.js", shell)
-        self.assertIn("<svg", shell)
-        self.assertIn("aria-current", shell)
+        self.assertIn("graph.js", shell)
+        self.assertNotIn("innerHTML", shell)
+        self.assertNotIn("adar-shell", shell)
 
     def test_existing_site_runtime_is_preserved_as_core(self) -> None:
         core = (STATIC / "site-core.js").read_text(encoding="utf-8")
         self.assertIn("startSearch();", core)
         self.assertIn("startGraph();", core)
 
-    def test_shared_shell_css_preserves_read_mode_and_black_gold(self) -> None:
-        css = (STATIC / "adar-shell.css").read_text(encoding="utf-8").lower()
-        self.assertIn("ibm plex sans", css)
-        self.assertIn(".site-header", css)
-        self.assertIn("#ffd000", css)
-        self.assertIn("#050505", css)
-        self.assertNotIn(".site-main { max-width: none", css)
+    def test_shared_shell_uses_canonical_obsidian_gold_tokens(self) -> None:
+        css = (STATIC / "site.css").read_text(encoding="utf-8").lower()
+        self.assertIn('data-si-theme="obsidian-gold"', css)
+        self.assertIn("--si-bg-canvas: #090807", css)
+        self.assertIn("--si-accent-primary: #e0b04a", css)
+        self.assertIn("var(--si-accent-primary)", css)
+        self.assertIn(".si-org", css)
+
+    def test_homepage_uses_canonical_identity_asset(self) -> None:
+        pages = (ROOT / "lisp" / "starintel" / "pages.el").read_text(encoding="utf-8")
+        self.assertIn("lambda-network.svg", pages)
+        self.assertTrue((STATIC / "lambda-network.svg").exists())
 
     def test_approval_activates_implementation_slot(self) -> None:
         self.assertTrue(IMPLEMENT.exists())

@@ -174,12 +174,29 @@ def section_bounds(text: str, title: str) -> tuple[int, int] | None:
     return match.start(), end
 
 
+def first_table_bounds(section: str) -> tuple[int, int] | None:
+    start: int | None = None
+    end = 0
+    offset = 0
+    for line in section.splitlines(keepends=True):
+        if TABLE_ROW_RE.match(line.rstrip("\r\n")):
+            if start is None:
+                start = offset
+            end = offset + len(line)
+        elif start is not None:
+            break
+        offset += len(line)
+    return (start, end) if start is not None else None
+
+
 def parse_table(section: str) -> tuple[list[str], list[list[str]]]:
     rows: list[list[str]] = []
-    for line in section.splitlines():
+    bounds = first_table_bounds(section)
+    if bounds is None:
+        return [], []
+    for line in section[bounds[0] : bounds[1]].splitlines():
         match = TABLE_ROW_RE.match(line)
-        if not match:
-            continue
+        assert match is not None
         cells = [cell.strip() for cell in match.group(1).split("|")]
         nonempty = [cell for cell in cells if cell]
         if nonempty and all(set(cell) <= {"-", "+", ":"} for cell in nonempty):
@@ -330,12 +347,16 @@ def ensure_approval(text: str) -> tuple[str, bool]:
         return front.rstrip() + "\n\n" + APPROVAL_TEMPLATE + "\n" + body.lstrip("\n"), True
 
     start, end = bounds
-    _, rows = parse_table(text[start:end])
+    section = text[start:end]
+    table_bounds = first_table_bounds(section)
+    if table_bounds is None:
+        return text[:start] + APPROVAL_TEMPLATE + "\n" + text[end:].lstrip("\n"), True
+    _, rows = parse_table(section)
     replacement = render_approval(normalized_approval_rows(rows))
-    current = text[start:end].rstrip() + "\n"
+    current = section[: table_bounds[1]]
     if replacement == current:
         return text, False
-    return text[:start] + replacement + text[end:].lstrip("\n"), True
+    return text[:start] + replacement + section[table_bounds[1] :] + text[end:], True
 
 
 def render_changelog(rows: Sequence[Sequence[str]]) -> str:

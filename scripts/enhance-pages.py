@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render PlantUML blocks and inject progressive site enhancements."""
+"""Render PlantUML blocks and inject diagram styles."""
 
 from __future__ import annotations
 
@@ -132,13 +132,6 @@ def inject_assets(document: str) -> str:
         if match:
             asset_base = match.group(1)
             addition = f'\n<link rel="stylesheet" href="{asset_base}enhancements.css">'
-            document = document[: match.end()] + addition + document[match.end() :]
-
-    if "enhancements.js" not in document:
-        match = re.search(r'<script defer src="([^"]*assets/)site\.js"></script>', document)
-        if match:
-            asset_base = match.group(1)
-            addition = f'\n<script defer src="{asset_base}enhancements.js"></script>'
             document = document[: match.end()] + addition + document[match.end() :]
 
     return document

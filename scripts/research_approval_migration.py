@@ -547,7 +547,7 @@ def inspect_repository(
 
 
 def verify_against_base(root: Path, results: Sequence[MigrationResult]) -> tuple[int, int]:
-    """Verify lifecycle and body preservation against recorded source commits."""
+    """Verify the migration snapshot preserved lifecycle and body bytes."""
 
     lifecycle_checked = 0
     body_checked = 0
@@ -569,9 +569,52 @@ def verify_against_base(root: Path, results: Sequence[MigrationResult]) -> tuple
         except (OSError, subprocess.CalledProcessError) as error:
             raise MigrationError(f"{result.relative_path}: cannot read approval base: {error}") from error
         _, _, source_body, source_metadata = _split_header(source)
-        if source_body != result.body:
+        source_is_canonical = (
+            source_metadata.get("approval_schema", [""])[0] == CANONICAL_SCHEMA
+        )
+        migration_text = source if source_is_canonical else ""
+        if not migration_text:
+            commits = _git_value(
+                root,
+                (
+                    "git",
+                    "log",
+                    "--format=%H",
+                    "--reverse",
+                    f"{base_commit}..HEAD",
+                    "--",
+                    result.relative_path.as_posix(),
+                ),
+            ).splitlines()
+            for commit in commits:
+                candidate = subprocess.run(
+                    ["git", "show", f"{commit}:{result.relative_path.as_posix()}"],
+                    cwd=root,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if candidate.returncode != 0:
+                    continue
+                candidate_metadata = _metadata_values(_split_header(candidate.stdout)[3])
+                if (
+                    candidate_metadata.get("approval_schema") == CANONICAL_SCHEMA
+                    and candidate_metadata.get("approval_base_commit") == base_commit
+                ):
+                    migration_text = candidate.stdout
+                    break
+        # Before the migration is committed, the working copy itself is the
+        # migration snapshot and must still preserve the recorded body.
+        if not migration_text and source_body == result.body:
+            migration_text = result.text
+        if not migration_text:
+            raise MigrationError(f"{result.relative_path}: cannot locate migration snapshot")
+
+        _, _, migration_body, migration_metadata_lists = _split_header(migration_text)
+        migration_metadata = _metadata_values(migration_metadata_lists)
+        if source_body != migration_body:
             raise MigrationError(f"{result.relative_path}: research body changed during migration")
-        if source_metadata.get("status", [""])[0] != current.get("status", ""):
+        if source_metadata.get("status", [""])[0] != migration_metadata.get("status", ""):
             raise MigrationError(f"{result.relative_path}: lifecycle keyword changed during migration")
         # Hash the recorded source through Git's blob algorithm instead of
         # relying on the current, metadata-augmented bytes.
@@ -583,8 +626,11 @@ def verify_against_base(root: Path, results: Sequence[MigrationResult]) -> tuple
             check=True,
         )
         expected_blob = blob_result.stdout.decode("ascii").strip()
-        if expected_blob != current.get("approval_base_blob", ""):
+        recorded_blob = current.get("approval_base_blob", "") if source_is_canonical else migration_metadata.get("approval_base_blob", "")
+        if expected_blob != recorded_blob:
             raise MigrationError(f"{result.relative_path}: recorded approval base blob does not match source")
+        if not source_is_canonical and current.get("approval_base_blob", "") != migration_metadata.get("approval_base_blob", ""):
+            raise MigrationError(f"{result.relative_path}: approval base blob changed after migration")
         lifecycle_checked += 1
         body_checked += 1
     return lifecycle_checked, body_checked

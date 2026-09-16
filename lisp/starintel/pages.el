@@ -15,7 +15,7 @@
   "Publish the Starintel Org-roam graph as a static site."
   :group 'org)
 
-(defcustom starintel-pages-site-title "Starintel Second Brain"
+(defcustom starintel-pages-site-title "StarIntel Research"
   "Title shown in the generated site."
   :type 'string)
 
@@ -38,6 +38,7 @@
 (defvar starintel-pages--path-to-title nil)
 (defvar starintel-pages--file-node-table nil)
 (defvar starintel-pages--records nil)
+(defvar starintel-pages--source-modified nil)
 
 (defun starintel-pages--repo-root (&optional start)
   (or starintel-pages-root
@@ -290,16 +291,44 @@
    (expand-file-name target starintel-pages--output-directory)))
 
 (defun starintel-pages--header-html (current-output)
+  (let ((page (file-name-nondirectory current-output)))
+    (format
+     (concat "<a class=\"si-skip-link\" href=\"#main-content\">Skip to content</a>"
+             "<header class=\"site-header si-topbar\">"
+             "<a class=\"site-title si-topbar__brand\" href=\"%s\" aria-label=\"StarIntel Research home\">"
+             "<span class=\"si-wordmark si-wordmark--sm\"><span class=\"si-wordmark__paren\">(</span>"
+             "<span class=\"si-wordmark__name\">starintel</span> "
+             "<span class=\"si-wordmark__lambda\">&lambda;</span>"
+             "<span class=\"si-wordmark__paren\">)</span></span>"
+             "<span class=\"site-product\">Research</span></a>"
+             "<nav class=\"si-topbar__nav\" aria-label=\"Primary navigation\">"
+             "<a href=\"%s\"%s>Index</a>"
+             "<a href=\"%s\"%s>Search</a>"
+             "<a href=\"%s\"%s>Graph</a>"
+             "<a href=\"%s\">Review</a>"
+             "<a class=\"sibling-link\" href=\"https://auto-dig.starintel.actor/\">Auto-Dig <span aria-hidden=\"true\">&nearr;</span></a>"
+             "</nav></header>")
+     (starintel-pages--root-href current-output "index.html")
+     (starintel-pages--root-href current-output "index.html")
+     (if (string= page "index.html") " aria-current=\"page\"" "")
+     (starintel-pages--root-href current-output "search.html")
+     (if (string= page "search.html") " aria-current=\"page\"" "")
+     (starintel-pages--root-href current-output "graph.html")
+     (if (string= page "graph.html") " aria-current=\"page\"" "")
+     (starintel-pages--root-href current-output "research-pending/index.html"))))
+
+(defun starintel-pages--footer-html (current-output)
   (format
-   (concat "<header class=\"site-header\">"
-           "<a class=\"site-title\" href=\"%s\">%s</a>"
-           "<nav><a href=\"%s\">Index</a>"
-           "<a href=\"%s\">Search</a>"
-           "<a href=\"%s\">Graph</a></nav>"
-           "</header>")
-   (starintel-pages--root-href current-output "index.html")
-   (org-html-encode-plain-text starintel-pages-site-title)
-   (starintel-pages--root-href current-output "index.html")
+   (concat "<footer class=\"si-footer\"><div class=\"si-shell\">"
+           "<p><span class=\"si-wordmark si-wordmark--sm\">"
+           "<span class=\"si-wordmark__paren\">(</span>"
+           "<span class=\"si-wordmark__name\">starintel</span> "
+           "<span class=\"si-wordmark__lambda\">&lambda;</span>"
+           "<span class=\"si-wordmark__paren\">)</span></span> &middot; Evidence before inference.</p>"
+           "<nav aria-label=\"Footer navigation\">"
+           "<a href=\"%s\">Search</a><a href=\"%s\">Graph</a>"
+           "<a href=\"https://discord.gg/R3VY8wr86Y\">Community <span aria-hidden=\"true\">&nearr;</span></a>"
+           "</nav></div></footer>")
    (starintel-pages--root-href current-output "search.html")
    (starintel-pages--root-href current-output "graph.html")))
 
@@ -367,17 +396,32 @@
                           "<link rel=\"stylesheet\" href=\"%s\">"
                           "<script defer src=\"%s\"></script>")
                   css script))
-           (header (starintel-pages--header-html current-output))
-           (backlinks (starintel-pages--backlinks-html
-                       input current-output)))
+            (header (starintel-pages--header-html current-output))
+            (backlinks (starintel-pages--backlinks-html
+                        input current-output))
+            (footer (starintel-pages--footer-html current-output)))
       (setq output
             (starintel-pages--insert-before
              "</head>" head output))
       (setq output
+            (replace-regexp-in-string
+             "<html lang=\"en\">"
+             "<html lang=\"en\" data-si-theme=\"obsidian-gold\">"
+             output t t))
+      (setq output
+            (replace-regexp-in-string
+             "<body>" "<body class=\"si-scanlines\">" output t t))
+      (setq output
             (starintel-pages--insert-after
              "<body[^>]*>" header output))
-      (starintel-pages--insert-before
-       "</body>" backlinks output))))
+      (setq output
+            (replace-regexp-in-string
+             "<div id=\"content\" class=\"content\">"
+             "<div id=\"main-content\" class=\"content si-org\">"
+             output t t))
+      (setq output
+            (starintel-pages--insert-before "</body>" backlinks output))
+      (starintel-pages--insert-before "</body>" footer output))))
 
 (defun starintel-pages--export-file (file)
   (let ((output (starintel-pages--note-output-file file)))
@@ -433,18 +477,49 @@
     (let ((text (replace-regexp-in-string
                  "[ \t\n\r]+" " " (buffer-string))))
       (string-trim
-       (substring text 0 (min 2400 (length text)))))))
+        (substring text 0 (min 2400 (length text)))))))
+
+(defun starintel-pages--source-modified-dates ()
+  (or starintel-pages--source-modified
+      (let ((path (expand-file-name
+                   "pages/source-modified.json"
+                   (starintel-pages--repo-root))))
+        (setq starintel-pages--source-modified
+              (and (file-readable-p path)
+                   (let ((json-object-type 'hash-table)
+                         (json-key-type 'string))
+                     (json-read-file path)))))))
+
+(defun starintel-pages--document-modified (file source-file relative)
+  "Return a reproducible modification timestamp for FILE.
+Prefer the latest ISO date recorded in the document; fall back to SOURCE-FILE's
+filesystem timestamp for legacy notes that do not yet carry dated metadata."
+  (let ((recorded (and (starintel-pages--source-modified-dates)
+                       (gethash relative starintel-pages--source-modified)))
+        dates)
+    (with-temp-buffer
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (while (re-search-forward
+              "\\_<\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)\\_>"
+              nil t)
+        (push (match-string-no-properties 1) dates)))
+    (cond
+     (recorded recorded)
+     (dates (concat (car (sort dates #'string>)) "T00:00:00Z"))
+     (t
+      (format-time-string
+       "%Y-%m-%dT%H:%M:%SZ"
+       (file-attribute-modification-time (file-attributes source-file))
+       t)))))
 
 (defun starintel-pages--record-for-node (node)
   (let* ((file (org-roam-node-file node))
          (relative (starintel-pages--relative-source-path file))
          (source-file (expand-file-name relative
                                         (starintel-pages--source-root)))
-         (attributes (file-attributes source-file))
-         (modified (format-time-string
-                    "%Y-%m-%dT%H:%M:%SZ"
-                    (file-attribute-modification-time attributes)
-                    t))
+          (modified (starintel-pages--document-modified
+                     file source-file relative))
          (kind (car (split-string relative "/" t)))
          (href (concat "notes/"
                        (file-name-sans-extension
@@ -475,18 +550,20 @@
 
 (defun starintel-pages--html-page (title body &optional script-data)
   (concat
-   "<!doctype html><html lang=\"en\"><head>"
+    "<!doctype html><html lang=\"en\" data-si-theme=\"obsidian-gold\"><head>"
    "<meta charset=\"utf-8\">"
    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
    "<title>" (org-html-encode-plain-text title) "</title>"
    "<link rel=\"stylesheet\" href=\"assets/site.css\">"
    "<script defer src=\"assets/site.js\"></script>"
    script-data
-   "</head><body>"
+    "</head><body class=\"si-scanlines\">"
    (starintel-pages--header-html
     (expand-file-name "index.html" starintel-pages--output-directory))
-   "<main class=\"site-main\">" body "</main>"
-   "</body></html>"))
+    "<main id=\"main-content\" class=\"site-main\">" body "</main>"
+    (starintel-pages--footer-html
+     (expand-file-name "index.html" starintel-pages--output-directory))
+    "</body></html>"))
 
 (defun starintel-pages--write-file (path content)
   (make-directory (file-name-directory path) t)
@@ -513,13 +590,18 @@
                         (lambda (left right)
                           (string> (plist-get left :modified)
                                    (plist-get right :modified))))
-                  25))
+                   12))
          (sections '("design" "research" "implement" "indexes")))
     (concat
-     "<section class=\"hero\"><p class=\"eyebrow\">Org-roam knowledge graph</p>"
-     "<h1>Starintel Second Brain</h1>"
-     "<p>Research, designs, implementation records, and project indexes exported directly from the repository's Org-roam graph.</p>"
-     "<div class=\"metrics\">"
+     "<section class=\"hero si-hero\"><div class=\"hero-copy\">"
+     "<p class=\"eyebrow si-hero__kicker\">Evidence workspace / public corpus</p>"
+     "<h1>Trace the work.<br><span>Interrogate the evidence.</span></h1>"
+     "<p class=\"hero-lede\">A living research graph connecting sources, decisions, designs, and implementation records. Every published path begins in the repository and stays inspectable.</p>"
+     "<div class=\"hero-actions\"><a class=\"si-btn si-btn--primary\" href=\"search.html\">Search the corpus</a>"
+     "<a class=\"si-btn si-btn--ghost\" href=\"graph.html\">Explore the graph</a></div></div>"
+     "<figure class=\"hero-visual si-graphframe\"><img src=\"assets/lambda-network.svg\" alt=\"A lambda term connected to document, actor, evidence, claim, relation, and source nodes\">"
+     "<figcaption>Typed knowledge / linked provenance</figcaption></figure></section>"
+     "<section class=\"metrics-band\" aria-label=\"Corpus totals\"><div class=\"metrics\">"
      (mapconcat
       (lambda (section)
         (format
@@ -528,7 +610,14 @@
          (capitalize section)))
       sections "")
      "</div></section>"
-     "<section><h2>Recently updated</h2><ol class=\"note-list\">"
+     "<section class=\"entry-section\"><div class=\"section-heading\"><p class=\"eyebrow\">Choose a path</p><h2>Enter the research system</h2></div>"
+     "<div class=\"entry-grid\">"
+     "<a class=\"si-card\" href=\"#research\"><span class=\"si-card__dtype\">Research</span><strong class=\"si-card__title\">Follow the evidence</strong><span class=\"si-card__desc\">Primary research, provider analysis, and unresolved questions.</span></a>"
+     "<a class=\"si-card\" href=\"#design\"><span class=\"si-card__dtype\">Design</span><strong class=\"si-card__title\">Inspect the decisions</strong><span class=\"si-card__desc\">Architectures, constraints, tradeoffs, and implementation plans.</span></a>"
+     "<a class=\"si-card\" href=\"research-pending/\"><span class=\"si-card__dtype\">Review queue</span><strong class=\"si-card__title\">Evaluate pending work</strong><span class=\"si-card__desc\">Lifecycle and approval state remain explicit and separate.</span></a>"
+     "<a class=\"si-card\" href=\"graph.html\"><span class=\"si-card__dtype\">Knowledge graph</span><strong class=\"si-card__title\">Traverse relationships</strong><span class=\"si-card__desc\">Explore how documents, claims, projects, and sources connect.</span></a>"
+     "</div></section>"
+     "<section class=\"recent-section\"><div class=\"section-heading\"><p class=\"eyebrow\">Latest signal</p><h2>Recently updated</h2></div><ol class=\"note-list si-doclist\">"
      (mapconcat #'starintel-pages--record-link recent "")
      "</ol></section>"
      (mapconcat
@@ -538,8 +627,8 @@
                                (string-lessp (plist-get left :title)
                                              (plist-get right :title))))))
           (when records
-            (concat "<section><h2>" (capitalize section) "</h2>"
-                    "<ul class=\"note-list\">"
+             (concat "<section class=\"catalog-section\" id=\"" section "\"><div class=\"section-heading\"><p class=\"eyebrow\">Corpus index</p><h2>" (capitalize section) "</h2></div>"
+                     "<ul class=\"note-list\">"
                     (mapconcat #'starintel-pages--record-link records "")
                     "</ul></section>"))))
       sections ""))))

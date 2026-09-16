@@ -17,6 +17,9 @@
   (or (gethash relative starintel-pages--git-modified-cache)
       (let* ((default-directory (starintel-pages--repo-root))
              (repo-path (concat starintel-pages-source-directory "/" relative))
+             (recorded-value
+              (and (starintel-pages--source-modified-dates)
+                   (gethash relative starintel-pages--source-modified)))
              (git-value
               (with-temp-buffer
                 (when (zerop
@@ -24,7 +27,8 @@
                                      "log" "-1" "--format=%cI" "--" repo-path))
                   (string-trim (buffer-string)))))
              (modified
-              (or (starintel-pages--normalize-iso-time git-value)
+              (or (starintel-pages--normalize-iso-time recorded-value)
+                  (starintel-pages--normalize-iso-time git-value)
                   (format-time-string
                    "%Y-%m-%dT%H:%M:%SZ"
                    (file-attribute-modification-time

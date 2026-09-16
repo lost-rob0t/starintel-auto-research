@@ -71,7 +71,7 @@ def render_dashboard(root: Path) -> str:
     approval_options = _options([item.approval_state for item in items], "approval states")
 
     return f'''<!doctype html>
-<html lang="en">
+<html lang="en" data-si-theme="obsidian-gold">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -81,17 +81,19 @@ def render_dashboard(root: Path) -> str:
   <script defer src="../assets/site.js"></script>
   <script defer src="../assets/research-pending.js"></script>
 </head>
-<body>
-<header class="site-header">
-  <a class="site-title" href="../index.html">StarIntel Research</a>
-  <nav>
+<body class="si-scanlines">
+<a class="si-skip-link" href="#main-content">Skip to content</a>
+<header class="site-header si-topbar">
+  <a class="site-title si-topbar__brand" href="../index.html" aria-label="StarIntel Research home"><span class="si-wordmark si-wordmark--sm"><span class="si-wordmark__paren">(</span><span class="si-wordmark__name">starintel</span> <span class="si-wordmark__lambda">&lambda;</span><span class="si-wordmark__paren">)</span></span><span class="site-product">Research</span></a>
+  <nav class="si-topbar__nav" aria-label="Primary navigation">
     <a href="../index.html">Index</a>
     <a href="../search.html">Search</a>
     <a href="../graph.html">Graph</a>
     <a href="./" aria-current="page">Review</a>
+    <a class="sibling-link" href="https://auto-dig.starintel.actor/">Auto-Dig <span aria-hidden="true">&nearr;</span></a>
   </nav>
 </header>
-<main class="site-main research-review-main">
+<main id="main-content" class="site-main research-review-main">
   <section class="review-hero">
     <p class="eyebrow">Human approval queue</p>
     <div class="review-hero-grid">
@@ -175,6 +177,7 @@ def render_dashboard(root: Path) -> str:
     <p class="review-footnote">This static site never receives a GitHub credential. Review, merge, and close actions intentionally open GitHub's authenticated UI.</p>
   </section>
 </main>
+<footer class="si-footer"><div class="si-shell"><p><span class="si-wordmark si-wordmark--sm"><span class="si-wordmark__paren">(</span><span class="si-wordmark__name">starintel</span> <span class="si-wordmark__lambda">&lambda;</span><span class="si-wordmark__paren">)</span></span> &middot; Evidence before inference.</p><nav aria-label="Footer navigation"><a href="../search.html">Search</a><a href="../graph.html">Graph</a><a href="https://discord.gg/R3VY8wr86Y">Community <span aria-hidden="true">&nearr;</span></a></nav></div></footer>
 </body>
 </html>
 '''

@@ -4,35 +4,42 @@
   const byId = (id) => document.getElementById(id);
   const currentScript = document.currentScript;
   const staticAssetBase = currentScript?.src ? new URL(".", currentScript.src) : null;
+  const styles = getComputedStyle(document.documentElement);
+  const token = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+  const GOLD = token("--si-accent-primary", "#e0b04a");
+  const STEEL = token("--si-accent-secondary", "#7fa8bd");
+  const IVORY = token("--si-text-primary", "#ece5d6");
+  const MUTED = token("--si-text-muted", "#8a8172");
+  const SURFACE = token("--si-bg-surface", "#16120c");
+  const SUCCESS = token("--si-status-success", "#7cae7f");
+  const WARNING = token("--si-status-warning", "#dd9f45");
+  const DANGER = token("--si-status-danger", "#d9776c");
 
   const KIND_COLORS = Object.freeze({
-    research: "#2de2e6",
-    design: "#ff5ea8",
-    implement: "#fba922",
-    implementation: "#fba922",
-    indexes: "#b487ff",
-    index: "#b487ff",
-    architecture: "#5ca9ff",
-    specification: "#62ff00",
-    spec: "#62ff00",
-    decision: "#ff6b6b",
-    operations: "#ffe66d",
-    provider: "#00f5a0",
-    actor: "#00d4ff",
-    document: "#d9dde3",
+    research: STEEL,
+    design: GOLD,
+    implement: WARNING,
+    implementation: WARNING,
+    indexes: MUTED,
+    index: MUTED,
+    architecture: STEEL,
+    specification: SUCCESS,
+    spec: SUCCESS,
+    decision: DANGER,
+    operations: WARNING,
+    provider: SUCCESS,
+    actor: STEEL,
+    document: IVORY,
   });
 
   const FALLBACK_COLORS = Object.freeze([
-    "#2de2e6",
-    "#ff5ea8",
-    "#fba922",
-    "#b487ff",
-    "#62ff00",
-    "#5ca9ff",
-    "#ff6b6b",
-    "#ffe66d",
-    "#00f5a0",
-    "#d9dde3",
+    STEEL,
+    GOLD,
+    WARNING,
+    MUTED,
+    SUCCESS,
+    DANGER,
+    IVORY,
   ]);
 
   async function loadJson(path) {
@@ -224,6 +231,7 @@
       let pixelRatio = 1;
       let alpha = 1;
       let dirty = true;
+      let framePending = false;
       let hovered = null;
       let selectedNode = null;
       let neighborhoodFocus = false;
@@ -292,6 +300,7 @@
 
       function markDirty() {
         dirty = true;
+        scheduleFrame();
       }
 
       function worldToScreen(point) {
@@ -495,7 +504,7 @@
           const focused = !neighborhoodFocus || selectedLink;
           context.beginPath();
           context.globalAlpha = focused ? (selectedLink ? 0.88 : 0.34) : 0.05;
-          context.strokeStyle = selectedLink ? selectedNode.color : "#7d6f99";
+          context.strokeStyle = selectedLink ? selectedNode.color : MUTED;
           context.lineWidth = (selectedLink ? 1.8 : 1) / camera.scale;
           context.moveTo(link.source.x, link.source.y);
           context.lineTo(link.target.x, link.target.y);
@@ -509,7 +518,7 @@
           const active = node === selectedNode || node === hovered || interaction?.node === node;
           context.globalAlpha = focused ? 1 : 0.12;
           context.beginPath();
-          context.fillStyle = active ? "#f3f4f5" : node.color;
+          context.fillStyle = active ? IVORY : node.color;
           context.shadowColor = node.color;
           context.shadowBlur = active ? 15 / camera.scale : 7 / camera.scale;
           context.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
@@ -518,7 +527,7 @@
 
           if (node === selectedNode || matched) {
             context.beginPath();
-            context.strokeStyle = node === selectedNode ? "#f3f4f5" : "#ffe66d";
+            context.strokeStyle = node === selectedNode ? IVORY : GOLD;
             context.lineWidth = (node === selectedNode ? 2.1 : 1.5) / camera.scale;
             context.arc(node.x, node.y, node.radius + (node === selectedNode ? 5 : 4) / camera.scale, 0, Math.PI * 2);
             context.stroke();
@@ -541,14 +550,14 @@
           const boxHeight = 46;
           const boxX = clamp(screen.x + labelNode.radius * camera.scale + 10, 8, width - boxWidth - 8);
           const boxY = clamp(screen.y - boxHeight - 8, 8, height - boxHeight - 8);
-          context.fillStyle = "rgba(17, 10, 39, 0.94)";
+          context.fillStyle = SURFACE;
           context.strokeStyle = labelNode.color;
           context.lineWidth = 1;
           context.beginPath();
           context.roundRect(boxX, boxY, boxWidth, boxHeight, 6);
           context.fill();
           context.stroke();
-          context.fillStyle = "#f3f4f5";
+          context.fillStyle = IVORY;
           context.font = "600 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
           context.fillText(title, boxX + 10, boxY + 19, boxWidth - 20);
           context.fillStyle = labelNode.color;
@@ -864,14 +873,22 @@
       });
 
       function animate() {
+        framePending = false;
         const active = alpha > 0 || interaction?.mode === "node";
         if (active) simulate();
         if (dirty) draw();
+        if (alpha > 0 || interaction?.mode === "node") scheduleFrame();
+      }
+
+      function scheduleFrame() {
+        if (framePending) return;
+        framePending = true;
         requestAnimationFrame(animate);
       }
 
       resizeCanvas();
       seedLayout(true);
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) alpha = 0;
       buildLegend();
       updateHud();
       canvas.style.cursor = "grab";
@@ -887,7 +904,7 @@
         });
       }
       window.setTimeout(() => fitView(), 120);
-      animate();
+      scheduleFrame();
     } catch (error) {
       status.textContent = `Graph failed: ${error.message}`;
     }

@@ -139,6 +139,27 @@ class DocumentAuditTests(unittest.TestCase):
         self.assertIn("| Research basis | Research reviewer | PENDING |", text)
         self.assertNotIn("| Research basis | Research reviewer | APPROVED |", text)
 
+    def test_fixer_preserves_legacy_table_after_approval_table(self) -> None:
+        root = self.make_repo()
+        legacy_table = (
+            "\n| Version | Date | Did reviewer approve it |\n"
+            "|---------+------+-------------------------|\n"
+            "| 0.1.0 | 2026-01-01 | Yes |\n"
+        )
+        path = self.write_doc(root, "LEGACY-TABLE.org", approval=APPROVAL + legacy_table)
+        fixed = self.run_validator(
+            root,
+            "--fix",
+            "--audit-date",
+            "2026-08-06",
+            "--actor",
+            "test audit",
+        )
+        self.assertEqual(fixed.returncode, 0, fixed.stdout + fixed.stderr)
+        text = path.read_text(encoding="utf-8")
+        self.assertIn(legacy_table.strip(), text)
+        self.assertEqual(text.count("| Research basis |"), 1)
+
     def test_todo_documents_are_substantive(self) -> None:
         root = self.make_repo()
         path = self.write_doc(

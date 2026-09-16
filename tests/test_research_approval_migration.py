@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,7 +13,9 @@ from research_approval_migration import (
     CANONICAL_SCHEMA,
     MigrationError,
     discover_research_files,
+    inspect_repository,
     migrate_document,
+    verify_against_base,
 )
 
 
@@ -158,6 +161,69 @@ class ResearchApprovalMigrationTests(unittest.TestCase):
             research.write_text(document(), encoding="utf-8")
             design.write_text(document(), encoding="utf-8")
             self.assertEqual(discover_research_files(root), [research])
+
+    def test_verification_allows_body_edits_after_committed_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "roam" / "research" / "test" / "record.org"
+            path.parent.mkdir(parents=True)
+            path.write_text(document(), encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base"],
+                cwd=root,
+                check=True,
+            )
+            base = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True, check=True
+            ).stdout.strip()
+            migrated = inspect_repository(root, base)[0]
+            path.write_text(migrated.text, encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "migrate"],
+                cwd=root,
+                check=True,
+            )
+            path.write_text(migrated.text + "\nPost-migration finding.\n", encoding="utf-8")
+
+            self.assertEqual(verify_against_base(root, inspect_repository(root)), (1, 1))
+
+    def test_verification_accepts_repaired_canonical_at_creation_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "roam" / "research" / "test" / "record.org"
+            path.parent.mkdir(parents=True)
+            canonical = self.migrate(document()).text
+            path.write_text(canonical, encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "create canonical"],
+                cwd=root,
+                check=True,
+            )
+            creation = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True, capture_output=True, check=True
+            ).stdout.strip()
+            blob = subprocess.run(
+                ["git", "rev-parse", "HEAD:roam/research/test/record.org"],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            repaired = canonical.replace(
+                "#+approval_base_commit: 0123456789abcdef0123456789abcdef01234567",
+                f"#+approval_base_commit: {creation}",
+            ).replace(
+                "#+approval_base_blob: fedcba9876543210fedcba9876543210fedcba98",
+                f"#+approval_base_blob: {blob}",
+            )
+            path.write_text(repaired + "\nPost-creation finding.\n", encoding="utf-8")
+
+            self.assertEqual(verify_against_base(root, inspect_repository(root)), (1, 1))
 
 
 if __name__ == "__main__":

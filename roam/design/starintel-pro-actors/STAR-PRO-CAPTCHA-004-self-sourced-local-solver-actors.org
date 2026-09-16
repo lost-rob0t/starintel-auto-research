@@ -2,13 +2,13 @@
 :ID:       star-pro-captcha-004-self-sourced-local-solver-actors
 :END:
 #+title: STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors
-#+description: Actor design for local OCR, audio, image-selection, geometry, browser-application, model-registry, benchmark, corpus, and operator-fallback CAPTCHA capabilities behind the existing authorized StarIntel broker.
+#+description: Actor design for the CAPTCHA system inside the Lisp Pro Actors add-on, covering local OCR, audio, image-selection, geometry, model routing, benchmark, corpus, and operator fallback behind the authorized StarIntel broker and shared WebDriver system.
 #+status: REVIEW
 #+filetags: :starintel:design:starintel-pro-actors:captcha:self-hosted:actors:common-lisp:onnx:ocr:audio:vision:security:uml:synthetic-data:
 
 * Decision
 
-Add self-sourced local solver capabilities to =starintel-pro-actors= and route them through the existing =CaptchaBrokerActor= and =CaptchaRunSupervisor=.
+Add self-sourced local solver capabilities as the first actor system inside the =starintel-pro-actors= Common Lisp add-on and route them through the existing =CaptchaBrokerActor= and =CaptchaRunSupervisor=.
 
 Do not create a second CAPTCHA broker and do not expose a public solve API.
 
@@ -21,19 +21,22 @@ Initial capability actors:
 - =LocalAudioActor=;
 - =LocalVisionActor=;
 - =LocalGeometryActor=;
-- =LocalBrowserApplyActor=;
 - =LocalOperatorActor=;
 - =LocalModelRegistryActor=;
 - =LocalCaptchaCorpusActor=;
 - =LocalCaptchaBenchmarkActor=.
 
-The first implementation slice is a fake strategy followed by Tesseract-backed OCR on synthetic and operator-owned fixtures. Everything else is added only after the contract, sandbox, resource-limit, secret-reference, abstention, and downstream-verification path works end to end.
+Browser capture and same-session application are provided by the add-on's separate shared WebDriver actor system, not by a CAPTCHA-owned browser actor.
+
+The first implementation slice remains a fake strategy. The first model slice benchmarks the operator-selected Mage, Yara, Graf-J, and numeric candidates against owned/synthetic fixtures; no model becomes routable from its model-card claim alone. Everything else is added only after the contract, sandbox, resource-limit, secret-reference, abstention, and downstream-verification path works end to end.
 
 * Approval Table
 
 | Approval area | Required authority | State | Evidence required | Evidence reference |
 |---------------+--------------------+-------+-------------------+--------------------|
 | Research basis | Research reviewer | APPROVED | Approved local-first research and current primary sources | [[id:star-pro-research-008-self-sourced-captcha-solver-stack][STAR-PRO-RESEARCH-008]]; project-owner approval 2026-08-09 |
+| Plugin placement | StarIntel operator | APPROVED | CAPTCHA and WebDriver are two actor systems inside the Lisp Pro Actors add-on; Lisp owns the contract and Python/Nim are callers | Operator directive 2026-09-16; [[id:star-pro-plugin-001-lisp-addon-polyglot-contract][STAR-PRO-PLUGIN-001]] |
+| Model-routing research | Research reviewer | PENDING | Candidate claims, licenses, immutable artifacts, owned-fixture accuracy, and admission gates reviewed | [[id:star-pro-research-009-hugging-face-captcha-model-routing][STAR-PRO-RESEARCH-009]] |
 | Security | Security reviewer | APPROVED | Threat model and mandatory controls for target authorization, session secrecy, model/artifact integrity, media parsing, resource isolation, retention, action bounds, and worker egress | Security Audit below; project owner explicitly authorized security review 2026-08-09 |
 | Architecture | Pro-actors maintainer | PENDING | Actor names, Common Lisp/native-worker boundary, model/corpus registry boundaries, broker integration, and browser-source application reviewed together | This design |
 | Operations | Operator | PENDING | Resource ceilings, artifact retention, model promotion/rollback, local-operator queue, canary policy, and external fallback policy configured | Operations and Test Plan below |
@@ -76,11 +79,15 @@ package "starintel-pro-actors / Common Lisp control" {
   [LocalAudioActor]
   [LocalVisionActor]
   [LocalGeometryActor]
-  [LocalBrowserApplyActor]
   [LocalOperatorActor]
   [LocalModelRegistryActor]
   [LocalCaptchaCorpusActor]
   [LocalCaptchaBenchmarkActor]
+}
+
+package "starintel-pro-actors / WebDriver system" {
+  [WebDriverSessionActor]
+  [ArtifactStoreActor]
 }
 
 package "sandboxed local workers" {
@@ -108,8 +115,10 @@ package "sandboxed local workers" {
 [LocalAudioActor] --> [LocalModelRegistryActor]
 [LocalVisionActor] --> [LocalModelRegistryActor]
 [LocalGeometryActor] --> [LocalModelRegistryActor]
-[LocalCaptchaSupervisorActor] --> [LocalBrowserApplyActor] : only when source binding requires it
-[LocalBrowserApplyActor] --> [EphemeralSecretStoreActor]
+[WebDriverSessionActor] --> [ArtifactStoreActor] : bounded capture
+[ArtifactStoreActor] --> [LocalCaptchaSupervisorActor] : opaque artifact ref
+[LocalCaptchaSupervisorActor] --> [WebDriverSessionActor] : opaque result ref + bounded apply
+[WebDriverSessionActor] --> [EphemeralSecretStoreActor]
 [LocalCaptchaCorpusActor] --> [LocalCaptchaBenchmarkActor]
 [LocalCaptchaBenchmarkActor] --> [LocalModelRegistryActor] : promotion evidence
 [LocalCaptchaSupervisorActor] --> [CaptchaTelemetryActor]
@@ -150,6 +159,18 @@ Default strategy order:
 
 OCR support never implies image-selection, behavioral, browser-bound, or puzzle support.
 
+Initial text-model rows are candidates, not production capabilities:
+
+| Exact row | Candidate strategy | Initial state | Required evidence |
+|-----------+--------------------+---------------+-------------------|
+| Default Magento/Adobe Commerce 200 by 50, case-sensitive length 4–5 | =kirmorozov/mage-captcha-solver= | =candidate= | Reproduce the required whole-sequence threshold on representative owned fixtures and verify downstream acceptance |
+| Variable-length alphanumeric 1–8 | =Wall3/Yara_Captcha_Solver= | =candidate= | Per-family owned/synthetic benchmark and calibrated abstention threshold |
+| Variable-length alphanumeric 1–8 | =Graf-J/captcha-conv-transformer-finetuned= | =quarantined= | Audit custom repository code, remove =trust_remote_code= from production loading, pin/export artifacts, then benchmark |
+| Fixed four-digit numeric | =FlanChanXwO/phpwind-captcha-ocr= baseline | =candidate= | License review and exact-family benchmark; published accuracy alone is below the requested target |
+| Numeric OCR, exact grammar not yet established | =anuashok/ocr-captcha-v3= | =experimental= | Prove alphabet/length contract and whole-sequence accuracy; character error rate alone is insufficient |
+
+Routing uses exact issuer/renderer, alphabet, length, dimensions, preprocessing, result kind, artifact digest, and current model state. It never uses popularity or a generic =image-to-text= tag as capability evidence.
+
 ** LocalAudioActor
 
 Owns bounded audio transcription through a pinned local ASR worker, initially =whisper.cpp=.
@@ -168,19 +189,11 @@ Owns deterministic preprocessing/localization capabilities backed by OpenCV-styl
 
 It does not advertise wildcard slider, rotation, or puzzle support.
 
-** LocalBrowserApplyActor
+** Shared WebDriver application dependency
 
-Applies a previously produced typed result or bounded action inside the authorized source context when the result binding requires same-session execution.
+The CAPTCHA system depends on the separate [[id:star-pro-webdriver-001-headless-actor-system][WebDriver actor system]] for bounded capture and same-session application. The WebDriver session actor receives an opaque browser-session reference, opaque result reference or exact bounded action, application instruction, target-policy ID, and request/attempt IDs.
 
-It receives:
-
-- opaque browser-session reference;
-- opaque result reference or exact bounded action;
-- capability/application instruction;
-- target-policy ID;
-- request/attempt IDs.
-
-It does not receive permission to browse unrelated URLs. It never exports the full browser profile or cookie jar into a normal actor message.
+This dependency does not grant the CAPTCHA actors permission to browse unrelated URLs and does not export the browser profile, cookie jar, raw session identifier, or driver credentials into ordinary messages. CAPTCHA selects a solver; WebDriver owns session state and applies only an already-authorized result.
 
 ** LocalOperatorActor
 
@@ -590,14 +603,14 @@ No paid provider is required for CI or for self-sourced canary validation.
 - rollback predecessor;
 - no runtime model download.
 
-** Slice 3 — Tesseract OCR
+** Slice 3 — text-CAPTCHA candidate benchmark
 
-- native worker wrapper;
-- image normalization;
-- fixture benchmark;
-- confidence calibration;
-- no-network sandbox;
-- systemd/Nix resource envelope.
+- =LocalOcrActor= and isolated worker adapter boundary;
+- immutable Mage, Yara, Graf-J, and numeric-baseline artifact manifests;
+- owned/synthetic exact-family fixtures;
+- whole-sequence accuracy, character error rate, latency, memory, cancellation, and abstention results;
+- quarantine of custom executable model code and no solve-time downloads;
+- explicit promotion decision for each exact capability row.
 
 ** Slice 4 — optional second OCR and local audio
 
@@ -615,12 +628,13 @@ No paid provider is required for CI or for self-sourced canary validation.
 - model-supply-chain tests;
 - CPU/GPU execution-provider selection as deployment configuration.
 
-** Slice 6 — same-session browser application
+** Slice 6 — shared WebDriver integration
 
 - browser-session opaque ref;
 - exact application/action instruction;
-- source-runtime verification;
-- browser worker isolation and concurrency.
+- bounded screenshot/element artifact capture;
+- same-session application and source-runtime verification;
+- dependency on the independently supervised WebDriver actor system rather than a CAPTCHA-owned browser worker.
 
 ** Slice 7 — local operator fallback
 
@@ -657,6 +671,9 @@ Do not record raw challenge media, text answers, audio transcripts, selection co
 * Related Nodes
 
 - [[id:star-pro-research-008-self-sourced-captcha-solver-stack][STAR-PRO-RESEARCH-008 Self-Sourced CAPTCHA Solver Actor Stack]].
+- [[id:star-pro-research-009-hugging-face-captcha-model-routing][STAR-PRO-RESEARCH-009 Hugging Face CAPTCHA Model Routing]].
+- [[id:star-pro-plugin-001-lisp-addon-polyglot-contract][STAR-PRO-PLUGIN-001 Lisp StarIntel Server Add-on and Polyglot Contract]].
+- [[id:star-pro-webdriver-001-headless-actor-system][STAR-PRO-WEBDRIVER-001 Headless WebDriver Actor System]].
 - [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors]].
 - [[id:star-captcha-000-broker-router][STAR-CAPTCHA-000 Authorized CAPTCHA Broker and Capability Router]].
 - [[id:star-pro-research-006-captcha-challenge-provider-landscape][STAR-PRO-RESEARCH-006 CAPTCHA Challenge and Provider Landscape]].
@@ -676,5 +693,6 @@ Do not record raw challenge media, text answers, audio transcripts, selection co
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
+| 2026-09-16 | Placed CAPTCHA as one of two actor systems inside the Lisp Pro Actors add-on, replaced the CAPTCHA-owned browser actor with the shared WebDriver system, and added gated Mage/Yara/Graf-J/numeric candidate routing and benchmark slices. | StarIntel operator + research/design worker | Operator directive 2026-09-16; STAR-PRO-RESEARCH-009; STAR-PRO-PLUGIN-001; STAR-PRO-WEBDRIVER-001 |
 | 2026-08-09 | Added canonical approval metadata and glossary; expanded the local design with corpus/benchmark actors, bounded multi-step action schema, explicit model promotion, sandbox/media limits, security audit, tests, and staged implementation | project owner + research/design agent | STAR-PRO-RESEARCH-008; user authorization 2026-08-09 |
 | 2026-08-09 | Created local self-sourced solver actor design with Common Lisp control plane, bounded local inference workers, strategy contract, model registry, sandboxing, media ceilings, promotion state machine, security audit, test plan, and staged implementation | research/design agent | STAR-PRO-RESEARCH-008 and existing broker architecture |

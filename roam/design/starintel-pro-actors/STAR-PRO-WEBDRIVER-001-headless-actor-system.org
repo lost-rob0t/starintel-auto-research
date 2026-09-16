@@ -1,0 +1,387 @@
+:PROPERTIES:
+:ID:       star-pro-webdriver-001-headless-actor-system
+:END:
+#+title: STAR-PRO-WEBDRIVER-001 Headless WebDriver Actor System
+#+description: Review-stage actor design for supervised headless WebDriver Classic and BiDi automation with Nim-style paired async/sync APIs, multisync generation, multi-sync batching, bounded artifacts, and CAPTCHA integration.
+#+status: REVIEW
+#+filetags: :starintel:design:starintel-pro-actors:webdriver:headless:common-lisp:actors:async:sync:multisync:bidi:security:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Research reviewer | PENDING | Approved protocol/concurrency research and current source evidence | [[id:star-pro-research-010-lisp-webdriver-async-sync-semantics][STAR-PRO-RESEARCH-010]] |
+| Product direction | StarIntel operator | APPROVED | Explicit request for a Lisp headless WebDriver actor system with async, sync, and Nim-style multisync semantics | Operator directive 2026-09-16 |
+| Shared plugin contract | StarIntel Server and Pro Actors maintainers | PENDING | Add-on lifecycle, operation surface, registry ownership, and Python/Nim clients reviewed | [[id:star-pro-plugin-001-lisp-addon-polyglot-contract][STAR-PRO-PLUGIN-001]] |
+| Security | Security reviewer | PENDING | Target policy, process isolation, secrets, scripts, downloads, event flooding, and artifact retention verified | Security Invariants and Test Plan below |
+| Operations | Operator | PENDING | Browser matrix, capacity, profile policy, versions, resource ceilings, and shutdown policy configured | Operations below |
+| Implementation | Repository maintainer | NOT STARTED | Approved design, issue ownership, RED-first fake driver, browser matrix, and exact-head tests | Implementation Slices below |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-16 | Created the WebDriver actor-system design with paired APIs, session serialization, cross-session batching, BiDi event actors, artifact references, failure semantics, security controls, and CAPTCHA integration. | research/design worker | STAR-PRO-RESEARCH-010; operator directive 2026-09-16 |
+
+* Decision
+
+Add a dedicated WebDriver[fn:webdriver] actor system to the =starintel-pro-actors= Common Lisp[fn:common-lisp] add-on.
+
+It supports:
+
+- WebDriver Classic HTTP commands;
+- WebDriver BiDi[fn:bidi] commands and events over WebSocket;
+- headless browser processes by default;
+- =NAME-ASYNC= calls returning futures;
+- =NAME= calls that synchronously join the same operation;
+- =DEFINE-MULTISYNC-COMMAND= to generate both call forms from one specification;
+- =MULTI-SYNC= to run independent admitted operations concurrently under one deadline;
+- Python and Nim clients through the canonical plugin contract.
+
+The browser system owns browser and session state. It does not own CAPTCHA[fn:captcha] solving, model routing, global actor discovery, caller authorization, or arbitrary StarIntel target selection.
+
+* Core Invariants
+
+1. One =WebDriverSessionActor= owns each raw WebDriver session identifier and serializes Classic state-changing commands.
+2. Callers receive opaque session references, never raw driver endpoint credentials or profile paths.
+3. Different sessions may run concurrently within explicit browser/process/session limits.
+4. Synchronous wrappers never contain separate command logic; they join the corresponding async future with a deadline.
+5. A synchronous wrapper is rejected from an actor receive handler or other context where blocking could deadlock the dispatcher.
+6. =MULTI-SYNC= starts all admitted independent operations before joining and preserves input order.
+7. WebDriver BiDi events use bounded subscription mailboxes and explicit overflow policy.
+8. State-changing commands are never replayed after ambiguous delivery.
+9. Target policy is checked before session creation, navigation, network interception, script execution, file upload, or download.
+10. Page source, screenshots, downloads, and print output use bounded opaque artifact references.
+11. Plugin-owned processes, profiles, sessions, subscriptions, and artifacts are closed on stop/reload under a bounded grace period.
+12. No stealth/fingerprint fabrication, evasion-oriented proxy rotation, or public arbitrary-target browser relay is provided.
+
+* Actor Topology
+
+#+begin_src plantuml
+@startuml
+package "starintel-server" {
+  [Actor Registry]
+  [Authorization]
+  [StarLang Dispatch]
+}
+
+package "starintel-pro-actors WebDriver system" {
+  [WebDriverSupervisorActor]
+  [BrowserPoolActor]
+  [BrowserProcessActor]
+  [WebDriverSessionActor]
+  [BiDiConnectionActor]
+  [ArtifactStoreActor]
+  [WebDriverTelemetryActor]
+}
+
+[Actor Registry] --> [WebDriverSupervisorActor] : registered manifest
+[Authorization] --> [StarLang Dispatch] : permitted operation
+[StarLang Dispatch] --> [WebDriverSupervisorActor]
+[WebDriverSupervisorActor] --> [BrowserPoolActor]
+[BrowserPoolActor] --> [BrowserProcessActor]
+[BrowserProcessActor] --> [WebDriverSessionActor]
+[WebDriverSessionActor] --> [BiDiConnectionActor]
+[WebDriverSessionActor] --> [ArtifactStoreActor]
+[WebDriverSessionActor] --> [WebDriverTelemetryActor]
+[BiDiConnectionActor] --> [WebDriverTelemetryActor]
+@enduml
+#+end_src
+
+* Actor Responsibilities
+
+** WebDriverSupervisorActor
+
+- validates plugin generation and top-level request shape;
+- admits work against global browser/session budgets;
+- supervises browser pools and owned stores;
+- reports manifest capability and readiness;
+- coordinates bounded drain/cancel/stop;
+- rejects work while stopping or saturated.
+
+** BrowserPoolActor
+
+- maintains configured browser families and versions;
+- selects a compatible healthy process or starts an allowed process;
+- enforces maximum processes and sessions per process;
+- applies profile isolation and browser capability policy;
+- quarantines incompatible or repeatedly failing driver/browser pairs.
+
+** BrowserProcessActor
+
+- owns one local browser/driver process pair or one approved remote endpoint;
+- binds local driver services to loopback or an equivalent protected endpoint;
+- captures bounded redacted process logs;
+- creates and deletes sessions;
+- fails children when the process is lost;
+- terminates only processes it owns.
+
+** WebDriverSessionActor
+
+- owns the raw session identifier and opaque public session reference;
+- serializes Classic commands for the session;
+- validates target, command, capability, deadline, artifact, and cancellation policy;
+- maps WebDriver results/errors into the canonical Lisp contract;
+- fences late responses by request, session, and plugin generation;
+- ensures terminal delete-session behavior.
+
+** BiDiConnectionActor
+
+- owns the session's BiDi WebSocket;
+- correlates commands with responses;
+- validates and normalizes events;
+- owns subscriptions and overflow behavior;
+- never treats reconnect as proof that the old session remains valid.
+
+** ArtifactStoreActor
+
+- enforces encoded and decoded size limits;
+- stores bytes outside ordinary messages;
+- returns opaque short-lived references with content type, size, digest, retention class, and access policy;
+- deletes expired and session-bound artifacts;
+- never turns a browser download into a StarIntel document without a separate authorized ingest decision.
+
+** WebDriverTelemetryActor
+
+- records operation class, browser/driver version, duration, capacity, outcome, failure code, and artifact metadata;
+- redacts targets when policy requires;
+- records no cookies, authorization headers, script bodies/results, page source, screenshot bytes, CAPTCHA answers, or raw session identifiers.
+
+* Paired Async and Sync API
+
+#+begin_src common-lisp
+(define-multisync-command screenshot
+    ((session session-ref) &key element-ref)
+  :message-type :webdriver.screenshot
+  :returns artifact-reference
+  :idempotency :read-observation
+  :default-timeout-ms 15000)
+#+end_src
+
+This generates one asynchronous operation and one bounded synchronous wrapper:
+
+#+begin_src common-lisp
+(screenshot-async client session)
+;; => future of ARTIFACT-REFERENCE
+
+(screenshot client session)
+;; => ARTIFACT-REFERENCE
+#+end_src
+
+Macro expansion rules:
+
+- one validator and encoder;
+- one async dispatch path;
+- one decoder and error mapper;
+- the sync wrapper calls the async function and =await-sync=;
+- =await-sync= requires a deadline and checks that blocking is legal in the current context;
+- cancellation, correlation identity, and telemetry are identical;
+- documentation is generated from the same operation descriptor.
+
+The macro name follows Nim's =multisync= concept but uses Lisp naming conventions. It does not copy Nim's event loop or source transformation beyond generating the paired operations.
+
+* Multi-Sync Batch Semantics
+
+=MULTI-SYNC= is a separate run-many/join operation.
+
+Inputs are zero-argument thunks or already-created futures. The function:
+
+1. validates one monotonic deadline and maximum batch size;
+2. starts every thunk in input order without waiting for earlier results;
+3. registers child cancellation;
+4. joins without serializing independent sessions;
+5. returns a vector of =success=, =failed=, =cancelled=, or =deadlineExceeded= outcomes aligned with the inputs;
+6. cancels unfinished children at the deadline;
+7. supports explicit =:collect= and =:fail-fast= policies.
+
+Two commands sent to the same session actor remain mailbox-ordered. The batch primitive cannot bypass actor ownership.
+
+* Initial Operation Set
+
+** Lifecycle
+
+- create session;
+- get session status;
+- delete session;
+- create/close browsing context when supported;
+- plugin health and capability discovery.
+
+** Navigation and observation
+
+- navigate, back, forward, refresh;
+- current URL and title;
+- page source as an artifact when above the inline limit;
+- find element(s) by approved locator strategies;
+- element text, attributes/properties, rectangle, and displayed/enabled state;
+- screenshot of viewport or element;
+- print page when supported.
+
+** Input and bounded execution
+
+- click, clear, send keys, pointer/wheel actions;
+- explicitly authorized script execution with byte/time/result limits;
+- cookie operations only under a separate secret-bearing capability;
+- file upload and download disabled until separately approved.
+
+** BiDi
+
+- subscribe/unsubscribe;
+- browsing-context lifecycle and load events;
+- console/log/JavaScript-error events;
+- network observation before network mutation/interception;
+- bounded event history and streaming cursor.
+
+Capabilities are advertised from actual runtime support. The manifest never claims an operation merely because the contract defines it.
+
+* Wire Envelope
+
+#+begin_src json
+{
+  "contractVersion": "starintel.pro-actors.v1",
+  "messageType": "webdriver.navigate",
+  "requestId": "01KZ...",
+  "correlationId": "01KZ...",
+  "sessionRef": "star-secret://webdriver/session/01KZ...",
+  "targetPolicyRef": "star://policy/web/owned-fixtures",
+  "deadlineMs": 30000,
+  "arguments": {
+    "url": "https://example.test/"
+  }
+}
+#+end_src
+
+The example uses opaque identifiers. The final URI/ref syntax must use the canonical STAR identity library and must not be invented independently by this plugin.
+
+* CAPTCHA Integration
+
+The WebDriver system exposes bounded capabilities used by the CAPTCHA actor system:
+
+- capture a screenshot or element artifact from an authorized session;
+- report challenge-observation metadata;
+- apply an already-authorized exact text, selection, coordinate, proof, or bounded interaction result;
+- verify downstream page/session outcome.
+
+It does not receive model names or decide solver routing. The CAPTCHA system does not receive raw browser cookies, driver credentials, or unrestricted navigation.
+
+The old =LocalBrowserApplyActor= role in [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004]] is satisfied by this shared actor system rather than duplicated inside CAPTCHA.
+
+* Failure and Retry Rules
+
+| Operation class | Ambiguous delivery | Safe automatic behavior |
+|-----------------+--------------------+-------------------------|
+| observation | unknown whether response was lost | retry only when transport proves command was not accepted, otherwise return =ambiguousDelivery= |
+| navigation/input/script/cookie/action | page/session may have changed | never auto-replay |
+| create session | driver may have allocated a session | reconcile by idempotency key when supported or clean up known orphan; otherwise terminal ambiguity |
+| delete session | repeated delete may report unknown session | normalize known already-closed state to terminal success only with matching owned session identity |
+| BiDi subscription | connection may have changed | reconcile desired and observed subscription state after validated reconnect |
+
+All retries are bounded by the original deadline and attempt budget.
+
+* Security Invariants
+
+- default-deny target policy for loopback, link-local, private-address, cloud-metadata, file, data, and non-HTTP(S) destinations;
+- allow exceptions only through an exact operator policy for owned infrastructure;
+- isolated ephemeral browser profiles by default;
+- no raw profile, cookie jar, local-storage dump, or authorization header in ordinary messages;
+- script execution, cookies, uploads, downloads, and network interception are separate capabilities;
+- driver endpoints are never exposed unauthenticated to non-local networks;
+- browser processes run under a dedicated account/container with CPU, memory, process, file, and wall-clock limits;
+- artifact type, encoded size, decoded size, and retention are checked;
+- event subscriptions are bounded;
+- all target content is untrusted input;
+- no stealth, fingerprint spoofing, or evasion policy.
+
+* Operations
+
+Init configuration must support:
+
+- enable/disable;
+- browser families and executable/driver references;
+- headless default and whether visible sessions are allowed;
+- maximum browser processes, sessions, commands, BiDi subscriptions, and artifact bytes;
+- profile strategy and scratch paths;
+- navigation, script, page-load, command, shutdown, and artifact deadlines;
+- allowed target-policy references;
+- download/upload/script/cookie/network-interception feature flags;
+- browser/driver compatibility pins;
+- telemetry and redaction policy.
+
+Configuration cannot contain session cookies or credentials as plain values.
+
+* Test Plan
+
+** Contract and fake-driver tests
+
+- paired macro generates sync and async operations with identical descriptors;
+- sync and async success/error values are equivalent;
+- synchronous wait inside actor receive context is rejected;
+- =multi-sync= starts independent operations before joining and preserves order;
+- same-session commands remain serialized;
+- deadline cancels unfinished work;
+- =:collect= and =:fail-fast= behavior is deterministic;
+- malformed envelopes, raw session IDs, invalid refs, and unbounded arguments are rejected;
+- ambiguous state-changing command is never replayed;
+- add-on stop drains/cancels and fences late replies.
+
+** Browser conformance tests
+
+- new/delete session;
+- headless navigation on an operator-owned local fixture site;
+- element lookup/input and page observation;
+- viewport and element screenshot artifacts;
+- script capability denial and separately authorized success;
+- BiDi subscription, event delivery, unsubscribe, overflow, and disconnect;
+- browser crash, driver crash, session loss, timeout, cancellation, and cleanup;
+- target-policy denial for disallowed address classes;
+- artifact limits and expiry;
+- Chromium version matrix; Firefox only after separately configured support is proven.
+
+** CAPTCHA integration tests
+
+- capture an owned synthetic challenge element;
+- send only the artifact reference to the CAPTCHA actor system;
+- receive an opaque authorized result reference;
+- apply the result in the same session;
+- record downstream acceptance separately;
+- prove no cookies, raw answer, screenshot bytes, or profile path enters telemetry.
+
+* Implementation Slices
+
+1. Contract declarations, paired API macro, =await-sync= guard, =multi-sync= gather, and fake futures.
+2. Fake WebDriver supervisor/process/session/BiDi actors with deterministic protocol fixtures.
+3. Add-on lifecycle, manifests, health, generation fencing, and fake remote client vertical slice.
+4. Chromium/ChromeDriver Classic adapter on an owned local fixture site.
+5. Artifact store, screenshot/page-source operations, and resource limits.
+6. BiDi connection/subscription actor for browsing-context and log events.
+7. CAPTCHA capture/apply integration using only fake/local fixtures.
+8. Python and Nim client conformance against the same fake and live-local tests.
+9. Firefox/geckodriver only after the first browser slice is stable and the capability matrix is explicit.
+
+* Acceptance Criteria
+
+- One Lisp command specification generates async and sync call forms.
+- =MULTI-SYNC= provides bounded concurrent joins without breaking per-session serialization.
+- WebDriver Classic and BiDi have separate actor-owned transport paths.
+- Browser, session, subscription, artifact, and plugin-generation ownership is explicit.
+- Python and Nim call the versioned Lisp-owned contract.
+- The CAPTCHA system uses WebDriver capture/apply capabilities without owning browser sessions.
+- Tests prove policy denial, deadlines, cancellation, ambiguous-delivery behavior, cleanup, and secret redaction.
+- No public arbitrary-target browser or CAPTCHA relay exists.
+
+* Related Nodes
+
+- [[id:star-pro-research-010-lisp-webdriver-async-sync-semantics][STAR-PRO-RESEARCH-010 Lisp Headless WebDriver Async and Sync Semantics]].
+- [[id:star-pro-plugin-001-lisp-addon-polyglot-contract][STAR-PRO-PLUGIN-001 Lisp StarIntel Server Add-on and Polyglot Contract]].
+- [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors]].
+- [[id:star-pro-research-009-hugging-face-captcha-model-routing][STAR-PRO-RESEARCH-009 Hugging Face CAPTCHA Model Routing]].
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors]].
+
+* Footnotes and Glossary
+
+[fn:webdriver] WebDriver: A W3C browser-automation protocol. Classic uses HTTP request/response commands; BiDi adds a bidirectional event-capable channel.
+
+[fn:common-lisp] Common Lisp: The programming language used by StarIntel Server and the Pro Actors plugin.
+
+[fn:bidi] WebDriver BiDi: The bidirectional WebDriver protocol using WebSocket for commands, responses, and browser-originated events.
+
+[fn:captcha] CAPTCHA: Completely Automated Public Turing test to tell Computers and Humans Apart; here it is processed only for operator-owned or explicitly authorized workflows.

@@ -1,0 +1,350 @@
+:PROPERTIES:
+:ID:       star-pro-research-010-lisp-webdriver-async-sync-semantics
+:END:
+#+title: STAR-PRO-RESEARCH-010 Lisp Headless WebDriver Async and Sync Semantics
+#+description: ARADR research for a Common Lisp headless WebDriver actor system with Nim-inspired async, sync, multisync, batched concurrency, WebDriver Classic, WebDriver BiDi, and StarIntel plugin boundaries.
+#+status: REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: research-worker
+#+approval_evidence: worker-authored conclusions require explicit StarIntel operator approval; operator requested the Lisp actor system and Nim-style semantics on 2026-09-16
+#+approval_base_commit: NONE
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+created: [2026-09-16]
+#+last_modified: [2026-09-16]
+#+filetags: :starintel:research:starintel-pro-actors:webdriver:headless:common-lisp:actors:async:sync:multisync:bidi:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Protocol and concurrency research | Research reviewer | PENDING | Current WebDriver, WebDriver BiDi, browser headless, Nim async, and current StarIntel/Sento evidence reviewed | Sources and Findings below |
+| Lisp-plugin and client-library direction | StarIntel operator | APPROVED | Explicit operator direction for a Pro Actors Lisp plugin with a Lisp contract and Python/Nim callers | Operator directive 2026-09-16 |
+| Security boundary | Security reviewer | PENDING | Process, profile, network, download, script, secret, artifact, and target-policy controls reviewed | Security Findings below |
+| Architecture/design | Pro Actors maintainer | NOT STARTED | Reviewed actor topology, paired API semantics, transport exposure, lifecycle, and failure model | [[id:star-pro-webdriver-001-headless-actor-system][STAR-PRO-WEBDRIVER-001]] |
+| Implementation | Repository maintainer | NOT STARTED | Approved design, issue ownership, RED-first tests, browser matrix, and resource-isolation evidence | No implementation authorized by this research record |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-16 | Created the headless WebDriver research record; mapped Nim async/waitFor/multisync behavior onto Sento futures and actor mailboxes; separated WebDriver Classic commands from BiDi events; and defined batching and security boundaries. | research-worker | W3C, Nim, Selenium, Chrome, and starintel-server sources retrieved or audited 2026-09-16 |
+
+* Objective
+
+Define a simple Common Lisp[fn:common-lisp] interface for headless browser automation that offers:
+
+- non-blocking asynchronous calls returning a future;
+- blocking synchronous calls for ordinary scripts and the Read-Eval-Print Loop[fn:repl];
+- a Nim[fn:nim]-inspired =multisync= definition form that generates both interfaces from one command body;
+- a =multi-sync= batching operation that starts independent commands concurrently and joins them under one deadline;
+- actor-owned browser/session state and bounded WebDriver[fn:webdriver] execution;
+- a stable Lisp contract with Python[fn:python] and Nim client libraries.
+
+* Executive Finding
+
+The requested interface fits the existing StarIntel Server[fn:starintel-server] runtime without adding another asynchronous runtime.
+
+Sento[fn:sento] already exposes the two necessary primitives:
+
+- asynchronous =ask= returns a future;
+- synchronous =ask-s= waits for the actor reply with a timeout.
+
+Nim's standard asynchronous model gives the intended user experience: an asynchronous procedure returns a future; =await= suspends the current asynchronous procedure while other work continues; =waitFor= blocks a synchronous caller; and =multisync= generates asynchronous and synchronous procedures from one definition. The Lisp system should copy these semantics at the API boundary, not port Nim's event loop.
+
+Use one session actor per WebDriver session. Its mailbox serializes state-changing Classic commands for that session, while different session actors run concurrently. A separate WebDriver BiDi[fn:bidi] connection actor owns the WebSocket[fn:websocket], correlation identifiers, subscriptions, and browser event stream.
+
+* Protocol Findings
+
+** WebDriver Classic is ordered request/response
+
+The W3C WebDriver specification defines HTTP commands such as:
+
+- =POST /session= to create a session;
+- navigation, element lookup, input, script execution, cookie, timeout, window, and action commands scoped to a session;
+- =GET /session/{session id}/screenshot= for the current top-level browsing context;
+- deletion of the session for terminal cleanup.
+
+This maps naturally to a session actor that owns the session identifier, current driver endpoint, deadlines, and sequential command queue.
+
+Classic transport is synchronous request/response on the wire. A Lisp caller may still issue it asynchronously because the actor returns a future and performs the blocking HTTP operation on a bounded I/O dispatcher rather than blocking unrelated actors.
+
+** WebDriver BiDi is an event stream
+
+WebDriver BiDi adds a bidirectional WebSocket connection so the browser can emit network, log, JavaScript, browsing-context, and other events without waiting for a new HTTP command. The session creation capability =webSocketUrl=true= requests the BiDi endpoint when supported.
+
+BiDi therefore needs a long-lived connection actor plus subscription actors or bounded subscriber mailboxes. It must not be forced through the one-request/one-reply Classic command actor.
+
+** Headless is a browser mode, not a second browser protocol
+
+Current Chrome documentation states that modern headless mode uses the normal Chrome browser code and hides platform windows. The plugin should set headless through browser capabilities or process arguments and keep the same WebDriver contract for headless and optionally visible sessions.
+
+* Nim Semantics to Preserve
+
+Nim's official documentation distinguishes three high-level operations:
+
+| Nim operation | Behavior | Lisp actor analogue |
+|---------------+----------+----------------------|
+| =asyncCheck= | non-blocking; reports failure even when the result is intentionally discarded | =detach= only with an explicit failure sink; silent future discard is forbidden |
+| =await= | suspends the current async procedure and re-raises future failure while other async work continues | await a Sento future from an approved async composition context |
+| =waitFor= | blocks the current thread until completion; prohibited inside an async procedure | synchronous wrapper using a bounded wait; forbidden inside an actor receive handler |
+| =multisync= | generates async and sync procedures from one body | =define-multisync-command= generates =NAME-ASYNC= and =NAME= from one command specification |
+
+Nim's =multisync= is a code-generation facility; it is not the same as running many requests concurrently. The Lisp API should preserve that meaning and separately provide =multi-sync= for concurrent batch joins because the operator explicitly wants both paired call styles and practical multi-command use.
+
+* Proposed User Surface
+
+** One command definition, two call forms
+
+#+begin_src common-lisp
+(define-multisync-command navigate
+    ((session session-ref) (url absolute-url))
+  :message-type :webdriver.navigate
+  :returns navigation-result
+  :default-timeout-ms 30000)
+#+end_src
+
+The definition expands to conceptually equivalent functions:
+
+#+begin_src common-lisp
+(navigate-async client session "https://example.test/")
+;; => SENTO.FUTURE:FUTURE of NAVIGATION-RESULT
+
+(navigate client session "https://example.test/")
+;; => NAVIGATION-RESULT, or a typed condition before the deadline
+#+end_src
+
+The exact Sento package name in the comment above is illustrative; implementation must use the package exported by the pinned Sento version and shared tests must prevent documentation drift.
+
+The synchronous wrapper calls the asynchronous operation and performs one bounded join. It does not duplicate validation, authorization, encoding, dispatch, decoding, error mapping, cancellation, or telemetry logic.
+
+** Concurrent join
+
+#+begin_src common-lisp
+(multi-sync
+ (list
+  (lambda () (page-source-async client session-a))
+  (lambda () (screenshot-async client session-b))
+  (lambda () (title-async client session-c)))
+ :deadline deadline
+ :failure-policy :collect)
+#+end_src
+
+=MULTI-SYNC= starts every admitted operation before joining, preserves input order, applies one monotonic[fn:monotonic] deadline, cancels unfinished children when the deadline expires, and returns one typed outcome per input. =:collect= is the default so one browser failure does not erase successful independent results. An explicit =:fail-fast= option may cancel siblings after the first terminal failure.
+
+Commands targeting the same session remain serialized by that session actor. =multi-sync= gains concurrency across independent sessions or actors; it does not violate WebDriver session ordering.
+
+* Actor Topology Recommendation
+
+#+begin_src plantuml
+@startuml
+package "starintel-pro-actors Lisp add-on" {
+  [WebDriverSupervisorActor]
+  [BrowserPoolActor]
+  [BrowserProcessActor]
+  [WebDriverSessionActor]
+  [BiDiConnectionActor]
+  [ArtifactStoreActor]
+  [WebDriverTelemetryActor]
+}
+
+[WebDriverSupervisorActor] --> [BrowserPoolActor]
+[BrowserPoolActor] --> [BrowserProcessActor]
+[BrowserProcessActor] --> [WebDriverSessionActor]
+[WebDriverSessionActor] --> [BiDiConnectionActor]
+[WebDriverSessionActor] --> [ArtifactStoreActor]
+[BiDiConnectionActor] --> [WebDriverTelemetryActor]
+[WebDriverSessionActor] --> [WebDriverTelemetryActor]
+@enduml
+#+end_src
+
+** WebDriverSupervisorActor
+
+Owns plugin-wide admission, actor creation, restart policy, shutdown, and capacity accounting. It does not own individual page state.
+
+** BrowserPoolActor
+
+Owns configured browser families, process capacity, profile policy, version/capability compatibility, and fair session admission. It never silently exceeds the configured process/session budget.
+
+** BrowserProcessActor
+
+Supervises one browser/driver process pair or one approved remote endpoint. It owns process identifiers, loopback binding, logs, health, and terminal cleanup. A process crash fails its sessions with a typed =browserProcessLost= result.
+
+** WebDriverSessionActor
+
+Owns one WebDriver session and serializes state-changing Classic commands. It validates session ownership, target policy, deadlines, command schema, and artifact/result references before sending a wire command.
+
+** BiDiConnectionActor
+
+Owns one BiDi WebSocket, command correlation map, event decoding, subscriptions, reconnect policy, and bounded subscriber delivery. Reconnect never pretends the old browser session survived without protocol evidence.
+
+** ArtifactStoreActor
+
+Stores screenshots, page source, downloads, print output, and other large or sensitive artifacts behind opaque short-lived references. Ordinary actor messages carry metadata and references rather than large base64 payloads.
+
+** WebDriverTelemetryActor
+
+Receives redacted lifecycle, timing, capacity, failure-class, and protocol-version events. It never records cookies, authorization headers, page bodies, JavaScript values, CAPTCHA answers, or screenshot bytes by default.
+
+* Command Contract
+
+Every command envelope requires:
+
+- contract version;
+- request and correlation identifiers;
+- caller identity and authorization context;
+- session reference rather than a caller-chosen raw session identifier;
+- command type and validated typed arguments;
+- absolute monotonic deadline or remaining duration;
+- idempotency classification;
+- target-policy reference;
+- result-artifact policy;
+- cancellation reference.
+
+Commands are classified as:
+
+| Class | Examples | Automatic retry rule |
+|-------+----------+----------------------|
+| Read-only observation | title, current URL, page source, element property, screenshot | Retry only when the transport proves the original command was not accepted and the deadline remains |
+| State transition | navigation, click, send keys, cookie mutation, script execution | No automatic replay after ambiguous delivery |
+| Lifecycle | new session, close context, delete session, process shutdown | Idempotency key and explicit terminal-state handling required |
+| Subscription | BiDi subscribe/unsubscribe | Reconcile desired versus observed subscription state after reconnect |
+
+* Failure Model
+
+The Lisp condition hierarchy and wire error union should preserve at least:
+
+- =invalidArgument=;
+- =unauthorized= and =forbidden=;
+- =unknownSession=;
+- =unsupportedCommand=;
+- =browserUnavailable=;
+- =browserProcessLost=;
+- =deadlineExceeded=;
+- =cancelled=;
+- =transportFailure=;
+- =ambiguousDelivery=;
+- =protocolError=;
+- =javascriptError=;
+- =noSuchElement=, =noSuchWindow=, and other normalized WebDriver errors;
+- =artifactLimitExceeded=;
+- =targetPolicyDenied=;
+- =mailboxSaturated=.
+
+Sync and async forms expose the same typed failure. The async future completes with the condition; the sync wrapper signals it after joining. Python and Nim clients map the same error code to native exception/error types without deleting correlation and retry-safety metadata.
+
+* Backpressure and Cancellation
+
+- Each session actor has a bounded mailbox and one configured maximum in-flight Classic command, normally one.
+- BiDi subscriptions use bounded per-subscriber queues with explicit =drop-oldest=, =drop-newest=, =disconnect-slow-subscriber=, or lossless durable-sink policy selected by event class.
+- Screenshots and page bodies count against artifact byte budgets before base64 decoding or persistence.
+- Cancellation stops queued work immediately and asks the driver to abandon supported in-flight work; if the remote command cannot be cancelled safely, the result becomes terminally =cancelled= and any late response is discarded by correlation identity.
+- Browser/session cleanup has a separate bounded grace period and escalates from protocol close to process termination only for plugin-owned processes.
+
+* Security Findings
+
+Headless browser automation is a high-privilege network and content-processing boundary.
+
+| Threat | Required control |
+|--------+------------------|
+| arbitrary-target browsing relay | internal authenticated calls, explicit target/purpose policy, scheme/host/port rules, and no public unrestricted navigation endpoint |
+| local service or cloud-metadata access | default deny for loopback, link-local, private-address, file, data, and non-HTTP schemes unless an exact operator policy allows them |
+| profile/cookie leakage | fresh isolated profiles by default; opaque session refs; no raw profile/cookie export through ordinary messages |
+| unbounded JavaScript execution | separate capability, script byte/time/result ceilings, no implicit enablement from navigation permission |
+| unbounded downloads | disabled by default or restricted to a dedicated size-limited directory and typed artifact workflow |
+| browser/driver remote exposure | bind locally or use an authenticated approved endpoint; never expose an unauthenticated driver port |
+| hostile page resource exhaustion | process/container CPU, memory, file, network, page, frame, and wall-clock limits |
+| event flood | bounded BiDi subscriptions and event-class backpressure |
+| ambiguous command replay | retry-safety classification and no automatic replay of state-changing commands |
+| secret logging | structured redaction and deny-by-default payload capture |
+| anti-detection misuse | no fingerprint fabrication, stealth patching, proxy rotation for evasion, or automatic bypass policy |
+
+The browser system performs authorized automation. It does not decide whether a CAPTCHA may be solved and it does not embed a CAPTCHA model.
+
+* Relationship to the CAPTCHA Actor System
+
+The two actor systems remain separate:
+
+1. the CAPTCHA system classifies and solves a bounded challenge artifact and returns an opaque typed result reference;
+2. the WebDriver system owns the browser/session and may capture a challenge artifact or apply a previously authorized bounded result/action inside the original session.
+
+The CAPTCHA system calls WebDriver capabilities such as =webdriver.captureElement= or =webdriver.applyCaptchaResult= only after broker authorization. The WebDriver system never chooses a solver, widens CAPTCHA capability, or reads a model registry.
+
+This removes =LocalBrowserApplyActor= as a private sub-actor of the CAPTCHA system and replaces it with a dependency on the shared WebDriver actor contract.
+
+* Common Lisp, Python, and Nim Libraries
+
+The canonical Lisp contract package defines value types, validation, conditions, codecs, command metadata, futures, paired command definitions, and conformance fixtures without starting StarIntel Server or a browser.
+
+The loaded plugin implements those contracts with actors. Python and Nim libraries call the same versioned service contract and expose both native asynchronous and synchronous APIs:
+
+- Python: =async def= methods plus blocking methods implemented by the same generated operation descriptors;
+- Nim: =Future[T]= methods plus synchronous methods following standard =await=/=waitFor= expectations;
+- Lisp: =NAME-ASYNC= plus =NAME= generated by =DEFINE-MULTISYNC-COMMAND=.
+
+No client library contains browser process supervision or a second actor registry.
+
+* Open Questions
+
+- Which browser matrix is required initially: Chromium only, or Chromium and Firefox?
+- Does the current StarIntel Server add-on lifecycle need a first-class route/operation registration API before Python and Nim can call plugin operations safely?
+- Should cross-process client traffic use a versioned HTTP operation surface first or wait for the stable Star Router service-call contract?
+- Which Sento future composition functions are exported by the exact pinned dependency, and is a small non-blocking =await= helper required?
+- How should a synchronous call detect and reject use from an actor receive context rather than deadlocking a dispatcher lane?
+- Which BiDi domains are mature enough for the first slice, and which commands must remain Classic-only?
+- What artifact retention defaults are acceptable for page source, screenshots, downloads, and CAPTCHA crops?
+
+* Recommendation
+
+Proceed to design with these constraints:
+
+1. use the existing StarIntel add-on lifecycle and Sento actor system;
+2. generate paired sync/async Lisp operations from one declaration;
+3. provide =multi-sync= as a separate bounded gather primitive;
+4. serialize Classic commands per session actor and parallelize across sessions;
+5. isolate BiDi streaming in its own connection actor;
+6. expose only versioned contract operations to Python and Nim;
+7. make target policy, deadlines, cancellation, resource bounds, and artifact references mandatory from the first fake-driver slice;
+8. keep CAPTCHA policy and solving outside the WebDriver system.
+
+* Sources
+
+Primary sources retrieved or audited 2026-09-16.
+
+- [[https://www.w3.org/TR/webdriver2/][W3C WebDriver specification]].
+- [[https://www.w3.org/TR/webdriver-bidi/][W3C WebDriver BiDi specification]].
+- [[https://www.selenium.dev/documentation/webdriver/bidi/][Selenium WebDriver BiDi documentation]].
+- [[https://developer.chrome.com/docs/automation-and-testing/headless][Chrome Headless mode documentation]].
+- [[https://nim-lang.org/docs/asyncdispatch.html][Nim =std/asyncdispatch= documentation]].
+- [[https://nim-lang.org/docs/asyncmacro.html][Nim =std/asyncmacro= documentation, including =multisync=]].
+- Local source audit of =lost-rob0t/starintel-server= commit =1ac298b797bd4bc0e71cfde083c6a59af55ccc6f=, including =source/addons.lisp=, =doc/addons.org=, =source/actors.lisp=, =t/couchdb-actor-test.lisp=, and =source/starintel-gserver.asd=.
+
+* Related Nodes
+
+- [[id:star-pro-research-009-hugging-face-captcha-model-routing][STAR-PRO-RESEARCH-009 Hugging Face CAPTCHA Model Routing]].
+- [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors]].
+- [[id:star-pro-webdriver-001-headless-actor-system][STAR-PRO-WEBDRIVER-001 Headless WebDriver Actor System]].
+- [[id:star-captcha-002-domain-server-repository-boundary][STAR-CAPTCHA-002 CAPTCHA Domain Server and Repository Boundary]].
+
+* Footnotes and Glossary
+
+[fn:common-lisp] Common Lisp: The programming language used by StarIntel Server and the canonical Pro Actors plugin contract.
+
+[fn:repl] Read-Eval-Print Loop: An interactive programming prompt that reads an expression, evaluates it, prints the result, and repeats.
+
+[fn:nim] Nim: A compiled programming language whose standard library provides futures, =async=, =await=, blocking =waitFor=, and the =multisync= code-generation macro.
+
+[fn:webdriver] WebDriver: A W3C browser-automation protocol whose Classic form uses HTTP commands scoped to browser sessions.
+
+[fn:python] Python: A programming language used here for a thin client library, not for ownership of actor or browser lifecycle semantics.
+
+[fn:starintel-server] StarIntel Server: The Common Lisp service owning authorization, deployment-facing actor discovery, persistence, search, and local actor hosting.
+
+[fn:sento] Sento: The Common Lisp actor library used by StarIntel Server; it provides actors, mailboxes, request/reply operations, and futures.
+
+[fn:bidi] WebDriver BiDi: The bidirectional W3C browser-automation protocol that carries commands, responses, and browser-originated events over WebSocket.
+
+[fn:websocket] WebSocket: A persistent full-duplex network connection that allows both peers to send messages without creating a new HTTP request for each message.
+
+[fn:monotonic] Monotonic time: A clock that only moves forward and is suitable for deadlines because wall-clock adjustments cannot move it backward.

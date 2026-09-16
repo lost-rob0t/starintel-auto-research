@@ -1,0 +1,282 @@
+:PROPERTIES:
+:ID:       star-pro-plugin-001-lisp-addon-polyglot-contract
+:END:
+#+title: STAR-PRO-PLUGIN-001 Lisp StarIntel Server Add-on and Polyglot Contract
+#+description: Review-stage design for packaging StarIntel Pro Actors as a trusted Common Lisp StarIntel Server add-on with a server-independent Lisp contract and thin Python and Nim client libraries.
+#+status: REVIEW
+#+filetags: :starintel:design:starintel-pro-actors:common-lisp:add-on:contract:python:nim:starlang:actors:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Product and repository direction | StarIntel operator | APPROVED | Explicit direction that Pro Actors is a Lisp StarIntel Server plugin with Lisp, Python, and Nim libraries | Operator directive 2026-09-16 |
+| Architecture | StarIntel Server and Pro Actors maintainers | PENDING | Package split, lifecycle, manifest, operation exposure, and registry ownership reviewed against current source | This design; current source commit below |
+| Security | Security reviewer | PENDING | Trusted-code, authorization, secrets, browser, model, and cross-process boundaries reviewed | Security Boundary below |
+| Operations | Operator | PENDING | Init configuration, startup ordering, capacity, health, reload, shutdown, observability, and rollback policy | Lifecycle and Operations below |
+| Implementation | Repository maintainer | NOT STARTED | Issue ownership, approved design, RED-first tests, shared fixtures, and exact-head verification | Implementation Slices below |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-16 | Created the shared Lisp add-on, contract-package, manifest, and Python/Nim client design for the CAPTCHA and WebDriver actor systems. | research/design worker | Operator directive 2026-09-16; starintel-server commit =1ac298b797bd4bc0e71cfde083c6a59af55ccc6f= |
+
+* Decision
+
+=starintel-pro-actors= becomes a trusted Common Lisp[fn:common-lisp] add-on[fn:add-on] for StarIntel Server[fn:starintel-server]. The first two actor systems in the add-on are:
+
+1. the local CAPTCHA[fn:captcha] solver/model-routing actor system;
+2. the headless WebDriver[fn:webdriver] actor system.
+
+The add-on is loaded through the existing StarIntel lifecycle rather than embedding Pro Actors into the core server ASDF[fn:asdf] dependency graph:
+
+#+begin_src common-lisp
+(in-package :star)
+
+(load-addon :starintel-pro-actors)
+#+end_src
+
+The plugin owns actor implementations and emitted actor/service manifests. It does not own StarIntel's global registry, authorization plane, StarLang[fn:starlang] semantics, Star Router[fn:star-router], document store, or HTTP server.
+
+* ASDF System Split
+
+#+begin_example
+starintel-pro-actors-contract
+  server-independent Lisp values, conditions, validation, codecs,
+  operation descriptors, shared fixtures, and client-facing API
+
+starintel-pro-actors
+  trusted StarIntel Server add-on; actors, supervision, model/browser
+  adapters, manifest emission, lifecycle hooks, and operation handlers
+
+starintel-pro-actors-tests
+  contract, actor, fake model, fake WebDriver, lifecycle, and
+  cross-language conformance tests
+
+python/starintel_pro_actors
+  thin Python sync/async remote client
+
+nim/starintel_pro_actors
+  thin Nim sync/async remote client
+#+end_example
+
+=starintel-pro-actors-contract= must not depend on the running StarIntel Server, Sento[fn:sento], a browser executable, TensorFlow, PyTorch, or model weights. This makes the contract loadable in tools, tests, the Common Lisp client, and schema generators without starting privileged runtime resources.
+
+=starintel-pro-actors= depends on the contract and =starintel-gserver=. During ASDF load it registers metadata only:
+
+#+begin_src common-lisp
+(star:register-addon
+ :starintel-pro-actors
+ :system :starintel-pro-actors
+ :start #'start-pro-actors
+ :stop #'stop-pro-actors)
+#+end_src
+
+The start hook creates or registers owned runtime resources only after StarIntel's core runtime is ready. The stop hook is idempotent and removes routes/operations, subscriptions, timers, actors, browser sessions, processes, and worker pools owned by the current generation.
+
+* Canonical Contract Ownership
+
+The Lisp contract is authoritative for domain values and behavior. A machine-readable schema projection is authoritative for cross-language encoding.
+
+The contract defines:
+
+- semantic version and wire-contract version;
+- actor/service identities and capability identifiers;
+- request, accepted, running, success, abstention, failure, cancellation, and status values;
+- deadlines and idempotency classifications;
+- opaque session, artifact, result, and run references;
+- typed error codes and retry-safety metadata;
+- actor manifests and operation descriptors;
+- serialization and strict validation;
+- shared positive and negative conformance fixtures.
+
+Python and Nim libraries are generated from or checked against that projection. They do not become independent authorities.
+
+* Registry and Routing Ownership
+
+The add-on follows the current StarIntel ownership split:
+
+- Pro Actors defines actors and emits manifests;
+- StarIntel Server owns deployment-facing registration, discovery, availability, authorization, and application selection;
+- StarLang owns actor/domain-server semantics and logical typed dispatch;
+- CL-GServer/Sento owns in-process actor execution;
+- Star Router owns client-facing and cross-authority route resolution and transport selection.
+
+The add-on must not create a private registry because its actors are specialized. A live actor is callable only after its emitted manifest validates and StarIntel registers the deployed incarnation.
+
+* Operation Surface
+
+The contract exposes domain operations, not raw actor mailbox addresses.
+
+** CAPTCHA operations
+
+- =captcha.capabilities=;
+- =captcha.solve=;
+- =captcha.runStatus=;
+- =captcha.cancel=;
+- =captcha.applyAuthorizedResult= only through the WebDriver/source-session dependency;
+- model/strategy status visible only to authorized operators;
+- model promotion and configuration excluded from ordinary clients.
+
+** WebDriver operations
+
+- browser/session create and close;
+- navigation and bounded observation;
+- element lookup and bounded input;
+- page source, title, current URL, screenshot, and typed artifacts;
+- explicitly authorized script execution;
+- WebDriver BiDi subscription and event streaming;
+- cancellation and status;
+- no unrestricted driver endpoint or raw session identifier exposure.
+
+The current StarIntel add-on lifecycle is real, but current source does not yet expose a general first-class add-on operation-registration API with route removal and contract discovery. Implementation must either land that core server primitive under its own approved issue/design or use an already-approved Star Router service-call contract. Direct mutation of private Ningle[fn:ningle] route tables is not the stable public plugin contract.
+
+* Client Libraries
+
+** Common Lisp
+
+The Lisp client is part of =starintel-pro-actors-contract= or a dependency-light companion system. It offers the canonical value types plus synchronous and asynchronous operations.
+
+** Python
+
+The Python package exposes one client with:
+
+- native =asyncio= methods;
+- blocking methods implemented from the same operation descriptors;
+- typed data classes or equivalent strict values;
+- typed exceptions preserving error code, correlation identity, deadline, and retry safety;
+- no embedded model or browser lifecycle.
+
+** Nim
+
+The Nim package exposes:
+
+- =Future[T]= methods for asynchronous calls;
+- synchronous wrappers using standard =waitFor= expectations only from synchronous contexts;
+- shared JSON fixtures and exact enum/optional/null behavior;
+- cancellation and deadline propagation;
+- no second actor runtime or registry.
+
+Client authentication uses StarIntel credentials and scopes. It never sends model-store paths, browser profile paths, raw cookies, or plugin-internal actor addresses.
+
+* Versioning and Compatibility
+
+Every wire envelope carries =contractVersion=. Servers advertise supported versions through capability discovery. A client must reject a response whose version cannot be decoded without silent field loss.
+
+Compatibility rules:
+
+- adding an optional response field is additive only when old clients may safely ignore it;
+- changing a required field, enum meaning, null rule, identifier syntax, or failure semantics requires a new contract version;
+- actor implementation version and wire-contract version are independent;
+- model/browser engine versions never redefine the contract;
+- one shared corpus proves Lisp/Python/Nim round trips and rejection behavior.
+
+* Lifecycle and Operations
+
+The plugin configuration belongs in the normal trusted StarIntel init file. Configuration references secrets by opaque names/handles and contains no credentials or browser cookies.
+
+Required lifecycle states are =registered=, =starting=, =active=, =degraded=, =stopping=, =stopped=, and =failed=. Readiness requires that the actor manifests are registered, mandatory fake/self-tests pass, and configured worker classes report capacity.
+
+Reload behavior:
+
+1. stop new admission;
+2. drain or cancel in-flight work under a bounded deadline;
+3. close BiDi subscriptions and WebDriver sessions;
+4. stop plugin-owned browser and model workers;
+5. unregister plugin-owned operations/manifests for the old generation;
+6. start the replacement generation;
+7. roll back through the existing add-on lifecycle when replacement start fails and rollback remains safe.
+
+A plugin generation identifier appears in run state so a late result from an old generation cannot satisfy a new request.
+
+* Security Boundary
+
+The add-on is trusted code because StarIntel's add-on system evaluates it with the same authority as =init.lisp=. That trust does not grant every caller permission to use every operation.
+
+Mandatory controls:
+
+- StarIntel authentication and authorization before operation dispatch;
+- exact capability and target-purpose policy;
+- actor-owned mutable state;
+- bounded mailboxes, concurrency, memory, CPU/GPU, process, artifact, and time budgets;
+- no public arbitrary-target CAPTCHA or navigation relay;
+- opaque secret/session/artifact/result references;
+- no runtime model-code download or production =trust_remote_code=;
+- local-only or authenticated browser driver endpoints;
+- structured redaction;
+- no hidden Python control plane;
+- no cross-language client privilege beyond the canonical Lisp contract.
+
+* Test Contract
+
+Shared tests must prove:
+
+- the contract system loads without StarIntel Server or runtime side effects;
+- the plugin registers exactly once and start/stop are idempotent;
+- reload generation fencing rejects late results;
+- emitted manifests match registered operation contracts;
+- Python and Nim encode every positive fixture identically to Lisp;
+- all three reject unknown required fields, invalid enums, malformed references, and illegal nulls as specified;
+- synchronous and asynchronous operations return equivalent typed results/errors;
+- timeouts and cancellations propagate end to end;
+- secrets never appear in logs, status, errors, or fixtures;
+- fake CAPTCHA and fake WebDriver vertical paths work without paid providers, live targets, or installed browser/model dependencies;
+- client libraries cannot invoke unregistered or unauthorized capabilities.
+
+* Implementation Slices
+
+1. Contract-only ASDF system, wire schema, positive/negative fixtures, and Lisp round-trip tests.
+2. Add-on lifecycle with fake CAPTCHA and fake WebDriver actors, manifest emission, health, and generation fencing.
+3. Approved StarIntel operation-registration/service-call boundary with authentication, authorization, discovery, and cancellation.
+4. Python sync/async client against the fake vertical slice.
+5. Nim sync/async client against the same fixtures and fake slice.
+6. Real CAPTCHA model adapters only after [[id:star-pro-research-009-hugging-face-captcha-model-routing][STAR-PRO-RESEARCH-009]] admission gates.
+7. Real WebDriver process/session/BiDi adapters only after [[id:star-pro-webdriver-001-headless-actor-system][STAR-PRO-WEBDRIVER-001]] approval.
+
+* Acceptance Criteria
+
+- Pro Actors loads through =star:load-addon= and is absent from the core server dependency graph.
+- The canonical Lisp contract loads without runtime side effects.
+- CAPTCHA and WebDriver remain two separate supervised actor systems in one plugin.
+- StarIntel Server remains the registry and authorization owner.
+- Python and Nim are thin clients of the same versioned contract.
+- Sync and async APIs share validation, dispatch, result, and error semantics.
+- No raw browser driver, actor mailbox, model path, secret, or arbitrary-target relay is exposed.
+- Shared conformance fixtures prevent language drift.
+
+* Sources and Current-Code Evidence
+
+- =lost-rob0t/starintel-server= commit =1ac298b797bd4bc0e71cfde083c6a59af55ccc6f=, specifically =source/addons.lisp=, =doc/addons.org=, =example_configs/init.lisp=, =source/actors.lisp=, and =source/starintel-gserver.asd=.
+- [[id:starintel-star-research-043-manifest-runtime-plan-composition][STAR-RESEARCH-050 Actor and Dataset Manifest Runtime-Plan Composition]].
+- [[id:star-pro-research-009-hugging-face-captcha-model-routing][STAR-PRO-RESEARCH-009 Hugging Face CAPTCHA Model Routing]].
+- [[id:star-pro-research-010-lisp-webdriver-async-sync-semantics][STAR-PRO-RESEARCH-010 Lisp Headless WebDriver Async and Sync Semantics]].
+
+* Related Nodes
+
+- [[id:star-captcha-002-domain-server-repository-boundary][STAR-CAPTCHA-002 CAPTCHA Domain Server and Repository Boundary]].
+- [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors]].
+- [[id:star-pro-webdriver-001-headless-actor-system][STAR-PRO-WEBDRIVER-001 Headless WebDriver Actor System]].
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors]].
+
+* Footnotes and Glossary
+
+[fn:common-lisp] Common Lisp: The programming language used by StarIntel Server and the canonical Pro Actors implementation and contract.
+
+[fn:add-on] Add-on: An optional trusted ASDF system registered with StarIntel Server start/stop lifecycle hooks; it is a packaging boundary rather than a sandbox.
+
+[fn:starintel-server] StarIntel Server: The Common Lisp service owning authorization, deployment-facing actor discovery, persistence, search, and local actor hosting.
+
+[fn:captcha] CAPTCHA: Completely Automated Public Turing test to tell Computers and Humans Apart; here it is a bounded challenge processed only under explicit authorization.
+
+[fn:webdriver] WebDriver: The W3C browser-automation protocol used by the headless browser actor system.
+
+[fn:asdf] ASDF: Another System Definition Facility, the standard Common Lisp build and system-loading mechanism.
+
+[fn:starlang] StarLang: The language layer authoritative for actor/domain-server semantics and logical typed dispatch.
+
+[fn:star-router] Star Router: The StarIntel component responsible for client-facing and cross-authority route resolution and transport selection.
+
+[fn:sento] Sento: The Common Lisp actor runtime currently used by StarIntel Server.
+
+[fn:ningle] Ningle: The Common Lisp web framework used by the current StarIntel HTTP application.

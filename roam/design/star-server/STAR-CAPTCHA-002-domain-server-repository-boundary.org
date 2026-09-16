@@ -2,14 +2,26 @@
 :ID:       star-captcha-002-domain-server-repository-boundary
 :END:
 #+title: STAR-CAPTCHA-002 CAPTCHA Domain Server and Repository Boundary
-#+description: Approved StarIntel architecture for a shared configurable CAPTCHA domain server, opportunistic actor integration, public provider adapters, and a private in-house solver implementation.
+#+description: Approved StarIntel architecture for a shared configurable CAPTCHA domain server whose provider-neutral broker remains in StarIntel Server while specialized solver and browser actors are packaged as a Lisp Pro Actors add-on.
 #+status: APPROVED
 #+approval_schema: adard.research-approval.v1
 #+approval_state: APPROVED
 #+approval_actor: human-reviewer
-#+approval_evidence: Project-owner decisions 2026-08-28: CAPTCHA solving system approved; make it a domain server; actors should use it when running; migrate ordinary solver actors out of starintel-pro-actors; do not open-source the in-house solver; CAPTCHA solving must be configurable through the normal init file.
-#+approval_decided_at: 2026-08-28
-#+filetags: :starintel:design:star-server:captcha:domain-server:configuration:actors:starlang:public-private-boundary:
+#+approval_evidence: Project-owner decisions 2026-08-28 established the domain server, optional use, private in-house solver, and init configuration; operator directive 2026-09-16 superseded the earlier actor-repository placement by making Pro Actors a Lisp StarIntel Server plugin with Lisp, Python, and Nim contract libraries.
+#+approval_base_commit: 825689da3ad669a29a9a7af585e7cdc8db2693b1
+#+approval_base_blob: b4f5af8ace0737d1a40b6b46895fb223946f5470
+#+approval_decided_at: 2026-09-16
+#+filetags: :starintel:design:star-server:captcha:domain-server:configuration:actors:starlang:plugin:public-private-boundary:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Domain-server direction | StarIntel operator | APPROVED | CAPTCHA is one optional configurable domain service | Project-owner directive 2026-08-28 |
+| Pro Actors plugin placement | StarIntel operator | APPROVED | Specialized CAPTCHA and WebDriver actors reside in the Lisp Pro Actors add-on; Lisp owns the contract and Python/Nim are callers | Operator directive 2026-09-16 |
+| Private solver boundary | StarIntel operator | APPROVED | In-house solver source, weights, training material, and private routing data remain non-public | Project-owner directive 2026-08-28; reaffirmed below |
+| Detailed plugin and actor architecture | Server and Pro Actors maintainers | PENDING | Add-on registration, contracts, manifests, lifecycle, operations, security, and tests reviewed together | [[id:star-pro-plugin-001-lisp-addon-polyglot-contract][STAR-PRO-PLUGIN-001]], [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004]], [[id:star-pro-webdriver-001-headless-actor-system][STAR-PRO-WEBDRIVER-001]] |
+| Implementation | Repository maintainer | NOT STARTED | Approved design, RED-first implementation, conformance fixtures, operational checks, and publication evidence | No implementation is authorized by this boundary record |
 
 * Decision
 
@@ -131,24 +143,62 @@ The preferred StarLang surface must support or be extended to support:
 
 If one of these cannot currently be expressed in StarLang, the first implementation task is to add the missing StarLang primitive rather than bypassing the language with an ad-hoc Python controller.
 
-* Public Repository Boundary
+* Server and Plugin Repository Boundary
 
-The ordinary, redistributable CAPTCHA actor implementations should live with the public StarIntel actor implementation in =lost-rob0t/starintel-server= rather than in the private =lost-rob0t/starintel-pro-actors= repository.
+The 2026-09-16 operator directive supersedes the earlier instruction to migrate ordinary CAPTCHA actors into =lost-rob0t/starintel-server=. Specialized CAPTCHA providers, recognition workers, operator review, and headless browser actors belong to =lost-rob0t/starintel-pro-actors=, packaged as one trusted Common Lisp[fn:common-lisp] add-on[fn:add-on] loaded by StarIntel Server[fn:starintel-server].
 
-Public/migratable components include:
+The split follows ownership, not language convenience:
+
+- =starintel-server= owns the provider-neutral CAPTCHA domain service, authorization, policy, broker/router, runtime-facing registry and discovery, secret/reference services, budgets, and optional integration used by ordinary actors;
+- =starintel-pro-actors= owns specialized solver/provider actors and the shared WebDriver actor system, defines their actor manifests, and registers them through the server add-on lifecycle;
+- a Pro Actors contract library defines the canonical Lisp request, result, error, deadline, cancellation, capability, and lifecycle values;
+- Python and Nim libraries are thin callers of that versioned Lisp-owned contract and do not create a second registry, router, or control plane;
+- StarLang remains authoritative for actor/domain semantics, and Star Router remains authoritative at client-facing or cross-authority routing boundaries.
+
+#+begin_src plantuml
+@startuml
+package "starintel-server" {
+  [CAPTCHA Domain Server]
+  [Deployment Registry]
+}
+package "starintel-pro-actors Lisp add-on" {
+  [Canonical Lisp Contract]
+  [CAPTCHA Actors]
+  [WebDriver Actors]
+}
+package "external callers" {
+  [Python / Nim Clients]
+}
+
+[CAPTCHA Domain Server] --> [CAPTCHA Actors] : authorized exact solve
+[Deployment Registry] --> [CAPTCHA Actors] : registered manifest
+[Deployment Registry] --> [WebDriver Actors] : registered manifest
+[Canonical Lisp Contract] --> [CAPTCHA Actors]
+[Canonical Lisp Contract] --> [WebDriver Actors]
+[Python / Nim Clients] --> [Canonical Lisp Contract] : versioned operations
+[CAPTCHA Actors] --> [WebDriver Actors] : artifact ref + bounded apply
+@enduml
+#+end_src
+
+Public/core components that remain suitable for =starintel-server= include:
 
 - the CAPTCHA domain-server protocol and StarLang declarations;
 - provider-neutral broker/router logic;
 - challenge detection and resolution orchestration;
 - init/config schema declarations;
 - runtime capability registration schema;
-- external provider adapters whose source and dependencies are suitable for redistribution;
-- provider fixtures that contain no credentials or sensitive captured sessions;
-- generic browser/application integration that contains no private solver logic;
 - fake-provider and owned-fixture tests;
 - health, timeout, cancellation, partial-result, configuration, and contract-drift tests.
 
-Existing provider design nodes currently under the =starintel-pro-actors= namespace are design inputs for this migration, including:
+Pro Actors plugin components include:
+
+- external provider adapters whose source and dependencies are approved for that repository;
+- local OCR, audio, vision, geometry, model-registry, benchmark, and operator actors;
+- the headless WebDriver Classic and BiDi actor system used for bounded capture and same-session application;
+- provider/model fixtures that contain no credentials or sensitive captured sessions;
+- Lisp add-on lifecycle integration and versioned Python/Nim client conformance fixtures.
+
+Existing provider design nodes under the =starintel-pro-actors= namespace remain plugin design inputs, including:
 
 - [[id:star-pro-captcha-001-nonecap-adapter][STAR-PRO-CAPTCHA-001 NoneCap hCaptcha Adapter]]
 - [[id:star-pro-captcha-002-nopecha-adapter][STAR-PRO-CAPTCHA-002 NopeCHA Adapter]]
@@ -199,25 +249,25 @@ Required invariants:
 - explicit unsupported/blocked outcomes;
 - downstream acceptance verification distinct from provider completion.
 
-* Repository Migration Plan
+* Repository and Plugin Plan
 
 ** Phase 1 — Design normalization
 
 - make this domain-server design the repository-boundary authority;
-- re-home ordinary provider adapter design from the =starintel-pro-actors= design namespace into the regular StarIntel actor/domain-server design namespace;
+- treat the 2026-09-16 Lisp-plugin directive as superseding the earlier actor-migration instruction while retaining the approved domain-server and private-solver decisions;
 - preserve research citations and capability contracts;
 - define the normal init-file CAPTCHA schema;
 - mark private in-house solver material as non-public implementation detail.
 
-** Phase 2 — Public actor migration
+** Phase 2 — Canonical contract and add-on boundary
 
-Move or reimplement redistributable solver/provider actors from =lost-rob0t/starintel-pro-actors= into =lost-rob0t/starintel-server=.
+Define the Lisp contract library, trusted add-on lifecycle, manifest registration/unregistration behavior, and Python/Nim conformance surface before implementing either actor system.
 
 Do not copy private solver implementation, private models, private corpora, credentials, or production secrets.
 
-** Phase 3 — StarLang domain server
+** Phase 3 — StarLang domain server and Pro Actors plugin
 
-Express the domain server, solver capability interface, init/config schema, optional dependency semantics, and challenge continuation flow in StarLang. Add missing StarLang primitives before falling back to lower-level implementation.
+Express the domain server, solver capability interface, init/config schema, optional dependency semantics, and challenge continuation flow in StarLang. Implement the specialized CAPTCHA and WebDriver actors inside the Pro Actors Lisp add-on only after their review-stage designs are approved. Add missing StarLang primitives before falling back to lower-level workarounds.
 
 ** Phase 4 — Actor adoption
 
@@ -232,15 +282,37 @@ Update OSINT actors incrementally. Actors that can encounter CAPTCHAs should dec
 - Actors can discover and use the domain server when available without making it a hard startup dependency.
 - Actors honor =enabled= and =autoSolve= without embedding provider-specific configuration.
 - Absence, disablement, or unavailability produces typed blocked or partial outcomes.
-- Public external-provider adapters are no longer architecturally tied to =starintel-pro-actors=.
+- Specialized provider, local-inference, operator, and WebDriver actors are packaged in =starintel-pro-actors= rather than embedded in the generic server core.
+- The Lisp contract is canonical and Python/Nim clients pass the same conformance corpus without owning routing or actor lifecycle.
 - The private in-house solver registers through the public contract but its implementation is absent from public repositories.
 - StarLang is the preferred orchestration/configuration surface and missing primitives produce StarLang work rather than immediate Python workarounds.
 - Tests cover init enable/disable, provider preference, provider allow/deny, missing private solver, external-provider disablement, fallback, deadlines, and budget limits.
 - No public arbitrary-target solve endpoint exists.
 
+* Related Nodes
+
+- [[id:star-pro-plugin-001-lisp-addon-polyglot-contract][STAR-PRO-PLUGIN-001 Lisp StarIntel Server Add-on and Polyglot Contract]].
+- [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors]].
+- [[id:star-pro-webdriver-001-headless-actor-system][STAR-PRO-WEBDRIVER-001 Headless WebDriver Actor System]].
+- [[id:star-pro-research-009-hugging-face-captcha-model-routing][STAR-PRO-RESEARCH-009 Hugging Face CAPTCHA Model Routing]].
+
+* Footnotes and Glossary
+
+[fn:common-lisp] Common Lisp: The implementation language of StarIntel Server and the canonical Pro Actors add-on contract.
+
+[fn:add-on] Add-on: An optional trusted ASDF system loaded through StarIntel Server lifecycle hooks; it is a packaging boundary, not a security sandbox.
+
+[fn:starintel-server] StarIntel Server: The Common Lisp service owning authorization, policy, deployment-facing discovery, persistence, and local actor hosting.
+
+- *Domain server* — One logical optional service contract coordinating policy, capability selection, lifecycle, and typed outcomes across multiple implementations.
+- *Plugin contract* — The versioned Lisp-owned request/result/error/cancellation/capability schema implemented by the add-on and consumed by language clients.
+- *Opaque reference* — A short-lived identifier granting bounded access to sensitive artifact, session, or result material without copying it into ordinary messages.
+- *Specialized actor* — A provider, inference, operator, or browser actor packaged outside the generic server core while using server-owned authorization and discovery.
+
 * Changelog
 
-| Date       | Change |
-|------------+--------|
-| 2026-08-28 | Project owner approved CAPTCHA as a domain server, opportunistic actor use, migration of ordinary solver actors to the regular public actor repository, and a non-OSS boundary for the in-house solver. |
-| 2026-08-28 | Project owner required CAPTCHA solving to be configurable through the normal StarIntel init/config file; added enablement, automatic solve, provider preference, external-provider policy, credential references, deadlines, fallback, budgets, operator fallback, challenge-family policy, and configuration tests. |
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-16 | Superseded the earlier ordinary-actor migration direction: Pro Actors is a Lisp StarIntel Server add-on containing specialized CAPTCHA and WebDriver actors, with a canonical Lisp contract and thin Python/Nim callers; retained the approved domain-server and private-solver boundaries. | StarIntel operator + research/design worker | Operator directive 2026-09-16; STAR-PRO-PLUGIN-001; STAR-PRO-WEBDRIVER-001 |
+| 2026-08-28 | Project owner approved CAPTCHA as a domain server, opportunistic actor use, migration of ordinary solver actors to the regular public actor repository, and a non-OSS boundary for the in-house solver. | project owner | Project-owner directive 2026-08-28; repository placement superseded 2026-09-16 |
+| 2026-08-28 | Project owner required CAPTCHA solving to be configurable through the normal StarIntel init/config file; added enablement, automatic solve, provider preference, external-provider policy, credential references, deadlines, fallback, budgets, operator fallback, challenge-family policy, and configuration tests. | project owner | Project-owner directive 2026-08-28 |

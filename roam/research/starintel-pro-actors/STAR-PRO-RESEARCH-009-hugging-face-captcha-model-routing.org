@@ -1,0 +1,289 @@
+:PROPERTIES:
+:ID:       star-pro-research-009-hugging-face-captcha-model-routing
+:END:
+#+title: STAR-PRO-RESEARCH-009 Hugging Face CAPTCHA Model Routing
+#+description: ARADR evaluation of selected Hugging Face text-CAPTCHA models for a Common Lisp StarIntel Pro Actors plugin, including Magento/Adobe Commerce, heterogeneous alphanumeric, numeric, provenance, runtime, and benchmark gates.
+#+status: REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: research-worker
+#+approval_evidence: worker-authored conclusions require explicit StarIntel operator approval; operator supplied the candidate set and Lisp-plugin direction on 2026-09-16
+#+approval_base_commit: NONE
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+created: [2026-09-16]
+#+last_modified: [2026-09-16]
+#+filetags: :starintel:research:starintel-pro-actors:captcha:hugging-face:ocr:common-lisp:model-routing:provenance:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Candidate-model evidence | Research reviewer | PENDING | Current model cards, immutable revisions, licenses, reported evaluation scope, and contradictions reviewed | Sources and Candidate Matrix below |
+| Lisp-plugin boundary | StarIntel operator | APPROVED | Explicit direction that Pro Actors is a Lisp StarIntel Server plugin with a Lisp contract and Python/Nim callers | Operator directive 2026-09-16 |
+| Model admission policy | Security and operations reviewers | PENDING | Artifact audit, license review, reproducible owned-fixture benchmark, resource limits, and rollback policy | Admission Gate below |
+| Architecture/design | Pro Actors maintainer | NOT STARTED | Approved research plus reviewed actor, plugin, and client contracts | [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004]] |
+| Implementation | Repository maintainer | NOT STARTED | Approved design, pinned artifacts, tests, deployment isolation, and canary evidence | No implementation authorized by this research record |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-16 | Created the candidate-model evaluation, corrected numeric-versus-alphanumeric claims, recorded immutable Hugging Face revisions, and defined benchmark-only admission into the Lisp plugin. | research-worker | Hugging Face model cards and API metadata retrieved 2026-09-16; operator-supplied model list |
+
+* Objective
+
+Determine how the operator-selected Hugging Face[fn:hugging-face] CAPTCHA[fn:captcha] models should enter the StarIntel[fn:starintel] Pro Actors[fn:pro-actors] local-solver system without treating model-card claims as production capability evidence.
+
+The requested candidate set is:
+
+1. the current Hugging Face image-to-text CAPTCHA catalog;
+2. =kirmorozov/mage-captcha-solver= for the default Magento/Adobe Commerce CAPTCHA;
+3. =Wall3/Yara_Captcha_Solver=;
+4. a number-focused text-CAPTCHA path;
+5. =Graf-J/captcha-conv-transformer-finetuned=.
+
+The governing implementation direction is a Common Lisp[fn:common-lisp] StarIntel Server[fn:starintel-server] plugin with one Lisp contract library and thin Python[fn:python] and Nim[fn:nim] client libraries. Python and Nim callers do not own model selection, actor supervision, authorization, or result semantics.
+
+* Executive Finding
+
+Use a capability router, not a single default model.
+
+- =kirmorozov/mage-captcha-solver= is the only reviewed candidate whose model card claims an exact Magento/Adobe Commerce visual contract. Its reported whole-sequence accuracy is 94.15% on a 5,063-image held-out split, but that is publisher-reported evidence and must be reproduced on operator-owned Magento fixtures.
+- =Wall3/Yara_Captcha_Solver= is a heterogeneous alphanumeric[fn:alphanumeric] Convolutional Recurrent Neural Network[fn:crnn] candidate. Its reported whole-sequence accuracy is 90.08% across a 5,502-image held-out real-data test set, with wide per-dataset variation. It is not a number-only model.
+- =Graf-J/captcha-conv-transformer-finetuned= is also alphanumeric. It reports 95.36% sequence accuracy on =hammer888/captcha-data= and 88.42% on Python-Captcha-generated data. It requires repository-supplied custom Python code through =trust_remote_code=True=, so it cannot be admitted directly into a production solver worker.
+- No reviewed candidate should be labeled the numeric production model yet. =anuashok/ocr-captcha-v3= is called the digit expert by a separate router project and reports a character error rate of about 1.39%, but its own model card does not publish whole-sequence accuracy or a sufficiently explicit numeric-only data contract. A four-digit ONNX[fn:onnx] checkpoint for PHPWind publishes a clearer numeric interface but only 88.61% validation accuracy and carries the GNU Affero General Public License version 3[fn:agpl].
+
+The first honest runtime states are therefore =candidate=, =quarantined=, or =experimental=. None of these model cards alone supports =verified=.
+
+* Candidate Matrix
+
+| Candidate | Exact claimed scope | Publisher-reported evidence | Runtime and license | Research disposition |
+|-----------+---------------------+-----------------------------+---------------------+----------------------|
+| =kirmorozov/mage-captcha-solver= | Default 200 by 50 pixel Magento/Adobe Commerce CAPTCHA; case-sensitive length 4–5 | 94.15% exact sequence; 4,767/5,063 matches; 50,630 images split 90/10 | TensorFlow[fn:tensorflow] SavedModel through legacy TF-Keras; Apache-2.0; revision =68d3bcdfa47832bc8bed3e79bba667ab8dbe5d86= | Highest-priority Magento benchmark candidate; not verified until reproduced on owned fixtures |
+| =Wall3/Yara_Captcha_Solver= | General 1–8 character =0-9a-zA-Z= CAPTCHA | 90.08% exact sequence and 96.14% character accuracy on 5,502 held-out images; per-dataset sequence accuracy 80.8–99.7% | Keras 3 / TensorFlow; about 10.0 million parameters and 38.3 MiB; MIT; revision =2aea1a155a8a603d965bb8ac156ac10cad7c6a61= | Broad alphanumeric benchmark candidate; useful ensemble member only after exact-family calibration |
+| =Graf-J/captcha-conv-transformer-finetuned= | General 1–8 character =0-9a-zA-Z= CAPTCHA | 95.36% exact sequence on =hammer888/captcha-data=; 88.42% on generated Python Captcha data; 733 images/second reported on NVIDIA RTX A6000 | PyTorch[fn:pytorch]/Transformers, Safetensors[fn:safetensors], custom repository code, MIT; revision =4bc31fa679c5f627e56dfa820ea7edad8cd5981a= | Experimental only; audit custom code and export a fixed non-executable artifact before sandbox evaluation |
+| =anuashok/ocr-captcha-v3= | Publisher says CAPTCHA optical character recognition; another router names it the digit expert | Character error rate 0.01394585726004922; no whole-sequence accuracy in the card | TrOCR[fn:trocr], about 0.3 billion parameters, Apache-2.0; revision =51581b607fa599e712555a65f1aa633fb9e22f67= | Numeric candidate with incomplete evidence; benchmark only, never advertise numeric support from the router label alone |
+| =FlanChanXwO/phpwind-captcha-ocr= | Four-digit numeric CAPTCHA from one PHPWind deployment labeled =v0.7beta= | 88.61% validation accuracy on a held-out split of 997 manually labeled images | ONNX opset 18, CPU-capable, AGPL-3.0 | Useful contract and CPU baseline; below the desired accuracy and license review required |
+
+Metrics are not directly comparable because the datasets, splits, label alphabets, preprocessing, and hardware differ. The table records claims; it does not rank universal accuracy.
+
+* Corrections to the Initial Model Labels
+
+** Yara is not numeric-only
+
+The Yara model card declares a 62-character vocabulary containing digits, lowercase letters, and uppercase letters. It accepts sequences of length 1–8. It may be benchmarked on numeric subsets, but its published contract is alphanumeric.
+
+** Graf-J is not numeric-only
+
+The Graf-J model card also declares the full =0-9a-zA-Z= vocabulary and variable-length output from 1–8 characters. Some example images contain only digits, but examples do not narrow the trained contract.
+
+** Character error rate is not sequence accuracy
+
+A low Character Error Rate[fn:cer] does not establish the probability that the complete answer is correct. CAPTCHA acceptance normally requires the entire sequence. StarIntel therefore treats exact sequence accuracy and downstream acceptance as primary measures and character error rate as a diagnostic.
+
+* Proposed Exact Capability Rows
+
+The model registry should begin with candidate rows, not wildcard OCR support.
+
+| Capability identifier | Required evidence | Initial candidates | Required output |
+|-----------------------+-------------------+--------------------+-----------------|
+| =captcha.text.magento-default.200x50.case-sensitive.v1= | Owned Magento/Adobe Commerce fixture suite matching default renderer, length 4–5, alphabet and preprocessing | Mage checkpoint; Yara and Graf-J as comparison baselines | =textAnswer= with exact challenge binding |
+| =captcha.text.alphanumeric.variable-1-8.v1= | Family-classified owned/synthetic fixtures with separate distribution slices | Yara, Graf-J, optional ensemble | =textAnswer= plus calibrated confidence |
+| =captcha.text.numeric.fixed-4.v1= | Numeric-only four-position fixtures with exact generator/version identity | PHPWind checkpoint as baseline; purpose-trained StarIntel model preferred | =textAnswer= constrained to four digits |
+| =captcha.text.numeric.variable.v1= | Variable-length numeric fixture set, grammar, and held-out renderer families | =anuashok/ocr-captcha-v3= only as an unverified candidate | =textAnswer= constrained to declared digit grammar |
+
+The router must not send a Magento image to a generic row merely because all candidates accept image bytes. Eligibility includes issuer or renderer family, dimensions/aspect policy, alphabet, case sensitivity, sequence length, preprocessing, required result kind, model state, and current capacity.
+
+* Common Lisp Plugin Placement
+
+The CAPTCHA actor system belongs inside the =starintel-pro-actors= Common Lisp add-on[fn:add-on]. It is loaded by StarIntel Server through the existing trusted add-on lifecycle:
+
+#+begin_src common-lisp
+(in-package :star)
+
+(load-addon :starintel-pro-actors)
+#+end_src
+
+The plugin defines actors and emits manifests. StarIntel Server remains the deployment-facing actor/service registry, StarLang[fn:starlang] remains authoritative for actor and domain-server semantics, CL-GServer/Sento[fn:sento] remains the in-process actor runtime, and Star Router[fn:star-router] remains the cross-authority routing boundary.
+
+The plugin must not create a second registry, authorization plane, secret store, or public arbitrary-target solve endpoint.
+
+* Model Adapter Boundary
+
+Every model adapter implements one internal Lisp strategy contract:
+
+#+begin_src common-lisp
+(defgeneric prepare-model-input (strategy artifact descriptor))
+(defgeneric solve-model-async (strategy prepared-input context))
+(defgeneric decode-model-output (strategy raw-output context))
+(defgeneric model-capabilities (strategy))
+(defgeneric model-fingerprint (strategy))
+(defgeneric cancel-model-run (strategy run-id))
+#+end_src
+
+The contract returns a typed candidate containing the constrained text, raw score summary, calibration identifier, model and preprocessing fingerprints, runtime measurements, and explicit abstention state. It never returns a provider-shaped unvalidated dictionary as the domain result.
+
+Framework-specific code remains behind sandboxed workers:
+
+- TensorFlow/Keras worker for Mage and Yara experiments;
+- audited PyTorch worker or preferably a fixed exported artifact for Graf-J experiments;
+- ONNX Runtime worker for vetted exports and numeric baselines;
+- no solve-time repository download;
+- no =trust_remote_code= in the production process;
+- no general network egress from recognition workers.
+
+* Admission Gate
+
+A model becomes =experimental= only after all of the following:
+
+1. pin the exact repository revision and every downloaded artifact digest;
+2. record the model-card license and licenses/provenance of every training or evaluation dataset that can be established;
+3. audit executable repository code and reject cached bytecode or unexpected executables from the artifact closure;
+4. copy or convert only reviewed immutable artifacts into the local model store;
+5. run the model with no network, read-only model paths, bounded scratch storage, CPU/GPU/memory/process limits, and a hard deadline;
+6. reproduce the exact preprocessing contract;
+7. measure exact sequence accuracy, character error rate, latency, memory, abstention, and malformed-input behavior on frozen owned/synthetic fixtures;
+8. calibrate confidence per exact capability rather than across mixed CAPTCHA families;
+9. verify that raw images, answers, and browser-session material never enter logs or ordinary documents;
+10. obtain explicit model-promotion approval.
+
+A model becomes =verified= only after a bounded operator-owned canary also measures downstream =accepted=, =rejected=, =expired=, or =inconclusive= outcomes.
+
+* Benchmark Design
+
+** Dataset partitions
+
+Each exact capability uses:
+
+- a training/adaptation partition when licensing permits;
+- a calibration partition for thresholds;
+- a frozen validation partition for iteration;
+- a hidden final test partition;
+- an operator-owned canary partition for downstream acceptance.
+
+Renderer families, fonts, backgrounds, distortion parameters, seeds, and source deployments must not leak across partitions.
+
+** Metrics
+
+Required measures are:
+
+- exact whole-sequence accuracy;
+- character error rate;
+- false-answer rate above the configured confidence threshold;
+- abstention rate;
+- p50, p95, and p99 latency;
+- peak resident memory and CPU/GPU time;
+- malformed/oversized media rejection;
+- cancellation latency;
+- accepted-result rate in owned canaries.
+
+The Magento 94% requirement applies to StarIntel's reproduced exact-sequence result on representative owned fixtures. A copied model-card percentage is not the acceptance gate.
+
+* Routing Policy
+
+Routing order is capability-specific:
+
+1. authorize the target, purpose, caller, and =captcha:solve= capability;
+2. classify the exact text-CAPTCHA family from bounded evidence;
+3. require a compatible alphabet, length, dimensions, preprocessing, result kind, and model state;
+4. select the lowest-cost eligible model meeting the capability's calibrated threshold and deadline;
+5. optionally run an explicitly configured ensemble under one shared budget;
+6. abstain when evidence is weak;
+7. pass only an opaque result reference to the browser/application system;
+8. record downstream acceptance independently.
+
+No popularity, download count, like count, or model-card pipeline tag participates in production eligibility.
+
+* Lisp, Python, and Nim Contract Consequence
+
+The Lisp contract is canonical. Python and Nim libraries encode and decode the same versioned request, result, error, cancellation, deadline, and capability-discovery values.
+
+Clients may request a solve, await a run, cancel a run, inspect non-secret status, and receive an opaque result reference. They may not name an arbitrary local model path, enable remote code, widen an exact capability, retrieve raw cookies, or promote a model.
+
+The wire schema must be generated or validated from one canonical contract corpus. Hand-maintained language variants require shared conformance fixtures so a field added in Lisp cannot silently disappear in Python or Nim.
+
+* Contradictions and Unknowns
+
+- The selected model cards report their own metrics; no independent StarIntel reproduction exists.
+- Dataset license and provenance are incomplete for several upstream corpora even when the model code or weights declare a permissive license.
+- The Yara model card calls its sources real-world datasets but does not establish that each dataset is legally redistributable for StarIntel deployment.
+- Graf-J's =trust_remote_code= path conflicts with the no-runtime-code-download security invariant.
+- =anuashok/ocr-captcha-v3= has a strong character error rate claim but no published whole-sequence metric or explicit numeric-only alphabet in its own card.
+- The desired CPU latency on the actual StarIntel deployment hosts has not been measured.
+- No current artifact proves that the Magento checkpoint still exceeds 94% after StarIntel reproduces preprocessing exactly.
+
+* Recommendation
+
+Approve the following research conclusion, not runtime activation:
+
+1. benchmark the Mage checkpoint first for the exact default Magento/Adobe Commerce row;
+2. benchmark Yara and Graf-J on the same Magento set and a separate heterogeneous alphanumeric set;
+3. treat Graf-J as quarantined until custom code is audited and removed from the production loading path;
+4. define a numeric-only fixture suite before selecting a numeric model;
+5. use the small explicit PHPWind ONNX model as a contract/runtime baseline, not as the accuracy winner;
+6. keep every candidate unavailable to production routing until the admission gate passes.
+
+* Sources
+
+Primary sources retrieved 2026-09-16.
+
+- [[https://huggingface.co/models?pipeline_tag=image-to-text&sort=trending&search=captcha][Hugging Face image-to-text CAPTCHA model search]].
+- [[https://huggingface.co/kirmorozov/mage-captcha-solver][kirmorozov/mage-captcha-solver model card]].
+- [[https://huggingface.co/Wall3/Yara_Captcha_Solver][Wall3/Yara_Captcha_Solver model card]].
+- [[https://huggingface.co/Graf-J/captcha-conv-transformer-finetuned][Graf-J/captcha-conv-transformer-finetuned model card]].
+- [[https://huggingface.co/anuashok/ocr-captcha-v3][anuashok/ocr-captcha-v3 model card]].
+- [[https://huggingface.co/arkhabbazan/ocr-captcha-router][arkhabbazan/ocr-captcha-router model card]].
+- [[https://huggingface.co/FlanChanXwO/phpwind-captcha-ocr][FlanChanXwO/phpwind-captcha-ocr model card]].
+- Local source audit of =lost-rob0t/starintel-server= commit =1ac298b797bd4bc0e71cfde083c6a59af55ccc6f=, especially =source/addons.lisp=, =doc/addons.org=, and =example_configs/init.lisp=.
+
+* Related Nodes
+
+- [[id:star-pro-research-008-self-sourced-captcha-solver-stack][STAR-PRO-RESEARCH-008 Self-Sourced CAPTCHA Solver Actor Stack]].
+- [[id:star-pro-captcha-004-self-sourced-local-solver-actors][STAR-PRO-CAPTCHA-004 Self-Sourced Local Solver Actors]].
+- [[id:star-captcha-002-domain-server-repository-boundary][STAR-CAPTCHA-002 CAPTCHA Domain Server and Repository Boundary]].
+- [[id:star-pro-index-001-captcha-service-actors][STAR-PRO-INDEX-001 CAPTCHA Detection, Broker, and Solver Actors]].
+
+* Footnotes and Glossary
+
+[fn:hugging-face] Hugging Face: A service hosting model repositories, model cards, datasets, and related machine-learning artifacts.
+
+[fn:captcha] CAPTCHA: Completely Automated Public Turing test to tell Computers and Humans Apart; here it means a bounded, explicitly authorized challenge whose result contract is known.
+
+[fn:starintel] StarIntel: A local-first actor-based platform for collecting, normalizing, searching, and analyzing authorized information with provenance.
+
+[fn:pro-actors] StarIntel Pro Actors: The actor package that defines specialized StarIntel actors and emits their manifests; under this decision it is packaged as a trusted Lisp add-on loaded by StarIntel Server.
+
+[fn:common-lisp] Common Lisp: The Lisp language used by StarIntel Server and the authoritative Pro Actors runtime contract.
+
+[fn:python] Python: A programming language used here only by a thin remote client and isolated experimental model workers, not as the actor control plane.
+
+[fn:nim] Nim: A compiled programming language whose asynchronous interface influenced the paired asynchronous/synchronous API requested for the browser actor system.
+
+[fn:alphanumeric] Alphanumeric: A character alphabet containing letters and numbers rather than numbers alone.
+
+[fn:crnn] Convolutional Recurrent Neural Network: A model combining image feature extraction with sequence processing, often decoded with Connectionist Temporal Classification.
+
+[fn:onnx] Open Neural Network Exchange: A portable file format for machine-learning models that can be executed by runtimes such as ONNX Runtime without loading a training framework.
+
+[fn:agpl] GNU Affero General Public License version 3: A copyleft software license whose network-use provision can require corresponding source availability for modified networked versions.
+
+[fn:tensorflow] TensorFlow: A machine-learning framework used by the Mage and Yara candidates.
+
+[fn:pytorch] PyTorch: A machine-learning framework used by the Graf-J and TrOCR candidates.
+
+[fn:safetensors] Safetensors: A tensor-weight storage format designed to avoid arbitrary-code execution during basic weight deserialization; repository-supplied model code can still execute separately.
+
+[fn:trocr] TrOCR: A Transformer-based optical-character-recognition model family using an image encoder and text decoder.
+
+[fn:cer] Character Error Rate: The edit distance between predicted and reference character sequences divided by reference length; it is not the same as whole-answer accuracy.
+
+[fn:starintel-server] StarIntel Server: The Common Lisp service owning authorization, deployment-facing actor discovery, persistence, search, and local actor hosting.
+
+[fn:add-on] Add-on: An optional trusted ASDF system loaded through StarIntel Server's registered start/stop lifecycle; it is a packaging boundary, not a sandbox.
+
+[fn:starlang] StarLang: The language layer authoritative for StarIntel actor and domain-server semantics, typed contracts, and logical dispatch behavior.
+
+[fn:sento] Sento: The Common Lisp actor runtime currently used by StarIntel Server for actor systems, mailboxes, asks, replies, and futures.
+
+[fn:star-router] Star Router: The StarIntel component responsible for client-facing and cross-authority route resolution and transport selection.

@@ -1,0 +1,112 @@
+:PROPERTIES:
+:ID:       star-pro-research-009-commercial-public-data-actors
+:END:
+#+title: STAR-PRO-RESEARCH-009 Commercial Public-Data Actor Opportunities
+#+description: Evidence-led actor candidates for paid procurement and company-monitoring products, with explicit customer-validation and approval gates.
+#+status: REVIEW
+#+approval_schema: prolog-rlm.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: NONE
+#+approval_evidence: NONE
+#+approval_base_commit: 5d01182e45a0cda1c4e062183469abd0be43e6af
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+filetags: :starintel:research:starintel-pro-actors:procurement:contracts:sec:revenue:
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research conclusion | Project owner | PENDING | Review source feasibility, product hypothesis, and priority | This research; no customer demand has been measured |
+| Architecture | Pro-actors maintainer | NOT STARTED | Design and adversarial review after research approval | |
+| Security and data rights | Operator | PENDING | Source terms, credential handling, customer separation, and retention policy | Official API references below; deployment policy remains open |
+| Operations | Operator | NOT STARTED | Rate budgets, monitoring, support, and rollback | |
+| Implementation | Repository maintainer | NOT STARTED | Executing actors, conformance, fixtures, and complete gates | |
+
+* Research Question
+
+Which bounded actors in =starintel-pro-actors= could plausibly support a paid intelligence product, using available official data and the existing StarIntel document contract?
+
+* Verified Source and Repository Facts
+
+- The General Services Administration (GSA) Get Opportunities Public API returns published SAM.gov opportunity details, requires an API key and posted-date window, paginates with =limit=/=offset=, and exposes notice IDs, procurement type, North American Industry Classification System (NAICS) code, response deadline, and links. Its public endpoint exposes only the latest active version; the source says active notices update daily and archived notices weekly.[fn:gsa]
+- USAspending's official endpoint reference says its endpoints currently require no authorization. It exposes federal award data through documented query endpoints.[fn:usaspending]
+- The Securities and Exchange Commission (SEC) exposes company submission history and extracted financial data through JSON APIs. Its fair-access guidance currently caps scripted access at 10 requests per second per user, across machines.[fn:sec]
+- The active =starintel-pro-actors= lock pins release/profile =0.9.1= and base/wire schema =0.9.0= at canonical commit =6479c0a9dc88ce9fed183515fc4df5d245de0b3a=. The canonical schema includes =procurement=, =contract=, =financial-observation=, =source=, and =actor-manifest= dtypes. The runtime currently has source-specific collection actors, a document publisher, and RabbitMQ integration; it has no dedicated GSA or SEC actor in the inspected Python tree.[fn:repo]
+- Existing StarIntel government-data designs already cover procurement as a source family and define a separate broad jurisdiction acquisition program. Any federal product actor should reuse its source/provenance model, not create a second government-data control plane.[fn:govdata]
+
+* Inferences and Unverified Commercial Assumptions
+
+- Small contractors may pay for timely, narrowly filtered notices and deadline changes. The APIs prove data availability, not willingness to pay or alert quality.
+- Vendors may pay for incumbent and spending context around notices. A join between opportunities and awards requires identity validation; a shared agency name or NAICS code alone cannot prove a contract lineage.
+- Analysts may pay for filing-change monitoring, but this market may be crowded. Public access and permission to reuse SEC content do not imply differentiation.
+- No revenue, market-size, conversion, or pricing claim is established by this research. Customer interviews, a measured pilot, and source-rights review are required before product commitment.
+
+* Candidate Actor Portfolio
+
+| Priority | Actor candidate | Official input | StarIntel output | Paid product hypothesis | First falsifier |
+|----------+-----------------+----------------+------------------+-------------------------+-----------------|
+| 1 | =FederalOpportunityActor= | GSA public opportunities | =procurement= with stable notice identity, source, deadline, revision observation | Targeted bid alerts and change summaries for a narrowly defined contractor segment | Five target customers reject a paid pilot despite accurate alerts |
+| 2 | =FederalAwardContextActor= | USAspending awards | =contract= and evidence-backed relations to notices only when identifiers match | Incumbent and recompete context sold with opportunity alerts | Identifier coverage is too sparse for useful verified joins |
+| 3 | =SECFilingChangeActor= | SEC submissions and company facts | =financial-observation= and source-backed change alerts | Diligence monitoring for a selected industry | Pilot users cannot identify a decision improved by the alert |
+
+The first experiment should be a bounded GSA collector plus a manual customer-facing digest, followed by award context only when deterministic joins are measured. A generic all-sector alert feed would obscure whether a narrow buyer has value.
+
+* Proposed ADADR Direction — Research Only
+
+** Analyze
+
+The hardest problem is producing a trusted, timely, non-duplicative signal from a public feed, not fetching a JSON page. Current source behavior provides a daily cadence and only the latest active opportunity version. That makes a durable observation history and deadline-change detection necessary for the proposed product.
+
+** Design candidate
+
+Give each source adapter an explicit request budget and persisted checkpoint. Store source snapshots by source notice ID plus observed content digest. Convert only validated fields into the pinned StarIntel dtype, preserve the raw source locator and collection time, and emit change events only when an observed field changes. Keep customer watchlists and billing outside the collector; a separate projection can filter canonical records for each customer. Use the existing publisher and contracted server operations.
+
+** Adversarial review
+
+- A notice can disappear or be cancelled after the latest-active API response; absence from one page is not deletion evidence. Reconcile by notice ID and record an unknown state until a documented source response confirms status.
+- Offset pagination can change while scanning. Use overlapping posted-date windows and stable notice IDs; repeated pages must be idempotent. Measure missed notices against a bounded independent sample.
+- A deadline may carry a timezone or be missing. Preserve the source value and avoid fabricating an exact deadline in customer alerts.
+- An awardee name may collide across entities. Relations require exact source identifiers or reviewed evidence; do not infer an incumbent from text similarity alone.
+- Rate limits, API-key rotation, outage, and malformed records must produce bounded retries and visible terminal gaps, not silent success.
+- Customer workspaces must receive only their authorized projection; a shared source cache must not leak private watchlists or contact data.
+
+** Decision gate
+
+Research approval is pending. This document recommends the GSA actor as the first design candidate, subject to an operator-selected product segment and at least five buyer interviews. It does not approve implementation or claim that a paid market exists.
+
+* First Design Acceptance Criteria
+
+1. A fixture scan with overlapping pages emits one canonical notice per stable source ID and preserves every changed observation.
+2. Source snapshots, response errors, and every projected deadline alert have reproducible provenance.
+3. Malformed inputs, cancellation, outage, and restart never advance a checkpoint past unprocessed pages.
+4. A pinned-schema conformance test validates all emitted document variants.
+5. A measured pilot reports alert precision, lateness, misses, duplicate rate, operator time, and customer willingness to pay without inventing revenue.
+
+* Related Nodes
+
+- [[id:star-pro-index-002-commercial-public-data-actors][STAR-PRO-INDEX-002 Commercial Public-Data Actors]]
+- [[id:starintel-auto-research-government-data-003][STAR-RESEARCH-003 US Government Data Acquisition Landscape]]
+- [[id:starintel-auto-research-government-data-actors-003][STAR-RESEARCH-PIPELINE-003 Government Data Acquisition Actors]]
+
+* Sources
+
+- Retrieved 2026-09-16: GSA, [[https://open.gsa.gov/api/get-opportunities-public-api/][Get Opportunities Public API]].
+- Retrieved 2026-09-16: USAspending, [[https://api.usaspending.gov/docs/endpoints][API endpoints]].
+- Retrieved 2026-09-16: SEC, [[https://www.sec.gov/search-filings/edgar-search-assistance/accessing-edgar-data][Accessing EDGAR Data]].
+- Inspected 2026-09-16: =starintel-pro-actors/schema/starintel-schema.lock.json=, =python/src/starintel_pro_actors/=, and the canonical schema manifest at the pinned commit.
+- Inspected 2026-09-16: [[id:starintel-government-data-ohio-source-profile-contract-002][STAR-GOVDATA-DESIGN-002 Ohio Source Profile Contract]].
+
+* Footnotes and Glossary
+
+[fn:gsa] GSA: General Services Administration. SAM.gov is the federal procurement notice system; this reference is its official public API contract.
+[fn:usaspending] USAspending: Official United States federal spending data service and API.
+[fn:sec] SEC: Securities and Exchange Commission. EDGAR is its public filing system.
+[fn:repo] StarIntel release and dtype authority come from the live consumer lock and the pinned canonical manifest, not the schema filename alone.
+[fn:govdata] Government-data source profile: Existing StarIntel contract for source-specific acquisition and provenance.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-09-16 | Researched three revenue-oriented actor candidates and selected a bounded procurement pilot as the first design candidate | Codex | GSA, USAspending, SEC official references; inspected pinned schema and pro-actors source |

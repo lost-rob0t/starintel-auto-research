@@ -1,80 +1,109 @@
 :PROPERTIES:
 :ID:       starintel-star-lang-design-014
 :END:
-#+title: STAR-LANG-014 Kotlin Runtime and JVM Transpilation
-#+description: Supersede the Common-Lisp-only runtime decision: keep the closed StarLang front end and normalized IR, transpile executable actor units to Kotlin, and migrate runtime ownership to a single Kotlin/JVM implementation with Java ABI compatibility and narrowly scoped native adapters.
+#+title: STAR-LANG-014 Polyglot Runtime Expansion and JVM Transpilation
+#+description: Preserve Common Lisp as a permanent first-class StarLang compiler/runtime while adding Kotlin/JVM as an additive peer runtime and retaining portable multi-language bindings and adapters.
 #+status: APPROVED BY OPERATOR REVERSAL
-#+filetags: :starintel:design:star-lang:kotlin:jvm:runtime:transpiler:java:nim:ffi:migration:
+#+filetags: :starintel:design:star-lang:polyglot:common-lisp:kotlin:jvm:runtime:transpiler:java:nim:ffi:
 #+todo: TODO RESEARCHING REVIEW BLOCKED APPROVED | DONE DENIED
 #+created: [2026-09-20 Sun]
-#+last_modified: [2026-09-20 Sun]
+#+last_modified: [2026-09-21 Mon]
 
 * Authority
 
-This node records the explicit operator reversal on 2026-09-20: port StarLang runtime code to Kotlin and transpile executable StarLang to Kotlin, using Java, Nim, or C only where they are the better boundary technology.
+This node records the explicit operator reversal on 2026-09-21.
 
-It supersedes the runtime-host restriction in STAR-LANG-001. It does not reopen the closed-source parser safety model or authorize multiple competing semantic runtimes.
+The earlier 2026-09-20 version of STAR-LANG-014 incorrectly framed Kotlin/JVM as
+a single replacement runtime and Common Lisp as temporary migration debt. That
+direction is superseded.
+
+The approved direction is now **polyglot**:
+
+- Common Lisp remains a permanent first-class StarLang compiler and runtime.
+- Kotlin/JVM is added as a peer runtime backend.
+- Portable generated/boundary targets remain supported across Common Lisp,
+  Python, TypeScript, Nim, Java, Kotlin, Go, Rust, Emacs Lisp, and Prolog.
+- Language-neutral StarLang specifications, normalized IR, wire contracts,
+  canonical fixtures, and conformance tests own semantics across implementations.
+
+This reversal does not reopen the closed-source parser safety model and does not
+authorize raw host-language evaluation.
 
 * Decision
 
-1. The closed StarLang parser, macro expander, validator, normalized IR producer, and canonical manifest producer remain compiler authorities until separately migrated.
-2. The canonical executable runtime target becomes Kotlin/JVM.
-3. The compiler gains a deterministic Kotlin backend from normalized runtime-neutral IR.
-4. Runtime behavior migrates from Common Lisp to Kotlin subsystem-by-subsystem under differential parity tests.
-5. After a Kotlin subsystem reaches parity and cutover, the superseded Common Lisp runtime implementation is deleted or reduced to a non-authoritative compatibility adapter. Permanent duplicate semantic ownership is forbidden.
-6. Public Kotlin runtime APIs MUST be Java-friendly; Java is an ABI/consumer surface, not a second semantic implementation.
-7. Nim MAY implement isolated native/edge adapter executables when a JVM is unavailable or materially inappropriate. Such adapters communicate through versioned StarLang wire/effect-port contracts and do not own actor semantics.
-8. C is last-resort FFI glue for external native libraries only. No parser, compiler, dispatcher, mailbox, supervision, lifecycle, recovery, or actor semantics may be reimplemented in C.
+1. Common Lisp remains a permanent supported implementation for the closed
+   parser, macro expander, validator, normalized IR producer, compiler, and actor
+   runtime.
+2. Kotlin/JVM is an additive peer runtime target, not the canonical replacement
+   for Common Lisp.
+3. The compiler retains deterministic IR->Kotlin generation.
+4. Runtime behavior may be implemented in multiple conforming backends.
+5. Reaching parity in Kotlin does not authorize deletion, demotion, or
+   fallback-only treatment of the Common Lisp runtime.
+6. A supported backend may be removed or demoted only by a new explicit
+   operator-approved decision.
+7. Public Kotlin runtime APIs MUST remain Java-friendly.
+8. Nim MAY implement isolated native/edge adapters behind versioned StarLang
+   wire/effect contracts.
+9. C remains thin FFI glue unless separately approved.
+10. Generated bindings and external adapters are not automatically full native
+    runtimes; the language matrix must distinguish those capabilities clearly.
 
-* Runtime Ownership Target
+* Runtime Ownership Model
 
 #+begin_src text
 .star source
   -> closed Common Lisp front end
   -> normalized runtime-neutral IR
-  -> Kotlin backend
-  -> Kotlin source / JVM bytecode
-  -> Kotlin StarLang runtime
-       +-> deterministic actor core
-       +-> bounded mailbox
-       +-> runtime directory
-       +-> lifecycle + idempotency
-       +-> supervision
-       +-> journal/replay
-       +-> leases/capabilities/artifacts
-       +-> adapter/effect ports
-       +-> Java-compatible public API
-       +-> optional Nim native adapter processes
+       +-> Common Lisp runtime
+       |    +-> mailbox/lifecycle/supervision/journal/leases/capabilities
+       |
+       +-> Kotlin backend
+            -> Kotlin source / JVM bytecode
+            -> Kotlin/JVM peer runtime
+                 +-> same portable semantics
+                 +-> Java-compatible public API
+
+Portable boundaries / generated bindings:
+  Common Lisp | Python | TypeScript | Nim | Java | Kotlin | Go | Rust | Emacs Lisp | Prolog
 #+end_src
+
+No runtime language owns the semantic contract by itself. The specification,
+normalized IR, portable protocol, canonical fixtures, and conformance suite are
+the cross-language authority.
 
 * Language Selection
 
-| Layer | Owner | Rule |
-|-------+-------+------|
-| Parser / source spans / macro expansion | Common Lisp for this migration | Preserve the closed parser and current safety invariants. |
-| Normalized IR / canonical manifests | Common Lisp for this migration | Remain runtime-neutral and deterministic. |
-| Executable code generation | Common Lisp compiler -> Kotlin backend | Generated Kotlin is deterministic from normalized IR. |
-| Runtime actor semantics | Kotlin | Single canonical implementation after cutover. |
-| JVM consumer ABI | Kotlin with Java-compatible API | No handwritten duplicate Java runtime. |
-| Android runtime | Kotlin/JVM | Same semantics and portable contracts; Android-specific effects remain adapters. |
-| Native/edge effects | Nim when justified | Separate process/FFI adapter, never semantic core. |
-| Native library glue | C only when unavoidable | Thin ABI shim only. |
+| Layer | Common Lisp | Kotlin/JVM | Other languages |
+|-------+-------------+------------+-----------------|
+| Parser / source spans / macro expansion | Permanent first-class owner | Consume normalized output | No alternate parser without separate approval |
+| Normalized IR / canonical manifests | Permanent compiler implementation | Consume shared contracts | Consume shared contracts |
+| Executable code generation | Native CL path + Kotlin generator | Generated Kotlin | Portable binding generators as supported |
+| Runtime actor semantics | Permanent supported backend | Peer supported backend | Future conforming runtimes may be added |
+| JVM consumer ABI | N/A | Kotlin with Java-compatible API | Java consumer surface |
+| Android runtime | May interoperate remotely/through protocol | Kotlin/JVM peer backend | Boundary clients/adapters |
+| Native/edge effects | Supported through ports | Supported through ports | Nim when justified |
+| Native library glue | Through FFI where needed | Through JVM/native boundary | C only when unavoidable |
 
-* Migration Rule
+* Conformance Rule
 
-The existing Common Lisp runtime is the differential oracle during migration, not a permanent alternate runtime.
+Every runtime implementation must execute the same shared fixtures against the
+real runtime boundary.
 
-For every port slice:
+For every Kotlin parity slice:
 
 1. freeze behavior as portable fixtures and canonical traces;
-2. add a Kotlin parity test that executes the real Kotlin boundary;
-3. run the same fixture against the current Common Lisp owner;
-4. compare normalized outputs, lifecycle trace, errors, generations, replay/idempotency state, and externally visible ordering;
-5. cut ownership to Kotlin only when parity is green;
-6. delete or demote the superseded Common Lisp behavior in the same or immediately following bounded cutover change;
-7. never add new authoritative runtime behavior only to the old Common Lisp path.
+2. execute the fixture against the real Common Lisp implementation;
+3. execute the fixture against the real Kotlin/JVM implementation;
+4. compare normalized outputs, lifecycle trace, errors, generations,
+   replay/idempotency state, and externally visible ordering;
+5. keep both implementations green after parity;
+6. add new semantic behavior to the language-neutral contract and then implement
+   it in supported runtimes rather than silently privileging one backend.
 
-* Required Port Order
+Parity is not a cutover trigger.
+
+* Required Kotlin Parity Order
 
 1. portable value model and actor/reference types;
 2. bounded FIFO mailbox;
@@ -88,8 +117,8 @@ For every port slice:
 10. artifact and verification contracts;
 11. adapter SDK and HTTP/process ports;
 12. durable/distributed transport integration;
-13. CLI run/materialization path;
-14. prototype compatibility retirement and removal of superseded Common Lisp runtime ownership.
+13. CLI/backend selection and packaging;
+14. prototype compatibility retirement where unrelated to permanent Common Lisp runtime support.
 
 * Transpiler Contract
 
@@ -102,11 +131,11 @@ The Kotlin backend MUST:
 - generate explicit actor definitions, contracts, effect requirements, and runtime registration;
 - keep external effects behind typed ports;
 - produce source maps/provenance back to StarLang source spans where available;
-- support a canonical formatting mode so generated-source hashes are stable.
+- support canonical formatting so generated-source hashes are stable.
 
-* JVM Runtime Contract
+* Shared Runtime Contract
 
-The Kotlin runtime MUST preserve the approved runtime semantics already exercised by StarLang:
+Every full runtime backend MUST preserve:
 
 - bounded mailboxes and explicit full/closed delivery outcomes;
 - per-runtime ownership with no process-global actor registry;
@@ -120,7 +149,8 @@ The Kotlin runtime MUST preserve the approved runtime semantics already exercise
 - durable journal/replay and lease fencing;
 - capabilities and effect-port isolation.
 
-Concurrency is an implementation detail and MUST NOT change externally visible semantic ordering. Coroutine/virtual-thread adapters may schedule work only around the deterministic semantic core.
+Concurrency is an implementation detail and MUST NOT change externally visible
+semantic ordering.
 
 * Java ABI
 
@@ -134,36 +164,42 @@ Kotlin public types must remain straightforward for Java callers:
 
 * Nim / C Boundary
 
-Nim is preferred over handwritten C for standalone native helpers because it offers a higher-level implementation while producing small native executables.
+Nim is preferred over handwritten C for standalone native helpers when a JVM is
+unavailable or materially inappropriate.
 
-Allowed examples:
+Allowed examples include OS/device integration, native codecs/packet adapters,
+and constrained edge workers.
 
-- OS/device integration unavailable on the JVM;
-- high-throughput native codec or packet adapters;
-- constrained edge workers where the JVM cannot be deployed.
-
-C is allowed only when binding an existing C ABI or where no practical Java FFM/JNI/JNA/Nim boundary exists.
-
-All native components communicate via frozen wire/effect-port contracts. They do not import or reproduce StarLang runtime state machines.
+C is allowed only for thin ABI/FFI integration unless a separate explicit
+operator decision expands its role.
 
 * Acceptance Gates
 
+- Common Lisp runtime/compiler tests remain mandatory and green.
 - Kotlin runtime tests execute the real Kotlin runtime.
-- Differential fixtures prove parity with the current Common Lisp oracle for every migrated slice.
-- Generated Kotlin is byte-for-byte deterministic after canonical formatting.
+- Shared fixtures prove Common Lisp/Kotlin parity for each implemented slice.
+- Generated Kotlin is deterministic after canonical formatting.
 - JVM tests include Kotlin and Java consumer compilation.
-- Android-compatible tests cover the portable runtime subset.
+- Android-compatible tests cover the portable runtime subset where applicable.
 - No Kotlin runtime slice depends on prototype/.
-- No semantic behavior exists in both Kotlin and Common Lisp after its declared cutover.
-- Native adapters cannot mutate runtime-owned state except through typed messages/effect responses.
-- CI reports the exact migration ownership map and fails if a cutover subsystem regains duplicate authority.
+- CI rejects documentation or agent contracts that mark Common Lisp as
+  temporary, fallback-only, retired, or scheduled for deletion.
+- Portable generated/boundary targets remain enumerated and tested according to
+  their supported capability tier.
+- Native adapters cannot mutate runtime-owned state except through typed
+  messages/effect responses.
 
 * Toolchain Baseline
 
-Implementation currently targets Kotlin 2.4.20 and Gradle 9.7.1. Exact versions are implementation pins rather than language semantics and may be upgraded independently with CI proof.
+Implementation currently targets Kotlin 2.4.20 and Gradle 9.7.1. Exact versions
+are implementation pins rather than language semantics and may be upgraded with
+CI proof.
 
-* Superseded Decision
+* Relationship to STAR-LANG-001
 
-STAR-LANG-001 remains authoritative for the closed parser, declarative source model, safety boundaries, normalized IR discipline, and deterministic semantics except where this node explicitly changes runtime implementation ownership.
+STAR-LANG-001 remains authoritative for the closed parser, declarative source
+model, safety boundaries, normalized IR discipline, and deterministic semantics.
 
-The rule "Common Lisp is the sole runtime implementation language" is superseded by this node.
+Its old "Common Lisp is the sole runtime implementation language" restriction is
+superseded only to permit additional conforming runtimes. It is **not**
+superseded in a way that removes Common Lisp.

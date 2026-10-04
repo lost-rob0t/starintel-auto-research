@@ -1,0 +1,392 @@
+:PROPERTIES:
+:ID:       starintel-star-server-064-distributed-document-target-access-a2a
+:END:
+#+title: STAR-SERVER-064 Distributed Document and Target Access Protocol
+#+description: ADADR design for star.access/1: distributed document and Target operations above the generic database runtime with RabbitMQ-first transport, StarRouter projection, and A2A v1.0 interoperability.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:design:star-server:database:documents:targets:rabbitmq:starrouter:a2a:
+#+created: [2026-10-03 Sat]
+#+last_modified: [2026-10-03 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | StarIntel operator | PENDING | Approval/review of STAR-RESEARCH-064 findings | [[id:starintel-star-research-064-distributed-document-target-access-a2a][STAR-RESEARCH-064]], [[https://github.com/lost-rob0t/starintel-auto-research/issues/263][#263]] |
+| Architecture/design | StarIntel operator | PENDING | Explicit review of this exact star.access/1 design | [[https://github.com/lost-rob0t/starintel-auto-research/issues/263][#263]] |
+| Implementation | Repository maintainers | NOT STARTED | Design approval plus project-native issue/PR/test gates | linked implementation graph |
+| Publication | Auto-Research maintainer | PENDING | Main Pages workflow succeeds for exact main head | Public site after deployment |
+
+No implementation authority is implied by this document's readiness state.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-10-03 | Created distributed access design from STAR-RESEARCH-064 and the live W08 implementation baseline. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-server/pull/295][PR #295]], [[https://github.com/lost-rob0t/starintel-auto-research/issues/263][#263]] |
+
+* Decision
+
+Adopt =star.access/1= as a semantic family over the existing Star operation/lifecycle substrate.
+
+It has two first-class namespaces:
+
+- =star.documents.*@1= for generic document access;
+- =star.targets.*@1= for durable Target lifecycle access.
+
+This design does not create a third generic envelope. It reuses the Actor2Actor/StarRouter operation identity, correlation, deadline, cancellation, idempotency and terminal-result semantics.
+
+#+begin_example
+caller / actor / external agent
+             |
+             v
+       star.access/1
+      /             \
+star.documents.*   star.targets.*
+      |                |
+      +--------+-------+
+               |
+     application authority
+               |
+       +-------+--------+
+       |                |
+ generic DB runtime   Target runtime
+   PR #295/W08      acceptance/lease/fence
+       |                |
+       +-------+--------+
+               |
+        transport projection
+        /       |        \
+      local   Rabbit   StarRouter
+                         |
+                       ZeroMQ
+
+A2A -> star.actor2actor/1 -> same application operations
+#+end_example
+
+* Canonical Request Context
+
+Every operation carries or resolves:
+
+- protocol/profile version;
+- stable operation name;
+- request/message id;
+- correlation and causation ids;
+- caller/principal reference established by the host;
+- tenant and dataset;
+- logical database/profile where applicable;
+- deadline;
+- cancellation identity where supported;
+- idempotency key where replayable mutation semantics require one;
+- trace/provenance references;
+- bounded metadata;
+- typed payload/bindings.
+
+Transport-specific peer IDs are never application identity.
+
+* Result Algebra
+
+All projections normalize to the existing common terminal classes, including:
+
+- ok;
+- invalid;
+- unauthorized/forbidden;
+- not-found;
+- conflict;
+- stale-authority;
+- overloaded;
+- deadline-exceeded;
+- cancelled;
+- dependency-unavailable;
+- no-route;
+- outcome-unknown;
+- protocol-error;
+- internal-error.
+
+Backend-specific exceptions, HTTP status, Rabbit settlement, ZeroMQ disconnects and A2A task states are projections into this algebra.
+
+* Document Operations
+
+** =star.documents.get@1=
+
+Inputs:
+
+- namespace/dataset/logical database;
+- document id;
+- optional opaque revision/version precondition;
+- consistency intent.
+
+Output:
+
+- canonical StarIntel document;
+- opaque revision/version token;
+- serving node/generation metadata suitable for diagnostics, not authority.
+
+** =star.documents.head@1=
+
+Returns bounded identity/revision/existence metadata without the full document.
+
+** =star.documents.put@1=
+
+Create/replace/upsert according to the named operation policy. Requires idempotency and explicit revision/precondition semantics when the selected operation can conflict.
+
+** =star.documents.patch@1=
+
+Applies a typed bounded patch according to application policy. Raw backend patch/query syntax is forbidden.
+
+** =star.documents.delete@1=
+
+Uses opaque revision/precondition semantics. Tombstone behavior remains application/document-schema policy.
+
+** Bulk operations
+
+Bulk get/write use bounded item and byte limits. Per-item outcomes are explicit. A batch cannot hide partial mutation ambiguity behind one Boolean result.
+
+** Query
+
+=star.documents.query@1= carries a typed named query/profile plus bindings, bounded limit/order and opaque cursor. Remote input cannot supply raw SQL/Cypher/Mango/Prolog source unless a separately approved profile explicitly models that language.
+
+** Changes
+
+=star.documents.changes@1= provides bounded subscription/changefeed semantics with sequence/cursor, cancellation and backpressure.
+
+* Target Operations
+
+** =star.targets.submit@1=
+
+Accepts or references a canonical StarIntel 0.10.1 Target plus request idempotency. The application service validates/persists it and enters the existing target acceptance/scheduling path.
+
+Caller input never grants execution authority.
+
+** =star.targets.get@1= and =status@1=
+
+Return persisted Target and execution/acceptance projection without leaking private lease backend details.
+
+** =star.targets.cancel@1=
+
+Requests cancellation. Cancellation acknowledgement means the request was observed; it does not claim rollback of already committed side effects.
+
+** =star.targets.reschedule@1=
+
+Updates the canonical durable schedule using Target identity/revision/idempotency rules. It cannot create a parallel cron record.
+
+** =star.targets.result@1=
+
+Returns typed result/artifact/document references tied to the canonical execution identity.
+
+* Runtime-Owned Target Dispatch
+
+Once a Target is accepted, runtime dispatch may carry:
+
+- schedule id;
+- execution id;
+- attempt;
+- runtime-issued lease id;
+- runtime-issued fencing token;
+- trace id;
+- canonical deadline.
+
+Only the authoritative runtime may issue/refresh lease/fence state. Workers must present current fencing authority at the commit boundary for exclusive Target effects.
+
+* Distributed Node Directory
+
+Document-access service instances advertise leased registrations containing:
+
+- stable component/node id;
+- generation/incarnation;
+- supported operation/profile versions;
+- logical database/dataset/namespace coverage;
+- optional partition/routing ownership;
+- supported read consistency modes;
+- transport profiles;
+- readiness/pressure hints;
+- registration expiry.
+
+Registrations are not authorization grants.
+
+* Partition and Write Routing
+
+Default stable routing identity is derived from application namespace/dataset plus document/Target identity or an explicitly modeled partition key.
+
+Writes route to one authoritative owner for the selected partition.
+
+Do not use a Rabbit competing-consumer queue to decide storage ownership.
+
+Re-registration after restart increments generation. Replies/heartbeats from older generations cannot restore authority.
+
+* Read Consistency
+
+The protocol can express:
+
+- authoritative;
+- session;
+- eventual.
+
+A backend/profile advertises only modes it can actually satisfy. No generic =strong= claim exists until a concrete topology proves it.
+
+* Distributed Query Coordinator
+
+Dataset/cluster query scope uses a bounded coordinator:
+
+1. resolve eligible partition owners/replicas;
+2. propagate the absolute deadline;
+3. cap fan-out;
+4. execute partition queries;
+5. deterministically merge/order/dedupe;
+6. return an opaque distributed cursor;
+7. report complete versus partial and missing partitions explicitly.
+
+Partial results may be returned only when the requested operation policy allows them.
+
+* RabbitMQ Projection
+
+Use separate broker surfaces for commands and durable document events.
+
+Example logical topology:
+
+#+begin_example
+star.documents.rpc
+  -> node-addressed queues chosen by the application router
+
+star.documents.events
+  -> documents.created.*
+  -> documents.updated.*
+  -> documents.deleted.*
+#+end_example
+
+Rabbit properties preserve request/message identity, correlation, deadline, idempotency and operation/profile identifiers.
+
+Mutation ordering remains:
+
+#+begin_example
+authorize/validate
+ -> authoritative application commit
+ -> durable outbox state
+ -> Rabbit publish
+ -> settlement
+#+end_example
+
+A Rabbit ACK is not proof of application commit. Broker disconnect after possible commit becomes =outcome-unknown= unless the idempotency record reconciles the terminal result.
+
+Target delivery may remain on a durable Rabbit route, but acceptance/lease/fence state remains application authority.
+
+* StarRouter Projection
+
+[[https://github.com/lost-rob0t/starRouter/issues/5][starRouter #5]] maps the same =star.documents.*= and =star.targets.*= operations onto STAR-SERVER-040/041 routing.
+
+StarRouter owns:
+
+- authority/resource resolution;
+- route eligibility/generation;
+- request multiplexing;
+- transport connection/session behavior;
+- HWM/backpressure translation.
+
+StarRouter does not own document persistence, Target leases, or backend consistency.
+
+The old Nim fixed =getDocument/updateDocument/deleteDocument/target= event enum is compatibility input only.
+
+* A2A v1.0 Projection
+
+A2A enters through the canonical =star.actor2actor/1= adapter.
+
+Mapping:
+
+- actor capability/manifest -> A2A AgentCard/skill metadata;
+- immediate command -> A2A Message response where no durable task is needed;
+- stateful remote Target work -> A2A Task;
+- typed task outputs -> A2A Artifact;
+- progress -> A2A task/status streaming;
+- cancellation -> canonical Star cancel request;
+- context/message identity -> correlation mapping.
+
+The Star Target remains the StarIntel durable work record. A2A Task remains the external protocol representation managed by the A2A server.
+
+A2A metadata cannot manufacture principal, tenant, Star capability, lease or fencing authority.
+
+* Security and Authority
+
+- Star Language owns portable semantic/profile definitions and generated fixtures.
+- StarIntel Server owns principal authorization, database profile resolution, Target acceptance, persistence, leases/fencing, idempotency journal and application commit.
+- Rabbit credentials authenticate broker peers only.
+- StarRouter transport identity authenticates/routs a peer/session only.
+- A2A authentication is projected into a server-established principal; raw credentials stay outside canonical messages.
+- No DSN, password, raw backend connection or private cloud identifier enters portable manifests/messages.
+- No remote raw SQL/Cypher/Orient SQL/arbitrary Prolog source.
+- Mutation replay requires explicit idempotency authority.
+- Stale Target generations/fences fail closed.
+
+* Compatibility and Migration
+
+1. Land/verify PR #295 without absorbing future adapter work.
+2. Implement [[https://github.com/lost-rob0t/star-lang/issues/198][star-lang #198]] canonical profile/fixtures.
+3. Migrate CouchDB through W09 [[https://github.com/lost-rob0t/starintel-server/issues/287][server #287]].
+4. Implement [[https://github.com/lost-rob0t/starintel-server/issues/315][server #315]] application service, distributed ownership/query and Rabbit projection.
+5. Implement [[https://github.com/lost-rob0t/starRouter/issues/5][starRouter #5]] projection.
+6. Reuse star-lang #160/server #291 for A2A rather than creating another gateway.
+7. Convert old CouchDB actors and legacy Nim StarRouter event forms into bounded adapters/compatibility paths.
+8. Remove compatibility only after conformance evidence proves maintained callers migrated.
+
+* Adversarial Review
+
+** Reject: one giant generic DB RPC
+
+Reason: backend operations, document semantics and Target lifecycle have different invariants. A public =execute anything= endpoint would leak trusted operation catalogs and undermine typed capability boundaries.
+
+** Reject: Rabbit as write-owner election
+
+Reason: competing consumers distribute messages, not storage authority. Ownership needs deterministic routing plus generation/fencing.
+
+** Reject: A2A Task as Star Target database
+
+Reason: loses existing acceptance/schedule/recovery/lease/fence semantics and makes external protocol state authoritative over local application state.
+
+** Reject: StarRouter-owned consistency
+
+Reason: transport routing cannot promise database replication consistency it does not implement.
+
+** Reject: raw backend revisions and query languages
+
+Reason: couples clients to CouchDB/Postgres/graph/Prolog details and defeats portable named-operation policy.
+
+** Reject: client-provided Target fencing
+
+Reason: lets untrusted input impersonate runtime-issued execution authority.
+
+* Acceptance Criteria
+
+Architecture is implementable only when:
+
+- W08/PR #295 remains the single generic DB runtime authority;
+- canonical document/Target operation fixtures exist in StarLang;
+- local and Rabbit paths execute the same application operations;
+- write ownership is deterministic and generation-fenced;
+- cluster queries expose explicit partial state;
+- mutations preserve idempotency and =outcome-unknown=;
+- Target submit/cancel/reschedule use the existing durable acceptance/lease/fence runtime;
+- StarRouter projection carries identical result semantics;
+- A2A projection maps AgentCard/Message/Task/Artifact without replacing Star Target authority;
+- 0.10.1 generated document/Target types are used rather than hand-maintained duplicates;
+- deadline representation is reconciled to the canonical generated type;
+- compatibility paths are bounded and tested.
+
+* Implementation Issue Graph
+
+- [[https://github.com/lost-rob0t/star-lang/issues/198][star-lang #198 — canonical distributed document + Target profile]]
+- [[https://github.com/lost-rob0t/starintel-server/pull/295][server PR #295 — W08 generic DB runtime]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/287][server #287 — W09 CouchDB adapter]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/315][server #315 — distributed application service + Rabbit]]
+- [[https://github.com/lost-rob0t/starRouter/issues/5][starRouter #5 — StarRouter projection]]
+- [[https://github.com/lost-rob0t/star-lang/issues/160][star-lang #160 — A2A binding]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/291][server #291 — A2A gateway]]
+
+The exactly-15-worker board [[https://github.com/lost-rob0t/starintel-server/issues/293][server #293]] remains unchanged; #198/#315/starRouter#5 are follow-on integration work rather than silently adding workers.
+
+* Footnotes and Glossary
+
+- *star.access/1* — Umbrella semantic family for typed document and Target access operations.
+- *Projection* — Adapter that maps canonical semantics to a transport/interoperability protocol without changing application meaning.
+- *Opaque revision token* — Backend-neutral concurrency/version value whose internal CouchDB/Postgres/etc. representation is not part of the public contract.
+- *Authoritative owner* — Current generation-bearing service allowed to commit a routed write.
+- *Partial query* — Distributed query result explicitly reporting that one or more required partitions did not contribute.
+- *A2A Task* — External A2A stateful work representation; not the canonical StarIntel Target persistence or lease record.

@@ -1,0 +1,316 @@
+:PROPERTIES:
+:ID:       starintel-star-research-064-distributed-document-target-access-a2a
+:END:
+#+title: STAR-RESEARCH-064 Distributed Document and Target Access with RabbitMQ, StarRouter, and A2A
+#+description: ARADR research for a backend-neutral distributed StarIntel document and Target access plane built above the generic database runtime, RabbitMQ-first transport, future StarRouter projection, and A2A v1.0 interoperability.
+#+status: READY_FOR_DESIGN
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+filetags: :starintel:research:star-server:database:documents:targets:rabbitmq:starrouter:a2a:distributed:
+#+created: [2026-10-03 Sat]
+#+last_modified: [2026-10-03 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research scope | StarIntel operator | PENDING | Review that the requested document/Target/Rabbit/StarRouter/A2A scope is captured | [[https://github.com/lost-rob0t/starintel-auto-research/issues/263][#263]] |
+| Research conclusion | StarIntel operator | PENDING | Review of the source-backed findings and recommended authority split | [[https://github.com/lost-rob0t/starintel-auto-research/issues/263][#263]] |
+| Design promotion | StarIntel operator | PENDING | Review of derived STAR-SERVER-064 design | [[id:starintel-star-server-064-distributed-document-target-access-a2a][STAR-SERVER-064]] |
+| Implementation | Repository maintainers | NOT STARTED | Approved design plus project-native implementation gates | |
+| Publication | Auto-Research maintainer | PENDING | Main Pages workflow succeeds for exact main head | Public site after deployment |
+
+Lifecycle readiness is not approval. This research is sufficient to derive a bounded design; it does not authorize implementation by itself.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-10-03 | Created ARADR research from the live W08 database runtime, current Target runtime, StarLang 0.10.1 schema authority, approved StarRouter architecture, and current A2A v1.0 specification. | GPT-5.6 Sol | [[https://github.com/lost-rob0t/starintel-server/pull/295][server PR #295]], [[https://github.com/lost-rob0t/starintel-auto-research/issues/263][#263]] |
+
+* Research Question
+
+What protocol boundary should StarIntel use for generic document access and Target work when:
+
+1. document reads/writes/queries must distribute across many nodes;
+2. RabbitMQ is the first production distributed transport;
+3. StarRouter must later carry the same semantics;
+4. Target submission/status/cancel/reschedule/results must be first-class;
+5. external agents must interoperate through Agent2Agent (A2A);
+6. Star Language remains the canonical schema/semantic authority and StarIntel Server remains the application persistence/authorization/fencing authority?
+
+* Current Source Baseline
+
+** PR #295 is the generic execution substrate
+
+[[https://github.com/lost-rob0t/starintel-server/pull/295][starintel-server PR #295]] implements W08 / issue #286:
+
+- backend/profile/named-operation registries;
+- read/write/transaction/subscribe access classes;
+- typed request/result and backend-neutral error handling;
+- mandatory idempotency identity for mutation/transaction work;
+- database-specific authorization scopes;
+- backend health;
+- fake adapter conformance;
+- real Sento database runtime actor.
+
+This is a useful lower-level runtime. It is intentionally not a distributed public document protocol and it does not own concrete CouchDB/PostgreSQL/graph/Prolog adapter semantics.
+
+** Star Language already owns generic DB and Actor2Actor semantics
+
+Relevant current issues:
+
+- [[https://github.com/lost-rob0t/star-lang/issues/147][STAR-DB-001]] generic DB grammar/portable DB IR;
+- [[https://github.com/lost-rob0t/star-lang/issues/148][STAR-DB-002]] typed DB actors/capabilities;
+- [[https://github.com/lost-rob0t/star-lang/issues/150][STAR-A2A-001]] canonical =star.actor2actor/1=;
+- [[https://github.com/lost-rob0t/star-lang/issues/154][scheduler Target contract]];
+- [[https://github.com/lost-rob0t/star-lang/issues/160][upstream A2A binding]].
+
+The new distributed access contract should reuse these authorities rather than introduce another generic database grammar or another lifecycle envelope.
+
+** StarIntel 0.10.1 owns document and Target payload types
+
+The canonical Star Language release =org.starintel/core@1= at StarIntel release/schema version =0.10.1= defines persistent =document= and =target= documents.
+
+The Target type includes:
+
+- actor;
+- target and optional targetType/scope;
+- delay/recurrence/schedule;
+- options/state/priority;
+- notBefore/deadline;
+- run times;
+- attempts/maximumAttempts;
+- lastError.
+
+Canonical source:
+[[https://github.com/lost-rob0t/star-lang/blob/919833266723edc9bddb337d606f72ae25fb8ced/specs/starintel/0.10.1/core.star][StarIntel 0.10.1 core.star]].
+
+The transport/access protocol must consume these generated types. It must not create a second Target document schema.
+
+** Current server Target execution is stronger than a queue message
+
+Current =target-dispatch-envelope= carries:
+
+- target record;
+- explicit destination;
+- schedule id;
+- deterministic execution id;
+- attempt;
+- trace id;
+- lease id;
+- fencing token;
+- deadline.
+
+Existing target acceptance and lease semantics require fencing at authoritative state changes, result writes, externally visible publication, and scheduler completion/reschedule.
+
+Sources:
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/target-dispatch.lisp][target-dispatch.lisp]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/source/databases/target-acceptance.lisp][target-acceptance.lisp]]
+- [[https://github.com/lost-rob0t/starintel-server/blob/master/doc/target-lease-semantics.org][target lease semantics]]
+
+Therefore Rabbit settlement or A2A Task status cannot replace StarIntel Target acceptance/fencing authority.
+
+** RabbitMQ is already durable dataflow, not semantic authority
+
+Current messaging uses RabbitMQ for:
+
+- document ingest/update/events;
+- external Target delivery;
+- at-least-once processing;
+- retry/settlement and durable broker flow.
+
+The semantic contract should map onto Rabbit rather than use exchange/queue/routing-key layout as the public API.
+
+** Approved StarRouter architecture already provides the operation substrate
+
+[[id:starintel-star-server-040-starrouter-zmq-overhaul][STAR-SERVER-040]] defines:
+
+- transport-neutral operation envelopes;
+- one terminal result/error algebra;
+- deadlines/cancellation;
+- idempotency and =outcome-unknown=;
+- capability registration with generation/lease semantics;
+- local/ZeroMQ/HTTP/Rabbit projections.
+
+[[id:starintel-star-server-041-star-uri-authority-routing-protocol][STAR-SERVER-041]] defines canonical =star://authority/resource-kind/resource-path= identity.
+
+The document/Target access protocol should therefore be a domain profile over those semantics, not another router.
+
+** A2A v1.0 is an interoperability contract
+
+The current released A2A specification is version =1.0.0=. Its binding-independent model includes AgentCard, Message, Task, Part, Artifact and extensions. Task is server-managed stateful work; Messages carry interaction; Artifacts are outputs. Interfaces advertise protocol binding/version, and the protocol supports task/status/cancel and streaming update semantics.
+
+Primary sources retrieved 2026-10-03:
+- [[https://a2a-protocol.org/dev/specification/][A2A specification]]
+- [[https://a2a-protocol.org/latest/whats-new-v1/][A2A v1.0 changes]]
+- [[https://a2a-protocol.org/latest/topics/key-concepts/][A2A key concepts]]
+
+A2A is therefore suitable as an external agent projection. It should not become StarIntel's internal persistence, lease, fencing, database, or scheduler authority.
+
+* Findings
+
+** Finding 1: PR #295 is necessary but below the desired protocol
+
+The W08 runtime solves backend-neutral execution. A distributed document API still needs stable document-specific operations, opaque revision/precondition semantics, partition/routing identity, query pagination/cursors, consistency intent, and changefeed semantics.
+
+Conclusion: build the document profile above W08 rather than expanding =database-request= into a public everything-RPC.
+
+** Finding 2: document and Target access are sibling profiles
+
+Document access and Target lifecycle share:
+
+- principal/tenant/dataset authority;
+- correlation/causation/trace;
+- deadline/cancel;
+- idempotency;
+- routing;
+- terminal result semantics.
+
+But they do not have the same application invariants. A Target is durable scheduled work with acceptance, execution identity, attempt state and fencing. A document is persisted/queryable state with revision/precondition/query semantics.
+
+Conclusion: use one access family/operation substrate with distinct =star.documents.*= and =star.targets.*= operation namespaces.
+
+** Finding 3: distributed write ownership must be explicit
+
+Rabbit competing consumers are not a storage-consistency model. If multiple database nodes can receive a write randomly, application ownership and revision/fencing semantics become undefined.
+
+Conclusion: each write resolves an authoritative owner for the selected namespace/dataset/partition/document identity. Registration must carry generation/incarnation and expire. Replicas may serve reads only under an explicitly supported consistency policy.
+
+** Finding 4: distributed queries need partial-result semantics
+
+Cluster/dataset queries may fan out across partitions. Node loss must not silently produce a result labeled complete.
+
+Conclusion: distributed query results need explicit complete/partial state, missing-partition metadata, bounded fan-out, deterministic merge/order and opaque distributed cursors.
+
+** Finding 5: RabbitMQ should be the first transport adapter
+
+Rabbit already provides durable distributed StarIntel traffic and settlement. The first distributed projection should preserve the canonical operation identity/result algebra while keeping request/reply commands separate from durable document events.
+
+Mutations should remain:
+
+#+begin_example
+application commit
+  -> durable outbox
+  -> Rabbit event publication
+#+end_example
+
+not:
+
+#+begin_example
+Rabbit publish
+  -> hope persistence succeeds later
+#+end_example
+
+** Finding 6: StarRouter should route the same operations later
+
+StarRouter should advertise and route document/Target capabilities using its approved authority/resource routing and generation-bearing registration model. ZeroMQ reconnect must not blindly replay non-idempotent mutations.
+
+Conclusion: StarRouter projection is downstream from the semantic profile, not a separate API redesign.
+
+** Finding 7: A2A Task maps to remote work, not Target authority
+
+A StarIntel Target can initiate stateful remote work represented as an A2A Task. A2A Task status/cancel/stream/artifacts can map to the canonical Star lifecycle.
+
+However:
+
+- A2A Task ID is not automatically the Star Target ID;
+- A2A Task state is not the authoritative lease/fence record;
+- A2A cancellation cannot roll back an already committed Star side effect;
+- AgentCard metadata cannot mint Star capabilities.
+
+Conclusion: A2A is a projection through =star.actor2actor/1= and the Target profile.
+
+** Finding 8: caller and runtime Target authority must remain separate
+
+External callers may submit a Target and an idempotency identity. They must not supply a trusted lease ID/fencing token as execution authority.
+
+Lease/fence values are runtime-issued assertions carried only on server-owned dispatch/commit paths.
+
+** Finding 9: one current deadline mismatch must be corrected during migration
+
+The StarIntel 0.10.1 Target schema defines =deadline= as Unix time while current server Target dispatch validation still contains historical ISO-string assumptions.
+
+The new profile must normalize to the canonical generated Star Language type and avoid freezing the legacy representation into the wire contract.
+
+* Recommended Architecture Direction
+
+Define an umbrella semantic family =star.access/1= using existing operation/lifecycle envelopes.
+
+Document operations:
+
+#+begin_example
+star.documents.get@1
+star.documents.head@1
+star.documents.put@1
+star.documents.patch@1
+star.documents.delete@1
+star.documents.bulk-get@1
+star.documents.bulk-write@1
+star.documents.query@1
+star.documents.changes@1
+#+end_example
+
+Target operations:
+
+#+begin_example
+star.targets.submit@1
+star.targets.get@1
+star.targets.status@1
+star.targets.cancel@1
+star.targets.reschedule@1
+star.targets.result@1
+#+end_example
+
+Transport projections:
+
+#+begin_example
+local Sento
+RabbitMQ
+StarRouter / ZeroMQ
+HTTP where needed
+A2A through star.actor2actor/1
+#+end_example
+
+No projection may redefine authorization, Target fencing, document schema, idempotency, or terminal outcome meaning.
+
+* Implementation Graph
+
+The current concrete issue graph is:
+
+1. [[https://github.com/lost-rob0t/starintel-server/pull/295][server PR #295 / W08]] — generic runtime base.
+2. [[https://github.com/lost-rob0t/star-lang/issues/198][star-lang #198]] — canonical distributed document + Target profile.
+3. [[https://github.com/lost-rob0t/starintel-server/issues/287][server W09 / #287]] — CouchDB behind generic adapter.
+4. [[https://github.com/lost-rob0t/starintel-server/issues/315][server #315]] — distributed document/Target application service + Rabbit projection.
+5. [[https://github.com/lost-rob0t/starRouter/issues/5][starRouter #5]] — StarRouter projection.
+6. Existing [[https://github.com/lost-rob0t/star-lang/issues/160][star-lang #160]] and [[https://github.com/lost-rob0t/starintel-server/issues/291][server #291]] own the upstream A2A gateway path.
+
+The existing exactly-15 worker board [[https://github.com/lost-rob0t/starintel-server/issues/293][server #293]] remains intact. These are follow-on integration issues, not an unreviewed expansion of that worker count.
+
+* Rejected Directions
+
+- *Expose =database-request= directly as the distributed document API.* Too backend/runtime-oriented and insufficiently document-specific.
+- *Make Rabbit routing keys the API contract.* Couples semantics to one broker topology.
+- *Let Rabbit competing consumers select write ownership.* Broker load balancing is not authoritative storage ownership.
+- *Make A2A Task the Star Target record.* Loses StarIntel acceptance/schedule/lease/fencing authority.
+- *Let external callers provide lease/fence values.* Confuses input with server-owned authority.
+- *Expose raw CouchDB revisions/query forms or backend query languages.* Breaks backend neutrality and capability safety.
+- *Create a second routing registry beside StarRouter.* Duplicates approved distributed routing authority.
+
+* Open Questions for Design
+
+1. Exact partition-directory representation and whether single-node deployments may omit partition metadata.
+2. Which read consistency modes can be truthfully guaranteed by each backend/replication topology.
+3. Exact distributed cursor composition and result-size ceiling.
+4. Whether Target result retrieval is a direct Target operation or a typed artifact/document reference projection.
+5. Compatibility lifetime for old Nim StarRouter document/Target EventType frames.
+
+* Footnotes and Glossary
+
+- *Access profile* — Domain-specific operation and result semantics carried by an existing common lifecycle/operation envelope.
+- *Authoritative owner* — Current service instance allowed to commit a routed write for one partition/identity.
+- *Generation* — Incarnation value preventing a restarted/stale service registration from regaining authority accidentally.
+- *Fencing token* — Monotonic authority value used to reject stale Target executors at the commit boundary.
+- *Outcome unknown* — Terminal classification used when a mutation may have committed but its result cannot be observed or reconciled.
+- *Projection* — Transport or interoperability mapping that preserves the same application semantics.

@@ -1,0 +1,426 @@
+:PROPERTIES:
+:ID: 2ee5270d-7bad-47ed-9f7c-c9ab3405e81b
+:END:
+#+TITLE: QUASAR-010 Remote Sandbox Runner Protocol and Service Boundary
+#+CREATED: [2026-10-09 Fri 19:50]
+#+LAST_MODIFIED: [2026-10-09 Fri 19:50]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: design
+#+ROAM_VISIBILITY: public
+#+CENSOR_PROFILE: strict
+#+SOURCE: QUASAR-RESEARCH-008 and operator direction for a separate remote-runner ARDR before implementation approval
+#+AI_GENERATED: t
+#+AI_TAG: ai_b8a6f32e85bca998
+#+FILETAGS: :ai:ai_b8a6f32e85bca998:quasar:remote-runners:sandbox:actors:
+
+#+description: Design-ready protocol and authority boundary for optional remote sandbox runners behind Quasar's Actor Center, with provider-neutral usage receipts and private future commercial policy.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+approval_evidence: ARDR produced a remote-runner design for operator review; no implementation or paid-service authorization has been granted.
+#+approval_base_commit: eda24d2540c3c847199a361cbf011bd597360e95
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+todo: TODO REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change | Did nsaspy approve it |
+|---------+------------+-----------------------+-----------------------|
+| 0.1.0   | 2026-10-09 | Initial design for an optional remote sandbox-runner protocol and a separate future starintel-biz commercial-policy layer. | No |
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Quasar operator | PENDING | Explicit acceptance or amendment of QUASAR-RESEARCH-008 | [[file:../../research/star-server/QUASAR-RESEARCH-008-remote-sandbox-runner-service-boundary.org][QUASAR-RESEARCH-008]] |
+| Architecture/design | Quasar operator and affected repository owners | PENDING | Explicit approval of this exact provider, protocol, and ownership design | Pending |
+| Security and privacy | Quasar operator / security reviewer | PENDING | Isolation, identity, data lifecycle, and adversarial acceptance | Adversarial Review |
+| StarIntel authority-chain repair | StarLang / consumer owners | PENDING | Consumer lock helper accepts the lock and canonical commit verifies | Current Quasar lock cannot be verified; contract-dependent implementation is blocked |
+| Paid-service design | starintel-biz owner | NOT STARTED | Separate private design for entitlements, quotas, prices, invoices, and payment/provider policy | Deliberately outside this document |
+| Implementation authorization | Quasar operator | PENDING | Explicit instruction to implement an approved bounded slice | Not granted by the request for ARDR |
+| Implementation completion | Quasar maintainers | NOT STARTED | Exact-head contract, isolation, reliability, privacy, and real-fleet acceptance evidence | Verification Plan |
+
+Design readiness is not approval. This document authorizes neither implementation nor a commercial offering.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-10-09 | Created the remote runner protocol, state machines, security boundary, business-policy split, adversarial gate, and staged delivery plan. | Codex | QUASAR-RESEARCH-008 and current local repository inspection |
+
+* Related Nodes
+
+- [[file:../../research/star-server/QUASAR-RESEARCH-008-remote-sandbox-runner-service-boundary.org][QUASAR-RESEARCH-008 Remote Sandbox Runner Service Boundary]].
+- [[file:QUASAR-009-actor-package-installation-configuration-and-run-control-plane.org][QUASAR-009 Actor Package Installation, Configuration, and Run Control Plane]].
+- [[file:../../research/star-server/QUASAR-RESEARCH-007-actor-install-configure-run-control-plane.org][QUASAR-RESEARCH-007 Actor Install, Configure, and Run Control Plane]].
+- [[file:STAR-MANIFEST-001-document-contracts.org][STAR-MANIFEST-001 Actor and Dataset Manifest Document Contracts]].
+- [[file:STAR-SERVER-049-component-handles-registry-readiness-health.org][STAR-SERVER-049 Component Handles, Registry, Readiness, and Health]].
+- [[file:../../indexes/star-server/QUASAR-INDEX-001-canonical-runtime-alignment.org][QUASAR-INDEX-001 Canonical Runtime Alignment]].
+
+* Decision
+
+Quasar SHALL run installed native and service actors in a sandbox on the local host by default, as specified by QUASAR-009. It MAY select an authorized remote runner as a separate execution provider when placement policy, data policy, actor requirements, runner capability, and operator authorization all permit it.
+
+Local and remote providers SHALL consume one provider-neutral immutable =RunPlan= and produce one provider-neutral terminal =RunReceipt=. A remote runner SHALL NOT become a semantic actor registry, configuration authority, credential store, canonical StarIntel writer, or commercial-policy authority.
+
+The public contract SHALL define execution, isolation, identity, data-transfer, reconciliation, attestation, and technical usage semantics. A future private =starintel-biz= layer MAY map principals and tenants to plans, quotas, prices, invoices, payment providers, and commercial fleet policy without altering the public protocol.
+
+* Authority Boundary
+
+#+begin_example
+Operator
+   |
+   v
+Quasar Actor Center
+   |
+   v authenticated actor.run.create
+Actor Administration / scheduler
+   |----> semantic catalog + deployment/config generations
+   |----> authorization + placement/data policy
+   |----> optional private starintel-biz entitlement/reservation adapter
+   |
+   +---- local-host provider ----> host sandbox
+   |
+   +---- remote provider --------> authenticated runner gateway
+                                      |
+                                      v
+                                  remote sandbox
+                                      |
+                                      v
+                          bounded events + signed receipt
+   |
+   v
+output validation / canonical ingest authority
+
+Neither runner writes the canonical registry or store directly.
+#+end_example
+
+Authority rules:
+
+- StarLang-derived manifests own actor semantics and declared capabilities.
+- QUASAR-009's Actor Administration service owns deployment identity, configuration generation, and durable run identity.
+- the scheduler owns placement decisions but cannot widen principal authorization or actor capabilities;
+- the selected runner provider owns only the bounded execution attempt and its evidence;
+- the output-validation/ingest authority decides whether returned documents or events may enter canonical storage;
+- starintel-biz may later own commercial entitlements and accounting policy, not runner protocol truth.
+
+* Execution and Isolation Tiers
+
+| Tier | Intended workload | Minimum boundary | Remote eligible |
+|------+-------------------+------------------+-----------------|
+| Browser local | User-authored browser actor | Opaque-origin browser boundary; explicitly not hostile-code containment | No |
+| Trusted host | Reviewed actor package | OS identity, namespaces/mounts, cgroups, privilege and egress restrictions | Yes, if remote runner proves the same profile |
+| Strong isolation | Untrusted third-party or high-risk actor | Dedicated virtual machine, micro-virtual machine, or equivalently reviewed containment | Yes, only on runners advertising and proving this tier |
+
+The literal label =sandboxed= is insufficient. A =sandboxProfileId= identifies a versioned policy with testable properties. The receipt carries its immutable digest and the enforcement provider's observed result.
+
+* Provider-Neutral RunPlan
+
+#+begin_src json
+{
+  "contract": "starintel.actor-runner.v1",
+  "runId": "run_...",
+  "attemptId": "attempt_...",
+  "idempotencyKey": "idem_...",
+  "leaseGeneration": 3,
+  "actor": {
+    "actorId": "star.actor.example",
+    "semanticDigest": "sha256:...",
+    "artifactDigest": "sha256:...",
+    "deploymentId": "actor_deployment_...",
+    "configurationGeneration": 4
+  },
+  "sandbox": {
+    "profileId": "trusted-host-v1",
+    "profileDigest": "sha256:..."
+  },
+  "inputs": [{"digest": "sha256:...", "size": 1234, "mediaType": "application/json"}],
+  "outputPolicy": {"maxBytes": 10485760, "maxEvents": 1000},
+  "resourceLimits": {"wallSeconds": 300, "memoryBytes": 1073741824, "cpuMillis": 60000, "tasks": 64},
+  "networkPolicyRef": "network-policy:no-egress-v1",
+  "secretBindings": [{"name": "apiToken", "reference": "secret-ref:opaque", "scopeDigest": "sha256:..."}],
+  "placement": {"regionAllow": ["local"], "dataClass": "internal"},
+  "expiresAt": "..."
+}
+#+end_src
+
+Normative rules:
+
+- the plan is signed or authenticated as a whole and has a stable digest;
+- every executable, input, sandbox policy, configuration generation, and output bound is immutable or generation-pinned;
+- the plan contains no shell command, arbitrary host path, raw secret, price, currency, plan name, or payment-provider field;
+- caller-supplied principal or tenant fields are informational only; transport/session authorization supplies identity;
+- start fails if the plan expired, the lease generation is stale, a digest differs, the runner no longer supports the profile, or placement constraints cannot be proven;
+- secret references are opaque and resolved only under run-scoped authorization.
+
+* Runner Advertisement and Selection
+
+A runner advertisement is short-lived and authenticated. It includes:
+
+- stable runner and provider identities;
+- protocol versions;
+- supported artifact and sandbox-profile digests;
+- architecture and accelerator classes;
+- enforced resource dimensions and hard maxima;
+- regions, residency/data classes, and retention modes;
+- current health/capacity class without co-tenant detail;
+- attestation kind, measurement reference, and expiry when required;
+- advertisement generation and expiry.
+
+The scheduler intersects advertisement, actor requirements, sandbox tier, data/placement policy, authorization, and capacity. Local host sandbox remains the default. Remote selection must be explicit in observable run state and cannot be inferred merely because local capacity is unavailable.
+
+* Remote Operations
+
+| Operation | Purpose | Required behavior |
+|-----------+---------+-------------------|
+| =runner.capabilities.get= | Read authenticated advertisement | Expiring generation and supported profile digests |
+| =runner.capacity.reserve= | Reserve bounded capacity | Idempotent reservation, expiry, limits, no commercial price semantics |
+| =runner.run.submit= | Register exact RunPlan | Return same attempt for same key/digest; conflict on mismatched replay |
+| =runner.run.start= | Start fenced attempt | Revalidate plan, lease, artifacts, policy, and secret grants |
+| =runner.run.get= | Inspect current state | Bounded state plus event cursor |
+| =runner.run.events= | Resume event stream | Ordered attempt-local sequence and truncation markers |
+| =runner.run.cancel= | Request cancellation | Idempotent request; never claim terminal cancellation before evidence |
+| =runner.run.reconcile= | Resolve uncertain state | Terminal receipt, still-running state, or explicit unknown |
+| =runner.input.stage= | Transfer referenced input | Digest/size verification, encryption, TTL, tenancy scope |
+| =runner.output.fetch= | Retrieve bounded output | Digest-bound content and terminal receipt association |
+| =runner.data.delete= | Request promised cleanup | Idempotent deletion status/receipt without false immediacy |
+
+The exact transport may be HTTP, a typed message channel, or another authenticated binding. Transport choice does not change operation semantics.
+
+* State Machines
+
+** Reservation
+
+#+begin_example
+requested -> reserved -> consumed
+             |    |
+             |    +-> released
+             +------> expired
+#+end_example
+
+One reservation can be consumed by one matching attempt. Consumption is idempotent and fenced.
+
+** Attempt
+
+#+begin_example
+accepted -> staging -> ready -> running
+    |          |         |        |
+    v          v         v        +-> cancel_requested
+ rejected    failed    expired              |
+                                          v
+                      succeeded | failed | cancelled | outcome_unknown
+#+end_example
+
+=cancel_requested= is non-terminal. =outcome_unknown= is honest durable state requiring reconciliation or operator resolution; it is not silently converted to failure and retried.
+
+* Artifact, Input, and Output Data Plane
+
+- Artifacts and data are content-addressed and verified before use.
+- The runner receives only references authorized for the exact attempt.
+- Transport encryption and authenticated endpoints are mandatory.
+- Writable storage is attempt-, deployment-, and tenant-scoped according to the declared actor state model.
+- Shared caches store only immutable content and prevent tenant metadata leakage.
+- Output and logs have hard byte, event, rate, and duration limits. Truncation is explicit.
+- Returned StarIntel documents remain untrusted until schema, provenance, authorization, and ingest validation pass.
+- Retention and deletion promises are machine-readable. A deletion request produces an evidence-bearing state; backup expiry limitations are explicit.
+
+* Secret and Workload Identity Contract
+
+The scheduler sends opaque secret bindings, never values. A broker issues a short-lived workload grant bound to runner identity, =runId=, attempt, actor, tenant/workspace, binding name, capability, and expiry.
+
+The runner materializes a granted value through a narrow credential file, descriptor, or provider mechanism that is absent from events and receipts. The actor receives only declared bindings. The grant is revoked or expires at terminal state. Long-lived StarIntel database, broker, package-manager, cloud, or third-party credentials are prohibited in the RunPlan and inherited environment.
+
+* RunReceipt and UsageReceipt
+
+#+begin_src json
+{
+  "contract": "starintel.actor-run-receipt.v1",
+  "runId": "run_...",
+  "attemptId": "attempt_...",
+  "runnerId": "runner_...",
+  "leaseGeneration": 3,
+  "planDigest": "sha256:...",
+  "artifactDigest": "sha256:...",
+  "inputSetDigest": "sha256:...",
+  "sandboxProfileDigest": "sha256:...",
+  "outcome": "succeeded",
+  "outputSetDigest": "sha256:...",
+  "usage": {
+    "wallMillis": 12345,
+    "cpuMillis": 6789,
+    "peakMemoryBytes": 456789,
+    "inputBytes": 1234,
+    "outputBytes": 5678
+  },
+  "startedAt": "...",
+  "finishedAt": "...",
+  "signature": "..."
+}
+#+end_src
+
+The usage object contains provider-neutral technical measurements and explicit meter definitions. It has no monetary meaning. A future private starintel-biz accounting adapter may verify and consume a unique receipt under a separately authorized commercial reservation.
+
+* Optional Private starintel-biz Adapter
+
+The public scheduler MAY call a private adapter before remote capacity reservation:
+
+#+begin_example
+authorizeRemoteRun(principal, workspace, actor, requestedLimits, placement)
+  -> commercialReservationId + public execution limits
+#+end_example
+
+The adapter may enforce plan eligibility, quota, credit, fleet policy, and price acceptance. It returns only the public limits and an opaque reservation reference needed for later settlement. Failure, timeout, ambiguity, or an expired reservation fails closed before remote execution starts.
+
+After a terminal signed receipt, the private adapter may consume the commercial reservation idempotently. Disputes, refunds, invoices, currencies, payment providers, and tax behavior are outside this design. Self-hosted deployments do not need this adapter.
+
+* Reliability and Reconciliation
+
+- Every mutation has an idempotency key and exact digest preconditions.
+- Reservations and attempts use monotonically increasing fencing generations.
+- A scheduler restart recovers durable run, attempt, and receipt state before issuing new work.
+- Network failure after submission or cancellation yields inspection/reconciliation, not automatic duplicate work.
+- Retry policy is derived from actor-declared effect safety and operator policy.
+- Competing terminal receipts, changed plan digests, duplicate usage receipt identities, or a stale runner generation quarantine the run for review.
+- Clock times are observations; ordering authority comes from generations, attempt sequences, and signed receipt identity.
+
+* Adversarial Invariants
+
+1. A policy marker or process ID never counts as sandbox evidence.
+2. The local-host sandbox is the default provider and remote placement is visible and authorized.
+3. Runner advertisements expire and are revalidated before start.
+4. A changed plan, artifact, input set, configuration generation, sandbox profile, reservation, or lease fails closed.
+5. No raw secret, parent environment, repository checkout, arbitrary path, privileged socket, price, or payment field enters the RunPlan.
+6. The runner cannot mutate the canonical actor registry or StarIntel store directly.
+7. All outputs remain untrusted until validation and ingest authorization.
+8. Tenant storage, secrets, events, caches, and receipts remain scoped and leakage-tested.
+9. Cancellation is not terminal until the runner produces terminal evidence or the scheduler records =outcome_unknown=.
+10. Uncertain effectful runs are not automatically duplicated.
+11. Technical usage receipts are unique, authenticated, digest-bound, and independent of commercial policy.
+12. Logs and output are bounded and explicit about truncation.
+13. Retention, residency, and deletion constraints are recorded in placement and receipt evidence.
+14. Strongly untrusted actors require the strong-isolation tier; they cannot be downgraded to a namespace profile by capacity pressure.
+
+* Rejected Designs
+
+- Direct Secure Shell (SSH) commands as the runner protocol: no portable idempotency, data, receipt, isolation, or reconciliation contract.
+- Broad message-broker consumer credentials on every runner: excessive canonical authority and tenant blast radius.
+- Remote fallback whenever the host is busy: violates explicit placement, data, authorization, and commercial consent.
+- A single =sandboxed=true= capability: self-asserted and not tied to enforceable profile properties.
+- Runner-side output ingest: conflates untrusted execution with canonical validation and storage authority.
+- Billing in actor manifests: leaks private policy and makes self-hosted compatibility depend on a commercial service.
+- Automatic retry of =outcome_unknown=: duplicates external effects.
+
+* Bounded Implementation Slices
+
+Implementation remains blocked until explicit approval.
+
+** Slice A: public contracts and fake runner
+
+- Freeze =RunPlan=, runner advertisement, state/event, =RunReceipt=, and technical usage fixtures.
+- Build a deterministic in-memory fake runner with replay, conflict, timeout, cancellation, and partition cases.
+- Add malformed, stale, oversized, secret-leak, and cross-tenant negative fixtures.
+
+** Slice B: loopback provider over the host sandbox
+
+- Route the remote-provider adapter through the same local host-sandbox implementation as QUASAR-009.
+- Prove provider interchangeability without network transport, a real fleet, or commercial behavior.
+- Record isolation profile and process-tree cleanup evidence.
+
+** Slice C: authenticated remote transport
+
+- Add runner identity, expiring advertisements, reservation, staging, event resume, cancellation, reconciliation, and signed receipts.
+- Deploy only to a controlled non-commercial environment.
+- Prove data lifecycle and multi-tenant isolation before accepting user workloads.
+
+** Slice D: controlled fleet acceptance
+
+- Exercise one real remote runner pool and one strong-isolation profile.
+- Add capacity, pressure, stale-advertisement, partition, runner-loss, and disaster-recovery tests.
+- Keep pricing and payments absent.
+
+** Slice E: separately approved starintel-biz service
+
+- Write a private design for plans, entitlements, quotas, commercial reservations, metering consumption, pricing, invoices, refunds, tax, and payment-provider operations.
+- Require separate approval and acceptance. This slice is not implicitly approved by approving A through D.
+
+* Repository Ownership
+
+| Repository | Ownership |
+|------------+-----------|
+| StarLang canonical schema repository | Cross-language semantic types only if the verified canonical contract requires them |
+| starintel-server / canonical actor administration owner | Durable run identity, authorization, scheduler, output validation, and canonical ingest |
+| Quasar | Actor Center projection and authorized user intent; no raw runner credentials or business policy |
+| public runner implementation repository | Host/remote provider implementation, sandbox enforcement, protocol fixtures, and receipts |
+| starintel-auto-research | Research, design, approval graph, and acceptance criteria |
+| private starintel-biz | Optional hosted entitlement, quota, price, invoice, payment, and commercial fleet policy |
+
+Exact implementation ownership must be confirmed against current source before Slice A. No repository should create a second actor registry or StarIntel schema authority.
+
+* Verification Plan
+
+** Contract and state-machine tests
+
+- canonical serialization and digest stability;
+- unknown-field/version behavior;
+- idempotent submit/start/cancel/delete and conflicting replay;
+- lease fencing, expiry, clock skew, and stale advertisement;
+- event ordering, resume cursors, limits, and truncation;
+- receipt uniqueness, signature failure, plan mismatch, and competing terminals.
+
+** Isolation and security tests
+
+- no repository, home, parent environment, package-manager socket, service-manager socket, or undeclared device visibility;
+- declared mount, network, syscall/capability, user, task, memory, CPU, wall-time, and output enforcement;
+- child/grandchild termination and deterministic cleanup;
+- secret binding scope, expiry, revocation, and redaction;
+- cross-tenant storage/cache/log/event isolation;
+- sandbox-profile downgrade rejection and strong-tier escape testing.
+
+** Distributed reliability tests
+
+- partition before and after submit/start/cancel/terminal receipt;
+- scheduler and runner crash/restart at each durable transition;
+- runner disappearance, stale lease, and late receipt;
+- actor effect-safety retry matrix and =outcome_unknown= operator resolution;
+- input/output transfer interruption, digest mismatch, and deletion reconciliation.
+
+** Business-boundary tests
+
+- public fixtures contain no plan, price, currency, invoice, tax, payment-provider, or merchant fields;
+- technical usage meter definitions remain stable and verifiable;
+- absent/failed private entitlement adapter fails closed only when configured as required;
+- self-hosted operation works without starintel-biz;
+- a private adapter cannot widen public resource or placement limits.
+
+** Release gates
+
+- StarIntel lock and canonical commit verify;
+- QUASAR-009 and this design have explicit approvals for the slice being built;
+- exact-head local and continuous-integration checks pass;
+- a real host-sandbox run proves the baseline before remote deployment;
+- a real controlled remote run proves authenticated identity, isolation profile, cancellation, receipt, validation, and data cleanup;
+- no commercial claim is made without separately approved starintel-biz evidence.
+
+* Operator Decision Gate
+
+The operator may:
+
+1. approve QUASAR-009's local host-sandbox amendment while leaving remote runners pending;
+2. approve or amend this remote protocol without approving a paid service;
+3. approve only Slice A, or another explicitly bounded slice;
+4. require a stronger isolation tier or narrower data policy;
+5. reject remote execution while preserving the local Actor Center.
+
+Absent an explicit approval naming this design and a bounded implementation slice, implementation remains prohibited.
+
+* Footnotes and Glossary
+
+[fn:run-plan] RunPlan: The immutable, authenticated, digest-bound description of one authorized actor execution attempt.
+
+[fn:run-receipt] RunReceipt: The authenticated terminal evidence binding an attempt to its plan, runner, sandbox profile, inputs, outcome, outputs, and technical usage.
+
+[fn:host-sandbox] Host sandbox: An operating-system-enforced local execution boundary with explicit identity, filesystem, network, resource, privilege, and cleanup controls.
+
+[fn:runner-advertisement] Runner advertisement: An authenticated, expiring description of protocol, hardware, isolation, data-policy, and capacity capabilities.
+
+[fn:commercial-reservation] Commercial reservation: A private business-policy authorization for bounded paid use. It is separate from the public technical capacity reservation.

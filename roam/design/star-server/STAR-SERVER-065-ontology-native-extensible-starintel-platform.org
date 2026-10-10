@@ -1,0 +1,370 @@
+:PROPERTIES:
+:ID:       starintel-star-server-065-ontology-native-platform
+:END:
+#+title: STAR-SERVER-065 Ontology-Native and Extensible StarIntel Platform
+#+description: ARADR design for a coherent typed ontology-driven StarIntel document/knowledge architecture, community and real-world event semantics, temporal geography, independently extensible vocabularies, and externally governed Prolog-triggered workflows.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+filetags: :starintel:aradr:design:ontology:extensible:entity:community:events:geo:prolog:workflow:
+#+created: [2026-10-09 Fri]
+#+last_modified: [2026-10-09 Fri]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research | StarIntel operator | PENDING | Review STAR-RESEARCH-065, ontology #252 and geo/profile inventory | [[id:starintel-star-research-065-ontology-native-community-event-geo][STAR-RESEARCH-065]], [[https://github.com/lost-rob0t/starintel-auto-research/issues/252][#252]] |
+| Architecture | StarIntel operator | PENDING | Explicit approval of this design, single authority and versioning plan | [[https://github.com/lost-rob0t/starintel-auto-research/issues/267][ARADR #267]] |
+| Threat/privacy | Owning security/operator authority | PENDING | Validated signal, identity, geo, tenant and workflow limits | design adversarial/negative gates |
+| Implementation | Operator and owning repository maintainers | NOT STARTED | Approved bounded child tasks, RED-first tests and immutable lock migration | dependency graph below |
+| Release | StarLang and StarIntel operator | NOT STARTED | New version, regenerated artifacts, compatibility fixtures and complete conformance | no release is cut here |
+| Publication | Auto-Research maintainer | PENDING | Verified main merge/Pages publication | pending |
+
+=DESIGN_READY_FOR_OPERATOR_REVIEW= is *not* implementation authorization. This document is a proposed authority/ownership contract, not a shipped StarIntel or StarLang specification.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-10-09 | Created implementation-oriented ontology-native StarIntel design from the existing ontology, StarLang 0.10.1, Star KB, geo and event/workflow owners. | ChatGPT ARADR design pass | [[https://github.com/lost-rob0t/starintel-auto-research/issues/267][#267]], [[id:starintel-star-research-065-ontology-native-community-event-geo][STAR-RESEARCH-065]] |
+
+* Decision Proposal
+
+**Recommend a single ontology-native semantic model across StarIntel without replacing the existing canonical JSON document store or making every domain type a compiler enum.**
+
+The whole platform must resolve, validate, preserve and query *meaning*, not merely store extra ontology files. Every document resolves its storage dtype to zero or more named semantic class URIs, and every meaningful cross-object fact is represented as a qualified, provenance-backed assertion. All clients and actors consume one immutable semantic bundle (including extension packages) and the same evidence and time interpretation.
+
+The system remains *document-primary and ontology-native*, not RDF-store-primary:
+
+#+begin_example
+canonical StarLang semantic model + release locks
+    + versioned, digest-pinned ontology/domain packages
+    |
+    +--> generated document validator / portable manifests / binding catalogs
+    +--> generated stable JSON-LD context + RDF vocabulary projection
+    +--> typed fact/constraint catalog for Star KB / Prolog
+                         |
+authorized ingest -> validate document + ontology semantics -> canonical JSON
+                         |
+            durable change/outbox + provenance
+               /          |            \
+       star-kb Prolog    star-geo     graph/search/RDF
+       derived facts     PostGIS      query projections
+               \          |            /
+                  referenced assertions
+                         |
+       signals for independently governed workflow actors
+#+end_example
+
+No semantic/graph/geo/RDF projection may become a second mutable ground-truth store; every derived result can be rebuilt from immutable sources, active package locks and rule locks. No LLM is required for deterministic validation, ontology resolution, inference or workflow selection.
+
+* Authority and Dependency Matrix
+
+| Surface | Authoritative owner | Must not own |
+|---------+---------------------+--------------|
+| Core document grammar, schema versions, semantic bundle source/compilation, compatibility and generated bindings | [[https://github.com/lost-rob0t/star-lang][StarLang / versioned StarIntel schema authority]] | Dataset processing, Prolog runtime policies, ingestion decisions |
+| Broad real-world ontology terms and their design semantics | Existing [[https://github.com/lost-rob0t/starintel-auto-research/issues/252][Auto-Research #252]], compiled/published by canonical schema pipeline | Hand-maintained alternative schema or host-language enum |
+| Document ingest, tenant/dataset/authorization, persistence, changes/outbox, Target and Operation | [[https://github.com/lost-rob0t/starintel-server][StarIntel Server]] | A private ontology interpretation replacing generated manifest |
+| Deterministic canonical JSON -> fact/constraint projection, rule packs, proof/candidates | [[https://github.com/starintel-labs/star-kb][Star KB]] and existing [[https://github.com/lost-rob0t/starintel-server/issues/213][named Prolog query]] seam | Independent fact truth, arbitrary remote Prolog goals |
+| Semantic RDF/JSON-LD/SPARQL projection | Existing [[https://github.com/lost-rob0t/starintel-server/issues/226][server #226]] | New input authority; external standards overwriting semantic source |
+| Spatial indexing, region hierarchy, bbox/nearest/temporal queries | Existing [[https://github.com/lost-rob0t/starintel-server/issues/237][server #237 star-geo]] | Second document/identity database |
+| Ingest external GeoJSON/KML/KMZ and world-event sources | Existing [[https://github.com/lost-rob0t/starintel-server/issues/266][server #266]] and governed adapters | Treating external map feature as authoritative incident or person |
+| Workflow scheduling, signals, actor fan-out and notification policy | Server Target/Operation, existing playbook/alert/workflow actors, tenant policy and capability registry | Per-incident execution commands in ontology schema |
+| Graph/map UI and field/Android clients | Quasar and StarIntel clients consuming typed projections | Silent rewriting of inferred claims into direct facts |
+
+The historical [[https://github.com/lost-rob0t/star-spec/blob/main/spec/geo/starintel-geo-v1.md][star-spec geo draft]] is prior design input. Its parent release =0.9.1.2= and implementation-authorizing prose do not supersede the current StarLang 0.10.1 source. This ARADR proposes reconciliation, *not* a new third authority.
+
+* Contract: Ontology-Native From Every Document
+
+** Storage type is not semantic type
+
+- =dtype= selects the canonical versioned persisted shape and validated base envelope.
+- A semantic class URI identifies the thing, concept, event or activity the document represents; one object can have several qualified classes.
+- A predicate URI identifies the stable meaning/direction of a relationship, attribute or observation.
+- A *qualified assertion* links subject/predicate/object to observed/valid/recorded times, source records, confidence/review, evidence, rule/proof and dataset/named context.
+- A class assignment itself may be sourced, disputed, inferred or time-qualified. A model's guess is not a fact by virtue of =@type=.
+
+To bridge old and new objects, define a **generated dtype-to-ontology profile registry**, not manual assumptions in each SDK. Examples:
+
+| Persisted dtype | Initial semantic profile | Important distinction |
+|----------------+--------------------------+-----------------------|
+| =entity= | generic =Entity= with declared ontology classes | broad resource without inventing new dtype |
+| =person= / =org= / =user= | person/organization/online-account profiles | account is not automatically same as the human who operates it |
+| =concept= | SKOS-like concept/vocabulary term | taxonomy labels are not automatically asserted entity facts |
+| =relation= | qualified relation/assertion projection | never collapse claim/evidence/inference into an unqualified edge |
+| =event= | real-world event/occurrence type(s) | broker/audit/workflow signal is not automatically a world event |
+| =observation= / =claim= | sourced observation/proposition | uncertain claims do not become verified occurrences |
+| =geo=, =location=, =route= and =geofence= | geometry/place/spatial object family | event at a location is an assertion, not an ID alias |
+| =target= and =operation= | control-plane activity/plan profiles | remain separate from investigative subject and real-world event |
+
+** Extension envelope decision to implement only after version approval
+
+Add one structurally typed optional semantic profile to the *new* core version, available on any document dtype (proposed shape; NOT CURRENT 0.10.1 syntax):
+
+#+begin_example
+semantic:
+  ontologyRefs: [{packageUri, version, digest}]
+  classUris: [stable URI ...]
+  propertyValues: [{predicateUri, typedValue, qualifiers?} ...]
+  assertionRefs: [canonical assertion refs ...]
+#+end_example
+
+This is *illustrative*. Final typed member names, null semantics, cardinalities, reference types, index obligations and migration are decided by StarLang implementation conformance. Root document envelope remains flat =id= /=dataset= /=dtype= /=schemaVersion=; an optional typed semantic member does **not** sanction a second nested =data= envelope. Do not copy a loose JSON map with unchecked keywords into the trusted schema.
+
+The core ontology module should be small: universal Entity/Event/Activity/Place/Concept/Document/Assertion/Source/Time/Role semantics and package resolution. Specialized communities, finance, cyber, governance, alert taxonomies and source-specific types belong in domain modules.
+
+* Contract: Extensible Domain Packages
+
+A domain owner authors a modular **data-only ontology package** referencing stable namespaced class and predicate URIs, with shapes and mappings, not executable arbitrary code.
+
+Proposed registry/package API operations for later design verification (NOT current public APIs):
+
+#+begin_example
+ontology.verify(bundleId, digest)
+ontology.resolveClass(classUri, lockedSnapshot)
+ontology.resolvePredicate(predicateUri, lockedSnapshot)
+ontology.validateDocument(document, lockedSnapshot)
+ontology.validateAssertion(assertion, lockedSnapshot)
+ontology.diff(baseDigest, proposedDigest)
+ontology.planMigration(sourceLock, destinationLock)
+#+end_example
+
+The package manifest is proposed to contain:
+
+| Member | Contract |
+|--------+----------|
+| =packageUri=, =version=, =digest= | Canonical identity and hash of deterministic bundle bytes |
+| =imports[]= | Exact digest-locked dependency closure; cycles/conflicts rejected |
+| =classes[]= | URI, parent classes, definitions, shapes, introduction/deprecation |
+| =predicates[]= | URI, domain/range, qualifiers, inverse/symmetric/transitive rules where proven |
+| =typedProperties[]= | datatype/units/cardinality/allowed references; no arbitrary executable validators |
+| =mappings[]= | Exact/close/broader/narrower/lossy external crosswalks with explicit data loss |
+| =factProjection= | Generated registry for generic Prolog facts and bounded named queries |
+| =migration= | Classified additive/breaking conversions, reversible transforms or loss markers |
+| =fixtures[]= | Immutable positive/negative/example and round-trip conformance records |
+| =owner= / =visibility= | Package ownership and import permissions; not an authorization grant |
+
+** Release/version invariant
+
+- Normative StarIntel *core schema* or compiled core semantics change => **new core schemaVersion**. 0.10.1 bytes, release locks and fixtures remain untouched.
+- A compatible additive release might be =0.11.0=, but exact semver classification is a release gate; if existing semantics must change incompatibly, use a major bump. Version numbers are never a substitute for migration.
+- Custom domain packages change => bump their *package version*, recalculate digest and pin the new bundle in document/dataset semantic contexts. A package introducing new classes via an already-supported extensibility envelope does **not** require arbitrarily bumping the core schema; this does not violate the core-change version rule.
+- Rule packs, workflow policies, named queries, graph projections and API/transport profiles have independent version/digest coordinates.
+- Package activation is immutable and controlled by authorized registry publication, static validation and rollback. No client-supplied remote contexts, unsandboxed Prolog clauses or tenant modifications of built-in URIs.
+- Unknown package or digest mismatch => typed quarantine/failure, never default-to-permissive or silent reinterpretation.
+
+** Offline and cross-language conformance
+
+CL, Kotlin, Java, Python, TS/JS, Nim, Go, Rust, Emacs Lisp and Prolog consumers of the existing release must resolve the *same* ontology definition, preserve unknown authorized extension fields and report the same invalid document/error category. New domain class installation must not require hand editing each language's class hierarchy.
+
+Generate a versioned JSON-LD =@context= and RDF vocabulary projection from the exact locked semantic source. A round-trip must preserve assertion IDs, typed literals, time, evidence and named context. If an export format cannot express a qualifier, report loss; do not silently declare equivalence. RDF/SPARQL query service is an optional projection and may be powered independently, without replacing CouchDB.
+
+* Domain: First-Class Communities Without One New Dtype Per Variant
+
+Use the broad class vocabulary from [[https://github.com/lost-rob0t/starintel-auto-research/issues/252][#252]]; specialize only through domain packages.
+
+A =Community= can be geographical, online, informal, event-based, topic-based, temporary, federated, or an overlapping collection. It may refer to an =Organization=, =Forum=, =Channel= or =ChatGroup= without being identical to that thing. The canonical =entity= is a valid storage profile; =community= as a dedicated dtype is a separate question requiring demonstrated storage-specific invariants and a new schema version.
+
+The domain module must define machine-readable predicates for =subcommunityOf=, =hasPlatformSpace=, =partOf=, =locatedIn=, =hostedBy=, =moderatedBy=, =memberOf=, =claimedMemberOf=, =mentions= and =participatedIn= with distinct semantics. =memberOf= requires an attributed assertion, temporal interval and evidence; a role binding is not a permanent person's characteristic.
+
+Negative examples:
+
+- A commenter discussing a forum is not necessarily a forum member.
+- A user following an account is not automatically an adherent of its ideas.
+- Co-attendance at a meeting is not evidence of membership or affiliation.
+- A city/neighborhood community can have a spatial catchment without containing a list of named humans.
+- Expired/retracted memberships cannot appear as current and cannot be silently re-inferred on stale sources.
+
+* Domain: Real-World Events as First-Class Knowledge
+
+** Reuse =event=; distinguish reports and hypotheses
+
+The 0.10.1 =event= dtype is the likely storage profile for a real-world event, with typed semantic classes in the new package. Different event taxonomies belong to domain vocabularies and must not be encoded as new core enums for every phenomenon. An event is *not* a broker message, target scheduling tick, detector alert, log entry or rule signal. Those remain runtime/control-plane records.
+
+Minimum domain meaning:
+
+- stable event candidate/identity plus independent source-report IDs;
+- time of occurrence (=earliest/latest=, instant, interval, ongoing or unknown) distinct from when evidence was collected/ingested and a classifier ran;
+- event stage =reported=, =hypothesized=, =contested=, =reviewed=, =confirmed= or =retracted= as qualified source/review assertions, not a single unqualified truth toggle;
+- one or many geometries, place anchors, region/area/trajectory, with explicit accuracy and alternative hypotheses;
+- role-qualified participants and organizations; alleged/claimed roles not treated as verified participation;
+- parent/subevent, repeated-instance, correlated-event and duplicate-report links, with evidence for merges and reversible adjudication;
+- source/licensing/provenance and event-specific ontology fields supplied by optional packages.
+
+Event classification can change as facts arrive. The original media and reports remain unchanged, and the derived event projection is rebuilt or revised with causation/proof. For a virtual world event, geometry may be absent; do not invent a site.
+
+* Domain: Better Geo as Semantic Relations Over Existing Geometry
+
+Use =geo= (seven families), =location=, =address=, =route=, =geofence=, =encounter= and =map-layer= as already implemented schema *types*; reuse [[https://github.com/lost-rob0t/starintel-server/issues/237][geo #237]] to answer spatial queries. The key addition is **semantics**:
+
+- =Place=, =Region=, =AdministrativeArea=, =Building=, =Venue=, =Route=, =Track=, =Coverage= etc. as ontology classes; locality hierarchy as time-qualified assertions rather than hard-coded U.S.-only administrative enums;
+- geometry source distinctions =direct/anchored/derived= and transform chain, with accuracy, measured or inferred status, timezone and vertical datum where applicable;
+- spatial predicates =inside=, =intersects=, =touches=, =near=, =coveredBy=, =routeThrough=, =observedAt= and =reportedInRegion= qualified by measurement method and temporal window;
+- precise polygon/ring orientation/holes, coordinate order WGS84, antimeridian, invalid/self-intersecting geometries, CRS conversion and units checked by geospatial services;
+- time-dependent location and competing location claims; an IP-geolocation or Wi-Fi sighting must never be promoted into the person's direct present location;
+- spatial projection only: PostGIS/vector tiles/GeoJSON/GeoSPARQL/TAK and mobile map layers are derived, visibility-filtered and rebuildable, and never a canonical data editing surface.
+
+The relevant historic =star-spec= geo draft supplies direct/anchored/derived projections and uncertainty principles; migrate useful statements into the version-bumped canonical source rather than retaining conflicting normative authorities.
+
+* Rules, Signals, Workflow Fan-Out and Dataset Policy: Not Schema Authority
+
+** All signal and workflow interpretation is outside core ontology
+
+A Star KB Prolog expert *named and bounded query* may detect a tenant/domain-defined signal from source-backed facts. The domain/rule package owns a rule's label and criteria; the workflow policy owns eligible capabilities, review requirements, actor selection and destination dataset. **Neither a generic StarIntel =event= document nor a custom ontology term authorizes execution.**
+
+#+begin_example
+raw source records -> validate + canonical document/evidence ingest
+  -> resolved ontology facts (star-kb projection)
+  -> bounded named Prolog query + proof + rulePack lock
+  -> candidate signal with source/evidence/time and reason
+  -> authenticated policy evaluator / review decision
+  -> StarIntel Target/Operation (durably accepted)
+  -> supervisor / workflow actor / bounded fan-out
+  -> actor outputs -> canonical validation + authorized dataset assignment
+  -> change feed -> re-evaluation or truth-maintenance, subject to dedupe/stop rules
+#+end_example
+
+Example (deliberately *non-normative*): a public-safety domain rule produces an =example.publicSafety.reviewCandidate= signal based on synthetically defined evidence. A tenant-configured policy may open a human review and run source-corroboration actors. The core schema must NOT introduce =activeShooter=, a social-media keyword flag, an emergency dispatch command, default watchlists, or specific dataset routing. Detection does not equal confirmed event; commentary or praise alone is not a threat finding, membership claim or authorization for action.
+
+** Required workflow invariants
+
+- signal has stable idempotency identity, rule URI/version/digest, input assertion/evidence refs, observed/decision times, method, provenance and state;
+- selected workflow is authorized by principal/tenant/purpose/capabilities *outside* ontology; dataset output is chosen by authorized policy, not an untrusted source field;
+- positive ceilings for fan-out count, concurrency, recursion depth, total work, time, bytes, costs; explicit cancellation/leases/fencing and terminal partial/error states;
+- no unbounded recursive rule → actor → rule feedback, no automatic public notification/high-consequence action on a single weak classifier hit;
+- replay and changed source evidence can invalidate a derived signal, update an alert, or ask for review without deleting historical audit;
+- no arbitrary external Prolog text, Prolog =call/1= or LLM-generated executable code through a generic public query endpoint; only signed/allowlisted named rule packages.
+
+Link execution to existing [[https://github.com/lost-rob0t/starintel-server/issues/167][server playbook #167]], [[https://github.com/lost-rob0t/starintel-server/issues/129][webhook registry #129]], [[https://github.com/lost-rob0t/starintel-server/issues/302][alert evaluator #302]] and [[https://github.com/lost-rob0t/star-lang/issues/51][bounded fan-out #51]]. This design must not create a hidden second scheduler or actor registry.
+
+* Concrete Non-Normative Scenario
+
+#+begin_example
+Package: example.org/community-events@1.2.0 (digest locked)
+  class: Community
+  class: MeetupEvent extends WorldEvent
+  predicate: hostedBy -> Community
+  predicate: heldAt -> Place
+  predicate: participantRole -> RoleAssignment
+
+Canonical entity: "Synthetic neighborhood coding club"
+  dtype=entity, semantic class=Community, evidence of existence
+Canonical location: "Synthetic public library meeting room"
+  dtype=location, geometry reference and source
+Canonical event: "Synthetic monthly coding meetup"
+  dtype=event, semantic class=MeetupEvent, scheduled interval
+Qualified assertions:
+  event hostedBy community (organizer listing, source/time)
+  event heldAt place (public schedule, valid time)
+  profile mentioned event (post text, NOT evidence of attending)
+Prolog rule package:
+  candidate cancellation based on source-corroborated notice
+  -> proof-linked candidate signal only
+Workflow:
+  configurable review policy -> bounded source-check task
+  -> result ingested to permitted tenant dataset, with source and rule refs
+#+end_example
+
+A separate public-safety ontology can add an incident class and rules with the *same infrastructure* without changing the core schema or shipping a hard-coded incident/watchlist policy.
+
+* Migration and Release Gates
+
+** 0.10.1 is immutable
+
+1. Preserve every 0.10.1 source, generated schema, fixture and hash. Never reinterpret =schemaVersion="0.10.1"= under new ontology terms silently.
+2. On design approval, reserve a *new versioned directory*, tentatively =specs/starintel/0.11.0/= for additive compatible work. If additive is impossible, explicitly raise a *major* version instead.
+3. Create canonical StarLang source + immutable semantic/ontology resolver manifest + JSON-LD context/ontology projection + compiled validators and every supported portable binding. No downstream-generated authoritative hand edits.
+4. Add a semantic compatibility classifier: unchanged/additive/alias/widening/narrowing/breaking; reviewed and digest-pinned mappings from old =entityClass=, =eventTypeId=, =concept= vocabulary and =relation= predicates into package URIs. No unconstrained auto-aliases.
+5. Migrate with source/target schema locks, original payload/history/provenance preserved, per-record failure quarantine, deterministic idempotency and dry-run review. Unknown extensions survive under an explicitly governed compatibility boundary.
+6. Maintain historical 0.10.1 readers and opt-in migration; switch new canonical writers only after consumers accept the new version and conformance.
+7. Rebuild Prolog, search, graph, geo and RDF indexes from newly validated canonical docs; compare semantic snapshot/output, not raw JSON textual order.
+8. Reconcile the legacy geo =0.9.1.2= draft into a single source-authority lineage and mark deprecated/superseded history without deleting it. Update cross-repo schema locks only through approved audited PRs.
+9. Never release from a draft PR merely because a unit-test inventory passes; require actual runtime, cross-language, geo and broker/actor gates.
+
+* Implementation Dependency DAG (Separate Approval per Slice)
+
+#+begin_example
+W0: ontology authority and compatibility decision (#267, #252, #130)
+  -> W1: StarLang versioned semantic bundle/compiler/profiles + fixtures
+        -> W2: StarIntel Server semantic ingest/resolution + derived assertion storage
+            -> W3: star-kb locked ontology facts, constraints, truth maintenance
+                -> W5: bounded workflow signal/policy consumers (outside schema)
+            -> W4: star-geo spatial + world-event projection alignment
+        -> W6: polyglot validation + JSON-LD/RDF/GeoJSON export/import
+  -> W7: end-to-end scenario / replay / security / release activation
+#+end_example
+
+| Slice | Owning repository | First required RED target |
+|-------+-------------------+---------------------------|
+| W0 | Auto-Research/StarLang | Refuse conflicting schema/ontology authorities; pin design and semver decision |
+| W1 | =lost-rob0t/star-lang= | Custom class works across 2 runtimes without editing dtype enums; malicious core URI shadow fails; every core change requires bump |
+| W2 | =lost-rob0t/starintel-server= | Canonical ingestion rejects unpinned package and cross-tenant assertion; supports historically pinned reads |
+| W3 | =starintel-labs/star-kb= + server Prolog seam | Derived claim proof expires after source retraction; arbitrary Prolog goals denied |
+| W4 | =star-geo= / server existing geo issues | Spatial query respects geometry uncertainty, temporal validity, area holes, antimeridian, source visibility |
+| W5 | Server workflow/playbook/alert actors | Duplicate signal cannot cause duplicate dispatch, dataset bypass or unbounded fan-out |
+| W6 | StarLang generated consumer ecosystem / RDF service | Semantically equivalent typed JSON ↔ JSON-LD/RDF without lost evidence; stable package lock in polyglot bindings |
+| W7 | Server, StarLang, Star KB, Quasar and relevant edge consumers | Full fixture matrix, exact-head CI, rollback and no runtime policy in ontology |
+
+Do not start W1–W7 from this research/design PR. A child issue stating =AWAITING_OPERATOR_IMPLEMENTATION_APPROVAL= is the appropriate handoff once the operator accepts the architecture.
+
+* Conformance Inventory: Required Behavior and Failure Examples
+
+| ID | Test scenario | Expected observable invariant |
+|----+---------------+-------------------------------|
+| ONT-001 | New version emitted after a change to base schema | release, schema, generated manifest and migration identities agree; 0.10.1 preserved |
+| ONT-002 | Add =example:Community= class via locked extension package | validation and semantic query work without per-language handwritten type changes |
+| ONT-003 | Introduce tenant package redefining a built-in =memberOf= predicate | fail closed before ingest |
+| ONT-004 | Two sources disagree about a community member | both assertions and sources retained; no silent truth promotion |
+| ONT-005 | Commenter, follower or co-located person | no derived =memberOf= or real-world participant claim from engagement/proximity alone |
+| EVT-001 | News article reports synthetic incident | report/claim distinct from reviewed world event |
+| EVT-002 | Unverified inference emits domain event candidate | provenance, evidence and uncertain status visible; no implicit confirmation |
+| EVT-003 | Event with time interval, competing place geometries and correction | every historical claim/interval/geometry remains inspectable |
+| EVT-004 | Actor/broker event also has an =event= label | no accidental semantic promotion to real-world occurrence |
+| GEO-001 | GeoJSON point/line/polygon with hole and antimeridian | correct spatial transform and topology semantics or explicit unsupported result |
+| GEO-002 | IP reports only a city | does not become exact GPS or present person location |
+| GEO-003 | Derived map anchor with mixed visibility | hidden documents/edge counts absent; direct-vs-derived origin preserved |
+| KB-001 | Retract input supporting derived event classification | affected derivation marked stale/retracted with explanation |
+| KB-002 | Add external rule class to package | candidate by default; no arbitrary trusted Prolog execution |
+| WF-001 | Prolog signal consumed twice | at most one authorized Target/Operation side-effect for idempotency key |
+| WF-002 | Tenant tries to route signal output into another dataset | rejected by server policy; source labels cannot grant capabilities |
+| WF-003 | Rule-triggered actor fan-out cycles indefinitely | bounded/terminated with traceable partial or stop condition |
+| EX-001 | Offline unknown package digest | typed unsupported/quarantine, never silently interpreted as core type |
+| EX-002 | JSON-LD/RDF export/import of assertion | same semantic meaning and evidence or reported explicit loss |
+
+This is a **design-time inventory**, not an executed conformance test suite.
+
+* Adversarial Review and Explicit Rejections
+
+- **Reject a million fixed dtypes:** does not scale to user-defined communities/event classes and breaks portable bindings.
+- **Reject ungoverned live ontology mutations:** changing domain/range, imports or class meaning invalidates downstream inference; require version, digest and migration.
+- **Reject a second canonical triple store:** PostGIS/RDF/graph/Prolog each derive from canonical validated documents, subject to the same scopes.
+- **Reject an inferred graph edge treated as a direct real-world fact:** every inferred edge needs provenance, time, proof, confidence/review and invalidation path.
+- **Reject source-content-driven workflow execution:** untrusted text, custom event names or class declarations do not grant capabilities, select datasets or create privileged targets.
+- **Reject blind high-consequence public-safety classification:** source sarcasm, debate, copied posts or topical support alone are not proof of imminent danger. Human review/authorization, independent corroboration and precise rule provenance belong to policy/evaluation services.
+- **Reject map projection as identity oracle:** co-observation and spatial proximity alone do not prove affiliation, residence, ownership, movement or intent.
+- **Reject unbounded event cascades:** budget, idempotency, parent causation and cancellation remain operational necessities even when a document is schema-valid.
+- **Reject semantic version relabeling:** migrating old documents requires explicit verified mapping, not replacing =schemaVersion= values.
+
+* Operator Review Decisions
+
+- [ ] Approve/modify Option C: single ontology-native semantic model over canonical JSON; optional RDF projection.
+- [ ] Decide whether broad =Community= remains generic =entity= + ontology type by default (recommended) or warrants a separately versioned persistent =community= dtype.
+- [ ] Approve a *version-bumped* extensibility envelope and classify whether 0.11.0 is genuinely backward-compatible.
+- [ ] Approve the single-authority resolution between StarLang semantic compilation, issue #252 JSON-LD vocabulary and legacy =star-spec= geo draft.
+- [ ] Accept time/provenance/uncertainty rules and the separation of world event, report, hypothesis, signal and runtime event.
+- [ ] Confirm workflow/policy/dataset selection remains outside the schema authority and outside direct Prolog query side effects.
+- [ ] Authorize bounded implementation child slices separately after conformance RED targets are accepted.
+
+Nothing here marks these boxes approved.
+
+* Footnotes and Glossary
+
+- *Ontology-native platform*: All persisted records participate in versioned typed semantic interpretation and evidence-aware inference, rather than ontology being a mere optional reference table.
+- *Storage dtype*: Versioned wire/document profile, not necessarily a domain class.
+- *Ontology module/package*: Versioned, integrity-locked namespaced data-only classes/predicates/shapes/constraints and mappings.
+- *Semantic projection*: Derived and rebuildable typed graph, spatial, Prolog or RDF view over canonical records.
+- *Qualified assertion*: Statement with traceable provenance, evidence, time, status, context and optional proof.
+- *World event*: Occurrence independent of its reports, hypotheses, notices and workflow signals.
+- *Workflow signal*: Bounded, evidence-linked detection output for an independently authorized workflow controller; not a confirmed event.
+- *Valid time*: Period when a source claims a relationship or condition held in the world, separate from observation and ingestion time.
+- *Digest pin*: Runtime verification of immutable package bytes and transitive imports against an expected cryptographic hash.
+- *Replay-safe fan-out*: Bounded actor dispatch with durable acceptance, idempotency, cancellation and terminal result accounting.

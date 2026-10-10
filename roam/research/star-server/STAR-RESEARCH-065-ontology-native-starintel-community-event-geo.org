@@ -31,7 +31,8 @@
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-10-10 | Corrected current UTC changed-document audit date after hosted CI gate rejected 2026-10-09-only entries; semantic scope and approval unchanged. | ChatGPT ARADR CI follow-up | [[https://github.com/lost-rob0t/starintel-auto-research/actions/runs/38022973919][Org-roam Pages job 38022973919]] |
+| 2026-10-10 | Examined existing 0.10.1 Target/relation and Star KB graph traversal, compared target-monitor expansion alternatives, and added XM-01..07 negative/replay gates without implementation approval. | ChatGPT GitHub ARADR follow-up | [[https://github.com/lost-rob0t/star-lang/blob/main/specs/starintel/0.10.1/core.star][0.10.1 core]], [[https://github.com/starintel-labs/star-kb/blob/main/kb/core/star_reasoning.pl][reasoning.pl]], [[https://github.com/starintel-labs/star-kb/issues/15][Star KB #15]] |
+| 2026-10-10 | Corrected current UTC changed-document audit date| 2026-10-10 | Corrected current UTC changed-document audit date after hosted CI gate rejected 2026-10-09-only entries; semantic scope and approval unchanged. | ChatGPT ARADR CI follow-up | [[https://github.com/lost-rob0t/starintel-auto-research/actions/runs/38022973919][Org-roam Pages job 38022973919]] |
 | 2026-10-09 | Created focused ontology-native whole-platform ARADR inventory and comparative design, linked to existing broad ontology and geo authorities. | ChatGPT ARADR research pass | [[https://github.com/lost-rob0t/starintel-auto-research/issues/267][Issue #267]], live GitHub source inspection and external standards in source register |
 
 * Question and Existing Authority
@@ -168,6 +169,54 @@ The rule does not write to an arbitrary dataset, approve its own finding or issu
 | Workflow can select an arbitrary output dataset from a document | Tenant-authoritative dataset policy; no data-driven capability minting |
 | A schema migrator silently relabels 0.10.1 as 0.11.0 | Source+target digest locks, field-level reviewed mapping, quarantine |
 | RDF map/graph/Prolog projection gains writes and diverges | Only canonical validated StarIntel ingest mutates facts; projections are deterministic rebuilds |
+
+* ARADR Addendum: Entity-Agnostic Monitoring and Semantically Typed Traversal (2026-10-10)
+
+** Verified current state and gap
+
+This extension inspects current GitHub sources on 2026-10-10; it is research and does not claim an implemented watchlist manager:
+
+1. [[https://github.com/lost-rob0t/star-lang/blob/main/specs/starintel/0.10.1/core.star][StarLang =core.star= 0.10.1]] defines persistent =target= with required =actor= and =target= (string), optional =targetType=, =scope=, schedule, recurrence, state and retry fields. This is a work/control-plane object; its =target= is *not* a schema-guaranteed typed reference to a =person= or even an =entity= document. A typed referential constraint added to core would require a new schemaVersion, never an edit of immutable 0.10.1.
+2. The same release defines =relation= with =source=, =destination=, =predicate= (string), =direction=, =inversePredicate=, evidence, =validAt= and =endedAt=. A stored predicate string is not automatically a resolved ontology URI or an authorized traversal.
+3. [[https://github.com/starintel-labs/star-kb/blob/main/kb/core/star_reasoning.pl][Current Star KB =star_reasoning.pl=]] synthesizes =graph_edge/5= from =star_relation/9= and separate =star_ref/3= document-reference paths. =path/4= walks =graph_edge/5= using an unconstrained predicate/direction, so a structural =references(Path)= link and a sourced semantic relation may both contribute to a path. =tool_neighbors/3= similarly exposes both for exploration. These are legitimate exploratory tools but insufficient authorization/semantics for scheduling another entity as a watch target.
+4. [[https://github.com/starintel-labs/star-kb/issues/15][Star KB #15]] already proposes bounded named policy decisions, cross-tenant authorization, scheduling/budget classification, and service-owned effects. Add this use case there after design approval; do not create another mutable actor scheduler or expose arbitrary Prolog goals.
+5. [[https://github.com/lost-rob0t/starintel-auto-research/issues/252][Ontology #252]] owns classes, predicate registry and qualified assertions. This pass refines *how* a monitor consumes typed assertions, not the authority that defines them.
+
+** Decision: neither generic relatedness nor graph reachability is monitoring intent
+
+- A monitor's subject may be any addressable canonical thing or document: person, organization, Bluetooth device, lake, geographic feature, event, website, concept or asset. =Target= means an actor work request *about* a subject, not that the subject must be a =person= or have one fixed =dtype=.
+- =related-to= is not a production-grade relation for traversal, alerting, identity promotion or target submission. Broad relatedness is already implied by any meaningful edge; at most expose a clearly marked derived *exploration* view that never becomes an assertion or work trigger. Social/family edges should likewise use =parentOf=, =follows=, =memberOf=, etc. as appropriate, rather than collapsing their meanings.
+- Separate *semantic assertions*, *structural document references*, *observations*, *identity/similarity candidates* and *derived/proposed edges*. A valid source reference or map co-location is not evidence of ownership, personal identity, intent, membership or authorization to monitor its endpoint.
+- Ontology specifies predicate meaning, direction, domain/range, inverse, validity and provenance requirements. A **versioned rule/workflow monitoring profile** separately decides which predicates, directions and states can expand a given watch and for what investigative purpose. Ontology =subPropertyOf= is not implicit approval to follow the child relation.
+- Predicate-based traversal uses an authorized and evidence-consistent knowledge snapshot. Filter by tenant/resource scope *per edge and endpoint*, time window, assertion state and proof/evidence; bounded depth, frontier, visited set, output count, time and work budget. Unresolvable or unsupported subjects produce typed skip/review decisions, not a guess about identity or a broad crawl.
+- Prolog returns ranked, proof-linked *candidate* targets and reasons through a named bounded query. Server policy then authorizes each candidate and the actor manifest before durable =Target= acceptance, scheduling, outbox, lease/fencing and idempotent fan-out. =submit_targets/1= is an effectful adapter/supervisor concern, never an effect embedded in an ontology predicate.
+
+** Alternatives and adversarial cases
+
+| Design | Benefit | Failure mode | Decision |
+|--------+---------+--------------+----------|
+| Traverse any =graph_edge/5= neighbor | Reuses =path/4= unchanged | Structural references, social mentions and weak claims trigger spurious watches; fan-out/tenant leaks | Reject for monitoring; keep for exploratory graph queries |
+| Hard-code a relation whitelist per =dtype= | Easy first implementation | A lake, device and community may share =dtype= yet need different semantics; package extensions require source changes | Reject as permanent authority |
+| Resolve ontology predicates, then apply named, purpose-scoped monitoring profiles | Arbitrary subjects and domain extensibility; explainable bounded candidates | Requires snapshot/locks, consistent query filters, proof retention and scheduling handoff | Recommend for operator review |
+
+Counterexamples:
+- Bluetooth =observedAt= a place proves a device *observation* only; it must not generate =ownedBy= person, =samePerson= or unrestricted nearby-person expansion.
+- A lake's =outflowsTo= waterbody or =withinWatershed= region may be valid for hydrological monitoring, but no person/organization collection follows from proximity.
+- An organization's =operates= website can motivate a website observation under a relevant rule and authorized actor, not a search of every person linked from the site.
+- A profile =mentions= an event is not an =attended= or =memberOf= assertion; weak or disputed relation evidence never silently promotes a person into a consequential watchlist.
+- A stale/retracted ownership or location claim must invalidate or suspend dependent candidates after projection replay; an audit of past decisions remains available.
+
+** New research tests to hand to the design
+
+- XM-01: arbitrary subject class, including Bluetooth device and lake, returns consistent typed candidates without hard-coded =Person= branches.
+- XM-02: =references(Path)= and generic =related-to= are visible to graph exploration yet cannot trigger watch expansion.
+- XM-03: relation direction, inverse and ontology subproperty are not interchangeable; reverse walk requires explicit policy and retains the original source-direction claim.
+- XM-04: cross-tenant endpoint, disputed evidence, ambiguous identity and outside-valid-time edges yield rejected/review-only candidates with reasons, not automatic target creation.
+- XM-05: cyclic/multi-hop graph and repeated source relations obey depth, visited, fan-out and idempotency ceilings; replay produces stable candidate/proof identity for the same snapshot.
+- XM-06: an existing 0.10.1 =target= remains readable unchanged; a proposed *normative* typed-reference constraint is classified and released only under a bumped StarLang core schemaVersion.
+- XM-07: retracting a source assertion invalidates the dependent expansion candidate without erasing the original evidence or the historical scheduling audit.
+
+No XM test was executed in this research/design change.
 
 * Research Outcome and Open Decisions
 

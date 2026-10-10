@@ -2,25 +2,22 @@
 
 This file is the repository-wide authority for every human or automated agent that reads or changes this repository.
 
-## Main-only Repository Workflow
+## Forgejo Branch and Pull-Request Workflow
 
-This repository is **strictly main-only**. `main` is the only active work, integration, verification, and publication branch.
+Forgejo at `git.starintel.actor` is the canonical repository host. `origin` must point there. GitHub is a fallback mirror when Forgejo is unavailable, not a second place to open the same pull request.
 
-These rules are non-negotiable unless the operator explicitly overrides them for one specific task:
+All substantive changes use an isolated feature branch and a Forgejo pull request into `main`:
 
-- Commit authorized changes directly to `main`.
-- **Never create a feature, review, migration, verification, safety, staging, agent, publication, reconciliation, or temporary branch.**
-- **Never create a branch as a workaround** for uncertainty, validation, tool limitations, GitHub Pages triggering, migration testing, or a desire to preserve a clean `main` history.
-- **Never open a new pull request for work in this repository** unless the operator explicitly instructs you to do so for that specific change.
-- Existing historical branches and pull requests are legacy work items only. Their existence is not workflow precedent and must never be used to infer that branches or PRs are acceptable for new work.
-- When an existing historical branch or pull request contains work that must land, reconcile or merge it into `main`; do not create another branch around it.
-- If a tool can write directly to `main`, use the direct-main operation. Do not build a temporary GitHub Actions workflow merely to mutate the repository when a direct repository write is available.
-- If direct-main mutation is genuinely unavailable, do **not** substitute a branch. Report the limitation rather than silently changing the repository workflow.
-- GitHub Pages production publication is driven by `main`. Any change intended to affect the public site must land on `main` and must either touch a Pages-triggered path or use the existing Pages workflow's explicit dispatch path. Do not create a branch solely to trigger, stage, test, or review publication.
-- Verification belongs on the exact `main` head. Do not use a side branch as a verification environment.
-- When reporting completion, report `main` and the exact `main` head SHA. Direct-main work does not require a review branch or pull request.
+- Start from a freshly fetched `origin/main` and create one narrowly named feature branch in an isolated worktree.
+- Never develop directly in the primary `main` checkout and never mix unrelated work into a task branch.
+- Push the feature branch to `origin` and create or update exactly one Forgejo pull request with `tea`.
+- Run local verification on the feature head before publication. CI evidence is valid only for the exact current pull-request head.
+- Merge with the repository's bounded merge-on-green workflow only after required checks and reviews for that exact head are green and the pull request is current and mergeable.
+- Do not enable hosted auto-merge and do not bypass red, missing, cancelled, stale, or ambiguous checks.
+- If Forgejo is unavailable, record the outage and use GitHub only as the documented fallback. Do not duplicate a pull request across both hosts. Reconcile the canonical remote when Forgejo recovers.
+- GitHub Pages production publication remains driven by `main`. Publication is complete only after the verified pull request lands and the exact merged `main` head publishes successfully.
 
-Before performing any Git write, verify that the destination is `main`. If a planned operation would create or update any other branch, stop that operation and use the direct-main path instead unless the operator explicitly authorized the non-main branch in the current task.
+Before any Git write, verify the current branch, worktree, destination branch, remote, and dirty state. Before completion, report the pull request, verified feature-head SHA, merged `main` SHA, and publication result when publication is in scope.
 
 ## Instruction Scope
 
@@ -296,8 +293,8 @@ When substantive Org files changed, also run the changed-file validation command
 
 Report:
 
-- `main` and the exact `main` head SHA;
-- any existing historical pull request consumed or merged, if applicable; direct-main work does not require a pull request;
+- the Forgejo pull request and exact verified feature-head SHA;
+- the exact merged `main` head SHA;
 - applicable `AGENTS.md` files read;
 - complete tracked scope inspected;
 - files created, changed, deleted, moved, or superseded;
@@ -306,7 +303,7 @@ Report:
 - unresolved risks and research gaps;
 - publication workflow result and only `auto-research.starintel.actor` page links.
 
-Do not enable auto-merge. This repository is main-only: perform authorized work directly on `main`. If consuming an existing historical pull request, merge it only after every required check for its current head is complete and green, it is current and mergeable, review requirements are satisfied, discussions are resolved, and the expected current head SHA is supplied to the merge operation. After any direct-main change or merged historical pull request, verify the exact `main` head and verify the `main` publication workflow when publication is in scope.
+Do not enable hosted auto-merge. Merge a pull request only after every required check for its current head is complete and green, it is current and mergeable, review requirements are satisfied, discussions are resolved, and the expected current head SHA is supplied to the bounded merge-on-green operation. After merge, fetch and verify the exact `main` head and verify the `main` publication workflow when publication is in scope.
 
 ## Org TODO and Review Queue Presentation
 

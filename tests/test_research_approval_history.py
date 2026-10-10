@@ -112,6 +112,15 @@ class ResearchApprovalHistoryTests(unittest.TestCase):
             self.git(root, "commit", "-m", "expand research")
             self.assertEqual(verify_repository(root), 1)
 
+    def test_approval_provenance_survives_later_file_rename(self) -> None:
+        root, temporary = self.setup_repo()
+        with temporary:
+            path = self.migrate(root)
+            renamed = path.with_name("renamed-record.org")
+            self.git(root, "mv", str(path.relative_to(root)), str(renamed.relative_to(root)))
+            self.git(root, "commit", "-m", "rename research record")
+            self.assertEqual(verify_repository(root), 1)
+
     def test_body_change_in_first_canonical_commit_still_fails(self) -> None:
         root, temporary = self.setup_repo()
         with temporary:
@@ -203,6 +212,47 @@ class ResearchApprovalHistoryTests(unittest.TestCase):
             )
             self.git(root, "add", ".")
             self.git(root, "commit", "-m", "create canonical research")
+            self.assertEqual(verify_repository(root), 1)
+
+    def test_canonical_born_wrong_blob_can_be_repaired_at_creation_parent(self) -> None:
+        root, temporary = self.setup_empty_repo()
+        with temporary:
+            base_commit = self.git(root, "rev-parse", "HEAD")
+            path = root / "roam" / "research" / "test" / "record.org"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                canonical_record(base_commit=base_commit, base_blob="1" * 40),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create research with wrong base blob")
+            path.write_text(
+                canonical_record(base_commit=base_commit, base_blob="NONE"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "repair canonical-born provenance")
+            self.assertEqual(verify_repository(root), 1)
+
+    def test_partial_canonical_born_record_can_be_repaired(self) -> None:
+        root, temporary = self.setup_empty_repo()
+        with temporary:
+            base_commit = self.git(root, "rev-parse", "HEAD")
+            path = root / "roam" / "research" / "test" / "record.org"
+            path.parent.mkdir(parents=True)
+            partial = canonical_record(base_commit="NONE", base_blob="NONE").replace(
+                "#+approval_base_commit: NONE\n#+approval_base_blob: NONE\n",
+                "",
+            )
+            path.write_text(partial, encoding="utf-8")
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "create partial canonical research")
+            path.write_text(
+                canonical_record(base_commit=base_commit, base_blob="NONE"),
+                encoding="utf-8",
+            )
+            self.git(root, "add", ".")
+            self.git(root, "commit", "-m", "repair canonical-born metadata")
             self.assertEqual(verify_repository(root), 1)
 
     def test_backfilled_record_can_anchor_absence_at_base_commit(self) -> None:

@@ -1,0 +1,258 @@
+:PROPERTIES:
+:ID: 9b6a666c-2665-479d-9280-6851540baea0
+:END:
+#+TITLE: QUASAR-RESEARCH-008 Remote Sandbox Runner Service Boundary
+#+CREATED: [2026-10-09 Fri 19:50]
+#+LAST_MODIFIED: [2026-10-09 Fri 19:50]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: research
+#+ROAM_VISIBILITY: public
+#+CENSOR_PROFILE: strict
+#+SOURCE: Operator direction on 2026-10-09 plus local Quasar, unpublished Python-runner, starintel-biz, and Auto-Research inspection
+#+AI_GENERATED: t
+#+AI_TAG: ai_7ee3e4ecae2bbd69
+#+FILETAGS: :ai:ai_7ee3e4ecae2bbd69:quasar:remote-runners:sandbox:actors:
+
+#+description: ARDR research separating Quasar's default host-sandbox execution from an optional remote-runner service whose commercial policy may later live in private starintel-biz.
+#+status: READY_FOR_DESIGN
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+approval_evidence: The operator requested a separate remote-runner ARDR; research and design are not implementation approval.
+#+approval_base_commit: eda24d2540c3c847199a361cbf011bd597360e95
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+todo: TODO RESEARCHING REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change | Did nsaspy approve it |
+|---------+------------+-----------------------+-----------------------|
+| 0.1.0   | 2026-10-09 | Initial research on remote sandbox runners, their trust boundary, and the public/private service split. | No |
+
+* Research Question
+
+How should Quasar optionally execute an installed actor on a remote sandbox runner while keeping a real sandbox on the local host as the default, preserving StarIntel authority and tenant isolation, and leaving plans, prices, billing, and payment-provider policy for a possible later service in private =starintel-biz=?
+
+This is a separate architectural decision from [[file:../../design/star-server/QUASAR-009-actor-package-installation-configuration-and-run-control-plane.org][QUASAR-009]]. QUASAR-009 owns the one-stop Actor Center and the default local-host execution path. This research asks what must be true before a remote runner can be another execution provider behind that same contract.
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research findings | Quasar operator | PENDING | Explicit acceptance or amendment of this research | Pending operator review |
+| Remote-runner architecture | Quasar operator and affected repository owners | PENDING | Explicit approval of QUASAR-010 and its authority split | [[file:../../design/star-server/QUASAR-010-remote-sandbox-runner-protocol-and-service-boundary.org][QUASAR-010]] |
+| Security and privacy | Quasar operator / security reviewer | PENDING | Threat model, data handling, isolation tiers, and deletion evidence accepted | Adversarial Review |
+| Business-service policy | starintel-biz owner | NOT STARTED | Separately approved entitlements, quotas, metering, plans, and payment policy | Deferred; no price or payment design is asserted here |
+| Implementation authorization | Quasar operator | PENDING | Explicit instruction to implement an approved bounded slice | Not granted by this ARDR request |
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-10-09 | Created local-evidence-backed remote-runner research, adversarial analysis, and public/private ownership recommendation. | Codex | Current Quasar, unpublished Python runner worktree, starintel-biz entitlement boundary, and linked Auto-Research nodes |
+| 2026-10-10 | Recorded the exact-head publication repair without changing the pending research approval. | Codex | GitHub PR #264 publication checks |
+
+* Exact Local Research Baseline
+
+This pass used local repository evidence and performed no external web research:
+
+- starintel-auto-research base =eda24d2540c3c847199a361cbf011bd597360e95=;
+- Quasar =main= at =9079604f766990db7f9b8998705862c4fa914c45=;
+- unpublished Quasar worktree =feat/python-actor-runner= at =53898ff= with dirty, uncommitted runner changes treated as read-only evidence;
+- starintel-biz =main= at =b256386=, inspected only for code-level entitlement ownership and without reading private credentials;
+- QUASAR-RESEARCH-007 and QUASAR-009 from this change.
+
+The Quasar consumer lock reports release and schema =0.10.1=, canonical repository =lost-rob0t/star-lang=, and canonical commit =9198370f7a6f3e2a5ea00af3efdb6d705e102650=. The installed resolver rejects the lock because =expansion_path= is absent, and the canonical commit was not available in the inspected local or advertised remote objects. Contract-dependent implementation therefore remains blocked until the authority chain verifies.
+
+* Findings
+
+** Local host sandbox is the default
+
+The operator expects installed actors to run in sandboxes on the Quasar host. That is the default execution model. Remote execution is an optional provider selected only when an authorized policy and an actor's requirements justify it; it is not the baseline hidden behind the Actor Center.
+
+A =sandboxed-p= request property is only a policy assertion. A direct child process is only process separation. Neither supplies operating-system isolation, bounded filesystem access, network controls, resource accounting, or process-tree cleanup.
+
+The unpublished Python-runner prototype launches an interpreter directly, overlays the parent environment plus a checkout =.env= file, waits synchronously, and terminates the immediate process on timeout. It proves that the existing Quasar control plane can dispatch a Python actor and ingest its output. It does not prove a sandbox. In particular, it currently lets secret material cross the Quasar process boundary and lacks a dedicated identity, mount namespace, network policy, cgroup limits, syscall/capability controls, durable reconciliation, and reliable descendant cleanup.
+
+** Browser actors are a separate isolation tier
+
+Quasar's disposable opaque-origin browser iframe is a useful capability and origin boundary. The browser ADR explicitly does not call it a complete hostile-code sandbox. Browser-local, trusted host-sandbox, and untrusted strong-isolation execution must remain visibly different tiers.
+
+** Remote runners add a hostile infrastructure boundary
+
+A remote runner can reduce load on the Quasar host and can support elastic or specialized hardware. It also adds risks absent from a local runner:
+
+- the runner may forge results, usage, logs, timestamps, or isolation claims;
+- the network may partition after an effect but before acknowledgement;
+- data, actor inputs, or secrets may cross a jurisdiction or retention boundary;
+- multiple tenants may share hosts, caches, networks, and accelerators;
+- replayed submissions or receipts may duplicate effects or charges;
+- mutable artifacts may be substituted between planning and execution;
+- cancellation can become an uncertain distributed outcome.
+
+Remote execution therefore cannot be modeled as an SSH command, a broad broker consumer, or a direct database writer.
+
+** Public execution protocol and private commercial policy have different owners
+
+The portable runner protocol, sandbox profile, artifact identity, run state, cancellation, usage receipt, attestation fields, conformance fixtures, and data-deletion evidence are interoperability and security contracts. They belong in public canonical repositories.
+
+The following are business policy and may later belong in private =starintel-biz=:
+
+- principal-to-plan and tenant-to-entitlement mapping;
+- quotas, credit limits, reservations, and overage policy;
+- prices, currencies, discounts, invoices, and tax policy;
+- payment-provider and merchant configuration;
+- commercial fleet selection and service-level policy.
+
+The current starintel-biz code already owns hosted Quasar entitlement mapping from authenticated sessions to workspaces and capabilities. That supports the ownership direction, but it does not prove that billing, remote execution, or a paid service exists today.
+
+* Required Host-Sandbox Baseline
+
+A remote provider must not become a way to avoid defining the local sandbox contract. Both providers should consume the same =RunPlan= and produce the same =RunReceipt=.
+
+The local trusted-host profile should require:
+
+- immutable Nix closure or Open Container Initiative (OCI) digest;
+- a per-run or per-deployment operating-system identity;
+- read-only root and explicit input, output, temporary, and state mounts;
+- no implicit home directory, repository checkout, package-manager socket, or service-manager socket;
+- an allowlisted environment and opaque, run-scoped secret materialization;
+- memory, central processing unit, process-count, wall-time, and output limits;
+- no-new-privileges, dropped capabilities, private devices and temporary storage, and a documented syscall policy;
+- network denied by default, with declared egress mediated by policy;
+- process-tree or cgroup termination and deterministic cleanup;
+- a receipt binding actor artifact, sandbox profile, configuration generation, input digest, outcome, and resource use.
+
+The implementation may use systemd transient units plus namespaces, a narrow sandbox helper, containers, or stronger virtual-machine isolation, but technology choice cannot weaken those observable contract properties.
+
+* Remote Runner Lifecycle
+
+The minimum protocol lifecycle is:
+
+#+begin_example
+advertise capabilities + attestation
+    -> reserve bounded capacity
+    -> submit digest-bound RunPlan with idempotency key
+    -> stage immutable artifacts and encrypted content-addressed inputs
+    -> start
+    -> stream bounded events
+    -> succeed | fail | cancel | outcome_unknown
+    -> signed terminal RunReceipt
+    -> reconcile uncertain outcomes
+#+end_example
+
+Reservation is a technical capacity operation, not a price quote. Commercial authorization may wrap it later but must not change its replay and expiry semantics.
+
+Control messages and bulk data should use separate bounded channels. Plans carry references and digests, not unbounded documents, credentials, or arbitrary paths. Outputs return to a validation and ingest authority; a runner does not receive broad write authority to the canonical StarIntel store.
+
+* Identity, Secrets, and Data Handling
+
+- Transport authentication identifies the runner and caller; payload principal fields are not authentication.
+- A run uses short-lived workload identity. Long-lived StarIntel or third-party credentials are not embedded in plans.
+- Secret references are resolved by an authorized broker only for the exact run, actor, tenant, and declared capability. Quasar and the remote runner protocol never return secret values.
+- Inputs and outputs use content digests, encryption in transit and at rest, explicit time-to-live, bounded size, and deletion receipts where retention is promised.
+- Region, residency, and data-class constraints are machine-checkable placement requirements, not UI labels.
+- Logs and events are treated as potentially sensitive output and follow the same limits and redaction rules.
+
+* Reliability Semantics
+
+Distributed execution cannot honestly promise exactly-once effects. The contract should provide at-least-once delivery with idempotency and fencing:
+
+- one client idempotency key resolves to one =runId=;
+- one reservation and execution lease has a monotonically fenced generation;
+- start, cancel, and terminal transitions reject stale generations;
+- the scheduler records =outcome_unknown= when it cannot distinguish failure from lost acknowledgement;
+- reconciliation asks the identified runner for a receipt rather than silently starting another effectful run;
+- retryable actors declare deduplication/effect semantics; non-retryable actors require operator resolution after uncertainty.
+
+* Usage Evidence Without Billing Semantics
+
+A public =UsageReceipt= may report stable technical dimensions such as wall time, metered CPU time, peak memory, accelerator class and duration, input/output bytes, and retained-state bytes. It binds those values to the =runId=, runner identity, artifact digest, sandbox profile, and terminal receipt.
+
+It must not contain a price, currency, plan, invoice, payment-provider identifier, or business entitlement decision. A later starintel-biz service may verify a receipt and map dimensions to private policy. The public protocol remains usable for self-hosted and non-commercial runners.
+
+* Adversarial Review
+
+| Threat or failure | Unsafe shortcut | Required defense |
+|-------------------+-----------------|------------------|
+| Sandbox escape | Treat process separation or =sandboxed-p= as isolation | Tested OS boundary, least privilege, isolation profile digest, and stronger tier for untrusted code |
+| Secret theft | Forward Quasar's environment or checkout =.env= | Empty allowlisted environment and run-scoped secret broker/materialization |
+| Data exfiltration | Give actor unrestricted network access | Default-deny egress and capability-scoped gateway |
+| Mutable artifact swap | Submit tag/path then fetch latest | Digest-bound artifact and verification at staging and start |
+| Malicious runner result | Trust output because transport was authenticated | Bind receipt to inputs/artifact/profile; validate outputs before canonical ingest; use attestation where risk requires it |
+| Forged usage | Accept unsigned counters | Authenticated signed receipt, server-side plausibility checks, and auditable meter definitions |
+| Replay or double accounting | Retry submission/payment independently | Idempotency key, reservation identity, receipt uniqueness, and transactionally consumed business reservation |
+| Lost cancel | Mark cancelled when request was sent | =cancel_requested= until terminal receipt or bounded =outcome_unknown= reconciliation |
+| Runner disappearance | Immediately resubmit effectful work | Lease expiry plus declared retry safety and operator resolution for uncertain effects |
+| Cross-tenant leakage | Reuse writable volumes or caches without tenancy keys | Tenant/run-scoped storage, encrypted content addressing, explicit cleanup and leakage tests |
+| Noisy neighbor | Unbounded shared CPU, memory, process, disk, or accelerator use | Enforced quotas and resource-pressure admission control |
+| Side-channel leakage | Expose co-tenant identity or fine-grained shared telemetry | Bounded/redacted observations and isolation-tier disclosure |
+| Stale capabilities | Schedule using an old advertisement | Expiring capability/attestation records and start-time revalidation |
+| Huge log/output denial | Stream without limits | Byte/event/rate limits with explicit truncation and terminal reason |
+| Retention breach | Promise deletion but retain volumes/backups | Declared retention, deletion receipt, audit, and fail-closed placement |
+| Regional policy breach | Choose cheapest runner regardless of data class | Placement constraints evaluated before reservation and recorded in receipt |
+| Business-policy leak | Put prices or plan names in public manifest | Keep public technical metering stable; map it privately in starintel-biz |
+
+* Rejected Alternatives
+
+** Make direct subprocess execution the sandbox
+
+Rejected. It lacks the required identity, filesystem, network, resource, syscall, and cleanup boundaries.
+
+** Give remote runners broker or database credentials
+
+Rejected. It turns a partially trusted worker into a broad canonical authority and widens the blast radius of compromise.
+
+** Put billing fields into the actor manifest or runner protocol
+
+Rejected. It couples public interoperability to one commercial policy and leaks private business behavior.
+
+** Trust a self-reported =sandboxed= flag
+
+Rejected. Isolation must be a selected profile with enforceable properties and verifiable evidence.
+
+** Retry every uncertain run automatically
+
+Rejected. Many actors have external effects that are not safe to duplicate.
+
+* Recommendation
+
+1. Keep host-sandbox execution as QUASAR-009's default for installed native and service actors.
+2. Define one public =RunPlan=/=RunReceipt= contract that both local and remote execution providers implement.
+3. Require explicit remote placement, authenticated runners, digest-bound artifacts, bounded data transfer, run-scoped identity, signed receipts, and reconciliation.
+4. Keep canonical ingest and semantic authority outside the runner.
+5. Keep technical usage dimensions public and provider-neutral.
+6. Defer commercial entitlements, quota policy, prices, invoices, and payment integration to a separate private starintel-biz design.
+7. Implement no remote runner until QUASAR-010 and the StarIntel lock authority chain are explicitly approved and verified.
+
+* Proposed Delivery Order After Approval
+
+1. Contract fixtures and a deterministic fake runner.
+2. A loopback remote adapter that uses the same local host sandbox, proving protocol semantics without networking or money.
+3. Authenticated remote transport, leases, cancellation, reconciliation, and signed receipts.
+4. One controlled non-commercial remote fleet with isolation and data-lifecycle acceptance evidence.
+5. Only then, a separate starintel-biz proposal for paid-service entitlement, metering, and payment policy.
+
+* Research Acceptance Evidence for a Future Implementation
+
+- host and remote providers pass the same RunPlan/RunReceipt conformance fixtures;
+- an actor cannot see the repository, home directory, parent environment, or undeclared network;
+- timeout and cancellation terminate descendants and clean mounts/state as declared;
+- crash/partition tests produce honest =outcome_unknown= and reconcile without duplicate effects;
+- artifact, input, output, sandbox-profile, and receipt digests remain bound end to end;
+- multi-tenant leakage and noisy-neighbor tests pass;
+- secrets never appear in plans, events, logs, output, receipts, or browser state;
+- output is validated before canonical ingest;
+- technical usage receipts remain independent of starintel-biz plan and price policy;
+- real remote-fleet acceptance records identity, current head, sandbox profile, isolation evidence, and data deletion outcome.
+
+* Footnotes and Glossary
+
+[fn:host-sandbox] Host sandbox: An operating-system-enforced execution boundary on the Quasar host with explicit identity, filesystem, network, resource, privilege, and cleanup controls.
+
+[fn:runner] Runner: A provider that accepts an authorized immutable run plan, executes it in a declared sandbox profile, and returns bounded events plus a terminal receipt.
+
+[fn:fencing] Fencing generation: A monotonically increasing token that makes work issued under an older lease invalid, preventing a stale worker from acting as current.
+
+[fn:attestation] Attestation: Evidence about the identity and measured configuration of a runner or isolation environment. It supplements, but does not replace, least privilege and output validation.
+
+[fn:usage-receipt] Usage receipt: A provider-neutral record of technical resource measurements bound to a run. It is not a price, invoice, or proof of payment.

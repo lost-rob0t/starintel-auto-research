@@ -1,0 +1,622 @@
+:PROPERTIES:
+:ID: da8105b3-c747-4e66-aecc-77aa7c0999eb
+:END:
+#+TITLE: QUASAR-009 Actor Package Installation, Configuration, and Run Control Plane
+#+CREATED: [2026-10-08 Thu 21:08]
+#+LAST_MODIFIED: [2026-10-09 Fri 19:50]
+#+ROAM_SCHEMA: org-roam-meta/v1
+#+ROAM_KIND: design
+#+ROAM_VISIBILITY: public
+#+CENSOR_PROFILE: strict
+#+SOURCE: QUASAR-RESEARCH-007 and operator request for ARDR before implementation approval
+#+AI_GENERATED: t
+#+AI_TAG: ai_2bc45e324d4946c5
+#+FILETAGS: :ai:ai_2bc45e324d4946c5:quasar:actors:
+
+#+description: Design-ready Quasar Actor Center and control-plane contract for digest-pinned actor installation, secret-safe configuration, lifecycle control, and durable runs without creating a second actor registry.
+#+status: DESIGN_READY_FOR_OPERATOR_REVIEW
+#+approval_schema: adard.research-approval.v1
+#+approval_state: PENDING
+#+approval_actor: ardr-auto-research
+#+approval_evidence: ARDR produced a design ready for operator review; the operator has not authorized implementation.
+#+approval_base_commit: eda24d2540c3c847199a361cbf011bd597360e95
+#+approval_base_blob: NONE
+#+approval_decided_at: NONE
+#+todo: TODO REVIEW BLOCKED | DONE REJECTED
+
+| Version | Date       | Description of change | Did nsaspy approve it |
+|---------+------------+-----------------------+-----------------------|
+| 0.1.0   | 2026-10-08 | Initial design for one Actor Center backed by a capability-based administration contract and trusted deployment providers. | No |
+| 0.2.0   | 2026-10-09 | Make real local host-sandbox execution the default, separate deployment from execution providers, and defer remote runners to QUASAR-010. | No |
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Research basis | Quasar operator | PENDING | Explicit acceptance or amendment of QUASAR-RESEARCH-007 | [[file:../../research/star-server/QUASAR-RESEARCH-007-actor-install-configure-run-control-plane.org][QUASAR-RESEARCH-007]] |
+| Architecture/design | Quasar operator and affected repository owners | PENDING | Explicit approval of this exact design and authority split | Pending |
+| Security/adversarial review | Quasar operator / security reviewer | PENDING | Accept or amend the threat model and fail-closed requirements | Adversarial Review |
+| StarIntel authority-chain repair | StarLang / consumer owners | PENDING | Consumer lock helper accepts the lock and canonical commit verifies | Current Quasar lock cannot be verified; implementation is blocked pending repair |
+| Implementation authorization | Quasar operator | PENDING | Explicit instruction to implement an approved bounded slice | Not granted by the request for ARDR |
+| Implementation completion | Quasar maintainers | NOT STARTED | Tests, exact-head checks, real-stack UI proof, and deployment-provider acceptance | Verification Plan |
+
+Design readiness is not approval. No Quasar, starintel-server, StarLang, actor-package, or deployment-provider source implementation is authorized by this document alone.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-10-08 | Created design, protocol boundaries, state machines, staged delivery plan, and adversarial gate. | Codex | QUASAR-RESEARCH-007 and current repository inspection |
+| 2026-10-09 | Amended the execution boundary so installed actors run in an operating-system-enforced host sandbox by default; linked the separate remote-runner ARDR. | Codex | Operator clarification, unpublished Python-runner inspection, QUASAR-RESEARCH-008, and QUASAR-010 |
+| 2026-10-10 | Recorded the exact-head publication repair without changing the pending design decision. | Codex | GitHub PR #264 publication checks |
+
+* Related Nodes
+
+- [[file:../../research/star-server/QUASAR-RESEARCH-007-actor-install-configure-run-control-plane.org][QUASAR-RESEARCH-007 Actor Install, Configure, and Run Control Plane]].
+- [[file:../../research/star-server/QUASAR-RESEARCH-008-remote-sandbox-runner-service-boundary.org][QUASAR-RESEARCH-008 Remote Sandbox Runner Service Boundary]].
+- [[file:QUASAR-010-remote-sandbox-runner-protocol-and-service-boundary.org][QUASAR-010 Remote Sandbox Runner Protocol and Service Boundary]].
+- [[file:QUASAR-008-lisp-actor-discovery-and-actor-studio.org][QUASAR-008 Operator Actor Capability Catalog and gserver Runtime Binding]].
+- [[file:STAR-MANIFEST-001-document-contracts.org][STAR-MANIFEST-001 Actor and Dataset Manifest Document Contracts]].
+- [[file:STAR-SERVER-049-component-handles-registry-readiness-health.org][STAR-SERVER-049 Component Handles, Registry, Readiness, and Health]].
+- [[file:../../research/star-server/STAR-RESEARCH-050-manifest-runtime-plan-composition.org][STAR-RESEARCH-050 Actor and Dataset Manifest Runtime-Plan Composition]].
+- [[file:../../indexes/star-server/QUASAR-INDEX-001-canonical-runtime-alignment.org][QUASAR-INDEX-001 Canonical Runtime Alignment]].
+
+* Decision
+
+Quasar SHALL provide one Actor Center that composes actor discovery, installation, deployment configuration, lifecycle control, execution, and observation.
+
+The UI SHALL use an authenticated, capability-based Actor Administration contract. Privileged installation and lifecycle effects SHALL be performed only by trusted deployment providers. Installed native and service actors SHALL execute in an operating-system-enforced sandbox on the Quasar host by default. A policy field or direct child process is not a sandbox. The browser SHALL NOT receive a package-manager socket, shell command surface, arbitrary artifact URL installer, raw credential value, or authority to mutate the canonical actor registry.
+
+Deployment and execution are separate provider roles. A deployment provider stages and activates an immutable actor artifact. A host-sandbox execution provider starts each run with bounded identity, mounts, environment, network, privileges, resources, outputs, and cleanup. An optional remote execution provider is a separate decision governed by QUASAR-010; it is not implicit in this approval.
+
+The design keeps four identities separate:
+
+1. =actorId= — stable semantic actor identity;
+2. =deploymentId= — one configured installed instance;
+3. =jobId= — one durable administrative mutation;
+4. =runId= — one durable actor invocation.
+
+Every cross-plane response also carries the immutable artifact digest and relevant configuration/runtime generations.
+
+* Authority and Component Boundary
+
+#+begin_example
+Operator
+   |
+   v
+Quasar Actor Center
+   |
+   v typed authenticated intent
+Quasar control-plane adapter
+   |-------------------------> StarIntel safe actor catalog
+   |                             (semantic catalog + safe observation)
+   v
+Actor Administration service
+   |-------------------------> policy / credential service
+   |
+   v bounded plan/apply
+Trusted deployment provider
+   |
+   v stage / activate / rollback
+Host-sandbox execution provider
+   |
+   v OS identity + mounts + cgroups + network/privilege policy
+Actor runtime sandbox
+   |
+   +-------------------------> bounded readiness, generations, run events,
+                               and execution receipt
+
+The UI receives redacted jobs and state: no shell, package socket,
+raw secret, or second registry.
+#+end_example
+
+Authority rules:
+
+- StarLang-derived manifests own actor semantics and capabilities.
+- starintel-server owns the operator-safe catalog projection.
+- the Actor Deployment Manifest owns data-only binding to an immutable semantic artifact.
+- the deployment provider owns package and service effects for its runtime.
+- the host-sandbox execution provider owns isolation enforcement and execution receipts.
+- the runtime owns only actor behavior and its declared output; it does not attest its own isolation.
+- Quasar owns presentation, intent capture, and projection of authorized state.
+
+No lower layer may widen a semantic capability or authorization granted by an upper authority.
+
+* Actor Center Information Architecture
+
+One Actor Center route SHOULD replace the fragmented mental model while preserving runtime distinctions.
+
+** Catalog view
+
+Each card/row shows:
+
+- semantic name, version, publisher/source, and trust status;
+- runtime kind and environment compatibility;
+- accepted target/document types and produced types;
+- installation state and installed artifact digest/version;
+- granted actions such as =install=, =configure=, =start=, =run=, =update=, or =uninstall=;
+- safe readiness and last-observed time.
+
+A badge MUST distinguish browser-local, local native, managed service, and remote actor behavior. The UI must not imply that all visible actors have the same trust or persistence.
+
+** Actor detail
+
+Tabs or sections:
+
+1. Overview and provenance.
+2. Install/update plan and receipts.
+3. Deployment configuration and secret presence.
+4. Lifecycle, health, and bounded diagnostics.
+5. Run form, progress, results, and history.
+
+Action availability comes only from server/provider capabilities evaluated for the current principal and deployment, not from hard-coded actor names or catalog visibility.
+
+** Standalone degradation
+
+Without a connected administration service, Actor Center still lists and runs browser actors. Native/service entries may be absent or shown from cached non-authoritative metadata, but install/configure/lifecycle actions are unavailable. Disconnected mode must never simulate completion.
+
+* Contract Envelope
+
+The administration contract SHOULD use one versioned envelope compatible with Quasar's existing typed control-plane direction:
+
+#+begin_src json
+{
+  "contract": "starintel.actor-admin.v1",
+  "requestId": "req_...",
+  "idempotencyKey": "idem_...",
+  "principalContext": {
+    "workspaceId": "workspace_..."
+  },
+  "operation": "actor.install.plan",
+  "resource": {
+    "actorId": "star.actor.example",
+    "deploymentId": null
+  },
+  "preconditions": {},
+  "payload": {}
+}
+#+end_src
+
+Normative rules:
+
+- authentication is transport/session owned; caller-supplied principal IDs are never trusted as authentication;
+- =idempotencyKey= is required for every mutation and run creation;
+- mutations include generation/digest preconditions;
+- unknown fields fail according to the versioned contract policy rather than being executed permissively;
+- arbitrary executable code, shell arguments, environment interpolation, package URLs, and provider socket paths are prohibited;
+- every accepted mutation returns a durable =jobId= before asynchronous work proceeds.
+
+* Read Models
+
+** ActorCatalogEntry
+
+This extends the current safe projection only by relationships and capabilities; it does not make the registry mutable.
+
+#+begin_src json
+{
+  "actorId": "star.actor.example",
+  "semanticVersion": "1.2.0",
+  "semanticDigest": "sha256:...",
+  "accepts": {},
+  "produces": {},
+  "runtimeKinds": ["native"],
+  "trust": {"state": "trusted", "publisher": "..."},
+  "actions": ["install"],
+  "observedAt": "..."
+}
+#+end_src
+
+=actions= is the intersection of semantic support, provider capability, environment compatibility, trust policy, and principal authorization. It is not stored as actor semantics.
+
+** ActorDeployment
+
+#+begin_src json
+{
+  "deploymentId": "actor_deployment_...",
+  "actorId": "star.actor.example",
+  "artifact": {
+    "kind": "nix-closure",
+    "digest": "sha256:...",
+    "semanticDigest": "sha256:..."
+  },
+  "providerId": "local-nix-v1",
+  "state": "ready",
+  "configurationGeneration": 4,
+  "runtimeGeneration": 7,
+  "readiness": {"state": "ready", "observedAt": "..."},
+  "actions": ["configure", "stop", "restart", "run", "update"]
+}
+#+end_src
+
+** Redacted configuration
+
+#+begin_src json
+{
+  "deploymentId": "actor_deployment_...",
+  "schemaVersion": "3",
+  "generation": 4,
+  "values": {"concurrency": 2},
+  "secrets": {
+    "apiToken": {"configured": true, "updatedAt": "..."}
+  },
+  "restartRequired": false
+}
+#+end_src
+
+Secret values and secret-reference internals never appear. Clearing/replacing a secret is an explicit write action.
+
+* Operations
+
+The exact transport binding may be HTTP, WebSocket, or Quasar's existing typed control-plane channel. Semantics are transport independent.
+
+| Operation | Purpose | Required result |
+|-----------+---------+-----------------|
+| =actor.catalog.list/get= | Read safe actor catalog | Bounded entries with granted actions |
+| =actor.deployment.list/get= | Read installed instance state | Artifact/config/runtime identities and redacted state |
+| =actor.install.plan= | Resolve package and compute pure effect plan | Plan digest, expiry, impact, prerequisites, rollback support |
+| =actor.install.apply= | Apply an unexpired exact plan | Durable job identity |
+| =actor.update.plan/apply= | Plan/apply exact artifact transition | Migration impact and rollback target |
+| =actor.configuration.get= | Read schema and redacted generation | No raw secrets |
+| =actor.configuration.validate= | Pure validation/preview | Diagnostics, normalized values, restart/migration impact |
+| =actor.configuration.apply= | Commit a new generation | Durable job and generation precondition |
+| =actor.lifecycle.start/stop/restart= | Request runtime transition | Durable job and supported-state validation |
+| =actor.rollback.plan/apply= | Restore an available verified generation | Exact target and state/data impact |
+| =actor.uninstall.plan/apply= | Remove deployment under retention policy | Data/secret impact and irreversible warnings |
+| =actor.run.create/get/cancel= | Manage durable invocation | Stable run identity and idempotent retry |
+| =actor.events.subscribe= | Stream bounded job/lifecycle/run changes | Ordered cursor and resumable replay |
+
+Plan and apply are separate. Applying requires the exact plan digest, expected catalog/deployment/configuration generations, and an authorization recheck.
+
+* Package and Trust Contract
+
+The public contract accepts a catalog/package identity, never installer commands.
+
+Each resolved artifact record contains:
+
+- provider kind and provider-scoped immutable identity;
+- content digest and, where applicable, signature/provenance identity;
+- semantic manifest digest;
+- deployment manifest digest;
+- supported host/runtime constraints;
+- dependency closure summary;
+- declared persistent-state and port/resource impact;
+- trust-policy result and reasons;
+- rollback capability.
+
+The first real provider SHOULD support exactly one packaging mechanism and a closed catalog. A local Nix provider is preferred when its implementation can remain digest/closure locked and isolated behind a narrow service boundary. OCI may be a later provider. This design does not authorize exposing the Nix daemon, Docker socket, or system service manager to Quasar.
+
+* Pure InstallPlan
+
+Before effects, the provider produces a normalized plan:
+
+#+begin_example
+InstallPlan {
+  contractVersion
+  planId
+  planDigest
+  expiresAt
+  actorId
+  proposedDeploymentId
+  providerId
+  artifactIdentity
+  semanticDigest
+  deploymentManifestDigest
+  prerequisites[]
+  dependencyChanges[]
+  configurationSchemaVersion
+  secretRequirements[]
+  persistentStateImpact
+  networkResourceImpact
+  expectedActivation
+  readinessPolicy
+  rollbackSupport
+  warnings[]
+}
+#+end_example
+
+Plan computation may resolve trusted metadata but performs no installation, actor creation, service activation, credential write, listener start, or state deletion.
+
+* Provider Interface
+
+The internal provider interface is narrow and typed:
+
+#+begin_example
+resolve(catalogIdentity) -> ResolvedArtifact
+planInstall(resolvedArtifact, requestedBinding) -> InstallPlan
+applyInstall(planDigest, jobContext) -> ProviderReceipt
+observe(deploymentIdentity) -> ProviderObservation
+planUpdate(...) / applyUpdate(...)
+planRollback(...) / applyRollback(...)
+planUninstall(...) / applyUninstall(...)
+reconcile(jobReceipt) -> ReconciliationResult
+#+end_example
+
+Provider receipts are durable, append-only evidence containing exact artifact/plan identities and bounded outcomes. They exclude secret values. Provider implementations must be independently testable without a browser.
+
+* Default Host-Sandbox Execution Provider
+
+Every installed native or service actor run uses a host sandbox unless an independently approved execution provider is selected. The minimum =trusted-host-v1= profile requires:
+
+- an immutable Nix closure or Open Container Initiative (OCI) artifact digest;
+- a dedicated per-run or per-deployment operating-system identity;
+- a read-only root and only declared input, output, temporary, and persistent-state mounts;
+- no implicit home directory, repository checkout, package-manager socket, service-manager socket, or host device access;
+- an empty/minimal allowlisted environment and opaque, run-scoped secret materialization rather than parent-environment or =.env= inheritance;
+- cgroup-enforced memory, central processing unit, process-count, wall-time, and output limits;
+- no-new-privileges, dropped capabilities, private devices and temporary storage, and a documented syscall policy;
+- network denied by default, with declared egress mediated by policy;
+- process-tree/cgroup cancellation, deterministic mount and secret cleanup, and explicit persistent-state retention;
+- a terminal execution receipt binding =runId=, artifact, configuration generation, input, sandbox profile, outcome, output, and resource observations.
+
+The implementation may use systemd transient units plus namespaces, a narrow sandbox helper, containers, or a stronger virtual-machine boundary. The observable contract above is normative. A =sandboxed-p= request marker, a service hardening label, or direct =uiop:launch-program= execution does not satisfy it.
+
+Browser actors remain a distinct browser-isolation tier. Untrusted third-party actors require a separately approved stronger profile such as a dedicated virtual machine or micro-virtual machine; capacity pressure must not silently downgrade them.
+
+* Configuration Generations
+
+Configuration is a versioned state transition:
+
+#+begin_example
+schema + current generation + proposed ordinary values + secret writes/clears
+        -> pure validation and normalization
+        -> preview (restart/migration/effect impact)
+        -> authorization and generation precondition
+        -> credential transaction + config generation commit
+        -> optional controlled restart
+        -> readiness or rollback/quarantine
+#+end_example
+
+Rules:
+
+1. ordinary values use the actor deployment configuration schema;
+2. =writeOnly= fields become credential-store writes and opaque instance-scoped references;
+3. reads return only secret presence and safe timestamps;
+4. secret writes are never echoed, logged, diffed, or included in receipts;
+5. applying against a stale generation fails with a conflict and current generation;
+6. schema migrations are explicit, previewable, and reversible where claimed;
+7. configuration activation and runtime readiness are separate observations.
+
+* Lifecycle State Machine
+
+#+begin_example
+Available -> Planning -> Staged -> Verified -> Installed -> Configured
+                          |                       |              |
+                          v                       v              v
+                     Quarantined            Uninstalling     Starting
+                                                 |          /         \
+                                                 v         v           v
+                                               Removed    Ready       Failed
+                                                           |
+                                               +-----------+-----------+
+                                               v                       v
+                                            Stopped                 Updating
+                                               |                 /     |      \
+                                               +-> Starting     Ready RolledBack Quarantined
+#+end_example
+
+The UI never derives =Ready= from job success alone. Readiness must match expected artifact digest, configuration generation, and runtime generation/instance identity.
+
+* Run State Machine
+
+#+begin_example
+accepted -> queued -> running -> succeeded
+                           |--> failed
+                           |--> cancelled
+                           +--> outcome_unknown
+#+end_example
+
+Run creation includes:
+
+- =actorId= and =deploymentId=;
+- expected artifact/configuration generation;
+- canonical target/document references;
+- schema-validated per-run options;
+- idempotency key;
+- authorization decision context/receipt reference;
+- optional preview/dry-run mode when the semantic capability declares it.
+- selected execution provider and immutable sandbox-profile digest;
+- declared resource, network, mount, secret-binding, and output limits.
+
+The execution provider returns bounded untrusted output to the canonical validation/ingest authority. It never writes the canonical actor registry or StarIntel store directly. Quasar must not treat browser-rendered output or child-process exit alone as durable completion evidence.
+
+* Event Model
+
+Events are projections, not commands. Each event includes:
+
+- event ID and resumable cursor;
+- event contract version;
+- job/deployment/run identity as applicable;
+- actor ID and safe generation/digest fields;
+- state transition and timestamp;
+- bounded structured diagnostic code;
+- authorization-safe display message;
+- no raw secret, internal queue name, privileged socket, or arbitrary stack dump.
+
+Consumers resume from the last acknowledged cursor. A snapshot read remains authoritative when event delivery is interrupted.
+
+* Authorization Model
+
+Authorization is evaluated at the effect owner for every operation. Minimum scope dimensions:
+
+- authenticated principal/service identity;
+- tenant/workspace;
+- semantic actor ID;
+- deployment ID;
+- action;
+- requested artifact/configuration generation;
+- target/document scope for a run.
+
+Example capabilities are =actor.install=, =actor.configure=, =actor.secret.write=, =actor.lifecycle.control=, =actor.run=, =actor.rollback=, and =actor.uninstall=. An =admin= UI label is not sufficient evidence.
+
+* Error Semantics
+
+Errors use stable codes and safe structured context. Required classes include:
+
+- =not_authorized=;
+- =capability_unavailable=;
+- =incompatible_environment=;
+- =untrusted_artifact=;
+- =plan_expired= or =plan_precondition_failed=;
+- =generation_conflict=;
+- =validation_failed=;
+- =provider_unavailable=;
+- =activation_failed=;
+- =readiness_timeout=;
+- =rollback_failed=;
+- =outcome_unknown=;
+- =quarantined=.
+
+Raw provider output is retained only in an appropriately protected operational channel and is scrubbed before any Quasar projection.
+
+* Adversarial Review
+
+The design is acceptable only if implementations satisfy these attacks and failures:
+
+1. A malicious catalog label or manifest cannot add actions, escape rendering, or select an executable provider command.
+2. A mutable tag, replaced release asset, or digest mismatch fails before staging and again before activation.
+3. Reapplying an install, configuration, or run idempotency key returns the existing object, including across process restart.
+4. A stale plan cannot apply after catalog, policy, capacity, artifact, deployment, or configuration generation changes.
+5. A secret canary never occurs in API reads, logs, events, error text, browser storage, receipts, or snapshots.
+6. One tenant/principal/instance cannot discover secret presence or reuse secret references from another.
+7. A provider crash after a host effect reconciles to an exact outcome or explicit =outcome_unknown=; it never reports success by inference.
+8. Concurrent mutations serialize per deployment and conflicting generations fail closed.
+9. Readiness for the wrong digest/config generation is rejected.
+10. Failed activation triggers supported rollback; failed rollback becomes visible =quarantined= state.
+11. Uninstall cannot silently destroy persistent actor state or shared dependencies.
+12. Registry/catalog staleness becomes =unknown= after TTL and never grants lifecycle actions.
+13. Internal actor topology, endpoints, queues, credentials, and privileged sockets remain absent from ordinary catalog/events.
+14. Standalone browser actors remain sandboxed and cannot acquire native install privileges through shared UI components.
+15. Run cancellation has explicit best-effort/confirmed semantics; timeout does not fabricate cancellation.
+16. An actor cannot observe the repository, home directory, parent environment, undeclared mounts/devices, privileged sockets, or undeclared network.
+17. Memory, CPU, task, wall-time, log, and output limits are enforced outside the actor.
+18. Cancellation and timeout terminate descendants and clean temporary mounts, secrets, and processes; a surviving process fails acceptance.
+19. The sandbox profile and enforcement result are digest-bound to the run receipt; the actor cannot self-assert isolation.
+20. Remote placement, if later approved, is explicit and uses QUASAR-010 rather than weakening the local profile.
+
+* Rejected Designs
+
+- *Browser package execution*: violates privilege and hosted deployment boundaries.
+- *Mutable =/v1/actors= installer*: conflates safe semantic projection with deployment effects and creates a second registry.
+- *Manifest with embedded shell/callbacks*: makes inert data executable and bypasses the provider policy boundary.
+- *Raw Nix/Docker/systemd proxy*: exposes a general host administration API rather than actor-scoped actions.
+- *Secrets in deployment JSON*: makes readback, logging, browser persistence, and backup leakage likely.
+- *Synchronous install HTTP request*: cannot safely survive long operations, disconnects, retries, and crash reconciliation.
+- *One state field for install and readiness*: allows staged or exited deployments to appear runnable.
+- *Direct subprocess as sandbox*: process separation lacks filesystem, network, privilege, resource, and descendant-cleanup enforcement.
+- *Parent environment or checkout =.env= inheritance*: crosses credential and ambient-authority boundaries and makes actor inputs non-reproducible.
+- *Self-reported =sandboxed= flag*: policy metadata cannot substitute for operating-system enforcement evidence.
+
+* Bounded Implementation Slices
+
+No slice is authorized yet. If approved, implementation proceeds in this order.
+
+** Slice A: contracts and fake provider
+
+- Add versioned fixtures for catalog relationships, deployment, redacted config, jobs, runs, events, plans, and errors.
+- Implement pure validators/state reducers and a deterministic in-memory fake provider.
+- Prove idempotency, conflicts, secret redaction, crash reconciliation, and rollback state transitions without privileged effects.
+
+** Slice B: unified Actor Center
+
+- Adapt current browser actors, Pro Actor manifests, and server catalog into one read model.
+- Preserve current browser create/configure/run behavior.
+- Render capability-gated install/config/lifecycle/run controls against the fake provider.
+- Add browser-visible end-to-end proof for standalone and connected modes.
+
+** Slice C: one real provider vertical
+
+- Integrate one trusted provider for one approved digest-pinned actor.
+- Implement plan/apply, configuration generation, secret-reference write, activation, readiness identity, a real host-sandbox run, and rollback.
+- Prove dedicated identity, bounded mounts/environment/network/resources, descendant termination, cleanup, and a digest-bound execution receipt.
+- Keep provider access behind a narrow authenticated local/control-plane service.
+- Do not add update/uninstall breadth until crash, concurrency, redaction, and rollback acceptance passes.
+
+** Slice D: update, uninstall, and more providers
+
+- Add only from observed requirements and independent security review.
+- Each provider declares capabilities; Quasar does not assume parity.
+
+* Repository Ownership
+
+Expected ownership after approval:
+
+| Concern | Owning repository/layer |
+|---------+-------------------------|
+| Semantic actor/manifest changes | StarLang canonical authority |
+| Safe registry/catalog projection | starintel-server |
+| Generic deployment/admin contract and runtime orchestration | Canonical server/runtime owner selected during implementation planning |
+| Actor package manifest/config schema | Actor implementation repository, constrained by canonical contracts |
+| Quasar Actor Center/adapters | quasar |
+| Host-specific installation provider | Deployment/infrastructure owner, behind the generic contract |
+| Local host-sandbox execution provider | Public runtime/infrastructure owner, behind the generic RunPlan/RunReceipt contract |
+| Optional remote execution | Separate QUASAR-010 approval; public protocol with private commercial policy only in starintel-biz |
+| Reusable expert knowledge | dotfiles =.zara/experts/=, never duplicated into actor UI/runtime repos |
+
+The implementation issue plan must be split along these ownership boundaries; one Quasar pull request must not silently redefine StarLang, registry, package, and infrastructure authority.
+
+* Verification Plan
+
+** Contract and property tests
+
+- schema fixtures accepted/rejected identically across relevant implementations;
+- state-transition model rejects illegal transitions;
+- idempotency survives restart and concurrent requests;
+- plan digest changes for every material prerequisite change;
+- secret-canary property scans all externally visible records;
+- authorization matrix covers cross-tenant, cross-workspace, and cross-instance denials.
+
+** Provider integration tests
+
+- exact digest/signature verification;
+- no effect before plan apply authorization;
+- crash at each step with reconciliation;
+- activation/readiness identity match;
+- rollback success and rollback failure/quarantine;
+- dependency and state-impact safeguards;
+- uninstall retention/export behavior.
+- real host-sandbox identity, mount, environment, network, privilege, cgroup, timeout, descendant-cleanup, and receipt behavior.
+
+** Quasar tests
+
+- standalone browser actor regression;
+- server catalog remains read-only;
+- capability-gated actions and trust/runtime badges;
+- configuration validation and write-only behavior;
+- reconnect and resumable event progress;
+- run create/cancel/history and explicit unknown outcomes;
+- actual browser geometry and interaction evidence against the worktree build.
+
+** Release gates
+
+- repair and verify the Quasar StarIntel lock/canonical commit chain;
+- repository-native conformance and exact-head CI;
+- one real deployment acceptance with receipt, readiness, run output, restart persistence, and rollback;
+- one real host-sandbox acceptance proving isolation controls and full process-tree cleanup rather than only a policy marker;
+- no approval inferred from lifecycle readiness, publication, passing tests, or prior actor-studio approval.
+
+* Operator Decision Gate
+
+The requested ARDR output ends here at =DESIGN_READY_FOR_OPERATOR_REVIEW=.
+
+The operator may:
+
+- approve the complete design for bounded implementation beginning with Slice A;
+- approve only selected slices or amend ownership/provider choices;
+- request further research or adversarial review;
+- reject the design.
+
+Until an explicit decision is recorded, implementation remains =PENDING= and the StarIntel lock problem remains =BLOCKED=.
+
+* Footnotes and Glossary
+
+[fn:capability] Granted action: A server-evaluated permission for a principal to perform one operation on one scoped resource; it is distinct from an actor's semantic capability.
+
+[fn:plan] Pure plan: A deterministic description of proposed effects and prerequisites that performs none of those effects itself.
+
+[fn:receipt] Provider receipt: Durable evidence of a provider mutation attempt, tied to exact plan and artifact identities and scrubbed of secrets.
+
+[fn:generation] Generation: A monotonic identity for configuration or runtime incarnation used to prevent stale writes and false readiness.
+
+[fn:host-sandbox] Host sandbox: An operating-system-enforced local execution boundary with explicit identity, filesystem, network, resource, privilege, and cleanup controls.
+
+[fn:execution-provider] Execution provider: A narrow component that consumes an authorized immutable run plan, enforces a declared sandbox profile, and returns bounded events plus a terminal execution receipt.

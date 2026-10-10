@@ -38,6 +38,73 @@ def _show(root: Path, commit: str, relative_path: Path) -> str:
     return _git(root, ["show", f"{commit}:{relative_path.as_posix()}"])
 
 
+def _followed_history(root: Path, relative_path: Path) -> list[tuple[str, Path]]:
+    """Return commits and the file path valid at each commit, following renames."""
+    output = _git(
+        root,
+        [
+            "log",
+            "--follow",
+            "--format=__COMMIT__%H",
+            "--name-status",
+            "--",
+            relative_path.as_posix(),
+        ],
+    )
+    groups: list[tuple[str, list[str]]] = []
+    commit = ""
+    statuses: list[str] = []
+    for line in output.splitlines():
+        if line.startswith("__COMMIT__"):
+            if commit:
+                groups.append((commit, statuses))
+            commit = line.removeprefix("__COMMIT__")
+            statuses = []
+        elif line:
+            statuses.append(line)
+    if commit:
+        groups.append((commit, statuses))
+
+    path = relative_path.as_posix()
+    followed: list[tuple[str, Path]] = []
+    for commit, statuses in groups:
+        followed.append((commit, Path(path)))
+        for status in statuses:
+            fields = status.split("\t")
+            if fields[0].startswith("R") and len(fields) == 3 and fields[2] == path:
+                path = fields[1]
+                break
+    return followed
+
+
+def _show_recorded_base(
+    root: Path,
+    commit: str,
+    relative_path: Path,
+    expected_blob: str,
+) -> str:
+    """Read the recorded base blob even when the research file was renamed later."""
+    if _path_exists_at_commit(root, commit, relative_path):
+        return _show(root, commit, relative_path)
+
+    matches = []
+    for line in _git(root, ["ls-tree", "-r", commit]).splitlines():
+        metadata, path = line.split("\t", 1)
+        _, object_type, blob = metadata.split()
+        if (
+            object_type == "blob"
+            and blob == expected_blob
+            and path.startswith("roam/research/")
+        ):
+            matches.append(Path(path))
+    if len(matches) != 1:
+        raise MigrationError(
+            f"{relative_path}: recorded approval base blob resolves to "
+            f"{len(matches)} research paths at {commit}"
+        )
+    return _show(root, commit, matches[0])
+
+
 def _blob_sha(root: Path, text: str) -> str:
     return _git(root, ["hash-object", "--stdin"], input_text=text).strip()
 
@@ -82,13 +149,13 @@ def _first_canonical_history_snapshot(
     relative_path: Path,
 ) -> tuple[str, str]:
     revision = "HEAD" if base_commit is None else f"{base_commit}..HEAD"
-    commits = _git(
-        root,
-        ["rev-list", "--reverse", revision, "--", relative_path.as_posix()],
-    ).splitlines()
-    for commit in commits:
+    eligible = set(_git(root, ["rev-list", revision]).splitlines())
+    history = _followed_history(root, relative_path)
+    for commit, path_at_commit in reversed(history):
+        if commit not in eligible:
+            continue
         try:
-            candidate = _show(root, commit, relative_path)
+            candidate = _show(root, commit, path_at_commit)
         except MigrationError:
             continue
         _, _, _, metadata = _split_header(candidate)
@@ -96,6 +163,14 @@ def _first_canonical_history_snapshot(
             if _is_adard_canonical(metadata):
                 return commit, candidate
         except MigrationError as error:
+            if base_commit is not None:
+                lineage = _git(root, ["rev-list", "--parents", "-n", "1", commit]).split()
+                parents = lineage[1:]
+                if (
+                    base_commit in parents
+                    and not _path_exists_at_commit(root, base_commit, path_at_commit)
+                ):
+                    continue
             raise MigrationError(f"{relative_path}@{commit}: {error}") from error
 
     anchor = "repository history" if base_commit is None else f"after {base_commit}"
@@ -151,9 +226,13 @@ def _verify_canonical_born(
     first_base_blob = first_metadata.get("approval_base_blob", "")
 
     if first_base_blob != "NONE":
-        raise MigrationError(
-            f"{relative_path}: canonical-born approval base blob changed after creation"
-        )
+        lineage = _git(root, ["rev-list", "--parents", "-n", "1", first_commit]).split()
+        parents = lineage[1:]
+        if first_base_commit != base_commit or base_commit not in parents:
+            raise MigrationError(
+                f"{relative_path}: canonical-born approval base blob changed after creation"
+            )
+        return
     if first_base_commit == base_commit:
         return
 
@@ -201,7 +280,7 @@ def verify_file(root: Path, path: Path) -> None:
         _verify_canonical_born(root, relative_path, base_commit, base_blob)
         return
 
-    source = _show(root, base_commit, relative_path)
+    source = _show_recorded_base(root, base_commit, relative_path, base_blob)
     if _blob_sha(root, source) != base_blob:
         raise MigrationError(
             f"{relative_path}: recorded approval base blob does not match source"

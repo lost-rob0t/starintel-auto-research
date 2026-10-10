@@ -25,7 +25,8 @@
 
 | Date | Change | Author or actor | Evidence |
 |------+--------+-----------------+----------|
-| 2026-10-10 | Corrected current UTC changed-document audit date after hosted CI gate rejected 2026-10-09-only entries; semantic scope and approval unchanged. | ChatGPT ARADR CI follow-up | [[https://github.com/lost-rob0t/starintel-auto-research/actions/runs/38022973919][Org-roam Pages job 38022973919]] |
+| 2026-10-10 | Added entity-agnostic target monitoring, typed predicate/profile separation, named candidate query, authority/version boundaries and MON-001..010 adversarial fixtures. | ChatGPT GitHub ARADR follow-up | [[https://github.com/starintel-labs/star-kb/blob/main/kb/core/star_reasoning.pl][current traversal]], [[https://github.com/lost-rob0t/star-lang/blob/main/specs/starintel/0.10.1/core.star][0.10.1 Target]] |
+| 2026-10-10 | Corrected current UTC changed-document audit date| 2026-10-10 | Corrected current UTC changed-document audit date after hosted CI gate rejected 2026-10-09-only entries; semantic scope and approval unchanged. | ChatGPT ARADR CI follow-up | [[https://github.com/lost-rob0t/starintel-auto-research/actions/runs/38022973919][Org-roam Pages job 38022973919]] |
 | 2026-10-09 | Created implementation-oriented ontology-native StarIntel design from the existing ontology, StarLang 0.10.1, Star KB, geo and event/workflow owners. | ChatGPT ARADR design pass | [[https://github.com/lost-rob0t/starintel-auto-research/issues/267][#267]], [[id:starintel-star-research-065-ontology-native-community-event-geo][STAR-RESEARCH-065]] |
 
 * Decision Proposal
@@ -237,6 +238,93 @@ Example (deliberately *non-normative*): a public-safety domain rule produces an 
 
 Link execution to existing [[https://github.com/lost-rob0t/starintel-server/issues/167][server playbook #167]], [[https://github.com/lost-rob0t/starintel-server/issues/129][webhook registry #129]], [[https://github.com/lost-rob0t/starintel-server/issues/302][alert evaluator #302]] and [[https://github.com/lost-rob0t/star-lang/issues/51][bounded fan-out #51]]. This design must not create a hidden second scheduler or actor registry.
 
+* Contract: Entity-Agnostic Semantic Target Monitoring (Proposed; Not a Shipped API)
+
+** Three different things: subject, watch intent and actor Target
+
+A *subject* is a canonical document/identity reference or a separately qualified unresolved external identifier. It may refer to a Bluetooth device, lake, person, organization, document, event or anything supported by the ontology. Never assume all subjects are =person= or persist under =dtype=entity=.
+
+A *watch profile* is independently versioned, rule-/policy-owned declarative monitoring intent: eligible semantic predicates, subject classes, directions, evidence/review states, time windows, requested actor capabilities, admission limits, observation frequency and intended purpose. Watch-profile authority lives in Star KB policy and Server scheduling configuration, *not* in a relation edge or as a new 0.10.1 core schema field.
+
+A *Target* is a durable actor work/control-plane document accepted by StarIntel Server. Existing 0.10.1 =target= stores required =actor= and =target= strings, optional =targetType= and timing/state/attempt fields. Its string must be resolved, authorized and normalized by a versioned service boundary before it is treated as a canonical subject reference. Adding an authoritative typed =subjectRef= or changing =target= semantics would require a *new* StarLang core release with migration and conformance; this design does not do so.
+
+** Separate discovery edges from monitor-eligible assertions
+
+Existing =star-kb= [[https://github.com/starintel-labs/star-kb/blob/main/kb/core/star_reasoning.pl][=graph_edge/5=, =path/4= and =tool_neighbors/3=]] enumerate explicit =star_relation/9= claims and document =star_ref/3= paths (=references(Path)=), with =path/4= currently independent of predicate/direction. This is useful for exploratory graph walks. It is *not* a semantics- or authorization-filtered monitor query.
+
+| Relation-like input | What it means | Monitoring treatment |
+|---------------------+---------------+----------------------|
+| =relation(source,predicate,destination)= | Explicit, potentially time-qualified semantic assertion | Consider only after ontology, evidence, policy and tenant resolution |
+| =references(Path)= / =referenced_by(Path)= | Structural JSON/document reference | Discovery navigation only unless a separate named monitoring rule explicitly qualifies the *underlying* asserted semantics |
+| =observedAt(Device,Place)= | Time/observer-qualified observation | May support device/place observation policy; never implies owner or identity |
+| =mentions(Person,Event)= / =follows(Account,Account)= | Mention or platform interaction | Never convert into membership, adherence, participation or threat status |
+| =candidateSameAs(A,B)= | Hypothesized identity link | Review/candidate only; not a canonical merge or unrestricted new watch |
+| =related-to= | Unspecific association | Reject for rule-driven monitoring; optional derived UI convenience cannot create a canonical assertion |
+
+Typed ontology metadata declares predicate URI, inverse semantics (if valid), domain/range, temporal meaning, evidence shape and version/digest. *Monitoring profile policy* independently declares whether an outbound/inbound predicate is relevant to a particular task. Neither schema typing nor =subPropertyOf= creates an automatic permission to traverse. =graph_edge(..., in)= is a direction of navigation, not proof that a semantically valid inverse assertion exists.
+
+** Proposed named query and decision separation
+
+#+begin_example
+monitor.expandCandidates(authorizedContext, watchProfileLock,
+                         subjectRefs, evidenceSnapshot, traversalBudget)
+    -> candidateSet {
+         candidates: [{subjectRef, predicatePath, evidenceRefs,
+                       ruleProofRef, assertionStates, validInterval,
+                       reasonCodes, requiredActorCapability}],
+         skipped: [{subjectRef, reasonCode}],
+         snapshotRevision, rulePackDigest, ontologyDigest,
+         continuationOrTerminalState
+       }
+#+end_example
+
+This is **illustrative**, not current 0.10.1 wire syntax, executable Prolog, or permission for clients to call arbitrary predicates. It is a bounded named tool contract over a deterministic immutable snapshot. The implementation may use tabled Prolog/Datalog and incremental invalidation for performance, but named external operations must not accept arbitrary Prolog goals.
+
+1. Resolve each subject ID/identifier under tenant/dataset authorization and ontology/semantic bundle locks. Ambiguous matches stay proposals, never silently merge.
+2. Select a *purpose-scoped* expansion profile. If no profile edge matches, retain the originating subject and return =no_eligible_relation=; never fall back to =related-to= or "all neighbors."
+3. Traverse only reviewed, policy-eligible semantic assertions. Require predicate direction, domain/range, valid/observed time, evidence and statement status. Source copying is not independent corroboration; inferred/claimed status cannot be silently promoted.
+4. Enforce positive limits on max hops, evaluated edges, visited nodes, output candidates, bytes, runtime and actor-work budget; stable ordering and cycle/duplicate suppression across the *whole watch batch*, not only per input Target.
+5. Produce candidates with a proof path (predicate URIs, source direction, assertion/evidence IDs, temporal intersection, ontology+rule locks, confidence/review state) and explicit skip/review reason codes.
+6. The authenticated Server policy evaluates *each candidate endpoint and requested actor capability*, including disclosure/dataset restrictions, before admission. Only after approval do existing Target/Operation actors perform durable idempotent scheduling; Prolog is pure decision output.
+7. On source change, ontology/rule revision, revocation or evidence retraction, recompute dependent candidates and mark old proof conclusions stale. Preserve historical audit and enforce revocation on new work; active in-flight operations follow service-owned cancellation policy.
+8. Prefer ingest/change-feed-driven invalidation plus scheduler-owned bounded freshness checks. =lastRunAt= and =nextRunAt= are durable scheduling concerns, not permanent mutable =last_check/1= facts in Star KB.
+
+** Illustrative domain profiles, not platform defaults
+
+| Watch purpose | Input subject | Eligible predicate example | Possible *candidate* action | Explicitly forbidden inference |
+|---------------+---------------+----------------------------+-----------------------------+--------------------------------|
+| Local wireless observation | Bluetooth device | =observedAt= qualified with sensor/time | Recheck authorized device observations | Correlating MAC/proximity with an identified person or owner |
+| Watershed changes | Lake | =outflowsTo=, =withinWatershed= | Check related waterbody/region data | Expanding to residents/people by geographic proximity |
+| Website uptime | Organization | =operates= | Check explicitly operated site | Treating linked accounts or employees as operators by implication |
+| Public event update | Event | =heldAt=, =hostedBy= | Recheck venue schedule or organizer notice | Treating mere mentions as attendance or group membership |
+
+=related-to= is not required: meaningful predicates already supply specific, qualified connections. Family/social networks may offer deliberately modeled relation families, but the monitor still selects concrete predicates, time windows and policy requirements.
+
+** Authority, versioning, and implementation ownership
+
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/252][Ontology #252]] / StarLang define *what each predicate means*. New core semantic/wire behavior requires new core schemaVersion (never patch 0.10.1); independently declared domain predicates use versioned/digest-locked extension bundles where the released envelope permits.
+- [[https://github.com/starintel-labs/star-kb/issues/15][Star KB #15]] owns *which named, bounded policy queries derive candidates and decisions*, including admissibility, versioned watch profiles and proof. A rule-pack change bumps its own version/digest and invalidates affected derived projections, not the immutable StarIntel 0.10.1 schema.
+- StarIntel Server owns *who may monitor whom/what and execute which work*: authorization, actor capability matching, Target creation, schedule/checkpoint, CAS/fencing, outbox/idempotency, budgets, cancellation and tenant-scoped dataset routing. Query candidates are not executable commands.
+- Quasar/clients may visualize reviewed typed edges and explain rejected/accepted candidates; Quasar does not become the ontology, scheduler or ARADR authority. An external third-party ARADR integration can be designed separately.
+- Legacy =star-kb:tool_path/4= continues to serve exploratory paths; a future separate allowlisted =monitor.expandCandidates= endpoint must not silently redefine =tool_path/4= semantics.
+
+** Adversarial and RED-first semantic monitoring matrix
+
+| ID | Input/attack | Required future assertion or observable outcome |
+|----+--------------+--------------------------------------------------|
+| MON-001 | Bluetooth device + sourced =observedAt= + =references(Path)= to collection record | Only purpose-allowed sourced observation can expand; structural reference does not |
+| MON-002 | Lake linked by =outflowsTo=, organization by =operates= | Appropriate distinct profiles work without hard-coded =person= or one =dtype= per target class |
+| MON-003 | =related-to=, =mentions=, =follows=, inferred/co-located device | No identity, ownership, membership or automatic monitoring promotion |
+| MON-004 | Reverse edge, missing =inversePredicate= and ontology =subPropertyOf= | Do not invent inverse meaning or authorize child predicate by inheritance |
+| MON-005 | Contradictory/retracted assertion and cross-tenant hidden endpoint | Skip, require review or deny; no leaked endpoint or stale positive watch |
+| MON-006 | 1,000-degree hub, mutual cycle, 3-hop graph and duplicate input targets | Budgets and stable dedupe bound work, return continuation/terminal reason |
+| MON-007 | Replayed candidate, concurrent schedulers and changed source before acceptance | At most one authorized durable Target action per idempotency identity; proof checked against fresh policy epochs |
+| MON-008 | Existing valid 0.10.1 =target=, then proposed new typed subject constraint | Old reader remains valid; normative contract change only after explicit new StarLang release/version lock |
+| MON-009 | Rule-pack or ontology lock changes while a watch is active | Old proof remains auditable; new evaluation uses pinned accepted version and revocation rules |
+| MON-010 | Source profile asks to watch every person near a wireless device | Fail closed unless a separately valid, expressly authorized evidence-backed rule exists; proximity is not personal identity |
+
+These tests are **proposed fixtures only**; no monitoring API or end-to-end proof is implemented by this ARADR edit. Operator research/design approval is still pending.
+
 * Concrete Non-Normative Scenario
 
 #+begin_example
@@ -353,6 +441,7 @@ This is a **design-time inventory**, not an executed conformance test suite.
 - [ ] Approve the single-authority resolution between StarLang semantic compilation, issue #252 JSON-LD vocabulary and legacy =star-spec= geo draft.
 - [ ] Accept time/provenance/uncertainty rules and the separation of world event, report, hypothesis, signal and runtime event.
 - [ ] Confirm workflow/policy/dataset selection remains outside the schema authority and outside direct Prolog query side effects.
+- [ ] Approve/modify policy-driven semantic Target expansion (not generic graph path traversal), with Star KB named queries and Server-owned scheduling/authorization.
 - [ ] Authorize bounded implementation child slices separately after conformance RED targets are accepted.
 
 Nothing here marks these boxes approved.

@@ -1,0 +1,501 @@
+:PROPERTIES:
+:ID:       starintel-star-protocol-research-001
+:END:
+#+title: STAR-PROTOCOL-RESEARCH-001 STAR URI Ownership and Cross-Language Bindings
+#+description: ARADR research on dependency-neutral ownership of the star:// protocol and native Common Lisp, Python, TypeScript/JavaScript, Nim, and Emacs Lisp libraries.
+#+status: READY_FOR_DESIGN
+#+filetags: :starintel:research:protocol:star-uri:rfc3986:bindings:common-lisp:python:typescript:nim:emacs-lisp:
+#+created: [2026-09-14 Mon]
+#+last_modified: [2026-09-14 Mon]
+
+* Research Question
+
+Who owns the =star://= URI protocol, and how should StarLang, StarRouter, StarIntel Server, Quasar, Python actors/tools, and Emacs tooling consume it without making any product/runtime repository the accidental protocol authority?
+
+Operator clarification on 2026-09-14 is explicit: =star://= is platform-wide, not StarLang-only. The requested language surface is at least:
+
+- Common Lisp;
+- Python;
+- JavaScript/TypeScript;
+- Nim;
+- Emacs Lisp.
+
+This research reconciles that direction with the already-approved STAR-SERVER-041 URI design rather than inventing a new URI grammar.
+
+* Existing Authority and Evidence
+
+** Approved protocol design already says the URI library is shared
+
+[[file:../../design/star-server/STAR-SERVER-041-star-uri-authority-routing-protocol.org][STAR-SERVER-041]] defines RFC 3986 hierarchical STAR identities:
+
+#+begin_example
+star://<authority>/<resource-kind>/<resource-path>
+#+end_example
+
+It explicitly states that the URI rules must be implemented once in a reusable STAR URI library and shared by StarLang, StarRouter, StarIntel MCP, Meta MCP, and future tooling.
+
+Therefore the architectural intent was already broader than StarLang. The unresolved part is repository/package ownership and cross-language delivery.
+
+** Current implementation location creates an ownership illusion
+
+Current StarLang source still contains the legacy URI implementation in:
+
+#+begin_example
+star-actor-protocol/src/service-uri.lisp
+#+end_example
+
+That implementation models:
+
+#+begin_example
+domain
+address
+actor-name
+#+end_example
+
+and serializes:
+
+#+begin_example
+star://domain:address:actor-name
+#+end_example
+
+This is the superseded compatibility syntax. Because the code physically lives in the StarLang repository and package family, downstream work can easily misread StarLang as owning the URI protocol itself.
+
+The approved design says the opposite: StarLang owns actor/service language semantics and emits/consumes STAR identities; it does not own the global URI scheme.
+
+** StarRouter is already a non-Lisp protocol consumer
+
+The current =lost-rob0t/starRouter= repository is a Nim project. It is a direct example of why protocol identity cannot be implemented only as a StarLang/Common Lisp internal.
+
+Quasar is also a browser/client consumer, and Python actor/service code needs the same validation/canonicalization semantics. Emacs tooling needs to resolve, validate, display, and follow =star://= values without embedding StarLang.
+
+** RFC 3986 supports this separation
+
+RFC 3986 defines the generic URI syntax while leaving scheme-specific restrictions and semantics to each URI scheme. A STAR library therefore should use a normal RFC 3986 parser where practical, then apply the reviewed STAR profile and canonicalization rules.
+
+The scheme-specific layer is protocol logic; product routing, authorization, actor runtime state, and transport selection are not.
+
+** URI scheme registration is currently unresolved
+
+RFC 7595 / BCP 35 treats URI scheme names as a shared global namespace and defines provisional/permanent registration procedures. The IANA URI scheme registry checked during this research contains no =star= entry.
+
+This does not block private/internal implementation. It does mean that wider ecosystem use of a short global name should have a tracked registration decision. Provisional registration is intentionally lightweight and can be pursued once the scheme specification is stable enough to cite.
+
+* Required Semantic Boundary
+
+The dependency-neutral STAR URI protocol owns only identifier semantics.
+
+It SHOULD own:
+
+- RFC 3986 STAR-profile parsing;
+- canonicalization;
+- serialization;
+- immutable URI value semantics;
+- authority access;
+- path segment access;
+- resource-kind and resource-path helpers;
+- equality based on canonical form;
+- stable typed error codes;
+- global resource-kind registry data/version;
+- explicit legacy compatibility parsing and explicit migration helpers;
+- conformance fixtures and fixture schema;
+- protocol-version identity.
+
+It MUST NOT own:
+
+- StarLang syntax/compiler semantics;
+- actor manifests beyond validating a =resourceUri= value;
+- RuntimePlan linking;
+- actor liveness/readiness;
+- StarRouter authority registration/resolution;
+- RabbitMQ routing keys or queue topology;
+- HTTP endpoints;
+- Sento actor references;
+- authorization or tenant policy;
+- target lifecycle;
+- persistence;
+- service discovery beyond URI value semantics.
+
+A URI names a logical resource. It is not an authorization grant and is not a transport endpoint.
+
+* Alternatives Considered
+
+** A. Keep the canonical implementation inside StarLang
+
+Advantages:
+
+- smallest immediate move;
+- existing Common Lisp code already lives there.
+
+Problems:
+
+- makes every consumer conceptually downstream of a language/compiler project;
+- encourages non-Lisp consumers to clone semantics;
+- blurs protocol identity with actor semantics;
+- StarRouter, Quasar, Python actors, and Emacs have no natural dependency on StarLang;
+- repeats the exact ownership confusion that triggered this research.
+
+Conclusion: reject as normative ownership.
+
+** B. Create five independent language repositories/specifications
+
+Advantages:
+
+- native packaging is straightforward;
+- independent release velocity.
+
+Problems:
+
+- canonicalization drift becomes likely;
+- fixture changes require coordinated multi-repo transactions;
+- no single obvious normative specification location;
+- security fixes can land inconsistently;
+- version skew is difficult to reason about.
+
+Conclusion: reject as protocol source-of-truth structure. Native packages can still be published independently from a shared source repository.
+
+** C. One protocol/conformance repository with native bindings
+
+Structure:
+
+#+begin_example
+star-uri/
+  spec/
+  registry/
+  conformance/
+  bindings/
+    common-lisp/
+    python/
+    typescript/
+    nim/
+    emacs-lisp/
+#+end_example
+
+Advantages:
+
+- one normative spec;
+- one resource-kind registry;
+- one malicious/edge-case fixture corpus;
+- atomic protocol changes;
+- native ergonomics in every runtime;
+- independent package publication remains possible;
+- cross-language equivalence can be a repository gate.
+
+Risk:
+
+- multi-language CI is heavier.
+
+Mitigation:
+
+- URI libraries are tiny and deterministic; conformance is a good use of a matrix build.
+
+Conclusion: preferred.
+
+** D. One implementation exported through FFI/WASM/subprocesses
+
+Advantages:
+
+- maximally centralized implementation.
+
+Problems:
+
+- absurd dependency cost for a URI value parser;
+- poor fit for Emacs Lisp and Common Lisp image use;
+- browser/WASM and Python native distribution complexity;
+- failure modes become runtime/ABI/process concerns for pure parsing;
+- violates the goal of cheap local validation.
+
+Conclusion: reject.
+
+* Language Binding Research
+
+Each binding should be native but intentionally thin. Standard URI parsing libraries may be reused beneath the STAR profile, but their behavior is not normative. The conformance corpus is normative.
+
+** Common Lisp
+
+Primary consumers:
+
+- StarLang;
+- StarIntel Server;
+- Lisp tooling/embedded callers.
+
+Recommended ASDF system/package:
+
+#+begin_example
+:star-uri
+STAR.URI
+#+end_example
+
+The current legacy implementation should be extracted/generalized into this binding rather than copied into the new system. StarLang then depends on =star-uri=.
+
+** Nim
+
+Primary consumer:
+
+- StarRouter.
+
+Recommended package/module:
+
+#+begin_example
+star_uri
+#+end_example
+
+Nim must pass the same fixture bytes and canonical output as Common Lisp. This binding should replace any future local URI interpretation in StarRouter rather than becoming another router-owned grammar.
+
+** TypeScript / JavaScript
+
+Primary consumers:
+
+- Quasar;
+- browser/Node clients;
+- generated SDKs where appropriate.
+
+Recommended package:
+
+#+begin_example
+@starintel/star-uri
+#+end_example
+
+Ship TypeScript types plus ESM-first JavaScript. Browser and Node behavior must be identical for the conformance corpus. Built-in WHATWG =URL= behavior may be used as an implementation aid only when it matches STAR rules; STAR canonicalization remains explicit.
+
+** Python
+
+Primary consumers:
+
+- Pro Actors;
+- ingestion/enrichment utilities;
+- automation and SDK users.
+
+Recommended package/import:
+
+#+begin_example
+star-uri
+star_uri
+#+end_example
+
+Python =urllib.parse= can separate generic components, but STAR validation/canonicalization must be explicit and fixture-driven rather than inherited accidentally from Python-version-specific parser behavior.
+
+** Emacs Lisp
+
+Primary consumers:
+
+- Emacs StarIntel clients;
+- Org links;
+- =star://= navigation/dispatch;
+- gptel/StarIntel tooling.
+
+Recommended library/feature:
+
+#+begin_example
+star-uri.el
+(provide 'star-uri)
+#+end_example
+
+The Elisp binding should remain pure and synchronous for parse/format/validation. Network/resource resolution belongs in a separate Emacs integration layer.
+
+* Normative API Shape
+
+Names are language-idiomatic, but semantic operations should line up:
+
+#+begin_example
+parse(input) -> StarUri
+parseCanonical(input) -> StarUri | typed error
+canonicalize(input) -> canonical string
+serialize(uri) -> canonical string
+make(authority, resourceKind, resourcePathSegments) -> StarUri
+authority(uri) -> string
+pathSegments(uri) -> ordered strings
+resourceKind(uri) -> string
+resourcePath(uri) -> ordered strings
+equal(a, b) -> bool
+parseLegacy(input) -> LegacyStarUri   ; compatibility module only
+migrateLegacy(old, explicitTarget) -> StarUri
+#+end_example
+
+=canonicalize= may accept valid non-canonical scheme/authority/percent-hex spelling where the approved profile allows normalization. =parseCanonical= requires the input already be canonical and is useful at signed/digest-bound protocol boundaries.
+
+* Shared Error Taxonomy
+
+Every binding should expose language-native exceptions/results carrying one stable machine code. Initial codes should include at least:
+
+#+begin_example
+invalid-scheme
+missing-authority
+invalid-authority
+userinfo-forbidden
+port-forbidden
+missing-resource-kind
+dot-segment-forbidden
+query-forbidden
+fragment-forbidden
+malformed-percent-encoding
+invalid-path-segment
+non-ascii-uri-input
+noncanonical-input
+legacy-uri-requires-compatibility-api
+legacy-migration-target-required
+#+end_example
+
+Exact spelling should be frozen in the design fixture schema.
+
+* Character and IRI Boundary
+
+STAR URI v1 should be an RFC 3986 URI contract, not an implicit IRI contract.
+
+Recommendation:
+
+- canonical serialized STAR URI is ASCII;
+- non-ASCII resource data is represented by UTF-8 percent-encoding according to the reviewed profile;
+- raw non-ASCII URI input is rejected in v1 rather than relying on five libraries' different implicit IRI conversions;
+- a future explicit IRI-to-STAR-URI conversion API can be designed separately if needed.
+
+This keeps equality, signatures, cache keys, manifest digests, and routing deterministic.
+
+* Conformance Corpus
+
+The protocol repository should make fixtures the executable authority.
+
+Suggested structure:
+
+#+begin_example
+conformance/v1/valid.json
+conformance/v1/canonicalization.json
+conformance/v1/invalid.json
+conformance/v1/legacy.json
+registry/resource-kinds-v1.json
+#+end_example
+
+Every fixture carries a stable ID and expected output/error code.
+
+Coverage must include:
+
+- scheme case normalization;
+- authority case normalization;
+- one- and multi-segment resource paths;
+- all reviewed resource kinds;
+- percent-encoded unreserved normalization;
+- uppercase output hex for remaining percent escapes;
+- reserved-character preservation;
+- empty and malformed segments as specified;
+- malformed percent escapes;
+- userinfo;
+- ports;
+- query;
+- fragment;
+- dot segments;
+- raw non-ASCII;
+- ambiguous delimiter cases;
+- legacy tuple syntax rejected by the normal parser;
+- legacy tuple syntax accepted only by the compatibility parser;
+- explicit migration target validation.
+
+A release is conformant only when all maintained bindings pass the same fixture revision.
+
+* Versioning
+
+Do not bind STAR URI protocol version to StarIntel document schema/release numbers such as StarIntel 0.9.1 or wire schema v0.9.
+
+Recommended independent version identities:
+
+#+begin_example
+STAR URI protocol: v1
+conformance corpus: v1.<revision>
+resource-kind registry: v1.<revision>
+package versions: SemVer per binding
+#+end_example
+
+A binding package release declares the exact protocol/conformance revision it implements.
+
+Protocol-breaking changes require a new protocol major version or an explicit compatibility rule. Adding a reviewed resource kind can normally be a registry/conformance revision if the generic URI grammar is unchanged.
+
+* Security Findings
+
+Canonicalization is security-sensitive because the URI can become:
+
+- a registry key;
+- a manifest digest input;
+- an authorization resource reference;
+- a router destination;
+- a target destination;
+- a cache/idempotency key component.
+
+Therefore:
+
+1. no caller may choose transport endpoint/routing key through URI syntax;
+2. parse success never grants authorization;
+3. canonicalization happens before equality/digest/index lookup;
+4. raw and canonical forms must not be compared interchangeably;
+5. malformed percent encoding fails closed;
+6. encoded path delimiters cannot be decoded in a way that changes segment boundaries;
+7. userinfo/port/query/fragment remain forbidden under the approved v1 profile;
+8. legacy parser is not reachable through the normal parse function;
+9. resource-kind registry is closed/reviewed, not arbitrary product-controlled text at privileged routing boundaries;
+10. conformance fixtures include hostile differential-parser cases across all five languages.
+
+* URI Scheme Registration Finding
+
+The reviewed IANA registry does not currently list =star=.
+
+Recommendation:
+
+- finish a stable public STAR URI v1 specification first;
+- prepare a RFC 7595 provisional registration request referencing that stable specification;
+- track registration as protocol governance, not as StarLang or StarIntel Server implementation work;
+- do not delay local deployment solely on registration.
+
+Because =star= is short and generic, wider public use without registration increases collision risk. This should not remain permanently implicit.
+
+* Integration Consequences
+
+** StarLang
+
+StarLang semantic manifests use the CL =star-uri= library and emit canonical =resourceUri=. StarLang owns actor/service semantics, not URI parsing rules.
+
+** StarIntel Server
+
+RuntimePlan / actor-service registry uses canonical URI values as keys. It must not implement another parser. Target submission accepts canonical destination URI and validates it through the shared CL binding.
+
+** StarRouter
+
+Uses the Nim binding for value/canonicalization semantics. Authority registration and routing remain StarRouter concerns above the URI library.
+
+** Quasar
+
+Uses the TS binding to display, construct, validate, and submit actor/service destinations. Quasar does not need StarLang to understand a STAR URI.
+
+** Python actors/services
+
+Use the Python binding to construct/validate manifest identity, request metadata, and diagnostics. They do not invent local parsing rules.
+
+** Emacs
+
+Uses the Elisp binding for =star://= Org/editor integration. Resolution/navigation is a separate client concern.
+
+* Research Decision
+
+Proceed to design with this architecture:
+
+1. one dependency-neutral =star-uri= protocol repository;
+2. normative specification + resource-kind registry + machine-readable golden fixtures in that repository;
+3. five maintained native bindings: Common Lisp, Nim, TypeScript/JavaScript, Python, Emacs Lisp;
+4. package publication may be independent, but protocol changes and conformance fixtures are atomic in the source repository;
+5. StarLang consumes the CL binding and stops being the apparent URI owner;
+6. normal parsers accept only RFC3986 STAR v1; legacy tuple parsing is explicit compatibility-only;
+7. URI protocol versioning is independent of StarIntel schema/release versioning;
+8. provisional IANA registration is a follow-up governance task once the public v1 specification is stable;
+9. cross-language conformance is a hard release gate.
+
+* Related Nodes
+
+- [[file:../../design/star-server/STAR-SERVER-041-star-uri-authority-routing-protocol.org][STAR-SERVER-041 RFC 3986 STAR URI Authority Routing Extension]]
+- [[file:../../design/star-lang/STAR-LANG-004-star-service-uri-discovery.org][STAR-LANG-004 STAR Service URI Discovery and Dispatch]]
+- [[file:../../indexes/star-server/STAR-PROTOCOL-INDEX-000-authority-routing.org][STAR-PROTOCOL-INDEX-000 STAR Authority Routing Protocol]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/250][Auto-Research #250]]
+- [[https://github.com/lost-rob0t/starintel-auto-research/issues/199][Auto-Research #199]]
+- [[https://github.com/lost-rob0t/star-lang/issues/72][StarLang #72]]
+- [[https://github.com/lost-rob0t/starintel-server/issues/43][StarIntel Server #43]]
+
+* External References
+
+- RFC 3986 — Uniform Resource Identifier (URI): Generic Syntax.
+- RFC 7595 / BCP 35 — Guidelines and Registration Procedures for URI Schemes.
+- IANA Uniform Resource Identifier (URI) Schemes registry, checked 2026-09-14; no =star= entry observed.

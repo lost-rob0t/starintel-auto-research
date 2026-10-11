@@ -1,0 +1,578 @@
+:PROPERTIES:
+:ID:       star-lang-design-011-prolog-expert-lowering
+:END:
+#+title: STAR-LANG-011 Prolog Expert-System Lowering
+#+description: Implementation-ready design for lowering approved StarLang expert IR into identity-preserving SWI-Prolog and N-Prolog artifacts through named operations, bounded adapters, normalized proofs, and explicit semantic-profile compatibility.
+#+status: REVIEW
+#+filetags: :starintel:design:star-lang:prolog:swi-prolog:n-prolog:expert-systems:lowering:actors:proofs:
+#+created: [2026-08-15 Sat]
+#+last_modified: [2026-08-15 Sat]
+
+* Approval Table
+
+| Approval area | Required authority | State | Evidence required | Evidence reference |
+|---------------+--------------------+-------+-------------------+--------------------|
+| Expert language research | StarLang maintainer | APPROVED | Approved fact/rule/goal/question/proof semantics and object-reuse gate | Maintainer approval on 2026-08-15; STAR-LANG-RESEARCH-023 |
+| Logic API | StarLang maintainer | APPROVED | Portable session/fact/named-operation/result semantics frozen | STAR-LANG-009 |
+| Expert compiler/IR | StarLang maintainer | PENDING | Approve exact normalized expert IR and compiler ownership | STAR-LANG-010 |
+| Backend policy syntax | StarLang maintainer | PENDING | Approve =(pragma :backend ...)= and resolution precedence | STAR-LANG-RESEARCH-026 and STAR-LANG-RESEARCH-027 |
+| SWI adapter semantics | Logic runtime maintainer | PENDING | Verify MQI lifecycle, named wrappers, tabling/transaction profiles, cancellation, and proof fixtures | This design plus STAR-LANG-009 profiles |
+| N-Prolog adapter semantics | Logic runtime maintainer | PENDING | Verify framed process protocol and portable-Prolog capability claims | This design plus conformance fixtures |
+| Core StarLang conformance | Repository maintainer | BLOCKED | Complete approved research 000–009 implementation gates before widening compiler/runtime contracts | lost-rob0t/star-lang issues #5 and #6 |
+| Implementation | Repository maintainer | NOT STARTED | Begin only after portable logic layer and compiler blockers are green | Implementation Order |
+
+* Related Nodes
+
+- [[file:STAR-LANG-010-expert-system-compiler-ir.org][STAR-LANG-010 Expert-System Compiler and Backend-Neutral IR]]
+- [[file:STAR-LANG-009-logic-runtime-api-specification.org][STAR-LANG-009 Logic Runtime API Specification]]
+- [[file:STAR-LANG-007-selectable-logic-and-expert-systems.org][STAR-LANG-007 Selectable Logic Backends and Expert Systems]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-023-expert-system-language-surface.org][STAR-LANG-RESEARCH-023 Expert-System Language Surface]]
+- [[file:../../research/star-lang/STAR-LANG-RESEARCH-026-explicit-logic-backend-selection.org][STAR-LANG-RESEARCH-026 Explicit Logic Backend Selection]]
+- [[file:../../research/star-server/STAR-RESEARCH-004-internal-prolog-server-library-swi-nprolog.org][STAR-RESEARCH-004 Internal Prolog Server Library]]
+
+* Decision
+
+SWI-Prolog and N-Prolog SHALL be backend adapters for compiler-generated expert artifacts. They SHALL NOT become alternate StarLang parsers, compilers, or source languages.
+
+StarLang expert source SHALL lower in two stages:
+
+#+begin_example
+StarLang expert source
+  -> STAR-LANG-010 backend-neutral expert IR
+  -> declared star.logic.api/1 operations
+  -> backend-specific compiler-owned Prolog artifact
+  -> named adapter operation
+  -> normalized answer/conclusion/proof records
+#+end_example
+
+No raw Prolog source, native variable, module name, predicate indicator, cut, =call/N=, =consult/1=, engine handle, or arbitrary goal may be supplied by StarLang runtime callers.
+
+* Backend Roles
+
+** SWI-Prolog
+
+SWI-Prolog is the primary Prolog backend for:
+
+- recursive relational reasoning;
+- tabled relations;
+- incremental tabling where explicitly profiled;
+- transactional dynamic state where explicitly profiled;
+- constrained relations when the requested profile is conformance-proven;
+- proof-carrying generated wrappers.
+
+** N-Prolog
+
+N-Prolog is the portable/compatibility Prolog backend for:
+
+- pure relational facts and rules;
+- bounded named queries;
+- the conformance-proven portable subset;
+- explicit N-Prolog-specific packages when requested.
+
+N-Prolog SHALL NOT advertise SWI tabling, SWI transactions, attributed-variable behavior, or CLP(FD) equivalence without fixture-backed evidence.
+
+* Final Package Ownership
+
+Proposed systems:
+
+#+begin_example
+star-logic-prolog-common
+star-logic-adapter-swi
+star-logic-adapter-nprolog
+starlang-expert-lower-prolog
+#+end_example
+
+=star-logic-prolog-common= may own only backend-neutral Prolog adapter infrastructure such as:
+
+- normalized atom/string encoding rules;
+- generated package identity;
+- safe scalar projection helpers;
+- answer decoding;
+- common error/result normalization;
+- worker request IDs;
+- shared conformance fixtures.
+
+It SHALL NOT define semantics that differ between SWI and N-Prolog.
+
+=starlang-expert-lower-prolog= owns compiler-side lowering from expert IR to an internal Prolog artifact AST. It emits engine-specific artifacts only after compatibility checks.
+
+* Internal Prolog Artifact AST
+
+The compiler SHALL not generate Prolog by concatenating strings from source fragments.
+
+Use a closed internal AST conceptually containing:
+
+#+begin_src lisp
+(defstruct prolog-artifact-ir
+  package-id
+  package-digest
+  backend-id
+  semantic-profile
+  fact-declarations
+  source-projections
+  clauses
+  named-operations
+  proof-wrappers
+  limits
+  required-features)
+
+(defstruct prolog-term-ir
+  kind
+  value
+  children
+  binding-id
+  source-span)
+#+end_src
+
+Allowed term kinds are compiler-owned and closed, for example:
+
+#+begin_example
+atom
+string
+integer
+approvedFloat
+exactDecimal
+variable
+compound
+list
+#+end_example
+
+No opaque raw-source node exists.
+
+* Identity-Preserving StarIntel Projection
+
+A Prolog backend may need relational projection even when LISA can consume a CLOS object instance directly. This is allowed only when the projection remains traceable to the authoritative StarIntel object.
+
+Every projected source fact SHALL carry a compiler/runtime-owned source reference.
+
+Conceptual generated relation:
+
+#+begin_src prolog
+star_source_object(SourceRef, SchemaId, SchemaVersion, ProvenanceRef).
+transaction(SourceRef, Id, Amount, Country).
+#+end_src
+
+The exact predicate names are compiler-private and digest-scoped. The semantic requirement is:
+
+#+begin_example
+backend fact/projection
+  -> stable SourceRef
+  -> authoritative StarIntel object ID
+  -> schema/version/provenance metadata
+#+end_example
+
+If a package requires relationship references, verification identity, or provenance that the adapter cannot preserve, materialization fails with an incompatibility. The adapter must not silently drop those fields.
+
+* Projection Authority
+
+Projection creates an inference representation, not a second mutable application object.
+
+Rules:
+
+1. canonical StarIntel state has one authority;
+2. Prolog source projections are snapshots or journaled session projections;
+3. source projection predicates are not arbitrary mutable Prolog database entries;
+4. mutations requested by expert rules target StarLang session-fact identity, not canonical object state;
+5. replay reconstructs projections from authoritative input/journal data;
+6. conclusions map back through stable source references.
+
+* Fact Lowering
+
+** Immutable/source facts
+
+For relational profiles, compiler-owned facts may be emitted as immutable package/snapshot data or loaded into adapter-owned session modules.
+
+** Session facts
+
+Portable =assert!= and =retract!= remain StarLang operations over stable fact identities.
+
+They SHALL NOT be implemented as a public promise that maps directly to arbitrary native =assertz/1= or =retract/1= semantics.
+
+Adapter-private implementation may use native dynamic predicates only behind a profile whose ordering, duplicate, transaction, and replay semantics have been proven.
+
+** Derived conclusions
+
+Derived conclusions are returned through generated wrapper operations and normalized into StarLang conclusion/proof records. They are not permitted to mutate canonical source objects.
+
+* Rule Lowering
+
+Portable relational conditions map as follows when semantics match:
+
+| Expert IR | Prolog artifact |
+|-----------+-----------------|
+| fact pattern | generated predicate call |
+| =all= | conjunction |
+| =any= | disjunction |
+| =exists= | existential wrapper/generated helper |
+| equality | unification or checked equality according to typed IR |
+| =different= | typed inequality helper |
+| comparisons | compiler-selected typed comparison helpers |
+| =member= | package-owned pure membership helper |
+| =notProvable= | negation as failure only under an approved closed-world profile |
+
+=absent= over production working memory SHALL NOT be automatically translated to Prolog negation as failure.
+
+=salience= SHALL fail Prolog compatibility unless a distinct future profile defines an equivalent observable scheduling contract.
+
+* Named Operations
+
+Every callable expert goal SHALL compile to a stable named operation ID.
+
+Example source goal:
+
+#+begin_src lisp
+(goal ownershipPath
+  (ownershipPath source destination ?path))
+#+end_src
+
+Conceptual generated wrapper:
+
+#+begin_src prolog
+star_operation_ownership_path(Source, Destination, Path, Proof) :-
+    generated_ownership_path(Source, Destination, Path, Proof).
+#+end_src
+
+The runtime invokes the operation by compiler-declared operation ID. It does not receive or construct =ownership_path(...)= text from callers.
+
+Required portable operation families remain those frozen by STAR-LANG-009, such as =solve=, =solutions=, and =exists?= over declared operation identities.
+
+* Recursion and Tabling
+
+Recursive expert rules SHALL carry compiler-derived recursion metadata.
+
+For SWI:
+
+- tabling may be requested only under =star.logic.tabled/1= or a compatible expert profile;
+- table declarations are compiler-generated;
+- incremental tabling is a separate capability/profile claim;
+- table lifecycle/reset behavior is part of the adapter contract.
+
+For N-Prolog:
+
+- no initial tabling claim;
+- recursive packages must satisfy the portable subset and bounded execution tests;
+- packages requiring tabling fail compatibility before worker launch.
+
+* Negation
+
+The Prolog lowering SHALL distinguish:
+
+- explicit inequality;
+- negation as failure;
+- contradiction facts/propositions;
+- production working-memory absence.
+
+Only =notProvable= may lower to native negation-as-failure behavior, and only when the package declares a compatible closed-world profile.
+
+* Proof Normalization
+
+Generated Prolog wrappers SHOULD return structured proof evidence rather than asking adapters to reconstruct arbitrary native traces after the fact.
+
+Conceptual internal proof term:
+
+#+begin_src prolog
+proof(rule(RuleId), Supports, Children)
+#+end_src
+
+This shape is compiler-private. Adapter output SHALL normalize into the shared StarLang derivation record.
+
+Required normalized node identities include:
+
+#+begin_example
+sourceFact
+sessionFact
+ruleApplication
+clauseApplication
+goal
+parameterBinding
+conclusion
+assumption
+contradiction
+budgetTruncation
+#+end_example
+
+Proofs SHALL preserve source-object references when conclusions depend on projected StarIntel objects.
+
+* SWI-Prolog Adapter
+
+Initial transport: SWI MQI where supported by the pinned runtime.
+
+Responsibilities:
+
+1. launch or lease an exact pinned SWI worker/runtime;
+2. authenticate/handshake before installing work;
+3. verify engine version/build and advertised profile set;
+4. install compiler-generated digest-locked artifact only;
+5. create isolated session/module state according to profile;
+6. project checked facts;
+7. invoke named wrapper operations;
+8. stream bounded normalized answers;
+9. enforce wall-time, answer-count, output, proof, and inference budgets where supported;
+10. cancel cooperatively, then escalate to worker termination;
+11. discard contaminated/unclean workers;
+12. emit normalized terminal state and replay evidence.
+
+No caller-selected raw module, predicate, goal, directive, consult path, or source text crosses the adapter API.
+
+* SWI Transactions and Dynamic State
+
+Native SWI transaction/database operations are backend-specific semantics.
+
+They SHALL be available only through explicit profiles frozen by STAR-LANG-009 and SHALL NOT redefine portable =assert!= or =retract!=.
+
+A package requesting transactional Prolog semantics must:
+
+- declare the relevant profile;
+- pass backend compatibility before materialization;
+- freeze duplicate/order/rollback visibility semantics in conformance fixtures;
+- record transaction boundaries in replay evidence when observable.
+
+* N-Prolog Adapter
+
+Initial transport: one child =npl= worker per active query or isolated worker lease, using a StarIntel-owned framed request/response protocol.
+
+Responsibilities:
+
+1. launch exact pinned binary/source build;
+2. record binary hash/version;
+3. load exact compiler-generated bootstrap/artifact;
+4. configure deterministic JSON/string mode;
+5. support one active query per worker initially;
+6. serialize typed arguments through the closed bridge format;
+7. decode bounded answer sets;
+8. report typed logical zero-answer completion separately from runtime failure;
+9. terminate worker for hard cancellation;
+10. discard killed/unclean workers;
+11. advertise only fixture-proven capability IDs.
+
+* Worker Isolation
+
+Backend-private state is never trusted as durable StarLang authority.
+
+A worker crash SHALL be recoverable only by:
+
+- restoring the same pinned backend/build identity;
+- reinstalling the same digest-locked package;
+- replaying authoritative source/session/question facts;
+- reissuing the same named operation if runtime policy permits.
+
+No silent SWI -> N-Prolog or N-Prolog -> SWI failover is allowed within one materialized run.
+
+* Cancellation Model
+
+Portable cancellation states are normalized by STAR-LANG-009.
+
+Adapter strategy:
+
+#+begin_example
+cooperative request
+  -> grace bound
+  -> connection/session abort if supported
+  -> process termination for hard cancellation
+  -> worker quarantine/discard
+#+end_example
+
+A cancelled native query must not later publish a conclusion into the StarLang session.
+
+* Budget Model
+
+Mandatory budget dimensions are checked against backend capabilities before execution.
+
+Potential dimensions:
+
+#+begin_example
+wallTimeMs
+answers
+inferences
+proofNodes
+outputBytes
+memoryBytes
+#+end_example
+
+SWI inference limits may provide one work metric where semantically appropriate. N-Prolog SHALL not advertise an equivalent hard inference budget unless the pinned engine can enforce and fixture-test it.
+
+Unsupported mandatory limits cause compatibility failure rather than best-effort execution.
+
+* Result Normalization
+
+Native outcomes SHALL map to closed StarLang states:
+
+#+begin_example
+success-with-answers
+success-zero-answers
+cancelled
+budget-exhausted
+package-error
+backend-unavailable
+backend-protocol-error
+backend-crash
+invalid-backend-result
+#+end_example
+
+Logical zero answers are not runtime failure.
+
+Answer ordering is semantic only when the declared profile says so. Portable consumers must not accidentally depend on native clause enumeration order.
+
+* Generated Artifact Manifest
+
+Each Prolog artifact SHALL carry or be referenced by a manifest containing:
+
+- expert package ID/version;
+- expert IR digest;
+- backend ID;
+- backend profile/version;
+- compiler version;
+- generated artifact digest;
+- named operation IDs;
+- fact/projection schema IDs;
+- required source-object metadata fields;
+- required backend capabilities;
+- proof format/version;
+- budget expectations;
+- conformance fixture identity.
+
+The runtime installs only artifacts matching the materialized plan.
+
+* Security Invariants
+
+1. no raw Prolog source in StarLang input or runtime request payloads;
+2. no runtime caller-selected arbitrary goal or predicate indicator;
+3. no unrestricted =call/N= bridge;
+4. no user =consult/1= path;
+5. no user-supplied directives;
+6. no file/network/process predicates exposed as expert actions;
+7. all generated atoms/strings are encoded through compiler-owned constructors;
+8. package identity is digest-locked;
+9. output/proof/answer sizes are bounded;
+10. worker environment and filesystem visibility are minimized;
+11. source-object provenance is never silently stripped;
+12. killed/unclean workers are never returned to a clean pool.
+
+* Conformance Fixtures
+
+** Shared relational
+
+#+begin_example
+animal classification
+transaction risk
+portable ownership join
+zero-answer goal
+multiple-answer goal
+notProvable closed-world fixture
+StarIntel object identity/provenance projection
+#+end_example
+
+A fixture claimed portable SHALL produce equivalent normalized logical results through SWI and N-Prolog without relying on answer ordering unless order is part of the profile.
+
+** SWI-specific
+
+#+begin_example
+tabled recursive ownership
+incremental table update if advertised
+transaction rollback if advertised
+constraint fixture if advertised
+proof wrapper/cancellation
+#+end_example
+
+** N-Prolog-specific
+
+#+begin_example
+portable recursion within bounds
+JSON/string bridge
+Unicode terms
+hard cancellation/worker replacement
+CLP(FD) subset only if explicitly advertised
+#+end_example
+
+* Static Rejections
+
+Compilation/materialization SHALL reject:
+
+- raw =(prolog "...")= source;
+- arbitrary native predicate calls;
+- cut/control constructs not represented in approved expert IR;
+- =absent= lowered as negation-as-failure without matching semantics;
+- salience on a Prolog-only backend;
+- SWI-only tabled package pinned to N-Prolog;
+- required proof on an adapter/artifact without proof support;
+- lossy StarIntel source-object projection;
+- mandatory resource limit unsupported by the selected backend;
+- native dynamic-database assumptions under a portable profile.
+
+* Implementation Order
+
+Do not begin by wiring SWI directly into the current prototype compiler.
+
+After STAR-LANG-010 and the core blockers are approved/green:
+
+1. implement final portable =star-logic= protocol/types/fake adapter from STAR-LANG-009;
+2. implement the closed internal Prolog artifact AST and deterministic renderer;
+3. implement compiler projection from expert IR to pure relational artifact IR;
+4. freeze generated artifact and source-object projection fixtures;
+5. implement SWI MQI adapter with named-operation execution;
+6. pass basic relational and object-projection conformance;
+7. add SWI tabled profile;
+8. implement N-Prolog framed worker adapter;
+9. pass portable relational cross-backend conformance;
+10. add normalized proof wrappers;
+11. add ExpertSessionActor integration only after the backend operations are independently conformant;
+12. advertise additional transactions/constraints/incremental features only after dedicated fixtures pass.
+
+* Blocking Gates Before Implementation
+
+1. lost-rob0t/star-lang research 000–009 ledger is conformant;
+2. float/RFC8785 and relation =destination= migration are complete;
+3. full SHA-256 and locked import graph conformance is permanent in CI;
+4. STAR-LANG-010 is approved;
+5. STAR-LANG-RESEARCH-026/027 backend pragma contract is approved or explicitly narrowed;
+6. final portable logic systems exist and do not depend on =starlang-prototype=;
+7. STAR-LANG-007 is amended to use the final pragma contract;
+8. SWI and N-Prolog versions/build inputs are pinned for conformance tests.
+
+* Acceptance Gate: SWI
+
+Complete when:
+
+1. a generated relational expert artifact loads into an isolated pinned SWI worker;
+2. only named wrapper operations are callable;
+3. StarIntel source-object identity/provenance survives projection and appears in normalized proof support;
+4. success-zero-answers is distinct from backend failure;
+5. cancellation prevents late result publication;
+6. same package/input replay produces the same normalized result under the declared profile;
+7. tabled recursion passes a dedicated profile fixture;
+8. unsupported production semantics fail before execution.
+
+* Acceptance Gate: N-Prolog
+
+Complete when:
+
+1. a generated portable relational expert artifact executes through the framed worker protocol;
+2. answer decoding is deterministic and bounded;
+3. StarIntel identity/provenance projection contract is preserved where claimed;
+4. hard cancellation replaces the worker cleanly;
+5. unsupported SWI semantics fail before execution;
+6. the shared portable fixture set agrees with SWI on normalized logical results.
+
+* Acceptance Gate: Cross-Backend Expert Portability
+
+A package may claim Prolog portability only when:
+
+1. it uses a named portable semantic profile;
+2. every required operation is supported by both adapters;
+3. no native ordering/transaction/tabling behavior leaks into portable results;
+4. the same canonical fixture produces equivalent normalized conclusions;
+5. proof identity remains traceable to the same source facts/object references;
+6. any unsupported feature causes deterministic compatibility failure rather than silent degradation.
+
+* Changelog
+
+| Date | Change | Author or actor | Evidence |
+|------+--------+-----------------+----------|
+| 2026-08-15 | Promote approved expert-language semantics into a dedicated SWI/N-Prolog lowering design with identity-preserving StarIntel projection, named operations, closed artifact AST, proof normalization, cancellation, budgets, and conformance gates | ChatGPT agent | Maintainer approval of STAR-LANG-RESEARCH-023; STAR-LANG-009; STAR-LANG-010; SWI/N-Prolog research |
+
+* Footnotes and Glossary
+
+- *Prolog artifact AST* — Closed compiler-owned representation used to generate backend code without interpolating arbitrary source strings.
+- *SourceRef* — Stable adapter-visible reference that maps a projected Prolog fact back to one authoritative StarIntel object and its provenance metadata.
+- *Named operation* — Compiler-declared callable identity mapped privately to a generated wrapper predicate.
+- *Portable Prolog profile* — Fixture-backed semantic subset that both SWI-Prolog and N-Prolog can execute with equivalent normalized observable results.
